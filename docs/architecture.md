@@ -1,0 +1,543 @@
+# SoniMesh Architecture
+
+> Status: architecture draft for feasibility validation
+> Version: 1.0.0
+> Updated: 2026-07-14
+
+This document describes the intended product boundary and engineering constraints
+for SoniMesh. It deliberately separates verified platform facts, implementation
+requirements, and capabilities that still require a prototype.
+
+## 1. Executive summary
+
+SoniMesh sends Android playback audio that the Android platform permits the
+application to capture to a desktop computer on the same local network. The
+desktop receives, authenticates, decrypts, decodes, buffers, resamples, and
+plays the stream through the selected system output device.
+
+The system has two planes:
+
+- The control plane performs discovery, pairing, capability negotiation,
+  session lifecycle, statistics, and user commands over a reliable authenticated
+  connection.
+- The data plane carries encrypted Opus packets over UDP. It must remain
+  independent from the UI and must use bounded memory.
+
+The first product goal is not synchronized multi-device playback, recording of
+calls, remote desktop, or a universal Bluetooth receiver. It is a practical
+local audio bridge for a PC user who wants to listen to permitted Android media
+through the same headset or speaker used by the PC.
+
+## 2. Product scope
+
+### 2.1 In scope for the WLAN MVP
+
+- one Android sender and one Windows desktop receiver
+- explicit MediaProjection consent before capture
+- capture of permitted media and game playback audio
+- Opus encoding and encrypted UDP transport
+- authenticated pairing and persistent device trust
+- mDNS/DNS-SD discovery through a platform-appropriate API, plus manual address
+  or QR-code fallback
+- one desktop output device at a time
+- per-source mute and gain control on the desktop
+- bounded jitter buffering, packet-loss concealment, reconnection, and drift
+  compensation
+- transport, buffering, output, and capture diagnostics
+
+### 2.2 Non-goals
+
+- bypassing Android capture policy, DRM, or protected content restrictions
+- phone, cellular, or VoIP call recording
+- video transport, remote desktop, or audio/video synchronization
+- Internet traversal, cloud relay, or cross-NAT operation
+- professional recording, ASIO guarantees, or studio-grade synchronization
+- iOS/iPadOS playback capture
+- Bluetooth audio as a guaranteed application-readable PCM source
+- a full desktop system mixer or a replacement for the operating system mixer
+
+### 2.3 Product truthfulness rule
+
+The Android capture API does not provide a universal reason for silence. The
+application can identify authorization loss, transport failure, and output
+failure, but it cannot always distinguish “nothing is playing” from “the source
+application or content cannot be captured”. The product must display:
+
+> No capturable audio detected. The source may be idle, protected, or refusing
+> playback capture.
+
+It must not present that inference as a definitive source-application diagnosis.
+
+## 3. Support tiers and capability boundaries
+
+### 3.1 Active validation baseline
+
+| Platform | Active baseline | Rationale |
+| --- | --- | --- |
+| Android sender | Android 12–17 | Fewer legacy lifecycle variants while covering current permission behavior |
+| Windows receiver | Windows 11 | Primary supported desktop OS in 2026 |
+| Windows 10 | Best effort, 22H2/ESU only | Ordinary Home/Pro support ended on 2025-10-14 |
+| Linux receiver | Later milestone | PipeWire integration is a separate platform project |
+| macOS receiver | Later milestone | Output support is feasible; Bluetooth receiver behavior is not assumed |
+| iOS/iPadOS | Not planned | No equivalent product path for system playback capture |
+
+Android 10 and 11 remain API-level compatibility candidates because playback
+capture starts at API 29. They are not release-qualified until the device
+matrix demonstrates reliable foreground-service, background, and network
+behavior.
+
+### 3.2 Android capture facts
+
+Playback capture requires all relevant conditions to hold:
+
+- the source uses a capturable audio usage such as USAGE_MEDIA, USAGE_GAME, or
+  USAGE_UNKNOWN;
+- the source application and player policy allow capture;
+- both applications are in the same Android user profile;
+- the user grants the MediaProjection request;
+- the authorization remains valid; and
+- the device vendor does not add a restrictive implementation detail.
+
+The application must handle the platform returning silence after authorization
+loss or when the source is not capturable. MediaProjection.Callback.onStop() is
+the authoritative signal for projection-session invalidation.
+
+Android 14 and later require the mediaProjection foreground-service type and
+single-session consent handling. Android 17 makes local-network protection
+mandatory for applications targeting SDK 37 or later. The discovery design must
+therefore support both a system-mediated NsdManager picker path and an explicit
+ACCESS_LOCAL_NETWORK path where broad local-network access is truly required.
+
+### 3.3 Bluetooth boundary
+
+Windows AudioPlaybackConnection is a system playback connection API. Its
+documented surface creates, opens, closes, and observes a connection; it does
+not expose a general application PCM capture stream. Linux Bluetooth audio also
+depends on the BlueZ, PipeWire, and WirePlumber stack.
+
+Bluetooth is represented as a capability result, not a promise:
+
+- ApplicationPcmSource — a platform-tested PCM node exists;
+- SystemRouted — the system can play the remote device but the application
+  cannot read PCM;
+- Unsupported — no supported path is available.
+
+The WLAN engine must not pretend that SystemRouted is an input source.
+
+## 4. Quality targets and latency budget
+
+The initial values below are engineering targets for a reference environment,
+not market guarantees.
+
+| Metric | Initial target |
+| --- | --- |
+| Stable-WLAN transport/playout p50 | 80–100 ms depending on mode |
+| Stable-WLAN transport/playout p95 | no more than 150 ms |
+| Continuous run | 8 hours before MVP; 24 hours before multi-source release |
+| Recovery after short network loss | Return to audio within 3 seconds when capture remains valid |
+| Memory | No unbounded queue or sustained growth |
+| Single-stream loss | 1% random loss without a persistent stall |
+| Output | No repeated clicks, pops, or buffer divergence in the reference matrix |
+
+The latency budget must be measured per component:
+
+| Component | Working budget |
+| --- | ---: |
+| Android capture and frame aggregation | 10–30 ms |
+| Encode, encrypt, and send | 1–5 ms |
+| WLAN transit | 1–10 ms in the reference network |
+| Jitter buffer | 20–60 ms depending on mode |
+| Decode, resample, and ring transfer | 2–10 ms |
+| Windows output buffering | 10–30 ms, device dependent |
+| Lookahead DSP | 0 ms for the single-stream MVP |
+
+If the measured sum cannot meet the target, the implementation must change the
+buffer mode or the product target. It must not hide the discrepancy by calling
+the result “estimated end-to-end latency”. The UI may show a playout-delay
+estimate; true end-to-end latency requires a common-clock hardware or acoustic
+measurement.
+
+## 5. System architecture
+
+~~~mermaid
+flowchart LR
+  subgraph Android["Android sender"]
+    AUI["Compose UI"]
+    PROJ["MediaProjection consent"]
+    AR["AudioRecord"]
+    OPUS_A["Opus encoder"]
+    SEC_A["Packet protection"]
+    CTRL_A["Control client"]
+    AUI --> PROJ --> AR --> OPUS_A --> SEC_A
+    AUI <--> CTRL_A
+  end
+
+  subgraph LAN["Local network"]
+    DNS["mDNS / DNS-SD"]
+    TCP["Reliable control + TLS"]
+    UDP["Encrypted UDP data"]
+  end
+
+  subgraph Desktop["Windows receiver"]
+    CTRL_D["Control/session service"]
+    RX["UDP receive + authentication"]
+    JB["Per-stream jitter buffer"]
+    DEC["Opus decode + PLC"]
+    ASRC["Nominal conversion + drift ASRC"]
+    RING["Fixed PCM ring slots"]
+    MIX["Realtime mixer"]
+    OUT["WASAPI/CPAL output"]
+    UI["Tauri UI"]
+    RX --> JB --> DEC --> ASRC --> RING --> MIX --> OUT
+    UI <--> CTRL_D
+    CTRL_D <--> RX
+  end
+
+  CTRL_A <--> TCP <--> CTRL_D
+  SEC_A --> UDP --> RX
+  CTRL_A -. discovery .-> DNS -. service records .-> CTRL_D
+~~~
+
+The UI is a control consumer. It never receives PCM or Opus frames and is not
+allowed to become part of the realtime scheduling path.
+
+## 6. Execution domains and ownership
+
+The desktop receiver has explicit execution domains:
+
+1. **Control domain** — discovery, pairing, TLS, state transitions, UI commands,
+   timers, and diagnostic snapshots.
+2. **Network domain** — UDP receive, cheap length/header checks, authenticated
+   session lookup, replay filtering, and packet dispatch.
+3. **Per-stream domain** — jitter scheduling, Opus decoding, PLC/FEC decisions,
+   nominal sample-rate conversion, and drift correction.
+4. **Realtime output domain** — fixed-slot reads, gain smoothing, mixing, and
+   output-format conversion.
+
+The output callback must not allocate, lock, await, decode, perform network I/O,
+write logs, enumerate devices, or call Tauri IPC. It may only access preallocated
+state and bounded data structures.
+
+Dynamic stream membership must use fixed slots or a preallocated snapshot/RCU
+boundary. Adding a source must not require allocating or taking a long-lived
+mutex in the output callback.
+
+## 7. Android sender
+
+### 7.1 UI and service boundary
+
+The sender should use Kotlin and Jetpack Compose. The foreground service owns:
+
+- MediaProjection lifecycle;
+- AudioRecord creation and reads;
+- fixed PCM buffers;
+- Opus encoding;
+- packet protection and UDP send;
+- reconnect and network-interface changes;
+- a visible notification with an explicit stop action.
+
+Flutter is not prohibited, but if it is retained it must remain a UI shell. No
+PCM, Opus frame, socket loop, or per-frame status event may cross a platform
+channel. Low-rate state events should be coalesced to approximately 2–5 updates
+per second.
+
+### 7.2 Capture path
+
+~~~text
+MediaProjection consent
+  -> capture configuration
+  -> AudioRecord
+  -> fixed direct PCM buffer
+  -> Opus encoder
+  -> packet header + AEAD
+  -> UDP socket
+~~~
+
+The implementation must record actual AudioRecord format, channel count, buffer
+size, read errors, and capture timestamps. It must not silently assume that
+every device supplies stereo float PCM at 48 kHz.
+
+Initial parameters to validate:
+
+| Parameter | Candidate | Rule |
+| --- | --- | --- |
+| Sample rate | 48 kHz | Prefer Opus-native rate; negotiate when required |
+| Frame duration | 10 ms and 20 ms | Compare latency, packet rate, CPU, and quality |
+| Channels | Mono or stereo | Preserve source layout; do not force expansion |
+| Opus application | Audio | Media quality is the default goal |
+| Bitrate | 96–128 kbps stereo | Validate by content class and packet loss |
+| UDP payload | Usually far below 1200 bytes | Keep a hard maximum to avoid fragmentation |
+
+For the media MVP, DTX should be disabled unless a measured power benefit is
+worth the silence-transition behavior. The sender must not request audio focus
+merely to capture playback; doing so could change the source application's
+behavior.
+
+### 7.3 Lifecycle states
+
+Capture permission, control trust, network reachability, and media streaming are
+separate state machines. At minimum the service must handle:
+
+- user denial or cancellation of projection consent;
+- projection onStop() and resource release;
+- AudioRecord initialization or read failure;
+- Wi-Fi handover, address changes, and AP loss;
+- process death and service recreation;
+- notification stop action;
+- control-channel loss while capture remains valid;
+- stale session credentials after a reconnect.
+
+The service must never reuse an expired projection token or a stale media key.
+
+## 8. Desktop receiver
+
+### 8.1 Windows output strategy
+
+CPAL is a useful cross-platform abstraction, but its default buffer behavior is
+host/device dependent. The Windows MVP must validate the CPAL path against a
+small direct-WASAPI adapter before promising a latency target.
+
+The platform layer must support:
+
+- default-device and pinned-device modes;
+- device removal and default-role changes;
+- unsupported sample formats and channel layouts;
+- output stream recreation outside the realtime callback;
+- sleep/wake and user-session changes;
+- shared-mode operation first, with exclusive mode as a separate experiment.
+
+The output device may require a different nominal rate than 48 kHz. That is a
+normal negotiated platform condition, not a protocol error.
+
+### 8.2 Bounded queues
+
+Every queue needs a capacity, a drop policy, and a metric. The policy must be
+defined before implementation:
+
+- UDP dispatch full: drop packets already past their playout deadline first;
+- jitter buffer full: controlled resynchronization, never unbounded growth;
+- PCM ring full: drop a bounded oldest region and fade back in;
+- PCM ring empty: output silence/fade; never run Opus PLC in the callback;
+- stream reset: discard only the affected stream's buffers.
+
+The initial implementation should publish fixed capacities in a configuration
+document and expose the resulting high-water marks in diagnostics.
+
+## 9. Discovery and control plane
+
+The desktop may advertise _sonimesh._tcp.local, but discovery is not identity.
+TXT records should contain only non-sensitive, non-authoritative information:
+
+- protocol version;
+- control-service capabilities;
+- a temporary instance identifier;
+- a user-editable display name;
+- a control port, with media ports negotiated after authentication.
+
+A stable public-key fingerprint should not be used as the long-lived discovery
+identifier. It enables local tracking and can still be spoofed before trust is
+established.
+
+The control channel should use length-prefixed Protobuf envelopes with:
+
+- protocol version;
+- request ID;
+- message type or oneof payload;
+- bounded message size;
+- structured error and retryability fields;
+- application-level required and optional capabilities.
+
+Commands must be idempotent or define duplicate behavior. Repeating StopStream
+must be safe. SetSourceGain does not belong on the wire in the single-source MVP
+when gain is applied locally on the desktop.
+
+## 10. Audio data plane
+
+The initial packet header is a proposal, not a final wire contract:
+
+| Field | Width | Notes |
+| --- | ---: | --- |
+| Magic | 32 bit | Fast packet-family rejection |
+| Version | 8 bit | Data-protocol version |
+| Flags | 8 bit | Negotiated frame/content flags |
+| Header length | 16 bit | Bounded extension support |
+| Session ID | 64 bit | Random media-session identifier |
+| Stream ID | 32 bit | Per-session stream identifier |
+| Sequence | 32 bit | Loss, reorder, and duplicate detection |
+| Sample timestamp | 64 bit | Sender sample position |
+| Payload length | 16 bit | Ciphertext payload length |
+| Key epoch | 16 bit | Explicit key-rotation generation |
+
+The authenticated data must include the complete header. Header parsing must
+validate a minimum size, maximum size, and payload bounds before any allocation.
+Only an authenticated packet may reach the Opus decoder.
+
+Sequence, stream, direction, and key-epoch uniqueness must be reflected in the
+key/nonce design. Replay-window state must advance only after successful AEAD
+authentication. Cheap duplicate filtering may happen earlier, but it must not
+mark unauthenticated input as received.
+
+## 11. Jitter, loss, and clock drift
+
+Each stream owns a bounded jitter buffer and a monotonic playout schedule.
+Initial user-selectable modes are:
+
+| Mode | Target buffer | Intended use |
+| --- | ---: | --- |
+| Low latency | 20–40 ms | Stable WLAN, interactive use |
+| Balanced | 40–70 ms | Default |
+| Stable | 80–120 ms | High jitter or congested WLAN |
+
+The adaptive controller must change slowly, expose minimum/target/maximum water
+levels, and reset its integral state after a stream reset. Packet arrival jitter
+and clock drift must not be treated as the same signal.
+
+Recovery policy:
+
+- single missing frame: Opus PLC where the decoder mode supports it;
+- in-band FEC: use only when the encoder actually produced usable redundancy and
+  the added waiting delay is acceptable;
+- repeated loss: PLC followed by a controlled fade, never replay stale PCM;
+- late packet: discard after its playout deadline;
+- large sequence discontinuity: reset the affected stream rather than allocating
+  a large catch-up buffer.
+
+Opus LBRR/in-band FEC belongs to the SILK layer and primarily targets active
+speech. The proposed high-bitrate stereo media configuration may operate mainly
+in CELT mode, so FEC benefit must be demonstrated rather than assumed.
+
+Android and the output device have independent clocks. Drift compensation must
+use a slow occupancy/error controller, bounded ratio changes, anti-windup, and a
+hard resynchronization policy when occupancy leaves the safe region.
+
+A fast polynomial resampler may be suitable for near-unity drift correction, but
+it is not automatically a high-quality general converter for 48 kHz to 44.1 kHz.
+Nominal sample-rate conversion and small-ratio drift correction may require
+different filters or stages.
+
+## 12. Mixing and DSP
+
+All decoded streams enter a common Float32 bus with explicit channel mapping.
+Gain changes are smoothed across blocks. The single-stream MVP should avoid
+lookahead limiting; a multi-source release may add:
+
+~~~text
+per-stream gain -> fade/mute -> Float32 sum -> headroom -> optional limiter
+~~~
+
+Any lookahead, attack, release, or safety limiter delay must be included in the
+reported playout budget. Disconnect, mute, reconnect, and device switching use
+short fades to prevent clicks.
+
+## 13. UX and diagnostics
+
+The Android UI should explain before consent that some applications, calls, and
+protected content may not be capturable. The desktop UI should separate:
+
+- discovery and pairing;
+- projection authorization;
+- capture activity;
+- network quality;
+- output-device availability;
+- “no capturable audio detected” as a non-definitive diagnosis.
+
+Per-stream diagnostics should include:
+
+- authenticated, duplicate, rejected, late, and reordered packets;
+- loss and jitter estimates;
+- current/target/min/max jitter and PCM ring levels;
+- PLC/FEC use and decode errors;
+- resampling ratio/ppm;
+- underflow, overflow, reset, and reconnection counts;
+- playout-delay estimate and its component breakdown.
+
+Realtime code updates counters only. Structured logs are emitted by non-realtime
+domains, use stable event codes, and redact keys, audio payloads, full IPs, and
+unnecessary device identifiers.
+
+## 14. Failure handling
+
+| Failure | Required behavior |
+| --- | --- |
+| Projection revoked | Stop capture, close AudioRecord, destroy media credentials, notify desktop |
+| Short Wi-Fi loss | Keep a bounded reconnect window, exponential backoff, no unbounded PCM cache |
+| Control channel loss | Enter a short grace state; destroy session keys after expiry |
+| UDP loss | PLC/fade; never repeat old audio indefinitely |
+| Output device removal | Fade out and recreate on a non-realtime thread |
+| One-stream decode error | Reset only that stream; preserve other sources |
+| Version mismatch | Return explicit incompatibility; do not guess |
+| Sleep/wake | Revalidate network, session, output device, and timing estimates |
+| Firewall denial | Show an actionable private-network firewall diagnosis |
+
+## 15. Repository direction
+
+The intended code layout is:
+
+~~~text
+sonimesh/
+├─ apps/
+│  ├─ android/
+│  └─ desktop-ui/
+├─ crates/
+│  ├─ sonimesh-app/
+│  ├─ sonimesh-audio/
+│  ├─ sonimesh-network/
+│  ├─ sonimesh-protocol/
+│  ├─ sonimesh-platform/
+│  └─ sonimesh-diagnostics/
+├─ proto/
+├─ docs/
+│  ├─ adr/
+│  ├─ architecture.md
+│  ├─ roadmap.md
+│  ├─ security-model.md
+│  └─ testing-and-measurement.md
+└─ tools/
+   ├─ network-simulator/
+   └─ latency-measurement/
+~~~
+
+Shared audio, network, protocol, and diagnostic crates must have no Tauri or
+web-view dependency. Platform APIs belong behind explicit adapters instead of
+being scattered through the audio engine.
+
+## 16. Supply chain and release
+
+Before public distribution, CI and release automation must cover:
+
+- Rust format, Clippy, unit tests, fuzz targets, and platform builds;
+- TypeScript type-check, lint, and UI tests;
+- Android lint, unit tests, signing, and reproducible build checks;
+- generated Protobuf consistency;
+- dependency license and vulnerability reports;
+- cross-language packet and crypto test vectors;
+- signed installers, checksums, and signed update metadata.
+
+Automatic updates must verify a release signature; HTTPS alone is not an update
+trust mechanism. Windows packaging must include the firewall and code-signing
+plan. Android distribution must document MediaProjection use, privacy behavior,
+and background-service expectations.
+
+## 17. Risks and open questions
+
+The highest risks are:
+
+- source applications refusing capture or returning indistinguishable silence;
+- Windows output-device and shared-buffer variance;
+- Android OEM background restrictions;
+- custom UDP cryptography and first-pairing mistakes;
+- clock drift and long-running buffer instability;
+- the temptation to treat Bluetooth system playback as application PCM input.
+
+Open questions must be answered by evidence, not assumptions:
+
+- Is 20 ms a better default than 10 ms for media quality and CPU cost?
+- Which Android OEMs preserve capture and foreground-service behavior while locked?
+- What jitter-buffer target survives representative home WLANs?
+- Does the selected Opus configuration produce usable FEC for music and games?
+- Can CPAL meet the Windows output budget, or is a Windows-specific backend required?
+- What Android 17 discovery/permission path gives the best user experience?
+
+See [Security Model](./security-model.md), [Testing and Measurement](./testing-and-measurement.md),
+[Roadmap](./roadmap.md), and [Architecture Decision Records](./adr/README.md) for
+the implementation gates behind this architecture.

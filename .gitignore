@@ -1,0 +1,15 @@
+/target/
+/.idea/
+/.vscode/
+*.iml
+*.log
+*.pdb
+*.user
+local.properties
+.gradle/
+build/
+node_modules/
+dist/
+.DS_Store
+Thumbs.db
+

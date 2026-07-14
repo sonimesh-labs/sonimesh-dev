@@ -1,0 +1,15 @@
+[package]
+name = "sonimesh-network"
+description = "SoniMesh authenticated media ingress and network boundaries"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+sonimesh-protocol = { path = "../sonimesh-protocol" }
+
+[lints]
+workspace = true
+

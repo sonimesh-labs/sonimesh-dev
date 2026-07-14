@@ -1,0 +1,37 @@
+# Architecture Decision Records
+
+These decisions are required before the corresponding implementation becomes a
+release boundary. Each ADR should record the context, alternatives, decision,
+security implications, test evidence, and rollback plan.
+
+## Priority ADRs
+
+1. **Android UI and service boundary** — Compose-only versus another UI shell;
+   JNI/native ownership; buffer and lifecycle ownership.
+2. **Windows output backend** — CPAL/WASAPI baseline, fixed-buffer behavior,
+   device notifications, and fallback policy.
+3. **First pairing and device identity** — QR, PAKE/SAS, key storage, revocation,
+   and trust migration.
+4. **UDP media security** — AEAD algorithm, HKDF labels, nonce layout, replay
+   window, key epochs, and address migration.
+5. **Protocol schema evolution** — Protobuf envelope, required/optional
+   capabilities, message-size limits, and cross-language vectors.
+6. **Frame duration and Opus policy** — 10 ms versus 20 ms, bitrate, DTX, FEC,
+   content classes, and CPU/power evidence.
+7. **Jitter and clock control** — playout scheduling, adaptive targets, ASRC
+   choice, ratio bounds, and hard resynchronization.
+8. **Realtime stream membership** — fixed slots or preallocated snapshot boundary
+   with no callback allocation or long-lived lock.
+9. **Android 17 local-network discovery** — system-mediated NsdManager picker,
+   broad permission path, denial behavior, and manual address UX.
+10. **Privacy and diagnostics** — retention, redaction, diagnostic export, and
+    user visibility for capture limitations.
+
+Do not mark an ADR complete merely because an API name has been selected. The
+decision is complete only when its failure modes and validation evidence are
+documented.
+
+## Records
+
+- [ADR 0001: Core workspace boundaries](./0001-core-workspace-boundaries.md) —
+  accepted for feasibility work; platform and security choices remain gated.

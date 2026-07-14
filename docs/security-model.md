@@ -1,0 +1,110 @@
+# SoniMesh Security Model
+
+This document defines the security boundary for the local-network control and
+audio planes. A local network is treated as hostile: another device may observe,
+spoof, replay, flood, or mutate traffic.
+
+## Threat model
+
+An attacker may:
+
+- observe packets on the WLAN;
+- impersonate a desktop or Android device before pairing;
+- inject, replay, reorder, or corrupt UDP packets;
+- brute-force a pairing code;
+- send oversized, malformed, or high-rate control messages;
+- send authenticated but malicious Opus payloads from a compromised paired device;
+- exploit parser, decoder, or logging bugs;
+- read local logs or discoverable device metadata.
+
+The system does not protect against a fully compromised Android device, a fully
+compromised desktop, or an attacker who controls the operating system audio
+stack. It does protect the network boundary and limits the damage of malformed
+input.
+
+## Trust and first pairing
+
+Discovery is unauthenticated. A discovered device is only a candidate.
+
+The preferred pairing flow is QR-based:
+
+1. The desktop creates a short-lived pairing record.
+2. The QR payload contains the desktop identity public key, a control address,
+   and a one-time high-entropy pairing secret.
+3. Android connects using TLS and pins the public key from the QR payload.
+4. Both sides prove knowledge of the one-time secret inside the authenticated
+   handshake transcript.
+5. The devices store each other's long-term public key and a user-visible trust
+   record.
+
+The manual-code flow must use a PAKE or a transcript-bound short-authentication
+string compared on both screens. A code that is merely entered on Android and
+forwarded through an untrusted channel is not sufficient.
+
+Pairing records need an expiry, attempt limit, per-source rate limit, and
+explicit revocation. The desktop should default to allowing only “send audio”;
+future administrative permissions must be separate capabilities.
+
+## Long-term identity storage
+
+- Android identity keys belong in Android Keystore-backed storage.
+- Windows identity keys and trust records belong in DPAPI/Credential Manager or
+  an equivalent OS-protected store.
+- Device display names are untrusted presentation data.
+- Revocation removes the peer key, session tickets, and any pending pairing data.
+
+## Session keys and UDP packets
+
+After pairing, the control session authenticates the peers. Media keys should be
+derived from the authenticated transcript with HKDF and explicit labels. Do not
+write media keys into ordinary control logs or crash reports.
+
+Recommended derivation shape:
+
+~~~text
+root = HKDF-Extract(pairing/session secret, authenticated transcript)
+direction_key = HKDF-Expand(root, "sonimesh media v1" || direction, ...)
+stream_key = HKDF-Expand(direction_key, stream_id || epoch, ...)
+~~~
+
+The exact byte encoding must be specified in the protocol document and tested in
+Rust and Kotlin. A nonce must be unique for every packet under a key. The
+implementation should use an explicit 96-bit layout whose fields include the
+key epoch, stream identity (or a per-stream key), direction, and sequence.
+
+Packets are accepted only after:
+
+1. length and minimum-header checks;
+2. bounded header parsing;
+3. session and stream lookup;
+4. AEAD authentication with the complete header as associated data;
+5. replay-window validation and update;
+6. jitter-buffer insertion.
+
+Unknown sessions and unauthenticated payloads must never reach Opus. Replay
+window state must not advance for failed authentication attempts.
+
+Key epochs need an explicit rotation and grace-period protocol. Sequence wrap,
+session resume, address migration, and control-channel expiry must all result in
+new nonce/key material rather than silently reusing old state.
+
+## Abuse controls
+
+- Bound every control message, packet, queue, stream count, and pairing attempt.
+- Rate-limit new TCP/TLS connections and pairing failures per source.
+- Drop stale UDP packets before expensive work when possible, without advancing
+  authenticated replay state.
+- Fuzz the packet parser and the authenticated Opus boundary. Authentication does
+  not make a paired peer benign.
+- Keep the decoder and parser libraries current and isolate decoder failures to a
+  single stream.
+- Do not expose stable public-key fingerprints in discovery records unless the
+  privacy trade-off is explicitly accepted.
+
+## Privacy
+
+The default behavior is no recording, no disk persistence of audio, and no cloud
+upload. Diagnostics redact full IP addresses, long-term identifiers, keys, and
+audio content. User-exported diagnostic bundles must be explicit, bounded, and
+redacted before writing to disk.
+
