@@ -75,6 +75,18 @@ with a deterministic clock. Inject:
 Physical WLAN tests are still required, but deterministic simulation should be
 the first regression signal in CI.
 
+### Current deterministic harness
+
+The buildable harness in `tools/network-simulator` currently provides a virtual
+monotonic clock, bounded in-flight event queue, seeded random and burst loss,
+jitter, duplication, reorder delay, and queue-capacity pressure. A cross-crate
+test exercises bounded packet parsing, a test-only authentication boundary,
+replay rejection, jitter/PLC decisions, and realtime PCM transfer.
+
+This is evidence for deterministic core behavior only. It does not yet model
+bandwidth shaping, socket buffers, address migration, sender/receiver clock drift,
+or operating-system scheduling, and it is not physical WLAN evidence.
+
 ## Stability and compatibility matrix
 
 Before MVP release:
@@ -106,4 +118,3 @@ while the screen is locked. The desktop must record CPU, memory, thread count,
 network rate, and output callback underruns. “Recorded” is not an acceptance
 criterion by itself; the release plan must set thresholds after the first PoC
 establishes a realistic baseline.
-

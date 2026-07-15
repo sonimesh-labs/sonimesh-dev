@@ -9,6 +9,8 @@ publish.workspace = true
 
 [dependencies]
 sonimesh-audio = { path = "../../crates/sonimesh-audio" }
+sonimesh-network = { path = "../../crates/sonimesh-network" }
+sonimesh-protocol = { path = "../../crates/sonimesh-protocol" }
 
 [lints]
 workspace = true
