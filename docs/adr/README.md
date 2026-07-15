@@ -37,3 +37,5 @@ documented.
   accepted for feasibility work; platform and security choices remain gated.
 - [ADR 0002: Realtime PCM queue boundary](./0002-realtime-pcm-queue.md) —
   accepted for the single-stream feasibility path with hardware timing still open.
+- [ADR 0003: Windows output feasibility prototype](./0003-windows-output-prototype.md) —
+  provisional CPAL shared-mode spike; direct WASAPI comparison remains required.
