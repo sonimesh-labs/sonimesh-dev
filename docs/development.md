@@ -28,7 +28,7 @@ Windows callback timing, acoustic latency, Opus behavior, or physical WLANs.
 ~~~text
 sonimesh-app            -> platform contracts, diagnostics
 sonimesh-network        -> protocol primitives
-sonimesh-audio          -> standard library only
+sonimesh-audio          -> crossbeam-queue behind its realtime queue boundary
 sonimesh-platform       -> standard library only
 sonimesh-diagnostics    -> standard library only
 sonimesh-protocol       -> standard library only
@@ -54,4 +54,3 @@ Anything reachable from `RenderSource::render` must be demonstrated to avoid:
 - decoding, network access, device discovery, logs, and UI IPC;
 - uninitialized output on an underflow;
 - queues without a fixed capacity and observable overflow policy.
-

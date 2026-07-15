@@ -35,3 +35,5 @@ documented.
 
 - [ADR 0001: Core workspace boundaries](./0001-core-workspace-boundaries.md) —
   accepted for feasibility work; platform and security choices remain gated.
+- [ADR 0002: Realtime PCM queue boundary](./0002-realtime-pcm-queue.md) —
+  accepted for the single-stream feasibility path with hardware timing still open.

@@ -18,6 +18,8 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   gap/PLC, and controlled-resynchronization results;
 - a preallocated PCM block ring that drops the oldest block on overflow and
   emits initialized silence on underflow;
+- a lock-free cross-thread PCM queue with non-cloneable logical endpoints,
+  oldest-block replacement, and exact discontinuity detection;
 - allocation-free gain smoothing, atomic diagnostic counters, endpoint
   redaction, output adapter contracts, and a tested desktop session state machine;
 - deterministic virtual-network smoke profiles and Windows/Linux core CI.
@@ -33,7 +35,8 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
 | Replay window | 64 packets | Reject authenticated duplicate or too-old packet |
 | Jitter storage | Compile-time capacity per stream | Stream-local reset on capacity collision |
 | Encoded frame | Compile-time capacity per stream | Reject oversized frame copy |
-| PCM ring | Compile-time blocks and samples | Drop oldest block; output silence when empty |
+| Local PCM ring | Compile-time blocks and samples | Drop oldest block; output silence when empty |
+| Cross-thread PCM queue | 1–128 inline blocks | Atomically replace oldest; report sequence gap |
 | Active source count | One for MVP | Separate ingress and buffers per future source |
 
 Compile-time capacities make accidental unbounded growth impossible in these
@@ -46,7 +49,7 @@ jitter, and output-backend ADRs using measured 10/20 ms and device results.
 - Opus encoder/decoder bindings and PLC/FEC evidence;
 - AEAD, HKDF, TLS, QR pairing, identity storage, or key rotation;
 - UDP sockets, discovery, control Protobuf generation, and address migration;
-- CPAL/direct-WASAPI output adapters or a lock-free cross-thread PCM transfer;
+- CPAL/direct-WASAPI output adapters;
 - Tauri/Vue product UI, signing, packaging, and firewall integration;
 - drift ASRC, nominal rate conversion, acoustic latency, and soak validation.
 
