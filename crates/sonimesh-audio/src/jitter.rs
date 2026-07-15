@@ -84,6 +84,7 @@ pub struct JitterBuffer<const CAPACITY: usize, const MAX_PAYLOAD: usize> {
     slots: [Option<EncodedFrame<MAX_PAYLOAD>>; CAPACITY],
     buffered: usize,
     next_sequence: Option<u32>,
+    playout_started: bool,
 }
 
 impl<const CAPACITY: usize, const MAX_PAYLOAD: usize> Default
@@ -102,7 +103,20 @@ impl<const CAPACITY: usize, const MAX_PAYLOAD: usize> JitterBuffer<CAPACITY, MAX
             slots: std::array::from_fn(|_| None),
             buffered: 0,
             next_sequence: None,
+            playout_started: false,
         }
+    }
+
+    /// Creates an empty buffer whose negotiated playout sequence is known.
+    ///
+    /// A playout decision before that sequence arrives reports a missing frame,
+    /// allowing the decoder worker to schedule PLC at the negotiated deadline.
+    #[must_use]
+    pub fn with_start_sequence(sequence: u32) -> Self {
+        let mut buffer = Self::new();
+        buffer.next_sequence = Some(sequence);
+        buffer.playout_started = true;
+        buffer
     }
 
     /// Number of currently buffered frames.
@@ -149,18 +163,23 @@ impl<const CAPACITY: usize, const MAX_PAYLOAD: usize> JitterBuffer<CAPACITY, MAX
             return PlayoutOutcome::NotReady;
         };
         if self.buffered == 0 {
-            self.next_sequence = None;
-            return PlayoutOutcome::NotReady;
+            if !self.playout_started {
+                return PlayoutOutcome::NotReady;
+            }
+            self.next_sequence = sequence.checked_add(1);
+            return PlayoutOutcome::Missing { sequence };
         }
 
         let index = sequence as usize % CAPACITY;
         if let Some(frame) = self.slots[index].take_if(|frame| frame.sequence == sequence) {
             self.buffered -= 1;
             self.next_sequence = sequence.checked_add(1);
+            self.playout_started = true;
             return PlayoutOutcome::Frame(frame);
         }
 
         self.next_sequence = sequence.checked_add(1);
+        self.playout_started = true;
         PlayoutOutcome::Missing { sequence }
     }
 
@@ -169,6 +188,14 @@ impl<const CAPACITY: usize, const MAX_PAYLOAD: usize> JitterBuffer<CAPACITY, MAX
         self.slots.fill_with(|| None);
         self.buffered = 0;
         self.next_sequence = None;
+        self.playout_started = false;
+    }
+
+    /// Clears this stream and resumes at a negotiated sequence.
+    pub fn reset_to(&mut self, sequence: u32) {
+        self.reset();
+        self.next_sequence = Some(sequence);
+        self.playout_started = true;
     }
 
     fn resynchronize(&mut self, frame: EncodedFrame<MAX_PAYLOAD>) -> InsertOutcome {
@@ -176,6 +203,7 @@ impl<const CAPACITY: usize, const MAX_PAYLOAD: usize> JitterBuffer<CAPACITY, MAX
         self.reset();
         let index = frame.sequence as usize % CAPACITY;
         self.next_sequence = Some(frame.sequence);
+        self.playout_started = true;
         self.slots[index] = Some(frame);
         self.buffered = 1;
         InsertOutcome::Resynchronized { dropped_frames }
@@ -240,5 +268,25 @@ mod tests {
         assert!(matches!(buffer.take_next(), PlayoutOutcome::Frame(_)));
         buffer.insert(frame(7));
         assert_eq!(buffer.insert(frame(5)), InsertOutcome::Late);
+    }
+
+    #[test]
+    fn negotiated_start_reports_initial_loss() {
+        let mut buffer = JitterBuffer::<4, 8>::with_start_sequence(10);
+        buffer.insert(frame(11));
+
+        assert_eq!(buffer.take_next(), PlayoutOutcome::Missing { sequence: 10 });
+        assert!(matches!(buffer.take_next(), PlayoutOutcome::Frame(_)));
+    }
+
+    #[test]
+    fn active_playout_keeps_sequence_during_empty_underflow() {
+        let mut buffer = JitterBuffer::<4, 8>::with_start_sequence(20);
+        buffer.insert(frame(20));
+        assert!(matches!(buffer.take_next(), PlayoutOutcome::Frame(_)));
+
+        assert_eq!(buffer.take_next(), PlayoutOutcome::Missing { sequence: 21 });
+        buffer.insert(frame(22));
+        assert!(matches!(buffer.take_next(), PlayoutOutcome::Frame(_)));
     }
 }
