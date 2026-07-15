@@ -40,6 +40,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
 | Encoded frame | Compile-time capacity per stream | Reject oversized frame copy |
 | Local PCM ring | Compile-time blocks and samples | Drop oldest block; output silence when empty |
 | Cross-thread PCM queue | 1–128 inline blocks | Atomically replace oldest; report sequence gap |
+| Output sample rate | 8–192 kHz | Reject outside platform-neutral bound |
+| Output channels | 1–8 | Reject zero or excessive layouts |
+| Requested callback | 16–8192 frames | Reject before platform stream creation |
 | Active source count | One for MVP | Separate ingress and buffers per future source |
 
 Compile-time capacities make accidental unbounded growth impossible in these
