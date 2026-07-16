@@ -40,9 +40,10 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
 - an application-domain receiver pipeline that composes protected ingress,
   bounded decode admission, and stream-local epoch reset without owning TLS,
   platform output, or a concrete decoder implementation.
-- atomic receiver-pipeline diagnostics for authenticated/rejected/replayed
-  packets, decoder-side PLC, bounded PCM replacement, and successful epoch
-  resets; output-callback underflow remains owned by the future output adapter.
+- atomic receiver-pipeline diagnostics for authenticated/rejected/replayed/late
+  packets, decoder-side PLC, bounded PCM replacement, jitter resynchronization,
+  and successful epoch resets; output-callback underflow remains owned by the
+  future output adapter.
 - a bounded per-stream PCM occupancy controller that emits slew-limited ppm
   decisions or stream-local hard-resynchronization requests; no ASRC backend is
   selected or performance-claimed yet.

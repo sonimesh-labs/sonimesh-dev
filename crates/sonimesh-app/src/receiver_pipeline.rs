@@ -133,7 +133,10 @@ where
             )
         };
         match admission {
-            Ok(outcome) => Ok(outcome),
+            Ok(outcome) => {
+                self.record_jitter_outcome(outcome);
+                Ok(outcome)
+            }
             Err(error) => {
                 plaintext.fill(0);
                 self.counters.rejected();
@@ -192,6 +195,15 @@ where
     fn record_queue_outcome(&self, outcome: RealtimePcmPushOutcome) {
         if outcome == RealtimePcmPushOutcome::ReplacedOldest {
             self.counters.pcm_overflow();
+        }
+    }
+
+    fn record_jitter_outcome(&self, outcome: InsertOutcome) {
+        match outcome {
+            InsertOutcome::Duplicate => self.counters.duplicate(),
+            InsertOutcome::Late => self.counters.late(),
+            InsertOutcome::Resynchronized { .. } => self.counters.stream_reset(),
+            InsertOutcome::Inserted | InsertOutcome::Disabled => {}
         }
     }
 }

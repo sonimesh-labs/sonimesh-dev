@@ -269,3 +269,66 @@ fn pipeline_publishes_bounded_receive_decode_and_epoch_metrics() {
     assert_eq!(snapshot.pcm_overflows, 1);
     assert_eq!(snapshot.stream_resets, 1);
 }
+
+#[test]
+fn pipeline_publishes_late_and_controlled_resynchronization_metrics() {
+    let secret = SessionSecret::new([0xA5; 32]);
+    let initial = context(2);
+    let mut sealer = MediaSealer::new(&secret, initial).unwrap();
+    let packet_zero = sealer.seal(0, 0, &[0]).unwrap();
+    let packet_one = sealer.seal(0, 960, &[1]).unwrap();
+    let packet_two = sealer.seal(0, 1_920, &[2]).unwrap();
+    let (producer, _consumer) = realtime_pcm_queue::<4>(4).unwrap();
+    let late_counters = Arc::new(StreamCounters::default());
+    let mut late_pipeline = ReceiverStreamPipeline::<ByteDecoder, 4, 8, 4>::new(
+        &secret,
+        initial,
+        ByteDecoder,
+        producer,
+        Arc::clone(&late_counters),
+        0,
+    )
+    .unwrap();
+    let mut plaintext = [0_u8; 8];
+
+    late_pipeline
+        .receive(&packet_zero.datagram, &mut plaintext)
+        .unwrap();
+    late_pipeline.decode_next().unwrap();
+    late_pipeline
+        .receive(&packet_two.datagram, &mut plaintext)
+        .unwrap();
+    assert!(matches!(
+        late_pipeline.decode_next().unwrap(),
+        DecodeStep::Concealed { .. }
+    ));
+    assert_eq!(
+        late_pipeline
+            .receive(&packet_one.datagram, &mut plaintext)
+            .unwrap(),
+        InsertOutcome::Late
+    );
+    assert_eq!(late_counters.snapshot().late_packets, 1);
+
+    let (producer, _consumer) = realtime_pcm_queue::<4>(4).unwrap();
+    let reset_counters = Arc::new(StreamCounters::default());
+    let mut reset_pipeline = ReceiverStreamPipeline::<ByteDecoder, 2, 8, 4>::new(
+        &secret,
+        initial,
+        ByteDecoder,
+        producer,
+        Arc::clone(&reset_counters),
+        0,
+    )
+    .unwrap();
+    reset_pipeline
+        .receive(&packet_zero.datagram, &mut plaintext)
+        .unwrap();
+    assert_eq!(
+        reset_pipeline
+            .receive(&packet_two.datagram, &mut plaintext)
+            .unwrap(),
+        InsertOutcome::Resynchronized { dropped_frames: 1 }
+    );
+    assert_eq!(reset_counters.snapshot().stream_resets, 1);
+}
