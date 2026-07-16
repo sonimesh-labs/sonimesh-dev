@@ -48,7 +48,7 @@ where
         session: &mut SessionState,
         selection: OutputSelection,
     ) -> Result<(), OutputLifecycleError> {
-        require_state(*session, SessionState::Ready, SessionEvent::StartStream)?;
+        require_state(*session, SessionState::READY, SessionEvent::StartStream)?;
         self.output
             .start(
                 selection.device.as_ref(),
@@ -75,7 +75,7 @@ where
         session: &mut SessionState,
     ) -> Result<Option<OutputHealth>, OutputLifecycleError> {
         let health = self.output.health();
-        if health == OutputHealth::Healthy || *session != SessionState::Streaming {
+        if health == OutputHealth::Healthy || *session != SessionState::STREAMING {
             return Ok(None);
         }
 
@@ -94,7 +94,7 @@ where
     pub fn recover(&mut self, session: &mut SessionState) -> Result<(), OutputLifecycleError> {
         require_state(
             *session,
-            SessionState::OutputUnavailable,
+            SessionState::OUTPUT_UNAVAILABLE,
             SessionEvent::OutputRestored,
         )?;
         let selection = self

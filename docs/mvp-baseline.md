@@ -40,6 +40,11 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
 - a bounded per-stream PCM occupancy controller that emits slew-limited ppm
   decisions or stream-local hard-resynchronization requests; no ASRC backend is
   selected or performance-claimed yet.
+- a pairing-invitation control owner that synchronizes bounded record expiry,
+  monotonic-clock failure, user expiry, and externally verified proof outcomes
+  with the desktop session state; only a consumed proof can establish trust. It
+  does not implement TLS, QR payloads, pairing secrets, or persistent identity
+  storage.
 - ChaCha20-Poly1305 packet protection with HKDF-SHA256 per-stream keys, a
   reviewed nonce layout, sender sequence exhaustion, and authentication before
   replay admission; pairing/TLS root-secret creation remains unimplemented.

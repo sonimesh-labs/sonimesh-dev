@@ -229,7 +229,7 @@ impl ControlStreamCoordinator {
         request: StreamStartRequest,
     ) -> Result<(), ControlStreamError> {
         if self.pending != Some(PendingStreamChange::Start(request))
-            || self.state != SessionState::Streaming
+            || self.state != SessionState::STREAMING
         {
             return Err(ControlStreamError::CompletionMismatch);
         }
@@ -251,7 +251,7 @@ impl ControlStreamCoordinator {
     ) -> Result<(), ControlStreamError> {
         if self.pending != Some(PendingStreamChange::Rotate { previous, next })
             || self.active != Some(previous)
-            || self.state != SessionState::Streaming
+            || self.state != SessionState::STREAMING
         {
             return Err(ControlStreamError::CompletionMismatch);
         }
@@ -274,7 +274,7 @@ impl ControlStreamCoordinator {
         identity: MediaStreamIdentity,
     ) -> Result<(), ControlStreamError> {
         if self.active != Some(identity)
-            || self.state != SessionState::Ready
+            || self.state != SessionState::READY
             || self.pending.is_some()
         {
             return Err(ControlStreamError::CompletionMismatch);
@@ -317,7 +317,7 @@ impl ControlStreamCoordinator {
         }
 
         let Some(active) = self.active else {
-            if self.state != SessionState::Ready {
+            if self.state != SessionState::READY {
                 return Err(ControlStreamError::StartRequiresReady(self.state));
             }
             self.pending = Some(PendingStreamChange::Start(request));
@@ -338,7 +338,7 @@ impl ControlStreamCoordinator {
                 requested: request.identity.key_epoch,
             });
         }
-        if self.state != SessionState::Streaming {
+        if self.state != SessionState::STREAMING {
             return Err(ControlStreamError::RotationRequiresStreaming(self.state));
         }
 

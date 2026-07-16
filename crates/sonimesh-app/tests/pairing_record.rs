@@ -26,6 +26,8 @@ fn valid_proof_consumes_the_record_exactly_once() {
         record.record_proof(11, source(1), true),
         Err(PairingRecordError::Consumed)
     );
+    record.expire();
+    assert_eq!(record.state(), PairingRecordState::Consumed);
 }
 
 #[test]
@@ -69,6 +71,11 @@ fn expiration_and_clock_regression_fail_closed() {
     assert_eq!(
         active.record_proof(9, source(1), true),
         Err(PairingRecordError::TimeRegressed)
+    );
+    assert_eq!(active.state(), PairingRecordState::Expired);
+    assert_eq!(
+        active.record_proof(11, source(1), true),
+        Err(PairingRecordError::Expired)
     );
 }
 

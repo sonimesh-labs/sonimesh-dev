@@ -167,6 +167,41 @@ impl<const MAX_SOURCES: usize> PairingRecord<MAX_SOURCES> {
         self.state
     }
 
+    /// Observes time without admitting a pairing proof.
+    ///
+    /// This is suitable for low-rate control polling. A clock regression
+    /// expires an active invitation so a later forward jump cannot revive it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PairingRecordError::TimeRegressed`] after permanently expiring
+    /// an active invitation when `now_ms` is earlier than a prior observation.
+    pub fn observe(&mut self, now_ms: u64) -> Result<PairingRecordState, PairingRecordError> {
+        if self.state == PairingRecordState::Consumed {
+            return Ok(self.state);
+        }
+        if now_ms < self.last_observed_ms {
+            self.state = PairingRecordState::Expired;
+            return Err(PairingRecordError::TimeRegressed);
+        }
+
+        self.last_observed_ms = now_ms;
+        if self.state == PairingRecordState::Active && now_ms >= self.expires_at_ms {
+            self.state = PairingRecordState::Expired;
+        }
+        Ok(self.state)
+    }
+
+    /// Permanently expires an active invitation without accepting a proof.
+    ///
+    /// A consumed record remains consumed to preserve the successful-pairing
+    /// audit state for its control owner.
+    pub fn expire(&mut self) {
+        if self.state == PairingRecordState::Active {
+            self.state = PairingRecordState::Expired;
+        }
+    }
+
     /// Records the result of one externally verified transcript-bound proof.
     ///
     /// # Errors
@@ -180,15 +215,10 @@ impl<const MAX_SOURCES: usize> PairingRecord<MAX_SOURCES> {
         source: PairingSource,
         proof_verified: bool,
     ) -> Result<PairingAttemptOutcome, PairingRecordError> {
-        if now_ms < self.last_observed_ms {
-            return Err(PairingRecordError::TimeRegressed);
-        }
-        self.last_observed_ms = now_ms;
         if self.state == PairingRecordState::Consumed {
             return Err(PairingRecordError::Consumed);
         }
-        if self.state == PairingRecordState::Expired || now_ms >= self.expires_at_ms {
-            self.state = PairingRecordState::Expired;
+        if self.observe(now_ms)? == PairingRecordState::Expired {
             return Err(PairingRecordError::Expired);
         }
 

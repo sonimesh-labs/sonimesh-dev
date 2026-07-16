@@ -3,8 +3,8 @@
 use core::convert::Infallible;
 
 use sonimesh_app::{
-    ControlStreamAction, ControlStreamCoordinator, ReceiverStreamPipeline, SessionEvent,
-    SessionState,
+    ControlStreamAction, ControlStreamCoordinator, PairingAttemptOutcome, PairingId,
+    PairingInvitationController, PairingSource, ReceiverStreamPipeline, SessionEvent, SessionState,
 };
 use sonimesh_audio::{
     DecodeStep, FrameDecoder, InsertOutcome, RealtimePcmPopOutcome, realtime_pcm_queue,
@@ -55,6 +55,19 @@ fn start_command(epoch: u16) -> Envelope {
             media_key_epoch: u32::from(epoch),
         })),
     }
+}
+
+fn trusted_session() -> SessionState {
+    let mut pairing = PairingInvitationController::<1>::new();
+    let mut session = SessionState::IDLE;
+    pairing
+        .begin(&mut session, PairingId::new([1; 16]), 100, 50, 1)
+        .unwrap();
+    assert_eq!(
+        pairing.record_proof(&mut session, 101, PairingSource::new([2; 16]), true),
+        Ok(PairingAttemptOutcome::Paired)
+    );
+    session
 }
 
 #[test]
@@ -160,7 +173,7 @@ fn control_epoch_rotation_commits_only_after_pipeline_context_rotates() {
         0,
     )
     .unwrap();
-    let mut coordinator = ControlStreamCoordinator::new(SessionState::Ready);
+    let mut coordinator = ControlStreamCoordinator::new(trusted_session());
     let ControlStreamAction::Start(initial_request) =
         coordinator.accept(&start_command(2)).unwrap()
     else {

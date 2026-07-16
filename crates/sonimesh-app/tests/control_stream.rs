@@ -1,7 +1,8 @@
 //! Low-rate control lifecycle tests independent of output and network adapters.
 
 use sonimesh_app::{
-    ControlStreamAction, ControlStreamCoordinator, ControlStreamError, SessionEvent, SessionState,
+    ControlStreamAction, ControlStreamCoordinator, ControlStreamError, PairingAttemptOutcome,
+    PairingId, PairingInvitationController, PairingSource, SessionEvent, SessionState,
 };
 use sonimesh_protocol::{
     CONTROL_PROTOCOL_VERSION, ControlFrameError, Envelope, MediaDirection, StartStream, StopStream,
@@ -35,6 +36,19 @@ fn stop(epoch: u32) -> Envelope {
     }
 }
 
+fn trusted_session() -> SessionState {
+    let mut pairing = PairingInvitationController::<1>::new();
+    let mut session = SessionState::IDLE;
+    pairing
+        .begin(&mut session, PairingId::new([1; 16]), 100, 50, 1)
+        .unwrap();
+    assert_eq!(
+        pairing.record_proof(&mut session, 101, PairingSource::new([2; 16]), true),
+        Ok(PairingAttemptOutcome::Paired)
+    );
+    session
+}
+
 fn activate(coordinator: &mut ControlStreamCoordinator, epoch: u32) {
     let ControlStreamAction::Start(request) = coordinator.accept(&start(epoch)).unwrap() else {
         panic!("expected a stream start action");
@@ -48,7 +62,7 @@ fn activate(coordinator: &mut ControlStreamCoordinator, epoch: u32) {
 
 #[test]
 fn starts_only_after_platform_state_reports_streaming() {
-    let mut coordinator = ControlStreamCoordinator::new(SessionState::Ready);
+    let mut coordinator = ControlStreamCoordinator::new(trusted_session());
     let ControlStreamAction::Start(request) = coordinator.accept(&start(0)).unwrap() else {
         panic!("expected a stream start action");
     };
@@ -80,7 +94,7 @@ fn starts_only_after_platform_state_reports_streaming() {
 
 #[test]
 fn rotates_only_to_a_higher_epoch_and_rejects_stale_start() {
-    let mut coordinator = ControlStreamCoordinator::new(SessionState::Ready);
+    let mut coordinator = ControlStreamCoordinator::new(trusted_session());
     activate(&mut coordinator, 2);
     let previous = coordinator.active().unwrap();
 
@@ -106,7 +120,7 @@ fn rotates_only_to_a_higher_epoch_and_rejects_stale_start() {
 
 #[test]
 fn stale_stop_cannot_stop_the_newer_active_epoch() {
-    let mut coordinator = ControlStreamCoordinator::new(SessionState::Ready);
+    let mut coordinator = ControlStreamCoordinator::new(trusted_session());
     activate(&mut coordinator, 4);
     let active = coordinator.active().unwrap();
 
@@ -129,7 +143,7 @@ fn stale_stop_cannot_stop_the_newer_active_epoch() {
 
 #[test]
 fn invalid_control_frame_cannot_prepare_media_work() {
-    let mut coordinator = ControlStreamCoordinator::new(SessionState::Ready);
+    let mut coordinator = ControlStreamCoordinator::new(trusted_session());
     let invalid = Envelope {
         protocol_version: CONTROL_PROTOCOL_VERSION,
         request_id: 1,
