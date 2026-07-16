@@ -188,6 +188,18 @@ where
         }
     }
 
+    /// Begins a fresh media epoch at its negotiated initial packet sequence.
+    ///
+    /// This drops only this stream's undecoded jitter frames, clears reusable
+    /// decode scratch, and marks queued PCM so the realtime consumer discards
+    /// blocks from the retired epoch. The caller installs matching network AEAD
+    /// state before admitting frames for `sequence`.
+    pub fn begin_epoch(&mut self, sequence: u32) {
+        self.jitter.reset_to(sequence);
+        self.pcm.fill(0.0);
+        self.producer.begin_epoch();
+    }
+
     /// Returns the number of queued PCM blocks for low-rate diagnostics.
     #[must_use]
     pub fn queued_blocks(&self) -> usize {

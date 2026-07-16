@@ -114,3 +114,33 @@ fn rejects_decoder_lengths_beyond_the_pcm_capacity() {
     );
     assert!(output.iter().all(|sample| sample.abs() < f32::EPSILON));
 }
+
+#[test]
+fn new_decode_epoch_discards_retired_jitter_and_pcm() {
+    let (producer, mut consumer) = realtime_pcm_queue::<4>(4).unwrap();
+    let mut worker = StreamDecodeWorker::<TestDecoder, 4, 8, 4>::new(TestDecoder, producer, 0);
+    worker.admit(0, 0, &[1]).unwrap();
+    assert!(matches!(
+        worker.decode_next().unwrap(),
+        DecodeStep::Decoded { sequence: 0, .. }
+    ));
+
+    worker.begin_epoch(0);
+    worker.admit(0, 0, &[2]).unwrap();
+    assert!(matches!(
+        worker.decode_next().unwrap(),
+        DecodeStep::Decoded { sequence: 0, .. }
+    ));
+
+    let mut output = [f32::NAN; 4];
+    assert!(matches!(
+        consumer.pop_into(&mut output),
+        RealtimePcmPopOutcome::Filled {
+            sequence: 0,
+            discontinuity: true,
+            discarded_stale_blocks: 1,
+            ..
+        }
+    ));
+    assert_eq!(&output[..2], &[2.0, 0.5]);
+}
