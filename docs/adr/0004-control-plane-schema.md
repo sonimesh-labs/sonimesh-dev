@@ -46,8 +46,10 @@ known envelope payload is rejected.
 
 Unit tests must cover frame byte order, truncated/oversized frames, malformed
 Protobuf, missing payload, version mismatch, capability limits, and idempotent
-command representation. Cross-language vectors remain required once the Kotlin
-sender is implemented.
+command representation. The published
+[control-frame vector](../protocol/control-frame-vectors.md) fixes the initial
+Rust/Kotlin wire encoding; Kotlin verification remains required once the sender
+is implemented.
 
 ## Rollback plan
 
@@ -55,4 +57,3 @@ All generated code is private to `sonimesh-protocol`; apps depend on its stable
 validation API. A future schema version is added through a new `oneof` member or
 new message field, while unsupported envelope versions produce a structured
 incompatibility error rather than fallback behavior.
-

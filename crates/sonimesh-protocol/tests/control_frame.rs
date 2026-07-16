@@ -38,6 +38,17 @@ fn round_trips_big_endian_framed_hello() {
 }
 
 #[test]
+fn matches_published_cross_language_control_frame_vector() {
+    assert_eq!(
+        encode_control_frame(&hello_envelope()).unwrap(),
+        [
+            0x00, 0x00, 0x00, 0x18, 0x08, 0x01, 0x10, 0x07, 0x52, 0x12, 0x0A, 0x01, 0x01, 0x12,
+            0x01, 0x02, 0x1A, 0x0A, 0x4C, 0x61, 0x62, 0x20, 0x73, 0x65, 0x6E, 0x64, 0x65, 0x72,
+        ]
+    );
+}
+
+#[test]
 fn rejects_truncated_oversized_and_inconsistent_frames() {
     assert!(matches!(
         decode_control_frame(&[0, 0, 0]),

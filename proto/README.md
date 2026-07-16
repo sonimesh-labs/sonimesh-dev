@@ -8,3 +8,6 @@ The schema deliberately contains only low-rate hello/capability exchange,
 start/stop commands, stream status, and structured errors. It is not a pairing or
 transport-security protocol and must run inside the future authenticated control
 session.
+
+The version-one length prefix and `Hello` encoding are fixed by the
+[control frame test vector](../docs/protocol/control-frame-vectors.md).
