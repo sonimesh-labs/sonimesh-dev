@@ -4,9 +4,9 @@ use sonimesh_audio::{
     DecodeStep, FrameDecoder, InsertOutcome, RealtimePcmConsumer, RealtimePcmPopOutcome,
     RealtimePcmPushOutcome, StreamDecodeWorker, realtime_pcm_queue,
 };
-use sonimesh_network::{IngressError, MediaIngress, ProtocolAuthenticator, StreamIdentity};
+use sonimesh_network::{IngressError, ProtectedMediaIngress};
 use sonimesh_network_simulator::{NetworkProfile, VirtualNetwork};
-use sonimesh_protocol::{MediaDirection, MediaKeyContext, MediaOpener, MediaSealer, SessionSecret};
+use sonimesh_protocol::{MediaDirection, MediaKeyContext, MediaSealer, SessionSecret};
 
 const FRAMES: u32 = 200;
 const FRAME_MS: u64 = 20;
@@ -105,15 +105,7 @@ fn authenticated_pipeline_stays_bounded_under_impairment() {
     let secret = SessionSecret::new([0xA5; 32]);
     let context = context();
     let mut sealer = MediaSealer::new(&secret, context).unwrap();
-    let opener = MediaOpener::new(&secret, context).unwrap();
-    let mut ingress = MediaIngress::new(
-        StreamIdentity {
-            session_id: SESSION_ID,
-            stream_id: STREAM_ID,
-            key_epoch: KEY_EPOCH,
-        },
-        ProtocolAuthenticator::new(opener),
-    );
+    let mut ingress = ProtectedMediaIngress::new(&secret, context).unwrap();
     let (pcm_producer, mut pcm_consumer) = realtime_pcm_queue::<1>(4).unwrap();
     let mut worker = StreamDecodeWorker::<LabDecoder, 16, 8, 1>::new(LabDecoder, pcm_producer, 0);
     let mut plaintext = [0_u8; 8];

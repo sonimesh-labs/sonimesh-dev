@@ -59,10 +59,11 @@ replay history from one key context being reused under another key.
 ## Validation evidence
 
 Protocol tests must reject out-of-range epochs and verify that Start/Stop frames
-preserve the exact identity. The future control executor requires transition
-tests for duplicate start, stale stop, rotation, and packet rejection before new
-context installation. Rust/Kotlin control vectors must include epoch-bearing
-commands before Android integration.
+preserve the exact identity. Application transition tests cover duplicate start,
+stale stop, and monotonic rotation. Network tests verify a rotation installs a
+fresh AEAD opener/replay window and rejects packets from the retired epoch.
+Rust/Kotlin control vectors must include epoch-bearing commands before Android
+integration.
 
 ## Rollback plan
 

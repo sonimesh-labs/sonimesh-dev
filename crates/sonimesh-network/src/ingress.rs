@@ -107,6 +107,12 @@ impl<A: Authenticator> MediaIngress<A> {
         }
     }
 
+    /// Returns the exact session, stream, and epoch accepted by this ingress.
+    #[must_use]
+    pub const fn identity(&self) -> StreamIdentity {
+        self.identity
+    }
+
     /// Validates and decrypts a packet into caller-owned storage.
     ///
     /// # Errors
@@ -118,11 +124,18 @@ impl<A: Authenticator> MediaIngress<A> {
         datagram: &[u8],
         plaintext: &'a mut [u8],
     ) -> Result<ReceivedFrame<'a>, IngressError<A::Error>> {
-        let packet = parse_media_packet(datagram).map_err(IngressError::Parse)?;
+        let packet = match parse_media_packet(datagram) {
+            Ok(packet) => packet,
+            Err(error) => {
+                plaintext.fill(0);
+                return Err(IngressError::Parse(error));
+            }
+        };
         if packet.header.session_id != self.identity.session_id
             || packet.header.stream_id != self.identity.stream_id
             || packet.header.key_epoch != self.identity.key_epoch
         {
+            plaintext.fill(0);
             return Err(IngressError::UnknownStream);
         }
 
@@ -267,5 +280,26 @@ mod tests {
 
         assert_eq!(error, IngressError::Replay(ReplayDecision::Duplicate));
         assert_eq!(plaintext[0], 0);
+    }
+
+    #[test]
+    fn early_rejections_clear_reused_plaintext_storage() {
+        let mut ingress = ingress();
+        let mut plaintext = [0xFF; 32];
+
+        assert!(matches!(
+            ingress.receive(&[0x00], &mut plaintext),
+            Err(IngressError::Parse(PacketParseError::Truncated))
+        ));
+        assert!(plaintext.iter().all(|byte| *byte == 0));
+
+        let mut unknown = datagram(3, &[0xAA, 1]);
+        unknown[8..16].copy_from_slice(&8_u64.to_be_bytes());
+        plaintext.fill(0xFF);
+        assert_eq!(
+            ingress.receive(&unknown, &mut plaintext),
+            Err(IngressError::UnknownStream)
+        );
+        assert!(plaintext.iter().all(|byte| *byte == 0));
     }
 }
