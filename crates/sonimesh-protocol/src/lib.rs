@@ -5,7 +5,9 @@
 //! authenticated ingress implementation must use as AEAD associated data.
 
 mod control;
+mod media_crypto;
 mod media_header;
+mod media_key;
 mod replay;
 
 /// Generated internal types for the control-plane source schema.
@@ -23,8 +25,12 @@ pub use control::{
     decode_control_frame, encode_control_frame, validate_control_envelope,
 };
 pub use generated::*;
+pub use media_crypto::{MAX_MEDIA_PLAINTEXT_LEN, MediaOpener, MediaSealer, ProtectedMediaPacket};
 pub use media_header::{
     MAX_ENCRYPTED_PAYLOAD_LEN, MAX_HEADER_LEN, MAX_MEDIA_DATAGRAM_LEN, MEDIA_HEADER_LEN,
     MEDIA_MAGIC, MEDIA_VERSION, MediaHeader, MediaPacket, PacketParseError, parse_media_packet,
+};
+pub use media_key::{
+    MediaCryptoError, MediaDirection, MediaKeyContext, MediaSequence, SessionSecret, media_nonce,
 };
 pub use replay::{ReplayDecision, ReplayWindow};

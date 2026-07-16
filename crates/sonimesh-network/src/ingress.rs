@@ -23,7 +23,8 @@ pub trait Authenticator {
     /// Authentication failure type.
     type Error;
 
-    /// Authenticates and decrypts `ciphertext` into `plaintext`.
+    /// Authenticates `header`/`authenticated_header` and decrypts `ciphertext`
+    /// into `plaintext`.
     ///
     /// # Errors
     ///
@@ -31,6 +32,7 @@ pub trait Authenticator {
     /// invalid ciphertext, or insufficient output capacity.
     fn authenticate(
         &mut self,
+        header: &MediaHeader,
         authenticated_header: &[u8],
         ciphertext: &[u8],
         plaintext: &mut [u8],
@@ -125,6 +127,7 @@ impl<A: Authenticator> MediaIngress<A> {
         }
 
         let plaintext_len = match self.authenticator.authenticate(
+            &packet.header,
             packet.authenticated_header,
             packet.ciphertext,
             plaintext,
@@ -178,6 +181,7 @@ mod tests {
 
         fn authenticate(
             &mut self,
+            _header: &MediaHeader,
             _authenticated_header: &[u8],
             ciphertext: &[u8],
             plaintext: &mut [u8],

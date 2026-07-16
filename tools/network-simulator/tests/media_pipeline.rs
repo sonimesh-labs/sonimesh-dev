@@ -35,6 +35,7 @@ impl Authenticator for LabAuthenticator {
 
     fn authenticate(
         &mut self,
+        _header: &sonimesh_protocol::MediaHeader,
         _authenticated_header: &[u8],
         ciphertext: &[u8],
         plaintext: &mut [u8],

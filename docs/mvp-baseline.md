@@ -30,6 +30,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   jitter/PLC decisions, and realtime PCM transfer without claiming real crypto.
 - a generated, length-prefixed Protobuf control envelope with hard frame and
   field limits for controlled-lab command exchange.
+- ChaCha20-Poly1305 packet protection with HKDF-SHA256 per-stream keys, a
+  reviewed nonce layout, sender sequence exhaustion, and authentication before
+  replay admission; pairing/TLS root-secret creation remains unimplemented.
 
 ## Initial capacities and policies
 
@@ -40,6 +43,7 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
 | Complete media datagram | 1,200 bytes | Reject before authentication/allocation |
 | Control Protobuf frame | 64 KiB | Reject before Protobuf decoding |
 | Control start stream | 8–192 kHz, 1–8 channels, 10/20 ms | Reject invalid command parameters |
+| Protected media plaintext | 1,148 bytes | Reserve 16 bytes for Poly1305 tag |
 | Encrypted payload with fixed header | 1,164 bytes | Extensions reduce this available payload |
 | Replay window | 64 packets | Reject authenticated duplicate or too-old packet |
 | Jitter storage | Compile-time capacity per stream | Stream-local reset on capacity collision |

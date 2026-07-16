@@ -72,6 +72,12 @@ Rust and Kotlin. A nonce must be unique for every packet under a key. The
 implementation should use an explicit 96-bit layout whose fields include the
 key epoch, stream identity (or a per-stream key), direction, and sequence.
 
+The controlled-lab Rust implementation records this exact derivation, nonce
+layout, sequence exhaustion behavior, and ChaCha20-Poly1305 choice in
+[ADR 0005](./adr/0005-udp-media-protection.md). It accepts only a caller-supplied
+root secret and does not claim to implement pairing, TLS transcript binding, or
+identity storage.
+
 Packets are accepted only after:
 
 1. length and minimum-header checks;
@@ -107,4 +113,3 @@ The default behavior is no recording, no disk persistence of audio, and no cloud
 upload. Diagnostics redact full IP addresses, long-term identifiers, keys, and
 audio content. User-exported diagnostic bundles must be explicit, bounded, and
 redacted before writing to disk.
-
