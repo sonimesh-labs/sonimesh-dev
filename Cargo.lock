@@ -989,6 +989,7 @@ name = "sonimesh-app"
 version = "0.1.0"
 dependencies = [
  "sonimesh-platform",
+ "sonimesh-protocol",
 ]
 
 [[package]]

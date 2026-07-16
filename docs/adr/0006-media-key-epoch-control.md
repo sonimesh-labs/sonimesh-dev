@@ -30,10 +30,10 @@ The exact control identity is the tuple:
 ~~~
 
 - A duplicate `StartStream` with the active tuple is idempotent.
-- A `StartStream` for the same session/stream and a different epoch is an
-  explicit key rotation. The control domain must construct a fresh media opener,
-  replay window, jitter state, decoder state, and PCM epoch before admitting
-  packets for the new tuple.
+- A `StartStream` for the same session/stream and a higher epoch is an explicit
+  key rotation. The control domain must construct a fresh media opener, replay
+  window, jitter state, decoder state, and PCM epoch before admitting packets
+  for the new tuple. Lower epochs are stale and rejected.
 - `StopStream` applies only to the matching active tuple. A stop for an older or
   unknown epoch is idempotently ignored or reported as `STREAM_NOT_FOUND`; it
   must never stop a newer epoch.
@@ -45,6 +45,8 @@ The exact control identity is the tuple:
 Rotation is mandatory before a sender would reuse a media sequence number. The
 existing `MediaSealer` refusal after `u32::MAX` remains the final local guard;
 control code must request and install the next epoch before that point.
+Epoch values do not wrap within one media session: after `65535`, the sender
+must establish a fresh media session and root secret.
 
 ## Security implications
 
