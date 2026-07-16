@@ -82,8 +82,9 @@ the first regression signal in CI.
 The buildable harness in `tools/network-simulator` currently provides a virtual
 monotonic clock, bounded in-flight event queue, seeded random and burst loss,
 jitter, duplication, reorder delay, and queue-capacity pressure. A cross-crate
-test exercises bounded packet parsing, a test-only authentication boundary,
-replay rejection, jitter/PLC decisions, and realtime PCM transfer.
+test exercises bounded packet parsing, reviewed AEAD authentication and replay
+rejection, jitter/PLC decisions, the non-realtime decode worker, and realtime
+PCM transfer.
 
 This is evidence for deterministic core behavior only. It does not yet model
 bandwidth shaping, socket buffers, address migration, sender/receiver clock drift,

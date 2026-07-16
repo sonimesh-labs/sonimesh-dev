@@ -11,12 +11,9 @@ a physical latency claim.
 - `VirtualNetwork<T>` schedules random loss, deterministic burst loss, jitter,
   duplication, reorder delay, and capacity drops from one reproducible seed.
 - `ScenarioConfig` drives sender and playout deadlines independently.
-- the media-pipeline integration test crosses protocol parsing, lab-only
-  authentication, replay rejection, jitter/PLC decisions, and the realtime PCM
-  queue.
-
-The lab authenticator is deliberately defined inside the test. Its marker byte is
-not cryptography and cannot be linked into a production crate as a security mode.
+- the media-pipeline integration test crosses protocol parsing, ChaCha20-
+  Poly1305 authentication, replay rejection, jitter/PLC decisions, the bounded
+  decode-worker boundary, and the realtime PCM queue.
 
 ## Run
 
@@ -26,5 +23,5 @@ cargo test -p sonimesh-network-simulator
 ~~~
 
 Physical WLAN, bandwidth contention, socket-buffer behavior, operating-system
-scheduling, clock drift, and address migration remain separate validation work.
-
+scheduling, closed-loop clock drift, and address migration remain separate
+validation work.

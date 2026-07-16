@@ -26,8 +26,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   render source while preserving the streaming session state;
 - deterministic virtual-clock/network profiles for random and burst loss,
   jitter, duplication, reorder delay, capacity pressure, and Windows/Linux CI;
-- a cross-crate lab pipeline covering parse, authenticate, replay rejection,
-  jitter/PLC decisions, and realtime PCM transfer without claiming real crypto.
+- a cross-crate protected pipeline covering AEAD parse/authentication, replay
+  rejection, jitter/PLC decisions, non-realtime decode scheduling, and realtime
+  PCM transfer without claiming an Opus backend or physical audio result.
 - a generated, length-prefixed Protobuf control envelope with hard frame and
   field limits for controlled-lab command exchange.
 - a per-stream, non-realtime decode-worker boundary that schedules ordinary
@@ -70,11 +71,14 @@ jitter, and output-backend ADRs using measured 10/20 ms and device results.
 
 - Android project and MediaProjection capture spike;
 - Opus encoder/decoder bindings and PLC/FEC evidence;
-- AEAD, HKDF, TLS, QR pairing, identity storage, or key rotation;
+- first pairing, TLS, QR bootstrap, identity storage, revocation, or root-secret
+  provisioning; AEAD/HKDF media protection and bounded epoch rotation exist only
+  after a caller supplies an authenticated control-session secret;
 - UDP sockets, discovery, and address migration;
 - direct-WASAPI comparison adapter and backend selection evidence;
 - Tauri/Vue product UI, signing, packaging, and firewall integration;
-- drift ASRC, nominal rate conversion, acoustic latency, and soak validation.
+- a concrete drift ASRC, nominal rate conversion, acoustic latency, and soak
+  validation; the occupancy controller alone does not establish any timing claim.
 
 An optional Windows CPAL adapter and read-only device probe are now available for
 phase 0B measurement. Their presence does not close the direct-WASAPI comparison,
