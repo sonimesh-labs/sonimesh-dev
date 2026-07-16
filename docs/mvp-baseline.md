@@ -103,8 +103,8 @@ and no build should leave a controlled lab network before phase 0D is reviewed.
    only phase 0A app and evidence matrix.
 2. Measure CPAL and prototype direct WASAPI behind `sonimesh-platform`; record
    callback size, negotiated format, device lifecycle, and latency in ADR 0003.
-3. Select a maintained Opus binding only after a concrete phase 0B spike need,
-   then compare 10 ms and 20 ms frames without adding network security claims.
+3. Validate the provisional Opus binding/build policy in ADR 0009 on Windows and
+   Android, then compare 10 ms and 20 ms frames without adding latency claims.
 4. Implement the reviewed QR-pinned TLS pairing design only after Android
    Keystore and Windows credential-store spikes; do not enable any non-lab
    network build before that validation.

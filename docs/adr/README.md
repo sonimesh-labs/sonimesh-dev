@@ -49,3 +49,5 @@ documented.
   non-realtime per-stream PI control and hard-resynchronization boundary.
 - [ADR 0008: First pairing and device identity](./0008-first-pairing-and-identity.md) —
   QR-pinned TLS, transcript binding, OS-protected identity storage, and revocation.
+- [ADR 0009: Opus decoder binding and frame policy](./0009-opus-codec-boundary.md) —
+  optional native decoder feature gated by reproducible Windows/Android evidence.
