@@ -2,12 +2,18 @@
 
 use core::convert::Infallible;
 
-use sonimesh_app::ReceiverStreamPipeline;
+use sonimesh_app::{
+    ControlStreamAction, ControlStreamCoordinator, ReceiverStreamPipeline, SessionEvent,
+    SessionState,
+};
 use sonimesh_audio::{
     DecodeStep, FrameDecoder, InsertOutcome, RealtimePcmPopOutcome, realtime_pcm_queue,
 };
 use sonimesh_network::IngressError;
-use sonimesh_protocol::{MediaDirection, MediaKeyContext, MediaSealer, SessionSecret};
+use sonimesh_protocol::{
+    CONTROL_PROTOCOL_VERSION, Envelope, MediaDirection, MediaKeyContext, MediaSealer,
+    SessionSecret, StartStream, envelope,
+};
 
 struct ByteDecoder;
 
@@ -33,6 +39,22 @@ fn context(epoch: u16) -> MediaKeyContext {
         MediaDirection::AndroidToDesktop,
     )
     .unwrap()
+}
+
+fn start_command(epoch: u16) -> Envelope {
+    let context = context(epoch);
+    Envelope {
+        protocol_version: CONTROL_PROTOCOL_VERSION,
+        request_id: u64::from(epoch),
+        payload: Some(envelope::Payload::StartStream(StartStream {
+            media_session_id: context.session_id,
+            stream_id: context.stream_id,
+            sample_rate_hz: 48_000,
+            channels: 2,
+            frame_duration_ms: 20,
+            media_key_epoch: u32::from(epoch),
+        })),
+    }
 }
 
 #[test]
@@ -123,4 +145,45 @@ fn rotation_rejects_old_packets_and_retires_old_pcm() {
         }
     ));
     assert!((output[0] - 2.0).abs() < f32::EPSILON);
+}
+
+#[test]
+fn control_epoch_rotation_commits_only_after_pipeline_context_rotates() {
+    let secret = SessionSecret::new([0xA5; 32]);
+    let initial = context(2);
+    let (producer, _consumer) = realtime_pcm_queue::<4>(4).unwrap();
+    let mut pipeline = ReceiverStreamPipeline::<ByteDecoder, 4, 8, 4>::new(
+        &secret,
+        initial,
+        ByteDecoder,
+        producer,
+        0,
+    )
+    .unwrap();
+    let mut coordinator = ControlStreamCoordinator::new(SessionState::Ready);
+    let ControlStreamAction::Start(initial_request) =
+        coordinator.accept(&start_command(2)).unwrap()
+    else {
+        panic!("expected initial start action");
+    };
+    coordinator
+        .state_mut()
+        .apply(SessionEvent::StartStream)
+        .unwrap();
+    coordinator.complete_start(initial_request).unwrap();
+
+    let ControlStreamAction::Rotate { previous, next } =
+        coordinator.accept(&start_command(3)).unwrap()
+    else {
+        panic!("expected rotate action");
+    };
+    let next_context = next
+        .identity
+        .media_key_context(MediaDirection::AndroidToDesktop)
+        .unwrap();
+    pipeline.rotate(&secret, next_context, 0).unwrap();
+    coordinator.complete_rotation(previous, next).unwrap();
+
+    assert_eq!(pipeline.context(), next_context);
+    assert_eq!(coordinator.active(), Some(next.identity));
 }
