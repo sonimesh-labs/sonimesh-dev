@@ -42,7 +42,8 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
 | Cross-thread PCM queue | 1–128 inline blocks | Atomically replace oldest; report sequence gap |
 | Output sample rate | 8–192 kHz | Reject outside platform-neutral bound |
 | Output channels | 1–8 | Reject zero or excessive layouts |
-| Requested callback | 16–8192 frames | Reject before platform stream creation |
+| Requested callback | default or 16–8192 frames | Fixed request may be unsupported |
+| Maximum callback | 16–8192 frames | Oversized callback emits silence and a fault |
 | Active source count | One for MVP | Separate ingress and buffers per future source |
 
 Compile-time capacities make accidental unbounded growth impossible in these
@@ -55,19 +56,30 @@ jitter, and output-backend ADRs using measured 10/20 ms and device results.
 - Opus encoder/decoder bindings and PLC/FEC evidence;
 - AEAD, HKDF, TLS, QR pairing, identity storage, or key rotation;
 - UDP sockets, discovery, control Protobuf generation, and address migration;
-- CPAL/direct-WASAPI output adapters;
+- direct-WASAPI comparison adapter and backend selection evidence;
 - Tauri/Vue product UI, signing, packaging, and firewall integration;
 - drift ASRC, nominal rate conversion, acoustic latency, and soak validation.
+
+An optional Windows CPAL adapter and read-only device probe are now available for
+phase 0B measurement. Their presence does not close the direct-WASAPI comparison,
+device lifecycle, callback timing, or physical latency gates in ADR 0003.
+
+A two-second silent CPAL smoke on the Windows reference host observed callback
+sizes beyond both the requested and device-reported frame sizes. The evidence and
+remaining gaps are documented in
+[the Windows CPAL smoke record](./measurements/2026-07-17-windows-cpal-smoke.md).
+The second host sample used an eight-channel USB endpoint; actual source-channel
+mapping remains an explicit unimplemented audio-engine concern.
 
 These are not omissions hidden behind mocks. Each is a named roadmap/ADR gate,
 and no build should leave a controlled lab network before phase 0D is reviewed.
 
 ## Next implementation slice
 
-1. Record ADR 0002 for the Android service/JNI boundary, then build the capture-
+1. Record an ADR for the Android service/JNI boundary, then build the capture-
    only phase 0A app and evidence matrix.
-2. Prototype CPAL and direct WASAPI behind `sonimesh-platform`; record callback
-   size, negotiated format, device lifecycle, and latency results in ADR 0003.
+2. Measure CPAL and prototype direct WASAPI behind `sonimesh-platform`; record
+   callback size, negotiated format, device lifecycle, and latency in ADR 0003.
 3. Select a maintained Opus binding only after a concrete phase 0B spike need,
    then compare 10 ms and 20 ms frames without adding network security claims.
 4. Specify and review pairing/media security before any non-lab network build.

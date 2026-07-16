@@ -29,8 +29,11 @@ pub struct OutputConfig {
     pub channels: u16,
     /// Device sample representation.
     pub sample_format: SampleFormat,
-    /// Requested callback size when the backend supports it.
-    pub callback_frames: u32,
+    /// Requested callback size when the backend supports fixed buffers.
+    /// `None` asks the backend to use its default cadence.
+    pub requested_callback_frames: Option<u32>,
+    /// Hard memory bound for any observed callback.
+    pub maximum_callback_frames: u32,
 }
 
 impl OutputConfig {
@@ -47,21 +50,29 @@ impl OutputConfig {
         if !(1..=MAX_OUTPUT_CHANNELS).contains(&self.channels) {
             return Err(OutputConfigError::InvalidChannelCount);
         }
-        if !(MIN_CALLBACK_FRAMES..=MAX_CALLBACK_FRAMES).contains(&self.callback_frames) {
-            return Err(OutputConfigError::InvalidCallbackFrames);
+        if !(MIN_CALLBACK_FRAMES..=MAX_CALLBACK_FRAMES).contains(&self.maximum_callback_frames) {
+            return Err(OutputConfigError::InvalidMaximumCallbackFrames);
+        }
+        if let Some(requested) = self.requested_callback_frames {
+            if !(MIN_CALLBACK_FRAMES..=MAX_CALLBACK_FRAMES).contains(&requested) {
+                return Err(OutputConfigError::InvalidRequestedCallbackFrames);
+            }
+            if requested > self.maximum_callback_frames {
+                return Err(OutputConfigError::RequestedExceedsMaximum);
+            }
         }
         self.interleaved_samples()?;
         Ok(())
     }
 
-    /// Maximum interleaved samples expected in one requested callback.
+    /// Maximum interleaved samples allowed in one callback.
     ///
     /// # Errors
     ///
     /// Returns [`OutputConfigError::InterleavedSizeOverflow`] if multiplication
     /// cannot fit in `usize`.
     pub fn interleaved_samples(self) -> Result<usize, OutputConfigError> {
-        usize::try_from(self.callback_frames)
+        usize::try_from(self.maximum_callback_frames)
             .ok()
             .and_then(|frames| frames.checked_mul(usize::from(self.channels)))
             .ok_or(OutputConfigError::InterleavedSizeOverflow)
@@ -75,8 +86,12 @@ pub enum OutputConfigError {
     InvalidSampleRate,
     /// Channel count is zero or greater than eight.
     InvalidChannelCount,
-    /// Callback frames are outside 16–8192.
-    InvalidCallbackFrames,
+    /// Requested callback frames are outside 16–8192.
+    InvalidRequestedCallbackFrames,
+    /// Maximum callback frames are outside 16–8192.
+    InvalidMaximumCallbackFrames,
+    /// Fixed request exceeds the preallocated callback maximum.
+    RequestedExceedsMaximum,
     /// Interleaved callback sample count overflowed `usize`.
     InterleavedSizeOverflow,
 }
@@ -98,7 +113,8 @@ mod tests {
             sample_rate_hz: 48_000,
             channels: 2,
             sample_format: SampleFormat::Float32,
-            callback_frames: 480,
+            requested_callback_frames: Some(480),
+            maximum_callback_frames: 960,
         }
     }
 
@@ -106,7 +122,7 @@ mod tests {
     fn accepts_bounded_shared_mode_config() {
         let config = valid_config();
         assert_eq!(config.validate(), Ok(()));
-        assert_eq!(config.interleaved_samples(), Ok(960));
+        assert_eq!(config.interleaved_samples(), Ok(1_920));
     }
 
     #[test]
@@ -123,10 +139,25 @@ mod tests {
         );
 
         config = valid_config();
-        config.callback_frames = MAX_CALLBACK_FRAMES + 1;
+        config.maximum_callback_frames = MAX_CALLBACK_FRAMES + 1;
         assert_eq!(
             config.validate(),
-            Err(OutputConfigError::InvalidCallbackFrames)
+            Err(OutputConfigError::InvalidMaximumCallbackFrames)
+        );
+
+        config = valid_config();
+        config.requested_callback_frames = Some(MAX_CALLBACK_FRAMES + 1);
+        assert_eq!(
+            config.validate(),
+            Err(OutputConfigError::InvalidRequestedCallbackFrames)
+        );
+
+        config = valid_config();
+        config.requested_callback_frames = Some(1_024);
+        config.maximum_callback_frames = 512;
+        assert_eq!(
+            config.validate(),
+            Err(OutputConfigError::RequestedExceedsMaximum)
         );
     }
 }

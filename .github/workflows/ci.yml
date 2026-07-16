@@ -29,7 +29,6 @@ jobs:
         if: runner.os == 'Linux'
         run: cargo fmt --all -- --check
       - name: Lint all targets
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - name: Test workspace
-        run: cargo test --workspace --all-targets
-
+        run: cargo test --workspace --all-targets --all-features

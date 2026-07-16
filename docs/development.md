@@ -19,6 +19,20 @@ cargo test --workspace --all-targets
 cargo run -p sonimesh-network-simulator
 ~~~
 
+On Windows, the read-only CPAL feasibility probe can enumerate output devices
+without starting a stream:
+
+~~~powershell
+cargo run -p sonimesh-platform --example output_probe --features cpal-output
+~~~
+
+The following explicit lab command starts the default device for two seconds and
+renders silence while recording callback sizes. It is not part of ordinary CI:
+
+~~~powershell
+cargo run -p sonimesh-platform --example output_smoke --features cpal-output
+~~~
+
 CI runs formatting, linting, and tests on Linux and Windows. These checks cover
 portable protocol/audio logic only; they do not validate Android capture,
 Windows callback timing, acoustic latency, Opus behavior, or physical WLANs.

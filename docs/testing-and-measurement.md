@@ -111,6 +111,10 @@ Hardware-in-the-loop tests should run on a documented lab matrix and publish
 artifacts containing raw metrics, configuration, software versions, and failure
 classification.
 
+The first Windows CPAL silent-output smoke is recorded in
+[2026-07-17 Windows CPAL smoke](./measurements/2026-07-17-windows-cpal-smoke.md).
+It validates callback observation only, not a latency target.
+
 ## Resource and power acceptance
 
 The Android sender must record CPU, memory, thermal state, and battery impact
