@@ -41,6 +41,11 @@ The manual-code flow must use a PAKE or a transcript-bound short-authentication
 string compared on both screens. A code that is merely entered on Android and
 forwarded through an untrusted channel is not sufficient.
 
+The QR payload, TLS pinning, transcript-binding requirement, identity storage,
+and revocation boundary are specified by
+[ADR 0008](./adr/0008-first-pairing-and-identity.md). The repository does not
+yet implement this flow.
+
 Pairing records need an expiry, attempt limit, per-source rate limit, and
 explicit revocation. The desktop should default to allowing only “send audio”;
 future administrative permissions must be separate capabilities.

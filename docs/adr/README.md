@@ -47,3 +47,5 @@ documented.
   control commands bind stream lifecycle to the AEAD key epoch.
 - [ADR 0007: Bounded PCM occupancy drift control](./0007-drift-control-decision.md) —
   non-realtime per-stream PI control and hard-resynchronization boundary.
+- [ADR 0008: First pairing and device identity](./0008-first-pairing-and-identity.md) —
+  QR-pinned TLS, transcript binding, OS-protected identity storage, and revocation.
