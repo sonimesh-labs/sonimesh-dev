@@ -41,3 +41,5 @@ documented.
   provisional CPAL shared-mode spike; direct WASAPI comparison remains required.
 - [ADR 0004: Control-plane envelope and schema evolution](./0004-control-plane-schema.md) —
   accepted for bounded controlled-lab Protobuf work; security remains separate.
+- [ADR 0005: UDP media protection and nonce lifecycle](./0005-udp-media-protection.md) —
+  controlled-lab AEAD/key derivation boundary; pairing and TLS remain separate.
