@@ -73,6 +73,11 @@ wrong pin, wrong secret, replayed proof, concurrent attempts, revocation,
 Android Keystore failure, and Windows credential-store failure. No test may log
 secret material.
 
+The controlled-lab Rust core currently validates only the bounded pairing-record
+lifecycle: expiry, single use, monotonic time, per-source attempt limits, and
+fixed source-table capacity. It does not verify a pairing proof or store a
+secret, identity, or QR payload.
+
 ## Rollback plan
 
 Pairing protocol versions and QR payload versions are explicit. A future

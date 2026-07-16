@@ -2,6 +2,7 @@
 
 mod control_stream;
 mod output_controller;
+mod pairing_record;
 mod session;
 
 pub use control_stream::{
@@ -9,4 +10,8 @@ pub use control_stream::{
     StreamStartRequest,
 };
 pub use output_controller::{OutputController, OutputLifecycleError, OutputSelection};
+pub use pairing_record::{
+    MAX_PAIRING_ATTEMPTS_PER_SOURCE, PairingAttemptOutcome, PairingId, PairingRecord,
+    PairingRecordError, PairingRecordState, PairingSource,
+};
 pub use session::{SessionEvent, SessionState, SessionTransitionError};
