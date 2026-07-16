@@ -54,10 +54,11 @@ docs/
 ## Current status
 
 The repository now contains a buildable, dependency-light Rust foundation for
-bounded protocol parsing, authenticated media ingress contracts, jitter/PCM
-buffers, diagnostics, platform adapters, and desktop session lifecycle. It is
-still a feasibility project: Android capture, Windows output, Opus, pairing,
-cryptography, and measured end-to-end latency are not implemented or claimed.
+bounded protocol parsing, ChaCha20-Poly1305 media protection, authenticated
+media ingress, jitter/PCM buffers, diagnostics, platform adapters, and desktop
+session lifecycle. It is still a feasibility project: Android capture, a
+qualified Windows output backend, Opus, TLS-backed pairing/root-secret
+provisioning, and measured end-to-end latency are not implemented or claimed.
 
 See [MVP implementation baseline](./docs/mvp-baseline.md) for implemented limits,
 explicit gaps, and the next platform-validation slices.
