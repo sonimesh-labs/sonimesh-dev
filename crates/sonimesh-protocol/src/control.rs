@@ -162,7 +162,7 @@ pub fn validate_control_envelope(envelope: &Envelope) -> Result<(), ControlFrame
     }
 }
 
-fn validate_hello(hello: &Hello) -> Result<(), ControlFrameError> {
+pub(crate) fn validate_hello(hello: &Hello) -> Result<(), ControlFrameError> {
     if hello.capabilities.len() > MAX_CONTROL_CAPABILITIES {
         return Err(ControlFrameError::TooManyCapabilities);
     }

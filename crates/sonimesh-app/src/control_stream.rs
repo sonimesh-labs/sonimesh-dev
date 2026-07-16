@@ -1,8 +1,8 @@
 use core::fmt;
 
 use sonimesh_protocol::{
-    ControlFrameError, Envelope, MediaCryptoError, MediaDirection, MediaKeyContext, StartStream,
-    StopStream, envelope, validate_control_envelope,
+    Capability, ControlFrameError, Envelope, MediaCryptoError, MediaDirection, MediaKeyContext,
+    NegotiatedControl, StartStream, StopStream, envelope, validate_control_envelope,
 };
 
 use crate::SessionState;
@@ -102,6 +102,8 @@ pub enum ControlStreamError {
     StartRequiresReady(SessionState),
     /// A key rotation arrived outside active streaming.
     RotationRequiresStreaming(SessionState),
+    /// Start requested a frame duration that peers did not negotiate.
+    UnsupportedFrameDuration(u32),
     /// A start attempted to move a stream back to an earlier epoch.
     StaleEpoch {
         /// Existing active key epoch.
@@ -134,6 +136,9 @@ impl fmt::Display for ControlStreamError {
                     "key rotation requires Streaming state, found {state:?}"
                 )
             }
+            Self::UnsupportedFrameDuration(duration) => {
+                write!(formatter, "frame duration {duration} ms was not negotiated")
+            }
             Self::StaleEpoch { active, requested } => {
                 write!(
                     formatter,
@@ -158,16 +163,18 @@ impl std::error::Error for ControlStreamError {}
 /// completed action here.
 pub struct ControlStreamCoordinator {
     state: SessionState,
+    negotiation: NegotiatedControl,
     active: Option<MediaStreamIdentity>,
     pending: Option<PendingStreamChange>,
 }
 
 impl ControlStreamCoordinator {
-    /// Creates a control coordinator in the supplied lifecycle state.
+    /// Creates a control coordinator after a successful authenticated hello exchange.
     #[must_use]
-    pub const fn new(state: SessionState) -> Self {
+    pub const fn new(state: SessionState, negotiation: NegotiatedControl) -> Self {
         Self {
             state,
+            negotiation,
             active: None,
             pending: None,
         }
@@ -308,6 +315,11 @@ impl ControlStreamCoordinator {
         start: &StartStream,
     ) -> Result<ControlStreamAction, ControlStreamError> {
         let request = request_from_start(start)?;
+        if !self.supports_frame_duration(request.frame_duration_ms) {
+            return Err(ControlStreamError::UnsupportedFrameDuration(
+                request.frame_duration_ms,
+            ));
+        }
         if let Some(pending) = self.pending {
             return if pending.identity() == request.identity {
                 Ok(ControlStreamAction::Noop)
@@ -362,6 +374,15 @@ impl ControlStreamCoordinator {
         } else {
             Ok(ControlStreamAction::Noop)
         }
+    }
+
+    fn supports_frame_duration(&self, duration_ms: u32) -> bool {
+        let capability = match duration_ms {
+            10 => Capability::FrameDuration10Ms,
+            20 => Capability::FrameDuration20Ms,
+            _ => return false,
+        };
+        self.negotiation.supports(capability)
     }
 }
 

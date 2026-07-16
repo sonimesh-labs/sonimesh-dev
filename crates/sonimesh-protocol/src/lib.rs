@@ -8,6 +8,7 @@ mod control;
 mod media_crypto;
 mod media_header;
 mod media_key;
+mod negotiation;
 mod replay;
 
 /// Generated internal types for the control-plane source schema.
@@ -34,4 +35,5 @@ pub use media_header::{
 pub use media_key::{
     MediaCryptoError, MediaDirection, MediaKeyContext, MediaSequence, SessionSecret, media_nonce,
 };
+pub use negotiation::{ControlNegotiationError, NegotiatedControl, negotiate_hello};
 pub use replay::{ReplayDecision, ReplayWindow};

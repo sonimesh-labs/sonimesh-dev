@@ -34,6 +34,17 @@ The initial schema covers hello/capability exchange, start/stop stream commands,
 stream state, and structured errors for controlled-lab work. It contains no keys,
 pairing code, IP address, audio data, or device fingerprint.
 
+The version-one protocol implementation selects only its exact protocol version
+and constructs a fixed, canonical intersection of known capabilities. Unknown
+numeric capability values remain unselected for additive compatibility; they are
+never treated as a guessed feature. A later schema version must add explicit
+selection rules rather than reinterpreting a version-one hello.
+
+A version-one `StartStream` is accepted by the receiver control coordinator only
+when its 10 ms or 20 ms duration capability appears in that selected
+intersection. A semantically valid but unnegotiated command does not prepare
+output or media work.
+
 ## Security implications
 
 The codec does bounded length validation before allocating/decode work. It is not a

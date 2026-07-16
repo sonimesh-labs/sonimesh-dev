@@ -31,6 +31,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   PCM transfer without claiming an Opus backend or physical audio result.
 - a generated, length-prefixed Protobuf control envelope with hard frame and
   field limits for controlled-lab command exchange.
+- bounded version-one hello negotiation that selects the exact supported
+  protocol version and a canonical fixed intersection of known capabilities;
+  receiver start commands reject unnegotiated frame durations before media work.
 - a per-stream, non-realtime decode-worker boundary that schedules ordinary
   decode and PLC from authenticated jitter decisions, then writes bounded PCM
   blocks to the existing lock-free output queue; no concrete Opus binding yet.

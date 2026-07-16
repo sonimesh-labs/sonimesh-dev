@@ -13,8 +13,8 @@ use sonimesh_audio::{
 use sonimesh_diagnostics::StreamCounters;
 use sonimesh_network::IngressError;
 use sonimesh_protocol::{
-    CONTROL_PROTOCOL_VERSION, Envelope, MediaDirection, MediaKeyContext, MediaSealer,
-    SessionSecret, StartStream, envelope,
+    CONTROL_PROTOCOL_VERSION, Capability, Envelope, Hello, MediaDirection, MediaKeyContext,
+    MediaSealer, SessionSecret, StartStream, envelope, negotiate_hello,
 };
 
 struct ByteDecoder;
@@ -70,6 +70,18 @@ fn trusted_session() -> SessionState {
         Ok(PairingAttemptOutcome::Paired)
     );
     session
+}
+
+fn negotiation() -> sonimesh_protocol::NegotiatedControl {
+    negotiate_hello(
+        &Hello {
+            supported_versions: vec![CONTROL_PROTOCOL_VERSION],
+            capabilities: vec![Capability::FrameDuration20Ms as i32],
+            display_name: "Lab sender".to_owned(),
+        },
+        &[Capability::FrameDuration20Ms],
+    )
+    .unwrap()
 }
 
 #[test]
@@ -178,7 +190,7 @@ fn control_epoch_rotation_commits_only_after_pipeline_context_rotates() {
         0,
     )
     .unwrap();
-    let mut coordinator = ControlStreamCoordinator::new(trusted_session());
+    let mut coordinator = ControlStreamCoordinator::new(trusted_session(), negotiation());
     let ControlStreamAction::Start(initial_request) =
         coordinator.accept(&start_command(2)).unwrap()
     else {
