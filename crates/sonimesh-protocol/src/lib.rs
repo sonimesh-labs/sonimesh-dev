@@ -21,8 +21,9 @@ pub mod generated {
 pub use control::{
     CONTROL_PROTOCOL_VERSION, ControlFrameError, MAX_CONTROL_CAPABILITIES, MAX_CONTROL_CHANNELS,
     MAX_CONTROL_DETAIL_BYTES, MAX_CONTROL_DISPLAY_NAME_BYTES, MAX_CONTROL_FRAME_BYTES,
-    MAX_CONTROL_SAMPLE_RATE_HZ, MAX_CONTROL_SUPPORTED_VERSIONS, MIN_CONTROL_SAMPLE_RATE_HZ,
-    decode_control_frame, encode_control_frame, validate_control_envelope,
+    MAX_CONTROL_MEDIA_KEY_EPOCH, MAX_CONTROL_SAMPLE_RATE_HZ, MAX_CONTROL_SUPPORTED_VERSIONS,
+    MIN_CONTROL_SAMPLE_RATE_HZ, decode_control_frame, encode_control_frame,
+    validate_control_envelope,
 };
 pub use generated::*;
 pub use media_crypto::{MAX_MEDIA_PLAINTEXT_LEN, MediaOpener, MediaSealer, ProtectedMediaPacket};

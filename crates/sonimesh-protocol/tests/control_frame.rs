@@ -3,8 +3,9 @@
 use prost::Message;
 use sonimesh_protocol::{
     CONTROL_PROTOCOL_VERSION, Capability, ControlError, ControlFrameError, Envelope, Hello,
-    MAX_CONTROL_CAPABILITIES, MAX_CONTROL_DETAIL_BYTES, MAX_CONTROL_FRAME_BYTES, StartStream,
-    StopStream, decode_control_frame, encode_control_frame, envelope,
+    MAX_CONTROL_CAPABILITIES, MAX_CONTROL_DETAIL_BYTES, MAX_CONTROL_FRAME_BYTES,
+    MAX_CONTROL_MEDIA_KEY_EPOCH, StartStream, StopStream, decode_control_frame,
+    encode_control_frame, envelope,
 };
 
 fn hello_envelope() -> Envelope {
@@ -45,6 +46,64 @@ fn matches_published_cross_language_control_frame_vector() {
             0x00, 0x00, 0x00, 0x18, 0x08, 0x01, 0x10, 0x07, 0x52, 0x12, 0x0A, 0x01, 0x01, 0x12,
             0x01, 0x02, 0x1A, 0x0A, 0x4C, 0x61, 0x62, 0x20, 0x73, 0x65, 0x6E, 0x64, 0x65, 0x72,
         ]
+    );
+}
+
+#[test]
+fn matches_published_epoch_bearing_start_vector() {
+    let envelope = Envelope {
+        protocol_version: CONTROL_PROTOCOL_VERSION,
+        request_id: 8,
+        payload: Some(envelope::Payload::StartStream(StartStream {
+            media_session_id: 7,
+            stream_id: 9,
+            sample_rate_hz: 48_000,
+            channels: 2,
+            frame_duration_ms: 20,
+            media_key_epoch: 0x2345,
+        })),
+    };
+
+    assert_eq!(
+        encode_control_frame(&envelope).unwrap(),
+        [
+            0x00, 0x00, 0x00, 0x15, 0x08, 0x01, 0x10, 0x08, 0x5A, 0x0F, 0x08, 0x07, 0x10, 0x09,
+            0x18, 0x80, 0xF7, 0x02, 0x20, 0x02, 0x28, 0x14, 0x30, 0xC5, 0x46,
+        ]
+    );
+}
+
+#[test]
+fn round_trips_stream_commands_with_the_exact_key_epoch() {
+    let start = Envelope {
+        protocol_version: CONTROL_PROTOCOL_VERSION,
+        request_id: 21,
+        payload: Some(envelope::Payload::StartStream(StartStream {
+            media_session_id: 0x0102_0304_0506_0708,
+            stream_id: 9,
+            sample_rate_hz: 48_000,
+            channels: 2,
+            frame_duration_ms: 20,
+            media_key_epoch: 0xFFFF,
+        })),
+    };
+    let stop = Envelope {
+        protocol_version: CONTROL_PROTOCOL_VERSION,
+        request_id: 22,
+        payload: Some(envelope::Payload::StopStream(StopStream {
+            media_session_id: 0x0102_0304_0506_0708,
+            stream_id: 9,
+            media_key_epoch: 0xFFFF,
+        })),
+    };
+
+    assert_eq!(
+        decode_control_frame(&encode_control_frame(&start).unwrap()).unwrap(),
+        start
+    );
+    assert_eq!(
+        decode_control_frame(&encode_control_frame(&stop).unwrap()).unwrap(),
+        stop
     );
 }
 
@@ -166,6 +225,7 @@ fn validates_stream_command_parameters() {
             sample_rate_hz: 48_000,
             channels: 2,
             frame_duration_ms: 20,
+            media_key_epoch: 0,
         })),
     };
     assert!(matches!(
@@ -179,10 +239,28 @@ fn validates_stream_command_parameters() {
         payload: Some(envelope::Payload::StopStream(StopStream {
             media_session_id: 5,
             stream_id: 0,
+            media_key_epoch: 0,
         })),
     };
     assert!(matches!(
         encode_control_frame(&invalid_stop),
         Err(ControlFrameError::InvalidStopStream)
+    ));
+
+    let invalid_epoch = Envelope {
+        protocol_version: CONTROL_PROTOCOL_VERSION,
+        request_id: 12,
+        payload: Some(envelope::Payload::StartStream(StartStream {
+            media_session_id: 5,
+            stream_id: 6,
+            sample_rate_hz: 48_000,
+            channels: 2,
+            frame_duration_ms: 20,
+            media_key_epoch: MAX_CONTROL_MEDIA_KEY_EPOCH + 1,
+        })),
+    };
+    assert!(matches!(
+        encode_control_frame(&invalid_epoch),
+        Err(ControlFrameError::InvalidMediaKeyEpoch)
     ));
 }

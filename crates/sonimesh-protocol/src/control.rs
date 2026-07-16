@@ -22,6 +22,8 @@ pub const MIN_CONTROL_SAMPLE_RATE_HZ: u32 = 8_000;
 pub const MAX_CONTROL_SAMPLE_RATE_HZ: u32 = 192_000;
 /// Highest channel count permitted in a stream-start control command.
 pub const MAX_CONTROL_CHANNELS: u32 = 8;
+/// Largest wire epoch representable by the version-one media key context.
+pub const MAX_CONTROL_MEDIA_KEY_EPOCH: u32 = u16::MAX as u32;
 
 /// Failure while framing, decoding, or validating a control envelope.
 #[derive(Debug)]
@@ -52,6 +54,8 @@ pub enum ControlFrameError {
     InvalidStartStream,
     /// Stop stream command has an invalid identity.
     InvalidStopStream,
+    /// Stream command epoch cannot fit the media protocol's 16-bit field.
+    InvalidMediaKeyEpoch,
 }
 
 impl fmt::Display for ControlFrameError {
@@ -80,6 +84,9 @@ impl fmt::Display for ControlFrameError {
             Self::DetailTooLong => formatter.write_str("control detail exceeds the limit"),
             Self::InvalidStartStream => formatter.write_str("control start stream is invalid"),
             Self::InvalidStopStream => formatter.write_str("control stop stream is invalid"),
+            Self::InvalidMediaKeyEpoch => {
+                formatter.write_str("control media key epoch exceeds the protocol limit")
+            }
         }
     }
 }
@@ -186,12 +193,19 @@ fn validate_start_stream(start: &StartStream) -> Result<(), ControlFrameError> {
     {
         return Err(ControlFrameError::InvalidStartStream);
     }
-    Ok(())
+    validate_media_key_epoch(start.media_key_epoch)
 }
 
 fn validate_stop_stream(stop: &StopStream) -> Result<(), ControlFrameError> {
     if stop.media_session_id == 0 || stop.stream_id == 0 {
         return Err(ControlFrameError::InvalidStopStream);
+    }
+    validate_media_key_epoch(stop.media_key_epoch)
+}
+
+fn validate_media_key_epoch(epoch: u32) -> Result<(), ControlFrameError> {
+    if epoch > MAX_CONTROL_MEDIA_KEY_EPOCH {
+        return Err(ControlFrameError::InvalidMediaKeyEpoch);
     }
     Ok(())
 }

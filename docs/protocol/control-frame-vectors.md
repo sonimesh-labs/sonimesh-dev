@@ -25,3 +25,24 @@ must still arrive through the future authenticated control channel.
 The repeated scalar fields use proto3 packed encoding. Receivers must apply the
 same 64 KiB framing limit and semantic validation before treating the envelope
 as a command.
+
+## Epoch-bearing StartStream
+
+| Field | Value |
+| --- | --- |
+| Protocol version | `1` |
+| Request ID | `8` |
+| Media session ID | `7` |
+| Stream ID | `9` |
+| Sample rate | `48000` Hz |
+| Channels | `2` |
+| Frame duration | `20` ms |
+| Media key epoch | `0x2345` (`9029`) |
+
+```text
+00000015080110085a0f080710091880f7022002281430c546
+```
+
+`media_key_epoch` is a `uint32` on the Protobuf wire but must not exceed
+`65535`. Start and Stop commands bind this exact epoch to the media session and
+stream identity; see [ADR 0006](../adr/0006-media-key-epoch-control.md).

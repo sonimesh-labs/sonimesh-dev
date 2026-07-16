@@ -55,11 +55,13 @@ message StartStream {
   uint32 sample_rate_hz = 3;
   uint32 channels = 4;
   uint32 frame_duration_ms = 5;
+  uint32 media_key_epoch = 6;
 }
 
 message StopStream {
   uint64 media_session_id = 1;
   uint32 stream_id = 2;
+  uint32 media_key_epoch = 3;
 }
 
 message StreamStatus {
@@ -74,4 +76,3 @@ message ControlError {
   bool retryable = 2;
   string detail = 3;
 }
-
