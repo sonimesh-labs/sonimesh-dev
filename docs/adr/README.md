@@ -39,3 +39,5 @@ documented.
   accepted for the single-stream feasibility path with hardware timing still open.
 - [ADR 0003: Windows output feasibility prototype](./0003-windows-output-prototype.md) —
   provisional CPAL shared-mode spike; direct WASAPI comparison remains required.
+- [ADR 0004: Control-plane envelope and schema evolution](./0004-control-plane-schema.md) —
+  accepted for bounded controlled-lab Protobuf work; security remains separate.
