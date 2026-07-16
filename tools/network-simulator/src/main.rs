@@ -1,6 +1,9 @@
 //! Deterministic virtual-network smoke runner for bounded audio buffering.
 
-use sonimesh_network_simulator::{NetworkProfile, ScenarioConfig, simulate};
+use sonimesh_audio::DriftConfig;
+use sonimesh_network_simulator::{
+    DriftScenarioConfig, NetworkProfile, ScenarioConfig, simulate, simulate_drift,
+};
 
 fn main() {
     println!("SoniMesh deterministic virtual-network profiles");
@@ -27,4 +30,25 @@ fn main() {
             report.resynchronizations
         );
     }
+
+    let drift = simulate_drift(DriftScenarioConfig {
+        ticks: 20_000,
+        initial_occupancy_blocks: 5,
+        source_rate_ppm: 100,
+        controller: DriftConfig {
+            target_blocks: 4,
+            low_resync_blocks: 0,
+            high_resync_blocks: 8,
+            proportional_ppm_per_block: 25,
+            integral_ppm_per_block_tick: 1,
+            max_adjustment_ppm: 500,
+            max_step_ppm: 25,
+            max_integral_block_ticks: 256,
+        },
+    })
+    .expect("built-in drift scenario is valid");
+    println!(
+        "drift source=100ppm final_occupancy={} final_adjustment={}ppm resyncs={}",
+        drift.final_occupancy_blocks, drift.final_adjustment_ppm, drift.hard_resynchronizations
+    );
 }

@@ -84,10 +84,11 @@ monotonic clock, bounded in-flight event queue, seeded random and burst loss,
 jitter, duplication, reorder delay, and queue-capacity pressure. A cross-crate
 test exercises bounded packet parsing, reviewed AEAD authentication and replay
 rejection, jitter/PLC decisions, the non-realtime decode worker, and realtime
-PCM transfer.
+PCM transfer. An independent integerized occupancy model exercises bounded drift
+controller decisions and stream-local hard-resynchronization requests.
 
 This is evidence for deterministic core behavior only. It does not yet model
-bandwidth shaping, socket buffers, address migration, sender/receiver clock drift,
+bandwidth shaping, socket buffers, address migration, real ASRC/device clocks,
 or operating-system scheduling, and it is not physical WLAN evidence.
 
 ## Stability and compatibility matrix

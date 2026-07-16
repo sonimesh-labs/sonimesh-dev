@@ -11,6 +11,8 @@ a physical latency claim.
 - `VirtualNetwork<T>` schedules random loss, deterministic burst loss, jitter,
   duplication, reorder delay, and capacity drops from one reproducible seed.
 - `ScenarioConfig` drives sender and playout deadlines independently.
+- `DriftScenarioConfig` closes an integerized PCM-occupancy loop around the
+  bounded ppm controller; it is not an ASRC or device-clock emulator.
 - the media-pipeline integration test crosses protocol parsing, ChaCha20-
   Poly1305 authentication, replay rejection, jitter/PLC decisions, the bounded
   decode-worker boundary, and the realtime PCM queue.
@@ -23,5 +25,5 @@ cargo test -p sonimesh-network-simulator
 ~~~
 
 Physical WLAN, bandwidth contention, socket-buffer behavior, operating-system
-scheduling, closed-loop clock drift, and address migration remain separate
+scheduling, real ASRC/device-clock drift, and address migration remain separate
 validation work.
