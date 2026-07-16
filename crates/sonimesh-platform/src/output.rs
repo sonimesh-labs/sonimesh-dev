@@ -11,6 +11,26 @@ pub trait RenderSource: Send + 'static {
     fn render(&mut self, interleaved_output: &mut [f32]);
 }
 
+/// Creates a fresh realtime render source from the control domain.
+///
+/// Implementations may allocate or replace queue ownership here because this
+/// method is only used for stream start and recreation, never from a callback.
+pub trait RenderSourceFactory {
+    /// Creates the source consumed by the next output stream.
+    fn create(&mut self) -> Box<dyn RenderSource>;
+}
+
+/// Low-rate health state published by a platform output adapter.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OutputHealth {
+    /// No callback or backend fault has been observed.
+    Healthy,
+    /// Callback exceeded the preallocated safe output bound.
+    CallbackCapacityExceeded,
+    /// Backend reported an asynchronous stream error.
+    StreamError,
+}
+
 /// Platform-owned output stream lifecycle.
 pub trait AudioOutput {
     /// Lists output devices outside the realtime domain.
@@ -36,6 +56,12 @@ pub trait AudioOutput {
 
     /// Stops and releases the current stream outside the realtime domain.
     fn stop(&mut self);
+
+    /// Returns the latest low-rate health state without touching the callback.
+    #[must_use]
+    fn health(&self) -> OutputHealth {
+        OutputHealth::Healthy
+    }
 }
 
 /// Stable platform adapter error categories suitable for UI mapping.

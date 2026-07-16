@@ -22,6 +22,8 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   oldest-block replacement, and exact discontinuity detection;
 - allocation-free gain smoothing, atomic diagnostic counters, endpoint
   redaction, output adapter contracts, and a tested desktop session state machine;
+- control-domain output health monitoring and stream recreation with a fresh
+  render source while preserving the streaming session state;
 - deterministic virtual-clock/network profiles for random and burst loss,
   jitter, duplication, reorder delay, capacity pressure, and Windows/Linux CI;
 - a cross-crate lab pipeline covering parse, authenticate, replay rejection,

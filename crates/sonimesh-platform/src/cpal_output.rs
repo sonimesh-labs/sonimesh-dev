@@ -7,8 +7,8 @@ use crate::cpal_callback::{build_float32_stream, build_signed16_stream};
 use crate::cpal_probe::{CpalDeviceProbe, probe_device};
 use crate::cpal_status::{CallbackStatus, CpalOutputStatus};
 use crate::{
-    AudioOutput, OutputConfig, OutputDeviceId, OutputDeviceInfo, OutputError, RenderSource,
-    SampleFormat,
+    AudioOutput, OutputConfig, OutputDeviceId, OutputDeviceInfo, OutputError, OutputHealth,
+    RenderSource, SampleFormat,
 };
 
 /// Optional CPAL/WASAPI output adapter for Windows feasibility measurements.
@@ -158,6 +158,17 @@ impl AudioOutput for CpalOutput {
 
     fn stop(&mut self) {
         self.stream.take();
+    }
+
+    fn health(&self) -> OutputHealth {
+        let status = self.status();
+        if status.stream_errors > 0 {
+            OutputHealth::StreamError
+        } else if status.oversized_callbacks > 0 {
+            OutputHealth::CallbackCapacityExceeded
+        } else {
+            OutputHealth::Healthy
+        }
     }
 }
 

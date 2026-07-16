@@ -83,9 +83,9 @@ impl SessionState {
         let next = match (*self, event) {
             (Self::Idle, SessionEvent::StartPairing) => Self::Pairing,
             (Self::Pairing, SessionEvent::TrustEstablished)
-            | (Self::Reconnecting, SessionEvent::Reconnected)
-            | (Self::OutputUnavailable, SessionEvent::OutputRestored) => Self::Ready,
-            (Self::Ready, SessionEvent::StartStream) => Self::Streaming,
+            | (Self::Reconnecting, SessionEvent::Reconnected) => Self::Ready,
+            (Self::Ready, SessionEvent::StartStream)
+            | (Self::OutputUnavailable, SessionEvent::OutputRestored) => Self::Streaming,
             (Self::Streaming | Self::Ready, SessionEvent::ConnectionLost) => Self::Reconnecting,
             (Self::Streaming, SessionEvent::OutputLost) => Self::OutputUnavailable,
             (_, SessionEvent::SessionExpired) => Self::Idle,
@@ -135,12 +135,12 @@ mod tests {
     }
 
     #[test]
-    fn output_recreation_returns_to_ready() {
+    fn output_recreation_resumes_streaming() {
         let mut state = SessionState::Streaming;
         state.apply(SessionEvent::OutputLost).unwrap();
         assert_eq!(state, SessionState::OutputUnavailable);
         state.apply(SessionEvent::OutputRestored).unwrap();
-        assert_eq!(state, SessionState::Ready);
+        assert_eq!(state, SessionState::Streaming);
     }
 
     #[test]
