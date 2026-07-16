@@ -62,6 +62,10 @@ unbounded memory, or reach the decoder before authentication and length checks.
 Authenticated malformed Opus payloads must also be tested because a paired peer
 may be compromised.
 
+The current Rust workspace includes deterministic adversarial-input regressions
+for bounded control/media parsing and invalid AEAD payloads. LibFuzzer targets
+remain a required follow-up once the `cargo-fuzz` toolchain is available.
+
 ## Network simulation
 
 The protocol and audio crates should run against an in-memory virtual transport
