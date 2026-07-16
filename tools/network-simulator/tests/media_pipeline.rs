@@ -1,14 +1,12 @@
 //! Cross-crate deterministic media-pipeline regression test.
 
-use std::fmt;
-
 use sonimesh_audio::{
-    EncodedFrame, InsertOutcome, JitterBuffer, PlayoutOutcome, RealtimePcmPopOutcome,
-    RealtimePcmPushOutcome, realtime_pcm_queue,
+    DecodeStep, FrameDecoder, InsertOutcome, RealtimePcmConsumer, RealtimePcmPopOutcome,
+    RealtimePcmPushOutcome, StreamDecodeWorker, realtime_pcm_queue,
 };
-use sonimesh_network::{Authenticator, IngressError, MediaIngress, StreamIdentity};
+use sonimesh_network::{IngressError, MediaIngress, ProtocolAuthenticator, StreamIdentity};
 use sonimesh_network_simulator::{NetworkProfile, VirtualNetwork};
-use sonimesh_protocol::MediaHeader;
+use sonimesh_protocol::{MediaDirection, MediaKeyContext, MediaOpener, MediaSealer, SessionSecret};
 
 const FRAMES: u32 = 200;
 const FRAME_MS: u64 = 20;
@@ -17,55 +15,82 @@ const SESSION_ID: u64 = 7;
 const STREAM_ID: u32 = 9;
 const KEY_EPOCH: u16 = 1;
 
-#[derive(Debug, Eq, PartialEq)]
-struct LabAuthenticationError;
+struct LabDecoder;
 
-impl fmt::Display for LabAuthenticationError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("lab marker authentication failed")
+impl FrameDecoder for LabDecoder {
+    type Error = core::convert::Infallible;
+
+    fn decode(&mut self, encoded: &[u8], output: &mut [f32]) -> Result<usize, Self::Error> {
+        assert_eq!(encoded.len(), 4);
+        output[0] = 1.0;
+        Ok(1)
+    }
+
+    fn decode_plc(&mut self, output: &mut [f32]) -> Result<usize, Self::Error> {
+        output[0] = 0.0;
+        Ok(1)
     }
 }
 
-impl std::error::Error for LabAuthenticationError {}
+fn context() -> MediaKeyContext {
+    MediaKeyContext::new(
+        SESSION_ID,
+        STREAM_ID,
+        KEY_EPOCH,
+        MediaDirection::AndroidToDesktop,
+    )
+    .unwrap()
+}
 
-struct LabAuthenticator;
+fn media_datagram(sealer: &mut MediaSealer, sequence: u32) -> Vec<u8> {
+    let protected = sealer
+        .seal(0, u64::from(sequence) * 960, &sequence.to_be_bytes())
+        .unwrap();
+    assert_eq!(protected.header.sequence, sequence);
+    protected.datagram
+}
 
-impl Authenticator for LabAuthenticator {
-    type Error = LabAuthenticationError;
+type Worker = StreamDecodeWorker<LabDecoder, 16, 8, 1>;
 
-    fn authenticate(
-        &mut self,
-        _header: &sonimesh_protocol::MediaHeader,
-        _authenticated_header: &[u8],
-        ciphertext: &[u8],
-        plaintext: &mut [u8],
-    ) -> Result<usize, Self::Error> {
-        let Some((&0xA5, payload)) = ciphertext.split_first() else {
-            return Err(LabAuthenticationError);
-        };
-        if payload.len() > plaintext.len() {
-            return Err(LabAuthenticationError);
+fn decode_and_render(
+    worker: &mut Worker,
+    consumer: &mut RealtimePcmConsumer<1>,
+    sequence: u32,
+) -> bool {
+    let concealed = match worker.decode_next().unwrap() {
+        DecodeStep::Decoded {
+            sequence: actual,
+            samples,
+            queue,
+        } => {
+            assert_eq!(actual, sequence);
+            assert_eq!(samples, 1);
+            assert_eq!(queue, RealtimePcmPushOutcome::Inserted);
+            false
         }
-        plaintext[..payload.len()].copy_from_slice(payload);
-        Ok(payload.len())
-    }
-}
-
-fn media_datagram(sequence: u32) -> Vec<u8> {
-    let mut ciphertext = Vec::with_capacity(5);
-    ciphertext.push(0xA5);
-    ciphertext.extend_from_slice(&sequence.to_be_bytes());
-    let header = MediaHeader {
-        flags: 0,
-        session_id: SESSION_ID,
-        stream_id: STREAM_ID,
-        sequence,
-        sample_timestamp: u64::from(sequence) * 960,
-        key_epoch: KEY_EPOCH,
+        DecodeStep::Concealed {
+            sequence: actual,
+            samples,
+            queue,
+        } => {
+            assert_eq!(actual, sequence);
+            assert_eq!(samples, 1);
+            assert_eq!(queue, RealtimePcmPushOutcome::Inserted);
+            true
+        }
+        DecodeStep::NotReady => panic!("negotiated playout must produce a decision"),
     };
-    let mut datagram = header.encode(ciphertext.len()).unwrap().to_vec();
-    datagram.extend_from_slice(&ciphertext);
-    datagram
+    let mut output = [f32::NAN];
+    assert_eq!(
+        consumer.pop_into(&mut output),
+        RealtimePcmPopOutcome::Filled {
+            samples: 1,
+            sequence: u64::from(sequence),
+            discontinuity: false,
+        }
+    );
+    assert!(output[0].is_finite());
+    concealed
 }
 
 #[test]
@@ -77,16 +102,20 @@ fn authenticated_pipeline_stays_bounded_under_impairment() {
     profile.jitter_ms = 10;
     profile.reorder_delay_ms = 25;
     let mut network = VirtualNetwork::new(profile).unwrap();
+    let secret = SessionSecret::new([0xA5; 32]);
+    let context = context();
+    let mut sealer = MediaSealer::new(&secret, context).unwrap();
+    let opener = MediaOpener::new(&secret, context).unwrap();
     let mut ingress = MediaIngress::new(
         StreamIdentity {
             session_id: SESSION_ID,
             stream_id: STREAM_ID,
             key_epoch: KEY_EPOCH,
         },
-        LabAuthenticator,
+        ProtocolAuthenticator::new(opener),
     );
-    let mut jitter = JitterBuffer::<16, 8>::with_start_sequence(0);
-    let (mut pcm_producer, mut pcm_consumer) = realtime_pcm_queue::<1>(4).unwrap();
+    let (pcm_producer, mut pcm_consumer) = realtime_pcm_queue::<1>(4).unwrap();
+    let mut worker = StreamDecodeWorker::<LabDecoder, 16, 8, 1>::new(LabDecoder, pcm_producer, 0);
     let mut plaintext = [0_u8; 8];
     let mut next_send = 0_u32;
     let mut next_playout = 0_u32;
@@ -99,20 +128,21 @@ fn authenticated_pipeline_stays_bounded_under_impairment() {
 
     for now_ms in 0..=end_ms {
         if next_send < FRAMES && now_ms == u64::from(next_send) * FRAME_MS {
-            network.send(now_ms, media_datagram(next_send));
+            network.send(now_ms, media_datagram(&mut sealer, next_send));
             next_send += 1;
         }
 
         for delivery in network.drain_ready(now_ms) {
             match ingress.receive(&delivery.payload, &mut plaintext) {
                 Ok(frame) => {
-                    let encoded = EncodedFrame::new(
-                        frame.header.sequence,
-                        frame.header.sample_timestamp,
-                        frame.opus_payload,
-                    )
-                    .unwrap();
-                    match jitter.insert(encoded) {
+                    match worker
+                        .admit(
+                            frame.header.sequence,
+                            frame.header.sample_timestamp,
+                            frame.opus_payload,
+                        )
+                        .unwrap()
+                    {
                         InsertOutcome::Inserted => {}
                         InsertOutcome::Resynchronized { .. } => jitter_resets += 1,
                         InsertOutcome::Duplicate | InsertOutcome::Late => rejected += 1,
@@ -125,43 +155,24 @@ fn authenticated_pipeline_stays_bounded_under_impairment() {
         }
 
         if next_playout < FRAMES && now_ms == TARGET_MS + u64::from(next_playout) * FRAME_MS {
-            let sample = match jitter.take_next() {
-                PlayoutOutcome::Frame(frame) => {
-                    assert_eq!(frame.payload().len(), 4);
-                    1.0
-                }
-                PlayoutOutcome::Missing { sequence } => {
-                    assert_eq!(sequence, next_playout);
-                    plc_frames += 1;
-                    0.0
-                }
-                PlayoutOutcome::NotReady => panic!("negotiated playout must produce a decision"),
-            };
-            assert_eq!(
-                pcm_producer.push(&[sample]),
-                RealtimePcmPushOutcome::Inserted
-            );
-            let mut output = [f32::NAN];
-            assert_eq!(
-                pcm_consumer.pop_into(&mut output),
-                RealtimePcmPopOutcome::Filled {
-                    samples: 1,
-                    sequence: u64::from(next_playout),
-                    discontinuity: false,
-                }
-            );
-            assert!(output[0].is_finite());
+            plc_frames += u32::from(decode_and_render(
+                &mut worker,
+                &mut pcm_consumer,
+                next_playout,
+            ));
             rendered += 1;
             next_playout += 1;
         }
     }
 
-    assert_eq!(next_send, FRAMES);
-    assert_eq!(rendered, FRAMES);
-    assert!(plc_frames > 0);
-    assert!(replayed > 0);
-    assert_eq!(rejected, 0);
-    assert_eq!(jitter_resets, 0);
-    assert!(network.stats().random_loss_packets > 0);
-    assert!(network.queued_copies() <= profile.max_in_flight_packets);
+    assert_eq!(
+        (next_send, rendered, rejected, jitter_resets),
+        (FRAMES, FRAMES, 0, 0)
+    );
+    assert!(
+        plc_frames > 0
+            && replayed > 0
+            && network.stats().random_loss_packets > 0
+            && network.queued_copies() <= profile.max_in_flight_packets
+    );
 }

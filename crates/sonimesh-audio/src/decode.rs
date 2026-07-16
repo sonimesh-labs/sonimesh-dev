@@ -1,0 +1,196 @@
+use core::fmt;
+
+use crate::{
+    EncodedFrame, FrameError, InsertOutcome, JitterBuffer, PlayoutOutcome, RealtimePcmProducer,
+    RealtimePcmPushOutcome,
+};
+
+/// Per-stream decoder boundary invoked outside the realtime output callback.
+///
+/// Implementations may wrap an Opus decoder once its policy and platform adapter
+/// are selected. They must initialize at most `output.len()` samples and must
+/// implement packet-loss concealment without allocating.
+pub trait FrameDecoder {
+    /// Decoder-specific failure type.
+    type Error;
+
+    /// Decodes one authenticated encoded frame into caller-owned PCM storage.
+    ///
+    /// # Errors
+    ///
+    /// Returns a decoder-specific error for malformed or unsupported encoded
+    /// input. Callers must isolate that failure to this stream.
+    fn decode(&mut self, encoded: &[u8], output: &mut [f32]) -> Result<usize, Self::Error>;
+
+    /// Generates one PCM block for a confirmed missing frame.
+    ///
+    /// # Errors
+    ///
+    /// Returns a decoder-specific error when concealment cannot produce a
+    /// bounded block.
+    fn decode_plc(&mut self, output: &mut [f32]) -> Result<usize, Self::Error>;
+}
+
+/// Outcome of one per-stream decode scheduling decision.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DecodeStep {
+    /// The jitter buffer has not reached a playout decision yet.
+    NotReady,
+    /// One encoded frame was decoded into the realtime PCM queue.
+    Decoded {
+        /// Sequence selected for ordinary decode.
+        sequence: u32,
+        /// Initialized PCM samples in the queued block.
+        samples: usize,
+        /// Bounded PCM queue result.
+        queue: RealtimePcmPushOutcome,
+    },
+    /// One missing frame was handled by decoder-side PLC.
+    Concealed {
+        /// Missing sequence selected for concealment.
+        sequence: u32,
+        /// Initialized PCM samples in the queued block.
+        samples: usize,
+        /// Bounded PCM queue result.
+        queue: RealtimePcmPushOutcome,
+    },
+}
+
+/// Failure while admitting or decoding a stream-local frame.
+#[derive(Debug, Eq, PartialEq)]
+pub enum DecodeWorkerError<DecoderError> {
+    /// An authenticated payload exceeded inline jitter storage.
+    Frame(FrameError),
+    /// The decoder reported more PCM samples than caller-owned storage holds.
+    InvalidOutputLength,
+    /// The concrete decoder rejected an authenticated frame or PLC request.
+    Decoder(DecoderError),
+}
+
+impl<DecoderError: fmt::Display> fmt::Display for DecodeWorkerError<DecoderError> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Frame(error) => write!(formatter, "encoded frame rejected: {error:?}"),
+            Self::InvalidOutputLength => {
+                formatter.write_str("decoder reported PCM beyond the bounded output block")
+            }
+            Self::Decoder(error) => write!(formatter, "stream decoder failed: {error}"),
+        }
+    }
+}
+
+impl<DecoderError> std::error::Error for DecodeWorkerError<DecoderError> where
+    DecoderError: std::error::Error + 'static
+{
+}
+
+/// Per-stream non-realtime pipeline from authenticated frames to PCM blocks.
+///
+/// Encoded packets remain in a fixed-capacity jitter buffer. Normal decode and
+/// PLC run only when [`Self::decode_next`] is called by the per-stream domain;
+/// the output callback only reads the paired realtime consumer endpoint.
+pub struct StreamDecodeWorker<
+    D,
+    const JITTER_CAPACITY: usize,
+    const MAX_ENCODED_BYTES: usize,
+    const PCM_SAMPLES_PER_BLOCK: usize,
+> {
+    decoder: D,
+    jitter: JitterBuffer<JITTER_CAPACITY, MAX_ENCODED_BYTES>,
+    producer: RealtimePcmProducer<PCM_SAMPLES_PER_BLOCK>,
+    pcm: [f32; PCM_SAMPLES_PER_BLOCK],
+}
+
+impl<
+    D,
+    const JITTER_CAPACITY: usize,
+    const MAX_ENCODED_BYTES: usize,
+    const PCM_SAMPLES_PER_BLOCK: usize,
+> StreamDecodeWorker<D, JITTER_CAPACITY, MAX_ENCODED_BYTES, PCM_SAMPLES_PER_BLOCK>
+where
+    D: FrameDecoder,
+{
+    /// Creates one stream-local worker with a negotiated playout sequence.
+    #[must_use]
+    pub fn new(
+        decoder: D,
+        producer: RealtimePcmProducer<PCM_SAMPLES_PER_BLOCK>,
+        sequence: u32,
+    ) -> Self {
+        Self {
+            decoder,
+            jitter: JitterBuffer::with_start_sequence(sequence),
+            producer,
+            pcm: [0.0; PCM_SAMPLES_PER_BLOCK],
+        }
+    }
+
+    /// Admits a packet that has already passed network authentication and replay checks.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DecodeWorkerError::Frame`] when the authenticated payload does
+    /// not fit the stream's fixed encoded-frame capacity.
+    pub fn admit(
+        &mut self,
+        sequence: u32,
+        sample_timestamp: u64,
+        payload: &[u8],
+    ) -> Result<InsertOutcome, DecodeWorkerError<D::Error>> {
+        let frame = EncodedFrame::new(sequence, sample_timestamp, payload)
+            .map_err(DecodeWorkerError::Frame)?;
+        Ok(self.jitter.insert(frame))
+    }
+
+    /// Performs one scheduled decode or PLC decision outside the realtime callback.
+    ///
+    /// # Errors
+    ///
+    /// Returns a decoder error, or rejects a decoder that reports a length
+    /// beyond the compile-time PCM block capacity. No block is queued on error.
+    pub fn decode_next(&mut self) -> Result<DecodeStep, DecodeWorkerError<D::Error>> {
+        let playout = self.jitter.take_next();
+        let (sequence, concealed, samples) = match playout {
+            PlayoutOutcome::NotReady => return Ok(DecodeStep::NotReady),
+            PlayoutOutcome::Frame(frame) => (
+                frame.sequence,
+                false,
+                self.decoder
+                    .decode(frame.payload(), &mut self.pcm)
+                    .map_err(DecodeWorkerError::Decoder)?,
+            ),
+            PlayoutOutcome::Missing { sequence } => (
+                sequence,
+                true,
+                self.decoder
+                    .decode_plc(&mut self.pcm)
+                    .map_err(DecodeWorkerError::Decoder)?,
+            ),
+        };
+        if samples > PCM_SAMPLES_PER_BLOCK {
+            self.pcm.fill(0.0);
+            return Err(DecodeWorkerError::InvalidOutputLength);
+        }
+
+        let queue = self.producer.push(&self.pcm[..samples]);
+        if concealed {
+            Ok(DecodeStep::Concealed {
+                sequence,
+                samples,
+                queue,
+            })
+        } else {
+            Ok(DecodeStep::Decoded {
+                sequence,
+                samples,
+                queue,
+            })
+        }
+    }
+
+    /// Returns the number of queued PCM blocks for low-rate diagnostics.
+    #[must_use]
+    pub fn queued_blocks(&self) -> usize {
+        self.producer.len()
+    }
+}

@@ -30,6 +30,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   jitter/PLC decisions, and realtime PCM transfer without claiming real crypto.
 - a generated, length-prefixed Protobuf control envelope with hard frame and
   field limits for controlled-lab command exchange.
+- a per-stream, non-realtime decode-worker boundary that schedules ordinary
+  decode and PLC from authenticated jitter decisions, then writes bounded PCM
+  blocks to the existing lock-free output queue; no concrete Opus binding yet.
 - ChaCha20-Poly1305 packet protection with HKDF-SHA256 per-stream keys, a
   reviewed nonce layout, sender sequence exhaustion, and authentication before
   replay admission; pairing/TLS root-secret creation remains unimplemented.
