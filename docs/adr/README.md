@@ -45,3 +45,5 @@ documented.
   controlled-lab AEAD/key derivation boundary; pairing and TLS remain separate.
 - [ADR 0006: Media key epoch control lifecycle](./0006-media-key-epoch-control.md) —
   control commands bind stream lifecycle to the AEAD key epoch.
+- [ADR 0007: Bounded PCM occupancy drift control](./0007-drift-control-decision.md) —
+  non-realtime per-stream PI control and hard-resynchronization boundary.
