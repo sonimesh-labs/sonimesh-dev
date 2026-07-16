@@ -26,9 +26,11 @@ and consumer endpoints in `sonimesh-audio`.
 - queue capacity is non-zero and capped at 128 blocks;
 - every PCM block stores samples inline with a compile-time sample limit;
 - `force_push` atomically replaces the oldest block when full;
-- producer-local epoch and sequence markers let the consumer detect every gap;
+- producer publishes an atomic active epoch before emitting new PCM blocks;
+  consumer-side epoch and sequence markers let the callback discard stale blocks
+  and detect every remaining gap;
 - callback reads always initialize their complete output slice, using silence on
-  underflow;
+  underflow or when only stale blocks were available;
 - the public SoniMesh implementation contains no unsafe block.
 
 Although `ArrayQueue` is an MPMC implementation, SoniMesh creates exactly one
@@ -41,13 +43,20 @@ Capacity validation prevents unbounded memory use. PCM blocks contain no key or
 network identity. Queue methods are lock-free and do not allocate after
 construction. Destruction and output-stream recreation remain control-domain work.
 
+After a stream epoch change, the consumer discards only blocks whose epoch no
+longer matches the atomic active epoch. The discard loop is explicitly bounded by
+the 128-block queue maximum; it emits silence if no current block remains. A
+concurrent epoch change can still race with one callback already reading a block,
+so the control domain must perform its documented stream-local fade/reset around
+the transition. No queue operation affects another stream.
+
 `crossbeam-queue` becomes a runtime dependency and must remain covered by supply-
 chain review. A future platform benchmark must still verify callback timing on
 actual WASAPI devices; lock-free does not by itself prove a latency target.
 
 ## Validation evidence
 
-Tests cover invalid capacities, oldest replacement, stream-epoch discontinuity,
+Tests cover invalid capacities, oldest replacement, stale epoch discard,
 underflow initialization, and a 50,000-block concurrent producer/consumer stress
 run. The stress test proves ordering and accounts every block as consumed or
 overwritten; it is not a substitute for Loom, Miri, or hardware timing evidence.
@@ -56,4 +65,3 @@ overwritten; it is not a substitute for Loom, Miri, or hardware timing evidence.
 
 The dependency is hidden behind SoniMesh-owned endpoints. It can be replaced by
 another reviewed queue without changing decoder, mixer, platform, or UI APIs.
-
