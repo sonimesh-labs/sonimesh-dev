@@ -43,3 +43,5 @@ documented.
   accepted for bounded controlled-lab Protobuf work; security remains separate.
 - [ADR 0005: UDP media protection and nonce lifecycle](./0005-udp-media-protection.md) —
   controlled-lab AEAD/key derivation boundary; pairing and TLS remain separate.
+- [ADR 0006: Media key epoch control lifecycle](./0006-media-key-epoch-control.md) —
+  control commands bind stream lifecycle to the AEAD key epoch.

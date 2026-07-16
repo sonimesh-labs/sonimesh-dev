@@ -90,9 +90,11 @@ Packets are accepted only after:
 Unknown sessions and unauthenticated payloads must never reach Opus. Replay
 window state must not advance for failed authentication attempts.
 
-Key epochs need an explicit rotation and grace-period protocol. Sequence wrap,
-session resume, address migration, and control-channel expiry must all result in
-new nonce/key material rather than silently reusing old state.
+Key epochs need an explicit rotation and grace-period protocol. The controlled-
+lab Start/Stop epoch identity and no-overlap policy are defined by
+[ADR 0006](./adr/0006-media-key-epoch-control.md). Sequence wrap, session
+resume, address migration, and control-channel expiry must all result in new
+nonce/key material rather than silently reusing old state.
 
 ## Abuse controls
 
