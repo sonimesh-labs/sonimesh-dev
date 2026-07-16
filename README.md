@@ -56,7 +56,10 @@ docs/
 The repository now contains a buildable, dependency-light Rust foundation for
 bounded protocol parsing, ChaCha20-Poly1305 media protection, authenticated
 media ingress, jitter/PCM buffers, diagnostics, platform adapters, and desktop
-session lifecycle. It is still a feasibility project: Android capture, a
+session lifecycle. A separately buildable Vue/Vite receiver control preview
+exercises only in-memory, low-rate state through its bridge boundary; it is not
+a Tauri or platform-audio integration. The project is still a feasibility
+project: Android capture, a
 qualified Windows output backend, Opus, TLS-backed pairing/root-secret
 provisioning, and measured end-to-end latency are not implemented or claimed.
 

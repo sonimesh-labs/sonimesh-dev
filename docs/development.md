@@ -46,11 +46,27 @@ sonimesh-audio          -> crossbeam-queue behind its realtime queue boundary
 sonimesh-platform       -> standard library only
 sonimesh-diagnostics    -> standard library only
 sonimesh-protocol       -> Prost-generated bounded control schemas
-desktop UI / Android    -> not bootstrapped until their validation ADR gates
+desktop UI              -> Vue/Vite control preview; Tauri bridge remains gated
+Android                 -> not bootstrapped until its validation ADR gate
 ~~~
 
 Shared crates must not depend on Tauri, Vue, Compose, Android APIs, or a web
-view. Platform implementations depend inward on these contracts.
+view. The desktop preview uses only low-rate state snapshots through
+`apps/desktop-ui/src/bridge.ts`; it does not carry audio, keys, or realtime
+callbacks. Platform implementations depend inward on these contracts.
+
+## Desktop UI checks
+
+~~~powershell
+Set-Location apps/desktop-ui
+npm install
+npm run build
+npm run dev
+~~~
+
+The bundled preview bridge is intentionally not a Tauri implementation. It
+exists to validate the control surface without turning pending Windows output,
+pairing, or packaging work into a platform claim.
 
 ## File and module size
 

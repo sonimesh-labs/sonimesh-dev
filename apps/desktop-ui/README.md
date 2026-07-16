@@ -1,13 +1,12 @@
-# Desktop control UI
+# Desktop UI
 
-This directory is reserved for the Tauri 2 and Vue 3 control surface. Product UI
-scaffolding is gated on a validated Windows output spike and a recorded backend
-ADR, so the feasibility work cannot accidentally turn a CPAL/WASAPI assumption
-into an MVP claim.
+Vue/Vite control surface for desktop lifecycle commands. `src/bridge.ts` is the
+only frontend integration point: it currently provides a preview adapter and is
+intended to be replaced by low-rate Tauri commands after the desktop shell is
+introduced. It must never receive PCM, Opus frames, keys, or realtime callbacks.
 
-The UI will consume low-rate session and diagnostic snapshots from
-`sonimesh-app`. It must never own or transport PCM, Opus frames, output callbacks,
-network loops, or key material.
-
-See [the MVP baseline](../../docs/mvp-baseline.md) for the bootstrap gate.
-
+```powershell
+npm install
+npm run dev
+npm run build
+```

@@ -1,7 +1,7 @@
 # MVP implementation baseline
 
 > Status: foundation implemented; platform feasibility remains open
-> Updated: 2026-07-14
+> Updated: 2026-07-17
 
 This baseline turns the architecture documents into a buildable core without
 claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
@@ -43,6 +43,10 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
 - ChaCha20-Poly1305 packet protection with HKDF-SHA256 per-stream keys, a
   reviewed nonce layout, sender sequence exhaustion, and authentication before
   replay admission; pairing/TLS root-secret creation remains unimplemented.
+- a buildable Vue/Vite receiver-control preview with a single low-rate bridge
+  boundary, session controls, output selection, pairing-invitation state, and
+  diagnostics presentation; it uses in-memory preview data and has no Tauri,
+  audio, key, or realtime integration.
 
 ## Initial capacities and policies
 
@@ -79,7 +83,7 @@ jitter, and output-backend ADRs using measured 10/20 ms and device results.
   after a caller supplies an authenticated control-session secret;
 - UDP sockets, discovery, and address migration;
 - direct-WASAPI comparison adapter and backend selection evidence;
-- Tauri/Vue product UI, signing, packaging, and firewall integration;
+- Tauri integration, signing, packaging, and firewall integration;
 - a concrete drift ASRC, nominal rate conversion, acoustic latency, and soak
   validation; the occupancy controller alone does not establish any timing claim.
 
