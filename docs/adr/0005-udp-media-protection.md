@@ -66,9 +66,10 @@ payloads, or secrets.
 
 Tests cover HKDF determinism/domain separation, nonce separation by every field,
 header tampering, ciphertext tampering, context mismatch, output bounds, sequence
-exhaustion, and authenticated replay ordering through the network adapter.
+exhaustion, authenticated replay ordering through the network adapter, and the
+published [cross-language media crypto vector](../protocol/media-crypto-vectors.md).
 
-Cross-language Rust/Kotlin crypto vectors, key rotation control messages, address
+Kotlin verification of the vector, key rotation control messages, address
 migration, and fuzzing remain required before a build leaves the lab network.
 
 ## Rollback plan
@@ -76,4 +77,3 @@ migration, and fuzzing remain required before a build leaves the lab network.
 Media protection is isolated behind the protocol key context and opener/sealer
 types. A future reviewed algorithm version uses a new protocol/key-derivation
 label and epoch, not a silent replacement under the same wire version.
-
