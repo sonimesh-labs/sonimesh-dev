@@ -1,7 +1,10 @@
 # Control schemas
 
-Control-plane Protobuf schemas will live here after the schema-evolution and
-pairing ADRs define message limits, capability rules, and transcript binding.
-No generated source is checked in yet, and this empty boundary is not a wire
-compatibility promise.
+`control.proto` defines the controlled-lab control-plane envelope described by
+[ADR 0004](../docs/adr/0004-control-plane-schema.md). Rust generation runs in
+`sonimesh-protocol` with a vendored `protoc`; generated source is not checked in.
 
+The schema deliberately contains only low-rate hello/capability exchange,
+start/stop commands, stream status, and structured errors. It is not a pairing or
+transport-security protocol and must run inside the future authenticated control
+session.

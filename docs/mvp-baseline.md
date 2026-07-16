@@ -28,6 +28,8 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   jitter, duplication, reorder delay, capacity pressure, and Windows/Linux CI;
 - a cross-crate lab pipeline covering parse, authenticate, replay rejection,
   jitter/PLC decisions, and realtime PCM transfer without claiming real crypto.
+- a generated, length-prefixed Protobuf control envelope with hard frame and
+  field limits for controlled-lab command exchange.
 
 ## Initial capacities and policies
 
@@ -36,6 +38,8 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
 | Media fixed header | 36 bytes | Reject truncated input |
 | Media extended header | 128 bytes | Reject larger declared header |
 | Complete media datagram | 1,200 bytes | Reject before authentication/allocation |
+| Control Protobuf frame | 64 KiB | Reject before Protobuf decoding |
+| Control start stream | 8–192 kHz, 1–8 channels, 10/20 ms | Reject invalid command parameters |
 | Encrypted payload with fixed header | 1,164 bytes | Extensions reduce this available payload |
 | Replay window | 64 packets | Reject authenticated duplicate or too-old packet |
 | Jitter storage | Compile-time capacity per stream | Stream-local reset on capacity collision |
@@ -57,7 +61,7 @@ jitter, and output-backend ADRs using measured 10/20 ms and device results.
 - Android project and MediaProjection capture spike;
 - Opus encoder/decoder bindings and PLC/FEC evidence;
 - AEAD, HKDF, TLS, QR pairing, identity storage, or key rotation;
-- UDP sockets, discovery, control Protobuf generation, and address migration;
+- UDP sockets, discovery, and address migration;
 - direct-WASAPI comparison adapter and backend selection evidence;
 - Tauri/Vue product UI, signing, packaging, and firewall integration;
 - drift ASRC, nominal rate conversion, acoustic latency, and soak validation.

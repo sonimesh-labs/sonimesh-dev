@@ -45,7 +45,7 @@ sonimesh-network        -> protocol primitives
 sonimesh-audio          -> crossbeam-queue behind its realtime queue boundary
 sonimesh-platform       -> standard library only
 sonimesh-diagnostics    -> standard library only
-sonimesh-protocol       -> standard library only
+sonimesh-protocol       -> Prost-generated bounded control schemas
 desktop UI / Android    -> not bootstrapped until their validation ADR gates
 ~~~
 

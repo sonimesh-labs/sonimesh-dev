@@ -1,0 +1,77 @@
+syntax = "proto3";
+
+package sonimesh.control.v1alpha1;
+
+// Capabilities are negotiated explicitly and never inferred from discovery.
+enum Capability {
+  CAPABILITY_UNSPECIFIED = 0;
+  CAPABILITY_FRAME_DURATION_10_MS = 1;
+  CAPABILITY_FRAME_DURATION_20_MS = 2;
+  CAPABILITY_MANUAL_ADDRESS = 3;
+  CAPABILITY_NETWORK_DIAGNOSTICS = 4;
+}
+
+enum StreamState {
+  STREAM_STATE_UNSPECIFIED = 0;
+  STREAM_STATE_READY = 1;
+  STREAM_STATE_STREAMING = 2;
+  STREAM_STATE_RECONNECTING = 3;
+  STREAM_STATE_STOPPED = 4;
+  STREAM_STATE_FAILED = 5;
+}
+
+enum ErrorCode {
+  ERROR_CODE_UNSPECIFIED = 0;
+  ERROR_CODE_INCOMPATIBLE_VERSION = 1;
+  ERROR_CODE_UNSUPPORTED_CAPABILITY = 2;
+  ERROR_CODE_INVALID_REQUEST = 3;
+  ERROR_CODE_STREAM_NOT_FOUND = 4;
+  ERROR_CODE_RETRY_LATER = 5;
+}
+
+// Every control frame carries exactly one known payload.
+message Envelope {
+  uint32 protocol_version = 1;
+  uint64 request_id = 2;
+
+  oneof payload {
+    Hello hello = 10;
+    StartStream start_stream = 11;
+    StopStream stop_stream = 12;
+    StreamStatus stream_status = 13;
+    ControlError error = 14;
+  }
+}
+
+message Hello {
+  repeated uint32 supported_versions = 1;
+  repeated Capability capabilities = 2;
+  string display_name = 3;
+}
+
+message StartStream {
+  uint64 media_session_id = 1;
+  uint32 stream_id = 2;
+  uint32 sample_rate_hz = 3;
+  uint32 channels = 4;
+  uint32 frame_duration_ms = 5;
+}
+
+message StopStream {
+  uint64 media_session_id = 1;
+  uint32 stream_id = 2;
+}
+
+message StreamStatus {
+  uint64 media_session_id = 1;
+  uint32 stream_id = 2;
+  StreamState state = 3;
+  string detail = 4;
+}
+
+message ControlError {
+  ErrorCode code = 1;
+  bool retryable = 2;
+  string detail = 3;
+}
+
