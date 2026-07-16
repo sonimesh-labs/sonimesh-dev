@@ -51,3 +51,5 @@ documented.
   QR-pinned TLS, transcript binding, OS-protected identity storage, and revocation.
 - [ADR 0009: Opus decoder binding and frame policy](./0009-opus-codec-boundary.md) —
   optional native decoder feature gated by reproducible Windows/Android evidence.
+- [ADR 0010: Android capture service and native boundary](./0010-android-capture-service-boundary.md) —
+  Kotlin/Compose consent UI, foreground-service ownership, and capture-only evidence gate.

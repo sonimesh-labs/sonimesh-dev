@@ -1,9 +1,10 @@
 # Android sender
 
 This directory is reserved for the Kotlin Android sender from roadmap phase 0A.
-The application project is intentionally not generated yet: the repository has
-not selected Android Gradle Plugin, Compose, JNI/Opus ownership, or a minimum
-tested SDK through ADR 0002.
+The application project is intentionally not generated yet: the service and
+native ownership boundary is recorded in [ADR 0010](../../docs/adr/0010-android-capture-service-boundary.md),
+but Android Gradle tooling and capture behavior have not been validated on the
+required device matrix.
 
 The first implementation must keep these module boundaries:
 
@@ -15,4 +16,3 @@ The first implementation must keep these module boundaries:
   silence observations recorded without claiming a source-specific cause.
 
 See [the MVP baseline](../../docs/mvp-baseline.md) for the bootstrap gate.
-

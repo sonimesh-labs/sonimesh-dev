@@ -108,8 +108,8 @@ and no build should leave a controlled lab network before phase 0D is reviewed.
 
 ## Next implementation slice
 
-1. Record an ADR for the Android service/JNI boundary, then build the capture-
-   only phase 0A app and evidence matrix.
+1. Build the capture-only phase 0A app and evidence matrix under
+   [ADR 0010](./adr/0010-android-capture-service-boundary.md).
 2. Measure CPAL and prototype direct WASAPI behind `sonimesh-platform`; record
    callback size, negotiated format, device lifecycle, and latency in ADR 0003.
 3. Validate the provisional Opus binding/build policy in ADR 0009 on Windows and
