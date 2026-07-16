@@ -8,6 +8,8 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+sonimesh-audio = { path = "../sonimesh-audio" }
+sonimesh-network = { path = "../sonimesh-network" }
 sonimesh-platform = { path = "../sonimesh-platform" }
 sonimesh-protocol = { path = "../sonimesh-protocol" }
 

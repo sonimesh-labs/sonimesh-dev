@@ -34,6 +34,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
 - a per-stream, non-realtime decode-worker boundary that schedules ordinary
   decode and PLC from authenticated jitter decisions, then writes bounded PCM
   blocks to the existing lock-free output queue; no concrete Opus binding yet.
+- an application-domain receiver pipeline that composes protected ingress,
+  bounded decode admission, and stream-local epoch reset without owning TLS,
+  platform output, or a concrete decoder implementation.
 - a bounded per-stream PCM occupancy controller that emits slew-limited ppm
   decisions or stream-local hard-resynchronization requests; no ASRC backend is
   selected or performance-claimed yet.

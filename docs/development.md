@@ -40,7 +40,7 @@ Windows callback timing, acoustic latency, Opus behavior, or physical WLANs.
 ## Dependency direction
 
 ~~~text
-sonimesh-app            -> platform contracts, protocol, diagnostics
+sonimesh-app            -> audio, network, platform contracts, protocol, diagnostics
 sonimesh-network        -> protocol primitives
 sonimesh-audio          -> crossbeam-queue behind its realtime queue boundary
 sonimesh-platform       -> standard library only
