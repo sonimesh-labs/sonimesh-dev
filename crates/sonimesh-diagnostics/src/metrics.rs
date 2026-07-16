@@ -8,6 +8,7 @@ pub struct StreamCounters {
     rejected_packets: AtomicU64,
     late_packets: AtomicU64,
     reordered_packets: AtomicU64,
+    plc_frames: AtomicU64,
     pcm_underflows: AtomicU64,
     pcm_overflows: AtomicU64,
     stream_resets: AtomicU64,
@@ -24,7 +25,7 @@ impl StreamCounters {
         self.duplicate_packets.fetch_add(1, Ordering::Relaxed);
     }
 
-    /// Records a malformed, unknown, or unauthenticated packet.
+    /// Records a packet rejected before it can reach decoder work.
     pub fn rejected(&self) {
         self.rejected_packets.fetch_add(1, Ordering::Relaxed);
     }
@@ -37,6 +38,11 @@ impl StreamCounters {
     /// Records an accepted reordered packet.
     pub fn reordered(&self) {
         self.reordered_packets.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Records one decoder-side packet-loss-concealment frame.
+    pub fn plc_frame(&self) {
+        self.plc_frames.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Records output silence caused by an empty PCM ring.
@@ -66,6 +72,7 @@ impl StreamCounters {
             rejected_packets: self.rejected_packets.load(Ordering::Relaxed),
             late_packets: self.late_packets.load(Ordering::Relaxed),
             reordered_packets: self.reordered_packets.load(Ordering::Relaxed),
+            plc_frames: self.plc_frames.load(Ordering::Relaxed),
             pcm_underflows: self.pcm_underflows.load(Ordering::Relaxed),
             pcm_overflows: self.pcm_overflows.load(Ordering::Relaxed),
             stream_resets: self.stream_resets.load(Ordering::Relaxed),
@@ -86,6 +93,8 @@ pub struct StreamMetricsSnapshot {
     pub late_packets: u64,
     /// Accepted out-of-order packets.
     pub reordered_packets: u64,
+    /// Decoder-side packet-loss-concealment frames.
+    pub plc_frames: u64,
     /// Output callbacks that emitted bounded silence.
     pub pcm_underflows: u64,
     /// Bounded oldest-region PCM drops.
@@ -103,11 +112,13 @@ mod tests {
         let counters = StreamCounters::default();
         counters.authenticated();
         counters.rejected();
+        counters.plc_frame();
         counters.pcm_underflow();
 
         let snapshot = counters.snapshot();
         assert_eq!(snapshot.authenticated_packets, 1);
         assert_eq!(snapshot.rejected_packets, 1);
+        assert_eq!(snapshot.plc_frames, 1);
         assert_eq!(snapshot.pcm_underflows, 1);
     }
 }

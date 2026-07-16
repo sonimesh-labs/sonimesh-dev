@@ -1,13 +1,15 @@
 use core::fmt;
+use std::sync::Arc;
 
 use sonimesh_audio::{
     DecodeStep, DecodeWorkerError, FrameDecoder, InsertOutcome, RealtimePcmProducer,
-    StreamDecodeWorker,
+    RealtimePcmPushOutcome, StreamDecodeWorker,
 };
+use sonimesh_diagnostics::StreamCounters;
 use sonimesh_network::{
     IngressError, ProtectedIngressError, ProtectedMediaIngress, StreamIdentity,
 };
-use sonimesh_protocol::{MediaCryptoError, MediaKeyContext, SessionSecret};
+use sonimesh_protocol::{MediaCryptoError, MediaKeyContext, ReplayDecision, SessionSecret};
 
 /// Non-realtime composition of one protected ingress and one decode worker.
 ///
@@ -22,6 +24,7 @@ pub struct ReceiverStreamPipeline<
 > {
     ingress: ProtectedMediaIngress,
     decode: StreamDecodeWorker<D, JITTER_CAPACITY, MAX_ENCODED_BYTES, PCM_SAMPLES_PER_BLOCK>,
+    counters: Arc<StreamCounters>,
 }
 
 /// Failure while receiving, admitting, decoding, or rotating one stream pipeline.
@@ -64,17 +67,21 @@ where
     /// # Errors
     ///
     /// Returns [`ProtectedIngressError`] when the initial media opener cannot be
-    /// derived from the caller-supplied authenticated session secret.
+    /// derived from the caller-supplied authenticated session secret. `counters`
+    /// is shared only with low-rate diagnostics or other atomic writers; the
+    /// realtime callback does not receive this pipeline.
     pub fn new(
         secret: &SessionSecret,
         context: MediaKeyContext,
         decoder: D,
         producer: RealtimePcmProducer<PCM_SAMPLES_PER_BLOCK>,
+        counters: Arc<StreamCounters>,
         initial_sequence: u32,
     ) -> Result<Self, ProtectedIngressError> {
         Ok(Self {
             ingress: ProtectedMediaIngress::new(secret, context)?,
             decode: StreamDecodeWorker::new(decoder, producer, initial_sequence),
+            counters,
         })
     }
 
@@ -90,6 +97,12 @@ where
         self.ingress.identity()
     }
 
+    /// Borrows atomic counters published by this stream's non-realtime pipeline.
+    #[must_use]
+    pub fn counters(&self) -> &StreamCounters {
+        &self.counters
+    }
+
     /// Authenticates and inserts one datagram into this stream's bounded jitter state.
     ///
     /// # Errors
@@ -103,10 +116,16 @@ where
         plaintext: &mut [u8],
     ) -> Result<InsertOutcome, ReceiverPipelineError<D::Error>> {
         let admission = {
-            let frame = self
-                .ingress
-                .receive(datagram, plaintext)
-                .map_err(ReceiverPipelineError::Ingress)?;
+            let frame = match self.ingress.receive(datagram, plaintext) {
+                Ok(frame) => {
+                    self.counters.authenticated();
+                    frame
+                }
+                Err(error) => {
+                    self.record_ingress_error(&error);
+                    return Err(ReceiverPipelineError::Ingress(error));
+                }
+            };
             self.decode.admit(
                 frame.header.sequence,
                 frame.header.sample_timestamp,
@@ -117,6 +136,7 @@ where
             Ok(outcome) => Ok(outcome),
             Err(error) => {
                 plaintext.fill(0);
+                self.counters.rejected();
                 Err(ReceiverPipelineError::Decode(error))
             }
         }
@@ -128,7 +148,16 @@ where
     ///
     /// Returns a bounded decoder failure without invoking platform output work.
     pub fn decode_next(&mut self) -> Result<DecodeStep, DecodeWorkerError<D::Error>> {
-        self.decode.decode_next()
+        let step = self.decode.decode_next()?;
+        match step {
+            DecodeStep::Decoded { queue, .. } => self.record_queue_outcome(queue),
+            DecodeStep::Concealed { queue, .. } => {
+                self.counters.plc_frame();
+                self.record_queue_outcome(queue);
+            }
+            DecodeStep::NotReady => {}
+        }
+        Ok(step)
     }
 
     /// Installs a strictly newer AEAD epoch and resets only this stream's audio state.
@@ -146,6 +175,23 @@ where
     ) -> Result<(), ProtectedIngressError> {
         self.ingress.rotate(secret, next)?;
         self.decode.begin_epoch(initial_sequence);
+        self.counters.stream_reset();
         Ok(())
+    }
+
+    fn record_ingress_error(&self, error: &IngressError<MediaCryptoError>) {
+        if let IngressError::Replay(decision) = error {
+            self.counters.authenticated();
+            if *decision == ReplayDecision::Duplicate {
+                self.counters.duplicate();
+            }
+        }
+        self.counters.rejected();
+    }
+
+    fn record_queue_outcome(&self, outcome: RealtimePcmPushOutcome) {
+        if outcome == RealtimePcmPushOutcome::ReplacedOldest {
+            self.counters.pcm_overflow();
+        }
     }
 }

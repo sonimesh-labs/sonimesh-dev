@@ -9,6 +9,7 @@ publish.workspace = true
 
 [dependencies]
 sonimesh-audio = { path = "../sonimesh-audio" }
+sonimesh-diagnostics = { path = "../sonimesh-diagnostics" }
 sonimesh-network = { path = "../sonimesh-network" }
 sonimesh-platform = { path = "../sonimesh-platform" }
 sonimesh-protocol = { path = "../sonimesh-protocol" }

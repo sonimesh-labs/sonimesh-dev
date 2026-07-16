@@ -1,6 +1,7 @@
 //! Cross-domain receiver pipeline tests with real media AEAD packets.
 
 use core::convert::Infallible;
+use std::sync::Arc;
 
 use sonimesh_app::{
     ControlStreamAction, ControlStreamCoordinator, PairingAttemptOutcome, PairingId,
@@ -9,6 +10,7 @@ use sonimesh_app::{
 use sonimesh_audio::{
     DecodeStep, FrameDecoder, InsertOutcome, RealtimePcmPopOutcome, realtime_pcm_queue,
 };
+use sonimesh_diagnostics::StreamCounters;
 use sonimesh_network::IngressError;
 use sonimesh_protocol::{
     CONTROL_PROTOCOL_VERSION, Envelope, MediaDirection, MediaKeyContext, MediaSealer,
@@ -81,6 +83,7 @@ fn receives_authenticated_media_then_decodes_into_realtime_pcm() {
         context,
         ByteDecoder,
         producer,
+        Arc::new(StreamCounters::default()),
         0,
     )
     .unwrap();
@@ -119,6 +122,7 @@ fn rotation_rejects_old_packets_and_retires_old_pcm() {
         initial,
         ByteDecoder,
         producer,
+        Arc::new(StreamCounters::default()),
         0,
     )
     .unwrap();
@@ -170,6 +174,7 @@ fn control_epoch_rotation_commits_only_after_pipeline_context_rotates() {
         initial,
         ByteDecoder,
         producer,
+        Arc::new(StreamCounters::default()),
         0,
     )
     .unwrap();
@@ -199,4 +204,56 @@ fn control_epoch_rotation_commits_only_after_pipeline_context_rotates() {
 
     assert_eq!(pipeline.context(), next_context);
     assert_eq!(coordinator.active(), Some(next.identity));
+}
+
+#[test]
+fn pipeline_publishes_bounded_receive_decode_and_epoch_metrics() {
+    let secret = SessionSecret::new([0xA5; 32]);
+    let initial = context(2);
+    let mut sealer = MediaSealer::new(&secret, initial).unwrap();
+    let (producer, _consumer) = realtime_pcm_queue::<4>(1).unwrap();
+    let counters = Arc::new(StreamCounters::default());
+    let mut pipeline = ReceiverStreamPipeline::<ByteDecoder, 4, 8, 4>::new(
+        &secret,
+        initial,
+        ByteDecoder,
+        producer,
+        Arc::clone(&counters),
+        0,
+    )
+    .unwrap();
+    let _first = sealer.seal(0, 0, &[6]).unwrap();
+    let packet = sealer.seal(0, 960, &[7]).unwrap();
+    let mut plaintext = [0_u8; 8];
+
+    pipeline.receive(&packet.datagram, &mut plaintext).unwrap();
+    assert!(matches!(
+        pipeline.decode_next().unwrap(),
+        DecodeStep::Concealed { .. }
+    ));
+    assert!(matches!(
+        pipeline.decode_next().unwrap(),
+        DecodeStep::Decoded { .. }
+    ));
+    assert!(matches!(
+        pipeline.receive(&packet.datagram, &mut plaintext),
+        Err(sonimesh_app::ReceiverPipelineError::Ingress(
+            IngressError::Replay(_)
+        ))
+    ));
+    assert!(matches!(
+        pipeline.receive(&[0_u8], &mut plaintext),
+        Err(sonimesh_app::ReceiverPipelineError::Ingress(
+            IngressError::Parse(_)
+        ))
+    ));
+
+    pipeline.rotate(&secret, context(3), 0).unwrap();
+    let snapshot = counters.snapshot();
+    assert_eq!(snapshot.authenticated_packets, 2);
+    assert_eq!(snapshot.duplicate_packets, 1);
+    assert_eq!(snapshot.rejected_packets, 2);
+    assert_eq!(snapshot.plc_frames, 1);
+    assert_eq!(snapshot.pcm_overflows, 1);
+    assert_eq!(snapshot.stream_resets, 1);
 }
