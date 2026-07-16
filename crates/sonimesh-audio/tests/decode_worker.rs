@@ -108,7 +108,9 @@ fn rejects_decoder_lengths_beyond_the_pcm_capacity() {
     let mut output = [f32::NAN; 4];
     assert_eq!(
         consumer.pop_into(&mut output),
-        RealtimePcmPopOutcome::Underflow
+        RealtimePcmPopOutcome::Underflow {
+            discarded_stale_blocks: 0,
+        }
     );
     assert!(output.iter().all(|sample| sample.abs() < f32::EPSILON));
 }

@@ -87,6 +87,7 @@ fn decode_and_render(
             samples: 1,
             sequence: u64::from(sequence),
             discontinuity: false,
+            discarded_stale_blocks: 0,
         }
     );
     assert!(output[0].is_finite());

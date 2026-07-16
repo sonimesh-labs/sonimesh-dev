@@ -42,33 +42,45 @@ fn full_queue_replaces_oldest_and_marks_gap() {
             samples: 1,
             sequence: 1,
             discontinuity: true,
+            discarded_stale_blocks: 0,
         }
     );
     assert!((output[0] - 1.0).abs() < f32::EPSILON);
 }
 
 #[test]
-fn new_epoch_is_reported_as_discontinuity() {
+fn new_epoch_discards_queued_stale_blocks_before_playing_current_pcm() {
     let (mut producer, mut consumer) = realtime_pcm_queue::<1>(2).unwrap();
     producer.push(&[1.0]);
+    producer.push(&[1.5]);
+    producer.begin_epoch();
+    producer.push(&[2.0]);
     let mut output = [0.0];
     assert!(matches!(
         consumer.pop_into(&mut output),
         RealtimePcmPopOutcome::Filled {
-            discontinuity: false,
-            ..
-        }
-    ));
-
-    producer.begin_epoch();
-    producer.push(&[2.0]);
-    assert!(matches!(
-        consumer.pop_into(&mut output),
-        RealtimePcmPopOutcome::Filled {
             discontinuity: true,
+            discarded_stale_blocks: 1,
             ..
         }
     ));
+    assert!((output[0] - 2.0).abs() < f32::EPSILON);
+}
+
+#[test]
+fn stale_only_epoch_queue_emits_silence_and_reports_discards() {
+    let (mut producer, mut consumer) = realtime_pcm_queue::<1>(2).unwrap();
+    producer.push(&[1.0]);
+    producer.begin_epoch();
+    let mut output = [f32::NAN];
+
+    assert_eq!(
+        consumer.pop_into(&mut output),
+        RealtimePcmPopOutcome::Underflow {
+            discarded_stale_blocks: 1,
+        }
+    );
+    assert!(output.iter().all(|sample| sample.abs() < f32::EPSILON));
 }
 
 #[test]
@@ -103,7 +115,7 @@ fn concurrent_transfer_preserves_order_and_accounts_for_overwrite() {
                 expected = sequence + 1;
                 received_count += 1;
             }
-            RealtimePcmPopOutcome::Underflow => {
+            RealtimePcmPopOutcome::Underflow { .. } => {
                 if done.load(Ordering::Acquire) && consumer.is_empty() {
                     break;
                 }

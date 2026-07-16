@@ -1,5 +1,6 @@
 use std::fmt;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crossbeam_queue::ArrayQueue;
 
@@ -56,9 +57,14 @@ pub enum RealtimePcmPopOutcome {
         sequence: u64,
         /// True when blocks were overwritten or a new stream epoch began.
         discontinuity: bool,
+        /// Number of queued blocks discarded because their epoch was retired.
+        discarded_stale_blocks: usize,
     },
     /// Queue was empty and callback-owned output was initialized to silence.
-    Underflow,
+    Underflow {
+        /// Number of queued blocks discarded because their epoch was retired.
+        discarded_stale_blocks: usize,
+    },
 }
 
 #[derive(Debug)]
@@ -69,12 +75,17 @@ struct PcmBlock<const SAMPLES_PER_BLOCK: usize> {
     initialized: usize,
 }
 
+struct QueueState<const SAMPLES_PER_BLOCK: usize> {
+    queue: ArrayQueue<PcmBlock<SAMPLES_PER_BLOCK>>,
+    active_epoch: AtomicU64,
+}
+
 /// Decoder-domain endpoint of a bounded logical SPSC PCM queue.
 ///
 /// This endpoint is intentionally not cloneable. [`Self::push`] is lock-free and
 /// allocates no memory after [`realtime_pcm_queue`] returns.
 pub struct RealtimePcmProducer<const SAMPLES_PER_BLOCK: usize> {
-    queue: Arc<ArrayQueue<PcmBlock<SAMPLES_PER_BLOCK>>>,
+    state: Arc<QueueState<SAMPLES_PER_BLOCK>>,
     epoch: u64,
     next_sequence: u64,
 }
@@ -96,32 +107,33 @@ impl<const SAMPLES_PER_BLOCK: usize> RealtimePcmProducer<SAMPLES_PER_BLOCK> {
         };
         self.next_sequence = self.next_sequence.wrapping_add(1);
 
-        if self.queue.force_push(block).is_some() {
+        if self.state.queue.force_push(block).is_some() {
             RealtimePcmPushOutcome::ReplacedOldest
         } else {
             RealtimePcmPushOutcome::Inserted
         }
     }
 
-    /// Starts a stream-local epoch without reallocating the queue.
+    /// Starts a stream-local epoch and retires queued PCM from the previous one.
     ///
     /// The counters are continuity markers only; they are not cryptographic
     /// nonces. Wrapping is therefore defined and harmless.
     pub fn begin_epoch(&mut self) {
         self.epoch = self.epoch.wrapping_add(1);
         self.next_sequence = 0;
+        self.state.active_epoch.store(self.epoch, Ordering::Release);
     }
 
     /// Approximate occupied block count for diagnostics.
     #[must_use]
     pub fn len(&self) -> usize {
-        self.queue.len()
+        self.state.queue.len()
     }
 
     /// Returns whether no decoded block is currently queued.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.queue.is_empty()
+        self.state.queue.is_empty()
     }
 }
 
@@ -130,7 +142,7 @@ impl<const SAMPLES_PER_BLOCK: usize> RealtimePcmProducer<SAMPLES_PER_BLOCK> {
 /// This endpoint is intentionally not cloneable. [`Self::pop_into`] is lock-free,
 /// initializes the complete output slice, and allocates no memory.
 pub struct RealtimePcmConsumer<const SAMPLES_PER_BLOCK: usize> {
-    queue: Arc<ArrayQueue<PcmBlock<SAMPLES_PER_BLOCK>>>,
+    state: Arc<QueueState<SAMPLES_PER_BLOCK>>,
     expected: (u64, u64),
 }
 
@@ -138,33 +150,47 @@ impl<const SAMPLES_PER_BLOCK: usize> RealtimePcmConsumer<SAMPLES_PER_BLOCK> {
     /// Copies one block to callback-owned output or emits bounded silence.
     pub fn pop_into(&mut self, output: &mut [f32]) -> RealtimePcmPopOutcome {
         output.fill(0.0);
-        let Some(block) = self.queue.pop() else {
-            return RealtimePcmPopOutcome::Underflow;
-        };
+        let mut discarded_stale_blocks = 0;
+        for _ in 0..MAX_PCM_QUEUE_BLOCKS {
+            let Some(block) = self.state.queue.pop() else {
+                return RealtimePcmPopOutcome::Underflow {
+                    discarded_stale_blocks,
+                };
+            };
+            let active_epoch = self.state.active_epoch.load(Ordering::Acquire);
+            if block.epoch != active_epoch {
+                discarded_stale_blocks += 1;
+                continue;
+            }
 
-        let samples = block.initialized.min(output.len());
-        output[..samples].copy_from_slice(&block.samples[..samples]);
-        let actual = (block.epoch, block.sequence);
-        let discontinuity = actual != self.expected;
-        self.expected = (block.epoch, block.sequence.wrapping_add(1));
+            let samples = block.initialized.min(output.len());
+            output[..samples].copy_from_slice(&block.samples[..samples]);
+            let actual = (block.epoch, block.sequence);
+            let discontinuity = actual != self.expected;
+            self.expected = (block.epoch, block.sequence.wrapping_add(1));
 
-        RealtimePcmPopOutcome::Filled {
-            samples,
-            sequence: block.sequence,
-            discontinuity,
+            return RealtimePcmPopOutcome::Filled {
+                samples,
+                sequence: block.sequence,
+                discontinuity,
+                discarded_stale_blocks,
+            };
+        }
+        RealtimePcmPopOutcome::Underflow {
+            discarded_stale_blocks,
         }
     }
 
     /// Approximate occupied block count for low-cost diagnostics.
     #[must_use]
     pub fn len(&self) -> usize {
-        self.queue.len()
+        self.state.queue.len()
     }
 
     /// Returns whether the callback would currently underflow.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.queue.is_empty()
+        self.state.queue.is_empty()
     }
 }
 
@@ -196,15 +222,18 @@ pub fn realtime_pcm_queue<const SAMPLES_PER_BLOCK: usize>(
         return Err(RealtimeQueueConfigError::ZeroSamplesPerBlock);
     }
 
-    let queue = Arc::new(ArrayQueue::new(capacity));
+    let state = Arc::new(QueueState {
+        queue: ArrayQueue::new(capacity),
+        active_epoch: AtomicU64::new(0),
+    });
     Ok((
         RealtimePcmProducer {
-            queue: Arc::clone(&queue),
+            state: Arc::clone(&state),
             epoch: 0,
             next_sequence: 0,
         },
         RealtimePcmConsumer {
-            queue,
+            state,
             expected: (0, 0),
         },
     ))
