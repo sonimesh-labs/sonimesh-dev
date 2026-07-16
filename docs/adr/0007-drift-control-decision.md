@@ -50,10 +50,9 @@ resynchronization must not affect other streams.
 ## Validation evidence
 
 Tests must cover configuration bounds, sign convention, slew limiting,
-anti-windup, convergence after stable error, and history reset after either hard
-resynchronization direction. Deterministic simulation remains required before
-selecting gain defaults; hardware tests are still required before making drift or
-latency claims.
+anti-windup, and history reset after either hard resynchronization direction.
+Deterministic closed-loop simulation remains required before selecting gain
+defaults; hardware tests are still required before making drift or latency claims.
 
 ## Rollback plan
 
