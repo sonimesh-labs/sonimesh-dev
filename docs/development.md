@@ -34,9 +34,11 @@ renders silence while recording callback sizes. It is not part of ordinary CI:
 cargo run -p sonimesh-platform --example output_smoke --features cpal-output
 ~~~
 
-CI runs formatting, linting, and tests on Linux and Windows. These checks cover
-portable protocol/audio logic only; they do not validate Android capture,
-Windows callback timing, acoustic latency, Opus behavior, or physical WLANs.
+CI runs formatting, linting, and tests on Linux and Windows, and builds the
+capture-only Android bootstrap with Java 21, API 36, and Build Tools 34.0.0.
+The Android job proves a reproducible host build only; none of these checks
+validate Android capture, Windows callback timing, acoustic latency, Opus
+behavior, or physical WLANs.
 
 ## Dependency direction
 
