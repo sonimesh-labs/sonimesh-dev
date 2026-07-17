@@ -18,6 +18,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
@@ -187,6 +188,9 @@ class CaptureService : Service() {
     private fun readCaptureLoop(record: AudioRecord, format: CaptureFormat) {
         val buffer = ShortArray(MAX_READ_SAMPLES)
         val signalMonitor = CaptureSignalMonitor(SILENT_READ_LIMIT)
+        val evidenceThrottle = CaptureEvidencePublishThrottle(
+            CAPTURE_EVIDENCE_PUBLISH_INTERVAL_MS,
+        )
 
         try {
             while (!teardownStarted.get()) {
@@ -261,6 +265,13 @@ class CaptureService : Service() {
                     index++
                 }
                 CaptureStateStore.evidence.recordRead(read / format.channels, silent)
+                if (evidenceThrottle.shouldPublish(SystemClock.elapsedRealtime())) {
+                    mainHandler.post {
+                        if (!teardownStarted.get()) {
+                            CaptureStateStore.publishEvidence()
+                        }
+                    }
+                }
                 when (signalMonitor.observe(silent)) {
                     CaptureSignalTransition.NoCapturableAudio -> {
                         mainHandler.post {
@@ -391,6 +402,7 @@ class CaptureService : Service() {
         private const val STOP_REQUEST_CODE = 1002
         private const val SILENT_READ_LIMIT = 100
         private const val CAPTURE_POLL_INTERVAL_MS = 5L
+        private const val CAPTURE_EVIDENCE_PUBLISH_INTERVAL_MS = 500L
         private const val REQUESTED_SAMPLE_RATE_HZ = 48_000
         private const val REQUESTED_CHANNELS = 2
         private const val REQUESTED_READ_FRAMES = 960

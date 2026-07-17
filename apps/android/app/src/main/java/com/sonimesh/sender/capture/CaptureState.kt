@@ -64,10 +64,11 @@ sealed interface CaptureStatus {
 
 data class CaptureUiState(
     val status: CaptureStatus = CaptureStatus.Idle,
+    val evidence: CaptureEvidenceSnapshot = CaptureEvidenceSnapshot(),
 )
 
 data class CaptureEvidenceSnapshot(
-    val capturedFrames: Long,
-    val silentReads: Long,
-    val readErrors: Long,
+    val capturedFrames: Long = 0,
+    val silentReads: Long = 0,
+    val readErrors: Long = 0,
 )

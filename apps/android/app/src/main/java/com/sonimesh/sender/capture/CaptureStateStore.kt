@@ -39,26 +39,42 @@ object CaptureStateStore {
     val evidence = CaptureEvidence()
 
     fun publishAwaitingPermission() {
-        mutableState.value = CaptureUiState(CaptureStatus.AwaitingPermission)
+        evidence.reset()
+        publish(CaptureStatus.AwaitingPermission)
     }
 
     fun publishAwaitingProjectionConsent() {
-        mutableState.value = CaptureUiState(CaptureStatus.AwaitingProjectionConsent)
+        publish(CaptureStatus.AwaitingProjectionConsent)
     }
 
     fun publishCapturing(format: CaptureFormat) {
-        mutableState.value = CaptureUiState(CaptureStatus.Capturing(format))
+        publish(CaptureStatus.Capturing(format))
     }
 
     fun publishNoCapturableAudio(format: CaptureFormat) {
-        mutableState.value = CaptureUiState(CaptureStatus.NoCapturableAudio(format))
+        publish(CaptureStatus.NoCapturableAudio(format))
     }
 
     fun publishStopped(reason: CaptureStopReason) {
-        mutableState.value = CaptureUiState(CaptureStatus.Stopped(reason))
+        publish(CaptureStatus.Stopped(reason))
     }
 
     fun publishFailure(message: String) {
-        mutableState.value = CaptureUiState(CaptureStatus.Failed(message))
+        publish(CaptureStatus.Failed(message))
+    }
+
+    /** Publishes the latest bounded evidence only while capture remains active. */
+    fun publishEvidence() {
+        val current = mutableState.value
+        if (current.status !is CaptureStatus.Capturing
+            && current.status !is CaptureStatus.NoCapturableAudio
+        ) {
+            return
+        }
+        mutableState.value = current.copy(evidence = evidence.snapshot())
+    }
+
+    private fun publish(status: CaptureStatus) {
+        mutableState.value = CaptureUiState(status = status, evidence = evidence.snapshot())
     }
 }

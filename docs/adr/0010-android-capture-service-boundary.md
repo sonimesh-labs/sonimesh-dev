@@ -29,7 +29,8 @@ UI. The activity owns only user interaction and the platform consent launch:
   state after the request;
 - transfer the one current consent result directly to the foreground service for
   immediate setup; never persist, cache, or reuse the projection token;
-- emit no PCM, encoded frames, keys, or high-rate metering events to Compose.
+- emit no PCM, encoded frames, keys, or high-rate metering events to Compose;
+  evidence summaries are capped at two state publications per second.
 
 The foreground service is the sole lifecycle owner once a capture request has
 been accepted. It owns:

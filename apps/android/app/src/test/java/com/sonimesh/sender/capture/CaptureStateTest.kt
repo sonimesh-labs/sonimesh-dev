@@ -1,7 +1,9 @@
 package com.sonimesh.sender.capture
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
 
@@ -94,6 +96,27 @@ class CaptureStateTest {
             fail("expected an invalid silence threshold to be rejected")
         } catch (_: IllegalArgumentException) {
             // Expected: a zero threshold would publish a state without a read.
+        }
+    }
+
+    @Test
+    fun evidence_publish_throttle_allows_at_most_one_snapshot_per_interval() {
+        val throttle = CaptureEvidencePublishThrottle(minimumIntervalMillis = 500)
+
+        assertTrue(throttle.shouldPublish(nowMillis = 0))
+        assertFalse(throttle.shouldPublish(nowMillis = 499))
+        assertTrue(throttle.shouldPublish(nowMillis = 500))
+        assertFalse(throttle.shouldPublish(nowMillis = 999))
+        assertTrue(throttle.shouldPublish(nowMillis = 1_000))
+    }
+
+    @Test
+    fun evidence_publish_throttle_rejects_a_non_positive_interval() {
+        try {
+            CaptureEvidencePublishThrottle(minimumIntervalMillis = 0)
+            fail("expected an invalid evidence publication interval to be rejected")
+        } catch (_: IllegalArgumentException) {
+            // Expected: a zero interval would allow per-read UI publication.
         }
     }
 }

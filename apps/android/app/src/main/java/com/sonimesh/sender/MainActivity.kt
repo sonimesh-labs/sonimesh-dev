@@ -24,8 +24,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.sonimesh.sender.capture.CaptureService
+import com.sonimesh.sender.capture.CaptureEvidenceSnapshot
 import com.sonimesh.sender.capture.CaptureStateStore
 import com.sonimesh.sender.capture.CaptureStatus
+import com.sonimesh.sender.capture.CaptureUiState
 
 class MainActivity : ComponentActivity() {
     private val audioPermissionLauncher =
@@ -72,7 +74,7 @@ class MainActivity : ComponentActivity() {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     CaptureScreen(
-                        status = state.status,
+                        state = state,
                         onStart = ::requestCapture,
                         onStop = { sendStopCommand() },
                     )
@@ -116,7 +118,7 @@ class MainActivity : ComponentActivity() {
 
 @androidx.compose.runtime.Composable
 private fun CaptureScreen(
-    status: CaptureStatus,
+    state: CaptureUiState,
     onStart: () -> Unit,
     onStop: () -> Unit,
 ) {
@@ -131,8 +133,11 @@ private fun CaptureScreen(
             "Playback capture can be silent or policy-limited. This prototype reports observations without identifying a source-specific cause.",
             style = MaterialTheme.typography.bodyMedium,
         )
-        Text(status.description(), style = MaterialTheme.typography.bodyLarge)
-        if (status.isActive()) {
+        Text(state.status.description(), style = MaterialTheme.typography.bodyLarge)
+        if (state.evidence.hasObservations()) {
+            Text(state.evidence.description(), style = MaterialTheme.typography.bodyMedium)
+        }
+        if (state.status.isActive()) {
             Button(onClick = onStop) { Text("Stop capture") }
         } else {
             Button(onClick = onStart) { Text("Start capture") }
@@ -154,3 +159,9 @@ private fun CaptureStatus.description(): String = when (this) {
     is CaptureStatus.Stopped -> "Capture stopped: ${reason.displayName}."
     is CaptureStatus.Failed -> "Capture failed: $message"
 }
+
+private fun CaptureEvidenceSnapshot.description(): String =
+    "Observed ${capturedFrames} frames, ${silentReads} silent reads, ${readErrors} read errors."
+
+private fun CaptureEvidenceSnapshot.hasObservations(): Boolean =
+    capturedFrames != 0L || silentReads != 0L || readErrors != 0L
