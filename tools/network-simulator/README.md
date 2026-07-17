@@ -12,7 +12,7 @@ a physical latency claim.
   duplication, reorder delay, finite-bandwidth serialization, and capacity drops
   from one reproducible seed. Senders provide payload byte counts explicitly.
 - `ScenarioConfig` drives sender and playout deadlines independently with a
-  protocol-bounded complete media datagram size for bandwidth scenarios.
+  protocol-bounded complete media datagram size and negotiated 10/20 ms frames.
 - `DriftScenarioConfig` closes an integerized PCM-occupancy loop around the
   bounded ppm controller; it is not an ASRC or device-clock emulator.
 - the media-pipeline integration test crosses protocol parsing, ChaCha20-

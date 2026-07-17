@@ -99,7 +99,8 @@ The buildable harness in `tools/network-simulator` currently provides a virtual
 monotonic clock, bounded in-flight event queue, seeded random and burst loss,
 jitter, duplication, reorder delay, byte-counted bandwidth serialization, and
 queue-capacity pressure. Its audio scenario accepts an explicit complete media
-datagram size bounded by the protocol limit. A cross-crate
+datagram size bounded by the protocol limit and uses the negotiated 10/20 ms
+frame timing model. A cross-crate
 test exercises bounded packet parsing, reviewed AEAD authentication and replay
 rejection, jitter/PLC decisions, controlled jitter resynchronization, the
 non-realtime decode worker, and realtime PCM transfer. An independent integerized

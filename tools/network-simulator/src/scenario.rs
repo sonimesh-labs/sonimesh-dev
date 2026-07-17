@@ -7,13 +7,14 @@ use crate::{ClockError, NetworkProfile, NetworkStats, ProfileError, VirtualClock
 
 const MAX_SCENARIO_FRAMES: u32 = 100_000;
 const DEFAULT_MEDIA_DATAGRAM_BYTES: u16 = 256;
+const SIMULATED_SAMPLE_RATE_HZ: u64 = 48_000;
 
 /// One deterministic encoded-audio simulation configuration.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ScenarioConfig {
     /// Number of sender frames.
     pub frames: u32,
-    /// Frame duration used by sender and receiver scheduling.
+    /// Negotiated 10 ms or 20 ms frame duration used by sender and receiver scheduling.
     pub frame_duration_ms: u64,
     /// Fixed initial playout delay.
     pub target_buffer_ms: u64,
@@ -59,7 +60,7 @@ pub struct SimulationReport {
 pub enum ScenarioError {
     /// Frame count must be between one and the scenario hard bound.
     InvalidFrameCount,
-    /// Frame duration must be between 1 and 120 milliseconds.
+    /// Frame duration must be one negotiated version-one value: 10 ms or 20 ms.
     InvalidFrameDuration,
     /// Initial playout target must be no more than one second.
     InvalidTargetBuffer,
@@ -119,8 +120,12 @@ pub fn simulate(config: ScenarioConfig) -> Result<SimulationReport, ScenarioErro
 
         for delivery in network.drain_ready(now_ms) {
             let sequence = delivery.payload;
-            let frame = EncodedFrame::new(sequence, u64::from(sequence) * 960, &[0])
-                .map_err(|_| ScenarioError::InternalCapacityInvariant)?;
+            let frame = EncodedFrame::new(
+                sequence,
+                sample_timestamp(sequence, config.frame_duration_ms),
+                &[0],
+            )
+            .map_err(|_| ScenarioError::InternalCapacityInvariant)?;
             match jitter.insert(frame) {
                 InsertOutcome::Inserted => {}
                 InsertOutcome::Reordered => report.reordered_arrivals += 1,
@@ -155,7 +160,7 @@ fn validate(config: ScenarioConfig) -> Result<(), ScenarioError> {
     if config.frames == 0 || config.frames > MAX_SCENARIO_FRAMES {
         return Err(ScenarioError::InvalidFrameCount);
     }
-    if !(1..=120).contains(&config.frame_duration_ms) {
+    if !matches!(config.frame_duration_ms, 10 | 20) {
         return Err(ScenarioError::InvalidFrameDuration);
     }
     if config.target_buffer_ms > 1_000 {
@@ -167,6 +172,11 @@ fn validate(config: ScenarioConfig) -> Result<(), ScenarioError> {
         return Err(ScenarioError::InvalidMediaDatagramBytes);
     }
     config.network.validate().map_err(ScenarioError::Profile)
+}
+
+fn sample_timestamp(sequence: u32, frame_duration_ms: u64) -> u64 {
+    let samples_per_frame = (SIMULATED_SAMPLE_RATE_HZ / 1_000) * frame_duration_ms;
+    u64::from(sequence).saturating_mul(samples_per_frame)
 }
 
 #[cfg(test)]
@@ -250,5 +260,21 @@ mod tests {
             simulate(too_large),
             Err(ScenarioError::InvalidMediaDatagramBytes)
         );
+    }
+
+    #[test]
+    fn negotiated_frame_duration_controls_48khz_sample_timestamps() {
+        assert_eq!(sample_timestamp(3, 10), 1_440);
+        assert_eq!(sample_timestamp(3, 20), 2_880);
+    }
+
+    #[test]
+    fn rejects_unnegotiated_frame_duration() {
+        let config = ScenarioConfig {
+            frame_duration_ms: 15,
+            ..ScenarioConfig::default()
+        };
+
+        assert_eq!(simulate(config), Err(ScenarioError::InvalidFrameDuration));
     }
 }
