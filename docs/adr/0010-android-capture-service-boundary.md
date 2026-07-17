@@ -49,8 +49,11 @@ been accepted. It owns:
 same idempotent teardown path. That path stops capture admission, releases
 AudioRecord and projection resources, retires PCM/encoded buffers, destroys
 session credentials, closes transport resources, and publishes a terminal
-state. Process recreation, a revoked projection, or a stale control session
-fails closed and requires a fresh consent result and fresh session material.
+state. A single completion claimant waits for the bounded reader to exit before
+releasing resources, so concurrent stop and reader-error paths cannot retire the
+same capture resources twice. Process recreation, a revoked projection, or a
+stale control session fails closed and requires a fresh consent result and fresh
+session material.
 
 Any future JNI/NDK component is limited to the codec and bounded buffer boundary
 defined by ADR 0009. Kotlin remains responsible for Android permission,

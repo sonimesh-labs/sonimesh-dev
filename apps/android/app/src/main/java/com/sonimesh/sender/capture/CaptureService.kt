@@ -23,12 +23,10 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.sonimesh.sender.R
-import java.util.concurrent.atomic.AtomicBoolean
 
 class CaptureService : Service() {
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val teardownStarted = AtomicBoolean(false)
-    private val readerExited = AtomicBoolean(true)
+    private val teardownGate = CaptureTeardownGate()
 
     @Volatile
     private var audioRecord: AudioRecord? = null
@@ -54,7 +52,7 @@ class CaptureService : Service() {
             teardown(TerminalOutcome.Stopped(CaptureStopReason.UserRequested))
             return START_NOT_STICKY
         }
-        if (teardownStarted.get() || audioRecord != null || mediaProjection != null) {
+        if (teardownGate.isTeardownStarted() || audioRecord != null || mediaProjection != null) {
             return START_NOT_STICKY
         }
 
@@ -182,7 +180,7 @@ class CaptureService : Service() {
     }
 
     private fun startCaptureThread(record: AudioRecord, format: CaptureFormat) {
-        readerExited.set(false)
+        teardownGate.markReaderRunning()
         val thread = Thread({ readCaptureLoop(record, format) }, "sonimesh-capture")
         captureThread = thread
         thread.start()
@@ -196,12 +194,12 @@ class CaptureService : Service() {
         )
 
         try {
-            while (!teardownStarted.get()) {
+            while (!teardownGate.isTeardownStarted()) {
                 if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
                     != PackageManager.PERMISSION_GRANTED
                 ) {
                     mainHandler.post {
-                        if (!teardownStarted.get()) {
+                        if (!teardownGate.isTeardownStarted()) {
                             teardown(TerminalOutcome.Failed("Microphone permission was revoked"))
                         }
                     }
@@ -212,18 +210,18 @@ class CaptureService : Service() {
                     // Non-blocking reads keep teardown independent of platform read wake-up behavior.
                     record.read(buffer, 0, format.readSamples, AudioRecord.READ_NON_BLOCKING)
                 } catch (error: IllegalStateException) {
-                    if (!teardownStarted.get()) {
+                    if (!teardownGate.isTeardownStarted()) {
                         mainHandler.post {
-                            if (!teardownStarted.get()) {
+                            if (!teardownGate.isTeardownStarted()) {
                                 teardown(TerminalOutcome.Failed("AudioRecord read failed"))
                             }
                         }
                     }
                     return
                 } catch (error: SecurityException) {
-                    if (!teardownStarted.get()) {
+                    if (!teardownGate.isTeardownStarted()) {
                         mainHandler.post {
-                            if (!teardownStarted.get()) {
+                            if (!teardownGate.isTeardownStarted()) {
                                 teardown(TerminalOutcome.Failed("Microphone permission was revoked"))
                             }
                         }
@@ -234,9 +232,9 @@ class CaptureService : Service() {
                     try {
                         Thread.sleep(CAPTURE_POLL_INTERVAL_MS)
                     } catch (error: InterruptedException) {
-                        if (!teardownStarted.get()) {
+                        if (!teardownGate.isTeardownStarted()) {
                             mainHandler.post {
-                                if (!teardownStarted.get()) {
+                                if (!teardownGate.isTeardownStarted()) {
                                     teardown(TerminalOutcome.Failed("AudioRecord reader was interrupted"))
                                 }
                             }
@@ -248,13 +246,13 @@ class CaptureService : Service() {
                 if (read < 0) {
                     CaptureStateStore.evidence.recordReadError()
                     mainHandler.post {
-                        if (!teardownStarted.get()) {
+                        if (!teardownGate.isTeardownStarted()) {
                             teardown(TerminalOutcome.Failed("AudioRecord read failed"))
                         }
                     }
                     return
                 }
-                if (teardownStarted.get()) {
+                if (teardownGate.isTeardownStarted()) {
                     return
                 }
 
@@ -270,7 +268,7 @@ class CaptureService : Service() {
                 CaptureStateStore.evidence.recordRead(read / format.channels, silent)
                 if (evidenceThrottle.shouldPublish(SystemClock.elapsedRealtime())) {
                     mainHandler.post {
-                        if (!teardownStarted.get()) {
+                        if (!teardownGate.isTeardownStarted()) {
                             CaptureStateStore.publishEvidence()
                         }
                     }
@@ -278,14 +276,14 @@ class CaptureService : Service() {
                 when (signalMonitor.observe(silent)) {
                     CaptureSignalTransition.NoCapturableAudio -> {
                         mainHandler.post {
-                            if (!teardownStarted.get()) {
+                            if (!teardownGate.isTeardownStarted()) {
                                 CaptureStateStore.publishNoCapturableAudio(format)
                             }
                         }
                     }
                     CaptureSignalTransition.SignalDetected -> {
                         mainHandler.post {
-                            if (!teardownStarted.get()) {
+                            if (!teardownGate.isTeardownStarted()) {
                                 CaptureStateStore.publishCapturing(format)
                             }
                         }
@@ -294,7 +292,7 @@ class CaptureService : Service() {
                 }
             }
         } finally {
-            readerExited.set(true)
+            teardownGate.markReaderExited()
             mainHandler.post { finishTeardownIfReady() }
         }
     }
@@ -340,7 +338,7 @@ class CaptureService : Service() {
     }
 
     private fun teardown(outcome: TerminalOutcome) {
-        if (!teardownStarted.compareAndSet(false, true)) {
+        if (!teardownGate.beginTeardown()) {
             return
         }
         pendingOutcome = outcome
@@ -351,7 +349,7 @@ class CaptureService : Service() {
     }
 
     private fun finishTeardownIfReady() {
-        if (!teardownStarted.get() || !readerExited.get()) {
+        if (!teardownGate.claimFinish()) {
             return
         }
 
