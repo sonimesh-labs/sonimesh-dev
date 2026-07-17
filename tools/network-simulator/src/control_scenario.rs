@@ -17,6 +17,8 @@ pub struct ControlSimulationReport {
     pub stale_completion_rejected: bool,
     /// The receiver required a fresh hello before accepting a replacement start.
     pub fresh_hello_required: bool,
+    /// A reordered old start arriving after reconnect was rejected.
+    pub delayed_command_rejected: bool,
 }
 
 /// Failure while building the fixed deterministic control simulation.
@@ -65,11 +67,24 @@ pub fn simulate_control_reconnect() -> Result<ControlSimulationReport, ControlSc
         .acknowledge_platform_event(SessionEvent::Reconnected)
         .map_err(|_| ControlScenarioError::Control)?;
     let stale_completion_rejected = coordinator.complete_start(token, request).is_err();
+    let mut delayed_profile = NetworkProfile::stable(0xC011_2027);
+    delayed_profile.base_delay_ms = 15;
+    delayed_profile.jitter_ms = 0;
+    delayed_profile.reorder_percent = 100;
+    delayed_profile.reorder_delay_ms = 30;
+    let mut delayed_network =
+        VirtualNetwork::new(delayed_profile).map_err(|_| ControlScenarioError::Control)?;
+    delayed_network.send(0, start());
+    let delayed = delayed_network.drain_ready(45);
+    let delayed_command_rejected = delayed
+        .first()
+        .is_some_and(|delivery| coordinator.accept(&delivery.payload).is_err());
     let restarted_start = deliver(&mut network, start())?;
     let fresh_hello_required = coordinator.accept(&restarted_start).is_err();
     Ok(ControlSimulationReport {
         stale_completion_rejected,
         fresh_hello_required,
+        delayed_command_rejected,
     })
 }
 
@@ -134,6 +149,10 @@ mod tests {
     #[test]
     fn reconnect_retires_old_control_work() {
         let report = simulate_control_reconnect().unwrap();
-        assert!(report.stale_completion_rejected && report.fresh_hello_required);
+        assert!(
+            report.stale_completion_rejected
+                && report.fresh_hello_required
+                && report.delayed_command_rejected
+        );
     }
 }
