@@ -1,10 +1,16 @@
 # Android sender
 
-This directory is reserved for the Kotlin Android sender from roadmap phase 0A.
-The application project is intentionally not generated yet: the service and
-native ownership boundary is recorded in [ADR 0010](../../docs/adr/0010-android-capture-service-boundary.md),
-but Android Gradle tooling and capture behavior have not been validated on the
-required device matrix.
+This directory contains the capture-only Kotlin/Compose bootstrap for roadmap
+phase 0A. It is a feasibility prototype, not a sender release: it requests
+MediaProjection consent, starts a media-projection foreground service, creates a
+bounded `AudioRecord`, and discards PCM after recording low-rate evidence
+counters. It does not encode, pair, protect, transmit, or persist audio.
+
+The service and native ownership boundary is recorded in [ADR 0010](../../docs/adr/0010-android-capture-service-boundary.md).
+The project builds against the checked-in Gradle wrapper, but no physical device
+matrix or capture behavior claim is implied until the runs in the
+[Android capture matrix](../../docs/measurements/android-capture-matrix.md)
+are recorded.
 
 The first implementation must keep these module boundaries:
 
@@ -15,4 +21,7 @@ The first implementation must keep these module boundaries:
 - platform evidence: actual device format, buffer size, lifecycle, power, and
   silence observations recorded without claiming a source-specific cause.
 
-See [the MVP baseline](../../docs/mvp-baseline.md) for the bootstrap gate.
+The prototype deliberately keeps the consent `Intent` in memory and routes both
+the notification stop action and `MediaProjection.Callback.onStop()` through
+one idempotent teardown path. See [the MVP baseline](../../docs/mvp-baseline.md)
+for the remaining bootstrap gates.

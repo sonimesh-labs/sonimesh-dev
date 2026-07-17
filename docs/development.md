@@ -7,8 +7,9 @@
 - Node.js 22 or newer when the desktop control UI starts;
 - Windows 11 and documented audio hardware for output validation.
 
-The current workspace is dependency-light and builds without an Android SDK,
-Node package installation, audio device, or network service.
+The portable Rust workspace builds without an Android SDK, audio device, or
+network service. The capture-only Android prototype requires the checked-in
+Gradle wrapper, Java 21, Android API 35, and Android Build Tools 34.0.0.
 
 ## Core checks
 
@@ -47,7 +48,7 @@ sonimesh-platform       -> standard library only
 sonimesh-diagnostics    -> standard library only
 sonimesh-protocol       -> Prost-generated bounded control schemas
 desktop UI              -> Vue/Vite control preview; Tauri bridge remains gated
-Android                 -> not bootstrapped until its validation ADR gate
+Android                 -> capture-only phase 0A prototype; sender transport remains gated
 ~~~
 
 Shared crates must not depend on Tauri, Vue, Compose, Android APIs, or a web

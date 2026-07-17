@@ -15,8 +15,10 @@ would make permission and teardown behavior difficult to verify.
 
 The architecture requires the sender to own MediaProjection, AudioRecord,
 fixed PCM buffers, encoding, packet protection, socket I/O, and reconnect
-behavior outside its UI. No Android SDK, Gradle project, MediaProjection run, or
-native Opus build has yet been validated in this repository.
+behavior outside its UI. The repository now contains a capture-only Kotlin/
+Compose bootstrap that is build-validated with the checked-in Gradle wrapper and
+local SDK; no physical-device capture run or native Opus build has been
+validated.
 
 ## Decision
 
