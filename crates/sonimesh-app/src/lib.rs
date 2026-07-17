@@ -7,6 +7,7 @@ mod pairing_record;
 mod pcm_render_source;
 mod receiver_pipeline;
 mod session;
+mod udp_receiver_pipeline;
 
 pub use control_stream::{
     ControlOperationToken, ControlStreamAction, ControlStreamCoordinator, ControlStreamError,
@@ -21,3 +22,6 @@ pub use pairing_record::{
 pub use pcm_render_source::PcmRenderSource;
 pub use receiver_pipeline::{ReceiverPipelineError, ReceiverStreamPipeline};
 pub use session::{SessionEvent, SessionPhase, SessionState, SessionTransitionError};
+pub use udp_receiver_pipeline::{
+    UdpPollOutcome, UdpReceiverError, UdpReceiverPipeline, UdpReceiverSetupError,
+};

@@ -66,6 +66,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
 - a non-blocking fixed-buffer UDP media receiver that rejects datagrams above
   the protocol limit before parser ingress; authentication and address policy
   remain separate boundaries.
+- an application-domain UDP receiver pipeline that feeds one socket datagram
+  through protected ingress, bounded jitter admission, and non-realtime decode;
+  control-session and output lifecycle wiring remain separate.
 - a buildable Vue/Vite receiver-control preview with a single low-rate bridge
   boundary, session controls, output selection, pairing-invitation state, and
   diagnostics presentation; it uses in-memory preview data and has no Tauri,
@@ -106,7 +109,7 @@ jitter, and output-backend ADRs using measured 10/20 ms and device results.
   provisioning; AEAD/HKDF media protection and bounded epoch rotation exist only
   after a caller supplies an authenticated control-session secret;
 - control sockets, discovery, and address migration; the bounded UDP media
-  receiver exists, but it is not yet wired to a complete runtime loop.
+  receiver is wired only to the per-stream pipeline, not to session lifecycle.
 - direct-WASAPI comparison adapter and backend selection evidence;
 - Tauri integration, signing, packaging, and firewall integration;
 - a concrete drift ASRC, nominal rate conversion, acoustic latency, and soak
