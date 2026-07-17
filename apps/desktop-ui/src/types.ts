@@ -17,6 +17,7 @@ export interface StreamMetrics {
   authenticatedPackets: number
   rejectedPackets: number
   reorderedPackets: number
+  jitterResyncDroppedFrames: number
   plcFrames: number
   decodeErrors: number
   pcmUnderflows: number

@@ -248,7 +248,10 @@ where
             InsertOutcome::Duplicate => self.counters.duplicate(),
             InsertOutcome::Late => self.counters.late(),
             InsertOutcome::Reordered => self.counters.reordered(),
-            InsertOutcome::Resynchronized { .. } => self.counters.stream_reset(),
+            InsertOutcome::Resynchronized { dropped_frames } => {
+                self.counters.jitter_resync_dropped_frames(dropped_frames);
+                self.counters.stream_reset();
+            }
             InsertOutcome::SequenceExhausted => self.counters.rejected(),
             InsertOutcome::Inserted | InsertOutcome::Disabled => {}
         }

@@ -8,6 +8,7 @@ pub struct StreamCounters {
     rejected_packets: AtomicU64,
     late_packets: AtomicU64,
     reordered_packets: AtomicU64,
+    jitter_resync_dropped_frames: AtomicU64,
     plc_frames: AtomicU64,
     decode_errors: AtomicU64,
     pcm_underflows: AtomicU64,
@@ -46,6 +47,13 @@ impl StreamCounters {
     /// Records an accepted reordered packet.
     pub fn reordered(&self) {
         self.reordered_packets.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Records encoded frames discarded by one controlled jitter resynchronization.
+    pub fn jitter_resync_dropped_frames(&self, frames: usize) {
+        let frames = u64::try_from(frames).unwrap_or(u64::MAX);
+        self.jitter_resync_dropped_frames
+            .fetch_add(frames, Ordering::Relaxed);
     }
 
     /// Records one decoder-side packet-loss-concealment frame.
@@ -117,6 +125,7 @@ impl StreamCounters {
             rejected_packets: self.rejected_packets.load(Ordering::Relaxed),
             late_packets: self.late_packets.load(Ordering::Relaxed),
             reordered_packets: self.reordered_packets.load(Ordering::Relaxed),
+            jitter_resync_dropped_frames: self.jitter_resync_dropped_frames.load(Ordering::Relaxed),
             plc_frames: self.plc_frames.load(Ordering::Relaxed),
             decode_errors: self.decode_errors.load(Ordering::Relaxed),
             pcm_underflows: self.pcm_underflows.load(Ordering::Relaxed),
@@ -148,6 +157,8 @@ pub struct StreamMetricsSnapshot {
     pub late_packets: u64,
     /// Accepted out-of-order packets.
     pub reordered_packets: u64,
+    /// Encoded jitter frames discarded by controlled resynchronization.
+    pub jitter_resync_dropped_frames: u64,
     /// Decoder-side packet-loss-concealment frames.
     pub plc_frames: u64,
     /// Stream-local decoder or bounded decoder-output failures.
@@ -212,6 +223,7 @@ mod tests {
         let counters = StreamCounters::default();
         counters.authenticated();
         counters.rejected();
+        counters.jitter_resync_dropped_frames(3);
         counters.plc_frame();
         counters.decode_error();
         counters.pcm_underflow();
@@ -225,6 +237,7 @@ mod tests {
         let snapshot = counters.snapshot();
         assert_eq!(snapshot.authenticated_packets, 1);
         assert_eq!(snapshot.rejected_packets, 1);
+        assert_eq!(snapshot.jitter_resync_dropped_frames, 3);
         assert_eq!(snapshot.plc_frames, 1);
         assert_eq!(snapshot.decode_errors, 1);
         assert_eq!(snapshot.pcm_underflows, 1);

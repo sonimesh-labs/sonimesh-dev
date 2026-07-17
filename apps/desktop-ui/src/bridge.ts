@@ -24,6 +24,7 @@ class PreviewDesktopBridge implements DesktopBridge {
       authenticatedPackets: 12_844,
       rejectedPackets: 3,
       reorderedPackets: 11,
+      jitterResyncDroppedFrames: 4,
       plcFrames: 7,
       decodeErrors: 1,
       pcmUnderflows: 0,

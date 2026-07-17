@@ -423,6 +423,7 @@ fn jitter_resynchronization_retires_old_pcm_but_keeps_the_new_packet() {
         }
     ));
     assert!((output[0] - 3.0).abs() < f32::EPSILON);
+    assert_eq!(counters.snapshot().jitter_resync_dropped_frames, 1);
     assert_eq!(counters.snapshot().stream_resets, 1);
 }
 
