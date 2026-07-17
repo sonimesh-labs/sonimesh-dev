@@ -13,25 +13,28 @@ export interface PairingStatus {
   expiresInSeconds: number | null
 }
 
+/** Unsigned cumulative Rust counter encoded without JavaScript number loss. */
+export type MetricCounter = string
+
 export interface StreamMetrics {
-  authenticatedPackets: number
-  duplicatePackets: number
-  rejectedPackets: number
-  latePackets: number
-  reorderedPackets: number
-  jitterResyncDroppedFrames: number
-  plcFrames: number
-  decodeErrors: number
-  pcmUnderflows: number
-  pcmOverflows: number
-  pcmDiscontinuities: number
+  authenticatedPackets: MetricCounter
+  duplicatePackets: MetricCounter
+  rejectedPackets: MetricCounter
+  latePackets: MetricCounter
+  reorderedPackets: MetricCounter
+  jitterResyncDroppedFrames: MetricCounter
+  plcFrames: MetricCounter
+  decodeErrors: MetricCounter
+  pcmUnderflows: MetricCounter
+  pcmOverflows: MetricCounter
+  pcmDiscontinuities: MetricCounter
   queuedPcmBlocks: number
   queuedPcmHighWaterBlocks: number
-  streamResets: number
+  streamResets: MetricCounter
   nominalInputSampleRateHz: number
   nominalOutputSampleRateHz: number
   driftAdjustmentPpm: number
-  driftHardResyncs: number
+  driftHardResyncs: MetricCounter
   currentJitterMs: number
   playoutDelayMs: number
 }
