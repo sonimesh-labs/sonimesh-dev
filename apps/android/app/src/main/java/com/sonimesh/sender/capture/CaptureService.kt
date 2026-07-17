@@ -40,7 +40,6 @@ class CaptureService : Service() {
     private var captureThread: Thread? = null
 
     private var projectionCallback: MediaProjection.Callback? = null
-    private var activeFormat: CaptureFormat? = null
 
     @Volatile
     private var pendingOutcome: TerminalOutcome? = null
@@ -86,6 +85,7 @@ class CaptureService : Service() {
     }
 
     private fun startCapture(resultCode: Int, resultData: Intent) {
+        var candidateRecord: AudioRecord? = null
         try {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
                 != PackageManager.PERMISSION_GRANTED
@@ -104,15 +104,14 @@ class CaptureService : Service() {
             projectionCallback = callback
             projection.registerCallback(callback, mainHandler)
 
-            val record = createAudioRecord(projection)
+            val record = createAudioRecord(projection).also { candidateRecord = it }
             if (record.state != AudioRecord.STATE_INITIALIZED) {
-                record.release()
                 throw CaptureSetupException("AudioRecord did not initialize")
             }
 
             val format = observedFormat(record)
             audioRecord = record
-            activeFormat = format
+            candidateRecord = null
             CaptureStateStore.evidence.reset()
             noSignalPublished.set(false)
 
@@ -127,6 +126,8 @@ class CaptureService : Service() {
             teardown(TerminalOutcome.Failed("Capture could not start"))
         } catch (error: CaptureSetupException) {
             teardown(TerminalOutcome.Failed(error.message ?: "Capture setup failed"))
+        } finally {
+            candidateRecord?.let { record -> runCatching { record.release() } }
         }
     }
 
@@ -203,7 +204,8 @@ class CaptureService : Service() {
                 }
 
                 val read = try {
-                    record.read(buffer, 0, format.readSamples, AudioRecord.READ_BLOCKING)
+                    // Non-blocking reads keep teardown independent of platform read wake-up behavior.
+                    record.read(buffer, 0, format.readSamples, AudioRecord.READ_NON_BLOCKING)
                 } catch (error: IllegalStateException) {
                     if (!teardownStarted.get()) {
                         mainHandler.post {
@@ -223,7 +225,22 @@ class CaptureService : Service() {
                     }
                     return
                 }
-                if (read <= 0) {
+                if (read == 0) {
+                    try {
+                        Thread.sleep(CAPTURE_POLL_INTERVAL_MS)
+                    } catch (error: InterruptedException) {
+                        if (!teardownStarted.get()) {
+                            mainHandler.post {
+                                if (!teardownStarted.get()) {
+                                    teardown(TerminalOutcome.Failed("AudioRecord reader was interrupted"))
+                                }
+                            }
+                        }
+                        return
+                    }
+                    continue
+                }
+                if (read < 0) {
                     CaptureStateStore.evidence.recordReadError()
                     mainHandler.post {
                         if (!teardownStarted.get()) {
@@ -344,7 +361,6 @@ class CaptureService : Service() {
         }
         mediaProjection = null
         projectionCallback = null
-        activeFormat = null
         pendingOutcome = null
 
         when (outcome) {
@@ -380,15 +396,10 @@ class CaptureService : Service() {
         private const val NOTIFICATION_ID = 1001
         private const val STOP_REQUEST_CODE = 1002
         private const val SILENT_READ_LIMIT = 100
+        private const val CAPTURE_POLL_INTERVAL_MS = 5L
         private const val REQUESTED_SAMPLE_RATE_HZ = 48_000
         private const val REQUESTED_CHANNELS = 2
         private const val REQUESTED_READ_FRAMES = 960
         private const val REQUESTED_READ_SAMPLES = REQUESTED_READ_FRAMES * REQUESTED_CHANNELS
-        private val CAPTURE_FORMAT = CaptureFormat(
-            sampleRateHz = REQUESTED_SAMPLE_RATE_HZ,
-            channels = REQUESTED_CHANNELS,
-            bufferSizeBytes = 0,
-            readSamples = REQUESTED_READ_SAMPLES,
-        )
     }
 }
