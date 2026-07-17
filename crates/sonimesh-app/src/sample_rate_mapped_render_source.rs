@@ -123,10 +123,21 @@ impl DriftAdjustmentHandle {
         self.ppm.load(Ordering::Acquire)
     }
 
-    fn publish_nominal_sample_rates(&self, input_sample_rate_hz: u32, output_sample_rate_hz: u32) {
+    pub(crate) fn publish_nominal_sample_rates(
+        &self,
+        input_sample_rate_hz: u32,
+        output_sample_rate_hz: u32,
+    ) {
         if let Some(metrics) = &self.metrics {
             metrics.set_nominal_sample_rates(input_sample_rate_hz, output_sample_rate_hz);
             metrics.set_drift_adjustment_ppm(self.current_ppm());
+        }
+    }
+
+    pub(crate) fn without_metrics(&self) -> Self {
+        Self {
+            ppm: Arc::clone(&self.ppm),
+            metrics: None,
         }
     }
 }

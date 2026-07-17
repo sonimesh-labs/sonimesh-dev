@@ -1,0 +1,192 @@
+use core::fmt;
+
+use sonimesh_audio::FrameDecoder;
+use sonimesh_platform::{AudioOutput, OutputError, OutputHealth};
+
+use crate::{
+    OutputSelection, ReceiverPcmEndpointError, ReceiverPcmEndpointFactory, ReceiverStreamPipeline,
+};
+
+/// Control-domain owner that recreates a receiver's paired PCM endpoint.
+///
+/// A platform callback source and the decoder-side producer are created as one
+/// endpoint. The producer is installed into the receiver pipeline only after
+/// the platform accepts its matching source.
+pub struct ReceiverOutputController<O, const PCM_SAMPLES_PER_BLOCK: usize> {
+    output: O,
+    endpoint_factory: ReceiverPcmEndpointFactory<PCM_SAMPLES_PER_BLOCK>,
+    selection: Option<OutputSelection>,
+    stream_active: bool,
+    fault_reported: bool,
+}
+
+impl<O, const PCM_SAMPLES_PER_BLOCK: usize> ReceiverOutputController<O, PCM_SAMPLES_PER_BLOCK>
+where
+    O: AudioOutput,
+{
+    /// Creates a stopped receiver output controller.
+    #[must_use]
+    pub const fn new(
+        output: O,
+        endpoint_factory: ReceiverPcmEndpointFactory<PCM_SAMPLES_PER_BLOCK>,
+    ) -> Self {
+        Self {
+            output,
+            endpoint_factory,
+            selection: None,
+            stream_active: false,
+            fault_reported: false,
+        }
+    }
+
+    /// Starts a platform output and installs its paired producer on success.
+    ///
+    /// # Errors
+    ///
+    /// Returns before changing the receiver pipeline when endpoint construction
+    /// or platform start fails.
+    pub fn start<D, const JITTER_CAPACITY: usize, const MAX_ENCODED_BYTES: usize>(
+        &mut self,
+        selection: OutputSelection,
+        pipeline: &mut ReceiverStreamPipeline<
+            D,
+            JITTER_CAPACITY,
+            MAX_ENCODED_BYTES,
+            PCM_SAMPLES_PER_BLOCK,
+        >,
+    ) -> Result<(), ReceiverOutputLifecycleError>
+    where
+        D: FrameDecoder,
+    {
+        self.install(&selection, pipeline)?;
+        self.selection = Some(selection);
+        self.stream_active = true;
+        self.fault_reported = false;
+        Ok(())
+    }
+
+    /// Stops a failed backend and returns its health once.
+    #[must_use]
+    pub fn monitor(&mut self) -> Option<OutputHealth> {
+        if !self.stream_active || self.fault_reported {
+            return None;
+        }
+        let health = self.output.health();
+        if health == OutputHealth::Healthy {
+            return None;
+        }
+
+        self.output.stop();
+        self.stream_active = false;
+        self.fault_reported = true;
+        Some(health)
+    }
+
+    /// Recreates the last selected output with a fresh paired PCM endpoint.
+    ///
+    /// # Errors
+    ///
+    /// Returns without changing the receiver pipeline when endpoint construction
+    /// or platform start fails, so a later retry can reuse its existing producer.
+    pub fn recover<D, const JITTER_CAPACITY: usize, const MAX_ENCODED_BYTES: usize>(
+        &mut self,
+        pipeline: &mut ReceiverStreamPipeline<
+            D,
+            JITTER_CAPACITY,
+            MAX_ENCODED_BYTES,
+            PCM_SAMPLES_PER_BLOCK,
+        >,
+    ) -> Result<(), ReceiverOutputLifecycleError>
+    where
+        D: FrameDecoder,
+    {
+        let selection = self
+            .selection
+            .clone()
+            .ok_or(ReceiverOutputLifecycleError::MissingSelection)?;
+        self.install(&selection, pipeline)?;
+        self.stream_active = true;
+        self.fault_reported = false;
+        Ok(())
+    }
+
+    /// Stops the platform backend without mutating receiver lifecycle state.
+    pub fn stop(&mut self) {
+        self.output.stop();
+        self.stream_active = false;
+        self.fault_reported = true;
+    }
+
+    /// Borrows the platform adapter for control-domain device operations.
+    #[must_use]
+    pub const fn output(&self) -> &O {
+        &self.output
+    }
+
+    /// Mutably borrows the platform adapter outside the realtime callback.
+    pub fn output_mut(&mut self) -> &mut O {
+        &mut self.output
+    }
+
+    fn install<D, const JITTER_CAPACITY: usize, const MAX_ENCODED_BYTES: usize>(
+        &mut self,
+        selection: &OutputSelection,
+        pipeline: &mut ReceiverStreamPipeline<
+            D,
+            JITTER_CAPACITY,
+            MAX_ENCODED_BYTES,
+            PCM_SAMPLES_PER_BLOCK,
+        >,
+    ) -> Result<(), ReceiverOutputLifecycleError>
+    where
+        D: FrameDecoder,
+    {
+        let endpoint = self
+            .endpoint_factory
+            .create_deferred_metrics(&selection.config)
+            .map_err(ReceiverOutputLifecycleError::Endpoint)?;
+        let (producer, source) = endpoint.into_parts();
+        self.output
+            .start(selection.device.as_ref(), selection.config, source)
+            .map_err(ReceiverOutputLifecycleError::Output)?;
+        self.endpoint_factory
+            .publish_output_format(&selection.config);
+        pipeline.replace_pcm_producer(producer);
+        Ok(())
+    }
+}
+
+/// Failure while creating or recovering a paired receiver output endpoint.
+#[derive(Debug)]
+pub enum ReceiverOutputLifecycleError {
+    /// Recovery has no successfully started output selection.
+    MissingSelection,
+    /// The queue or source endpoint could not be created.
+    Endpoint(ReceiverPcmEndpointError),
+    /// The platform backend rejected the paired output source.
+    Output(OutputError),
+}
+
+impl fmt::Display for ReceiverOutputLifecycleError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MissingSelection => {
+                formatter.write_str("receiver output recovery has no selection")
+            }
+            Self::Endpoint(error) => {
+                write!(formatter, "receiver PCM endpoint setup failed: {error}")
+            }
+            Self::Output(error) => write!(formatter, "receiver output backend failed: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for ReceiverOutputLifecycleError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::MissingSelection => None,
+            Self::Endpoint(error) => Some(error),
+            Self::Output(error) => Some(error),
+        }
+    }
+}

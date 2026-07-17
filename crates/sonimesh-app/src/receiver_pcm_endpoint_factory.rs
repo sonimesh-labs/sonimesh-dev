@@ -114,6 +114,33 @@ impl<const SAMPLES_PER_BLOCK: usize> ReceiverPcmEndpointFactory<SAMPLES_PER_BLOC
         &self,
         config: &OutputConfig,
     ) -> Result<ReceiverPcmEndpoint<SAMPLES_PER_BLOCK>, ReceiverPcmEndpointError> {
+        self.create_with_adjustment(config, &self.adjustment)
+    }
+
+    /// Creates an endpoint without publishing its output format yet.
+    ///
+    /// The receiver output lifecycle controller calls
+    /// [`Self::publish_output_format`] only after the platform accepts the
+    /// matching callback source.
+    pub(crate) fn create_deferred_metrics(
+        &self,
+        config: &OutputConfig,
+    ) -> Result<ReceiverPcmEndpoint<SAMPLES_PER_BLOCK>, ReceiverPcmEndpointError> {
+        let adjustment = self.adjustment.without_metrics();
+        self.create_with_adjustment(config, &adjustment)
+    }
+
+    /// Publishes a platform-accepted output format to the stream diagnostics.
+    pub(crate) fn publish_output_format(&self, config: &OutputConfig) {
+        self.adjustment
+            .publish_nominal_sample_rates(self.source_format.sample_rate_hz, config.sample_rate_hz);
+    }
+
+    fn create_with_adjustment(
+        &self,
+        config: &OutputConfig,
+        adjustment: &DriftAdjustmentHandle,
+    ) -> Result<ReceiverPcmEndpoint<SAMPLES_PER_BLOCK>, ReceiverPcmEndpointError> {
         config
             .validate()
             .map_err(RenderSourceFactoryError::InvalidConfig)
@@ -121,7 +148,7 @@ impl<const SAMPLES_PER_BLOCK: usize> ReceiverPcmEndpointFactory<SAMPLES_PER_BLOC
         let (producer, consumer) =
             realtime_pcm_queue(self.queue_capacity).map_err(ReceiverPcmEndpointError::Queue)?;
         let source = Box::new(PcmRenderSource::new(consumer, Arc::clone(&self.counters)));
-        let source = adapt_render_source(source, self.source_format, config, &self.adjustment)
+        let source = adapt_render_source(source, self.source_format, config, adjustment)
             .map_err(ReceiverPcmEndpointError::Source)?;
         Ok(ReceiverPcmEndpoint { producer, source })
     }

@@ -33,6 +33,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
 - an app-domain receiver PCM endpoint factory that creates a fresh bounded queue
   pair and format-adapted render source together for output recovery; the
   receiver pipeline can install the paired producer without resetting ingress.
+- a receiver output lifecycle controller that starts a matching platform source
+  before swapping its paired producer into the receiver pipeline; failed output
+  starts leave the existing producer intact for retry.
 - allocation-free gain smoothing, atomic diagnostic counters, endpoint
   redaction, output adapter contracts, and a tested desktop session state machine;
 - control-domain output health monitoring and stream recreation with a fresh
