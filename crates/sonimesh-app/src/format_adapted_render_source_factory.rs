@@ -112,6 +112,9 @@ where
         &mut self,
         config: &OutputConfig,
     ) -> Result<Box<dyn RenderSource>, RenderSourceFactoryError> {
+        config
+            .validate()
+            .map_err(RenderSourceFactoryError::InvalidConfig)?;
         let source = self.source_factory.create(config)?;
         adapt_render_source(source, self.source_format, config, &self.adjustment)
     }

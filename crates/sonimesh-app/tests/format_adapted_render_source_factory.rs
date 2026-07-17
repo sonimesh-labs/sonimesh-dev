@@ -1,6 +1,7 @@
 //! Control-domain composition tests for source format adaptation.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use sonimesh_app::{FormatAdaptedRenderSourceFactory, SourcePcmFormat, SourcePcmFormatError};
 use sonimesh_diagnostics::StreamCounters;
@@ -28,6 +29,20 @@ impl RenderSourceFactory for RampFactory {
         &mut self,
         _config: &OutputConfig,
     ) -> Result<Box<dyn RenderSource>, RenderSourceFactoryError> {
+        Ok(Box::new(RampSource { next: 0.0 }))
+    }
+}
+
+struct CountingRampFactory {
+    creates: Arc<AtomicUsize>,
+}
+
+impl RenderSourceFactory for CountingRampFactory {
+    fn create(
+        &mut self,
+        _config: &OutputConfig,
+    ) -> Result<Box<dyn RenderSource>, RenderSourceFactoryError> {
+        self.creates.fetch_add(1, Ordering::Relaxed);
         Ok(Box::new(RampSource { next: 0.0 }))
     }
 }
@@ -69,8 +84,15 @@ fn factory_preserves_drift_control_across_recreated_format_adapters() {
 
 #[test]
 fn factory_rejects_invalid_output_config_before_creating_the_source() {
+    let creates = Arc::new(AtomicUsize::new(0));
     let format = SourcePcmFormat::new(48_000, 1).unwrap();
-    let mut factory = FormatAdaptedRenderSourceFactory::new(RampFactory, format, None);
+    let mut factory = FormatAdaptedRenderSourceFactory::new(
+        CountingRampFactory {
+            creates: Arc::clone(&creates),
+        },
+        format,
+        None,
+    );
     let mut invalid = output_config();
     invalid.channels = 0;
 
@@ -78,6 +100,7 @@ fn factory_rejects_invalid_output_config_before_creating_the_source() {
         factory.create(&invalid),
         Err(RenderSourceFactoryError::InvalidConfig(_))
     ));
+    assert_eq!(creates.load(Ordering::Relaxed), 0);
     assert_eq!(
         SourcePcmFormat::new(7_999, 1),
         Err(SourcePcmFormatError::InvalidSampleRate)
