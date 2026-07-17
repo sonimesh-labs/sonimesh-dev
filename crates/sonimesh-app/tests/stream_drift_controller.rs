@@ -103,7 +103,10 @@ fn control_tick_publishes_ppm_then_retires_the_affected_stream() {
     );
     assert_eq!(controller.adjustment_ppm(), 110);
     assert_eq!(adjustment.current_ppm(), 110);
-    assert_eq!(counters.snapshot().drift_adjustment_ppm, 110);
+    let adjusted = counters.snapshot();
+    assert_eq!(adjusted.drift_adjustment_ppm, 110);
+    assert_eq!(adjusted.queued_pcm_blocks, 3);
+    assert_eq!(adjusted.queued_pcm_high_water_blocks, 3);
 
     let packet = sealer.seal(0, 2_880, &[3]).unwrap();
     pipeline.receive(&packet.datagram, &mut plaintext).unwrap();
@@ -125,6 +128,8 @@ fn control_tick_publishes_ppm_then_retires_the_affected_stream() {
     assert_eq!(snapshot.drift_adjustment_ppm, 0);
     assert_eq!(snapshot.drift_hard_resyncs, 1);
     assert_eq!(snapshot.stream_resets, 1);
+    assert_eq!(snapshot.queued_pcm_blocks, 0);
+    assert_eq!(snapshot.queued_pcm_high_water_blocks, 4);
     assert_eq!(pipeline.queued_pcm_blocks(), 0);
     let mut output = [f32::NAN; 4];
     assert_eq!(

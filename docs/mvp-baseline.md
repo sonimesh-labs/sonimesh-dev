@@ -56,8 +56,8 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   platform output, or a concrete decoder implementation.
 - atomic receiver-pipeline diagnostics for authenticated/rejected/replayed/late
   packets, decoder-side PLC, bounded PCM replacement, jitter resynchronization,
-  and successful epoch resets; output-callback underflow remains owned by the
-  future output adapter.
+  successful epoch resets, and active-epoch PCM queue level/high water;
+  output-callback underflow remains owned by the future output adapter.
 - a bounded per-stream PCM occupancy controller that emits slew-limited ppm
   decisions or stream-local hard-resynchronization requests; hard resync clears
   only that stream's jitter, decoder state, and queued PCM epoch; no

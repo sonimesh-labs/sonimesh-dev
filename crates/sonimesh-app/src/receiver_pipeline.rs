@@ -161,6 +161,7 @@ where
             }
             DecodeStep::NotReady => {}
         }
+        self.publish_queued_pcm_blocks();
         Ok(step)
     }
 
@@ -179,6 +180,7 @@ where
     ) -> Result<(), ProtectedIngressError> {
         self.ingress.rotate(secret, next)?;
         self.decode.begin_epoch(initial_sequence);
+        self.counters.set_queued_pcm_blocks(0);
         self.counters.stream_reset();
         Ok(())
     }
@@ -190,13 +192,14 @@ where
     /// realtime consumer retires PCM queued before this reset.
     pub fn hard_resynchronize(&mut self) {
         self.decode.hard_resynchronize();
+        self.counters.set_queued_pcm_blocks(0);
         self.counters.stream_reset();
     }
 
     /// Returns the approximate queued PCM-block count for a low-rate controller.
     #[must_use]
     pub fn queued_pcm_blocks(&self) -> usize {
-        self.decode.queued_blocks()
+        self.publish_queued_pcm_blocks()
     }
 
     fn record_ingress_error(&self, error: &IngressError<MediaCryptoError>) {
@@ -213,6 +216,13 @@ where
         if outcome == RealtimePcmPushOutcome::ReplacedOldest {
             self.counters.pcm_overflow();
         }
+    }
+
+    fn publish_queued_pcm_blocks(&self) -> usize {
+        let blocks = self.decode.queued_blocks();
+        self.counters
+            .set_queued_pcm_blocks(u16::try_from(blocks).unwrap_or(u16::MAX));
+        blocks
     }
 
     fn record_jitter_outcome(&self, outcome: InsertOutcome) {
