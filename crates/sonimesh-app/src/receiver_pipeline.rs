@@ -197,6 +197,31 @@ where
         Ok(())
     }
 
+    /// Installs a newly authenticated media session without recreating output ownership.
+    ///
+    /// Unlike [`Self::rotate`], the replacement context may change session or
+    /// stream identity. The caller must establish the supplied secret and
+    /// context through the control domain before calling this method.
+    ///
+    /// # Errors
+    ///
+    /// Returns without changing the active ingress or playout state when the
+    /// replacement opener cannot be derived. On success, replay, jitter,
+    /// decoder, and queued PCM state begin at `initial_sequence`.
+    pub fn install_fresh_session(
+        &mut self,
+        secret: &SessionSecret,
+        context: MediaKeyContext,
+        initial_sequence: u32,
+    ) -> Result<(), ProtectedIngressError> {
+        let replacement = ProtectedMediaIngress::new(secret, context)?;
+        self.ingress = replacement;
+        self.decode.begin_epoch(initial_sequence);
+        self.counters.reset_queued_pcm_epoch();
+        self.counters.stream_reset();
+        Ok(())
+    }
+
     /// Clears this stream's playout state after a drift-controller hard resync.
     ///
     /// This leaves AEAD/replay state and other streams intact. The next

@@ -65,7 +65,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   blocks to the existing lock-free output queue; no concrete Opus binding yet.
 - an application-domain receiver pipeline that composes protected ingress,
   bounded decode admission, and stream-local epoch reset without owning TLS,
-  platform output, or a concrete decoder implementation.
+  platform output, or a concrete decoder implementation. It can install a
+  control-domain authenticated fresh media session without recreating socket or
+  output ownership, retiring the prior replay and playout epoch first.
 - atomic receiver-pipeline diagnostics for authenticated/rejected/replayed/late
   packets, accepted reordered packets, decoder-side PLC/errors, bounded PCM
   replacement, jitter resynchronization, successful epoch resets, and

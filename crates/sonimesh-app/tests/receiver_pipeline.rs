@@ -501,6 +501,71 @@ fn hard_resync_retires_only_the_current_stream_playout_state() {
 }
 
 #[test]
+fn fresh_session_replaces_replay_and_playout_state_without_recreating_output() {
+    let old_secret = SessionSecret::new([0xA5; 32]);
+    let old_context = context(2);
+    let fresh_secret = SessionSecret::new([0x5A; 32]);
+    let fresh_context = MediaKeyContext::new(
+        old_context.session_id + 1,
+        old_context.stream_id,
+        0,
+        old_context.direction,
+    )
+    .unwrap();
+    let mut old_sealer = MediaSealer::new(&old_secret, old_context).unwrap();
+    let old_packet = old_sealer.seal(0, 0, &[1]).unwrap();
+    let mut fresh_sealer = MediaSealer::new(&fresh_secret, fresh_context).unwrap();
+    let fresh_packet = fresh_sealer.seal(0, 0, &[2]).unwrap();
+    let (producer, mut consumer) = realtime_pcm_queue::<4>(4).unwrap();
+    let counters = Arc::new(StreamCounters::default());
+    let mut pipeline = ReceiverStreamPipeline::<ByteDecoder, 4, 8, 4>::new(
+        &old_secret,
+        old_context,
+        ByteDecoder,
+        producer,
+        Arc::clone(&counters),
+        0,
+    )
+    .unwrap();
+    let mut plaintext = [0_u8; 8];
+
+    pipeline
+        .receive(&old_packet.datagram, &mut plaintext)
+        .unwrap();
+    assert!(matches!(
+        pipeline.decode_next().unwrap(),
+        DecodeStep::Decoded { .. }
+    ));
+    pipeline
+        .install_fresh_session(&fresh_secret, fresh_context, 0)
+        .unwrap();
+    assert_eq!(pipeline.context(), fresh_context);
+    assert!(
+        pipeline
+            .receive(&old_packet.datagram, &mut plaintext)
+            .is_err()
+    );
+    pipeline
+        .receive(&fresh_packet.datagram, &mut plaintext)
+        .unwrap();
+    assert!(matches!(
+        pipeline.decode_next().unwrap(),
+        DecodeStep::Decoded { .. }
+    ));
+
+    let mut output = [f32::NAN; 4];
+    assert!(matches!(
+        consumer.pop_into(&mut output),
+        RealtimePcmPopOutcome::Filled {
+            discontinuity: true,
+            ..
+        }
+    ));
+    assert!((output[0] - 2.0).abs() < f32::EPSILON);
+    assert_eq!(counters.snapshot().stream_resets, 1);
+}
+
+#[test]
 fn replacing_pcm_producer_restarts_only_the_output_side_of_one_stream() {
     let secret = SessionSecret::new([0xA5; 32]);
     let context = context(2);

@@ -197,6 +197,22 @@ where
         self.pipeline.rotate(secret, next, initial_sequence)
     }
 
+    /// Installs authenticated media state for a newly established session.
+    ///
+    /// # Errors
+    ///
+    /// Returns without changing the active pipeline when media key derivation
+    /// for the replacement context fails.
+    pub fn install_fresh_session(
+        &mut self,
+        secret: &SessionSecret,
+        context: MediaKeyContext,
+        initial_sequence: u32,
+    ) -> Result<(), ProtectedIngressError> {
+        self.pipeline
+            .install_fresh_session(secret, context, initial_sequence)
+    }
+
     /// Clears this stream's playout state after a drift-controller hard resync.
     pub fn hard_resynchronize(&mut self) {
         self.pipeline.hard_resynchronize();
