@@ -14,7 +14,7 @@ possible.
 | Item | Value |
 | --- | --- |
 | Capture format | PCM16, 48,000 Hz, stereo |
-| Read block | 20 ms, 480 frames, 960 interleaved samples |
+| Read block | 20 ms, 960 frames, 1,920 interleaved samples |
 | AudioRecord buffer | Platform minimum, capped at 64 KiB |
 | Ownership | Foreground service after consent; UI receives low-rate state only |
 | PCM persistence | None; samples are scanned for silence and discarded |

@@ -9,7 +9,7 @@
 
 The portable Rust workspace builds without an Android SDK, audio device, or
 network service. The capture-only Android prototype requires the checked-in
-Gradle wrapper, Java 21, Android API 35, and Android Build Tools 34.0.0.
+Gradle wrapper, Java 21, Android API 36, and Android Build Tools 34.0.0.
 
 ## Core checks
 
