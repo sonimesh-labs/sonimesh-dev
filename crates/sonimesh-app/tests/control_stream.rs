@@ -2,8 +2,8 @@
 
 use sonimesh_app::{
     ControlStreamAction, ControlStreamCoordinator, ControlStreamError, PairingAttemptOutcome,
-    PairingId, PairingInvitationController, PairingRecordState, PairingSource, SessionEvent,
-    SessionState,
+    PairingId, PairingInvitationController, PairingInvitationError, PairingRecordError,
+    PairingRecordState, PairingSource, SessionEvent, SessionState,
 };
 use sonimesh_protocol::{
     CONTROL_PROTOCOL_VERSION, Capability, ControlFrameError, Envelope, Hello,
@@ -602,6 +602,42 @@ fn expiring_active_pairing_returns_the_coordinator_to_idle() {
     coordinator.expire_pairing(&mut pairing).unwrap();
     assert_eq!(coordinator.state(), SessionState::IDLE);
     assert_eq!(pairing.state(), Some(PairingRecordState::Expired));
+    assert_eq!(coordinator.active(), None);
+    assert_eq!(coordinator.negotiation(), None);
+}
+
+#[test]
+fn observed_pairing_failure_retires_the_coordinator_and_rejects_control_frames() {
+    let capabilities = [Capability::FrameDuration20Ms];
+    let mut coordinator = ControlStreamCoordinator::new(SessionState::IDLE, &capabilities).unwrap();
+    let mut pairing = PairingInvitationController::<1>::new();
+    coordinator
+        .begin_pairing(&mut pairing, PairingId::new([6; 16]), 400, 50, 1)
+        .unwrap();
+
+    assert_eq!(
+        coordinator.observe_pairing(&mut pairing, 399),
+        Err(PairingInvitationError::Record(
+            PairingRecordError::TimeRegressed
+        ))
+    );
+    assert_eq!(coordinator.state(), SessionState::IDLE);
+    assert_eq!(pairing.state(), Some(PairingRecordState::Expired));
+    assert_eq!(coordinator.active(), None);
+    assert_eq!(coordinator.negotiation(), None);
+    assert!(matches!(
+        coordinator.accept(&hello(&capabilities)),
+        Err(ControlStreamError::HelloRequiresReady(SessionState::IDLE))
+    ));
+
+    coordinator
+        .begin_pairing(&mut pairing, PairingId::new([7; 16]), 500, 50, 1)
+        .unwrap();
+    assert_eq!(
+        coordinator.observe_pairing(&mut pairing, 550),
+        Ok(PairingRecordState::Expired)
+    );
+    assert_eq!(coordinator.state(), SessionState::IDLE);
     assert_eq!(coordinator.active(), None);
     assert_eq!(coordinator.negotiation(), None);
 }
