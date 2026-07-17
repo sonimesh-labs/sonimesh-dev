@@ -30,7 +30,9 @@ pub use pairing_record::{
     PairingRecordError, PairingRecordState, PairingSource,
 };
 pub use pcm_render_source::PcmRenderSource;
-pub use receiver_output_controller::{ReceiverOutputController, ReceiverOutputLifecycleError};
+pub use receiver_output_controller::{
+    ReceiverOutputController, ReceiverOutputLifecycleError, ReceiverPcmProducerInstaller,
+};
 pub use receiver_pcm_endpoint_factory::{
     ReceiverPcmEndpoint, ReceiverPcmEndpointError, ReceiverPcmEndpointFactory,
 };

@@ -35,7 +35,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   receiver pipeline can install the paired producer without resetting ingress.
 - a receiver output lifecycle controller that starts a matching platform source
   before swapping its paired producer into the receiver pipeline; failed output
-  starts leave the existing producer intact for retry.
+  starts leave the existing producer intact for retry. The controller accepts
+  either the direct receiver pipeline or its UDP composition wrapper without
+  taking ownership of ingress or socket state.
 - allocation-free gain smoothing, atomic diagnostic counters, endpoint
   redaction, output adapter contracts, and a tested desktop session state machine;
 - control-domain output health monitoring and stream recreation with a fresh

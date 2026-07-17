@@ -1,11 +1,48 @@
 use core::fmt;
 
-use sonimesh_audio::FrameDecoder;
+use sonimesh_audio::{FrameDecoder, RealtimePcmProducer};
 use sonimesh_platform::{AudioOutput, OutputError, OutputHealth};
 
 use crate::{
     OutputSelection, ReceiverPcmEndpointError, ReceiverPcmEndpointFactory, ReceiverStreamPipeline,
+    UdpReceiverPipeline,
 };
+
+/// Control-domain boundary that installs a producer for a newly accepted output source.
+pub trait ReceiverPcmProducerInstaller<const PCM_SAMPLES_PER_BLOCK: usize> {
+    /// Retires the previous output queue and installs the producer paired with a new source.
+    fn replace_pcm_producer(&mut self, producer: RealtimePcmProducer<PCM_SAMPLES_PER_BLOCK>);
+}
+
+impl<
+    D,
+    const JITTER_CAPACITY: usize,
+    const MAX_ENCODED_BYTES: usize,
+    const PCM_SAMPLES_PER_BLOCK: usize,
+> ReceiverPcmProducerInstaller<PCM_SAMPLES_PER_BLOCK>
+    for ReceiverStreamPipeline<D, JITTER_CAPACITY, MAX_ENCODED_BYTES, PCM_SAMPLES_PER_BLOCK>
+where
+    D: FrameDecoder,
+{
+    fn replace_pcm_producer(&mut self, producer: RealtimePcmProducer<PCM_SAMPLES_PER_BLOCK>) {
+        ReceiverStreamPipeline::replace_pcm_producer(self, producer);
+    }
+}
+
+impl<
+    D,
+    const JITTER_CAPACITY: usize,
+    const MAX_ENCODED_BYTES: usize,
+    const PCM_SAMPLES_PER_BLOCK: usize,
+> ReceiverPcmProducerInstaller<PCM_SAMPLES_PER_BLOCK>
+    for UdpReceiverPipeline<D, JITTER_CAPACITY, MAX_ENCODED_BYTES, PCM_SAMPLES_PER_BLOCK>
+where
+    D: FrameDecoder,
+{
+    fn replace_pcm_producer(&mut self, producer: RealtimePcmProducer<PCM_SAMPLES_PER_BLOCK>) {
+        UdpReceiverPipeline::replace_pcm_producer(self, producer);
+    }
+}
 
 /// Control-domain owner that recreates a receiver's paired PCM endpoint.
 ///
@@ -45,18 +82,13 @@ where
     ///
     /// Returns before changing the receiver pipeline when endpoint construction
     /// or platform start fails.
-    pub fn start<D, const JITTER_CAPACITY: usize, const MAX_ENCODED_BYTES: usize>(
+    pub fn start<P>(
         &mut self,
         selection: OutputSelection,
-        pipeline: &mut ReceiverStreamPipeline<
-            D,
-            JITTER_CAPACITY,
-            MAX_ENCODED_BYTES,
-            PCM_SAMPLES_PER_BLOCK,
-        >,
+        pipeline: &mut P,
     ) -> Result<(), ReceiverOutputLifecycleError>
     where
-        D: FrameDecoder,
+        P: ReceiverPcmProducerInstaller<PCM_SAMPLES_PER_BLOCK>,
     {
         self.install(&selection, pipeline)?;
         self.selection = Some(selection);
@@ -88,17 +120,9 @@ where
     ///
     /// Returns without changing the receiver pipeline when endpoint construction
     /// or platform start fails, so a later retry can reuse its existing producer.
-    pub fn recover<D, const JITTER_CAPACITY: usize, const MAX_ENCODED_BYTES: usize>(
-        &mut self,
-        pipeline: &mut ReceiverStreamPipeline<
-            D,
-            JITTER_CAPACITY,
-            MAX_ENCODED_BYTES,
-            PCM_SAMPLES_PER_BLOCK,
-        >,
-    ) -> Result<(), ReceiverOutputLifecycleError>
+    pub fn recover<P>(&mut self, pipeline: &mut P) -> Result<(), ReceiverOutputLifecycleError>
     where
-        D: FrameDecoder,
+        P: ReceiverPcmProducerInstaller<PCM_SAMPLES_PER_BLOCK>,
     {
         let selection = self
             .selection
@@ -128,18 +152,13 @@ where
         &mut self.output
     }
 
-    fn install<D, const JITTER_CAPACITY: usize, const MAX_ENCODED_BYTES: usize>(
+    fn install<P>(
         &mut self,
         selection: &OutputSelection,
-        pipeline: &mut ReceiverStreamPipeline<
-            D,
-            JITTER_CAPACITY,
-            MAX_ENCODED_BYTES,
-            PCM_SAMPLES_PER_BLOCK,
-        >,
+        pipeline: &mut P,
     ) -> Result<(), ReceiverOutputLifecycleError>
     where
-        D: FrameDecoder,
+        P: ReceiverPcmProducerInstaller<PCM_SAMPLES_PER_BLOCK>,
     {
         let endpoint = self
             .endpoint_factory

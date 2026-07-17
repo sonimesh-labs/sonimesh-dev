@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use sonimesh_app::{
     OutputSelection, ReceiverOutputController, ReceiverOutputLifecycleError,
-    ReceiverPcmEndpointFactory, ReceiverStreamPipeline, SourcePcmFormat,
+    ReceiverPcmEndpointFactory, ReceiverStreamPipeline, SourcePcmFormat, UdpReceiverPipeline,
 };
 use sonimesh_audio::{DecodeStep, FrameDecoder, realtime_pcm_queue};
 use sonimesh_diagnostics::StreamCounters;
@@ -106,6 +106,21 @@ fn pipeline(counters: Arc<StreamCounters>) -> ReceiverStreamPipeline<ByteDecoder
     ReceiverStreamPipeline::new(&secret, context(), ByteDecoder, producer, counters, 0).unwrap()
 }
 
+fn udp_pipeline(counters: Arc<StreamCounters>) -> UdpReceiverPipeline<ByteDecoder, 4, 8, 4> {
+    let secret = SessionSecret::new([0xA5; 32]);
+    let (producer, _consumer) = realtime_pcm_queue::<4>(4).unwrap();
+    UdpReceiverPipeline::bind(
+        "127.0.0.1:0".parse().unwrap(),
+        &secret,
+        context(),
+        ByteDecoder,
+        producer,
+        counters,
+        0,
+    )
+    .unwrap()
+}
+
 fn enqueue_decoded_block(
     pipeline: &mut ReceiverStreamPipeline<ByteDecoder, 4, 8, 4>,
     sealer: &mut MediaSealer,
@@ -188,4 +203,18 @@ fn recovery_replaces_the_pipeline_producer_only_after_platform_start() {
     let recovered = counters.snapshot();
     assert_eq!(recovered.stream_resets, 2);
     assert_eq!(recovered.queued_pcm_high_water_blocks, 0);
+}
+
+#[test]
+fn controller_accepts_the_udp_receiver_pipeline_boundary() {
+    let counters = Arc::new(StreamCounters::default());
+    let mut pipeline = udp_pipeline(Arc::clone(&counters));
+    let mut controller = controller(Arc::clone(&counters));
+
+    controller.start(selection(), &mut pipeline).unwrap();
+
+    let snapshot = counters.snapshot();
+    assert_eq!(snapshot.stream_resets, 1);
+    assert_eq!(snapshot.nominal_input_sample_rate_hz, 48_000);
+    assert_eq!(snapshot.nominal_output_sample_rate_hz, 48_000);
 }
