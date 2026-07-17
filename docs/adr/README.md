@@ -53,3 +53,5 @@ documented.
   optional native decoder feature gated by reproducible Windows/Android evidence.
 - [ADR 0010: Android capture service and native boundary](./0010-android-capture-service-boundary.md) —
   Kotlin/Compose consent UI, foreground-service ownership, and capture-only evidence gate.
+- [ADR 0011: Diagnostic export boundary](./0011-diagnostic-export-boundary.md) —
+  explicit, bounded, redacted desktop export design deferred to Phase 2.
