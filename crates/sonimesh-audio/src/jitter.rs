@@ -58,6 +58,8 @@ pub enum InsertOutcome {
         /// Number of buffered frames discarded.
         dropped_frames: usize,
     },
+    /// The active key epoch has consumed its final sequence number.
+    SequenceExhausted,
     /// Zero-capacity configuration cannot accept frames.
     Disabled,
 }
@@ -84,6 +86,7 @@ pub struct JitterBuffer<const CAPACITY: usize, const MAX_PAYLOAD: usize> {
     slots: [Option<EncodedFrame<MAX_PAYLOAD>>; CAPACITY],
     buffered: usize,
     next_sequence: Option<u32>,
+    sequence_exhausted: bool,
     playout_started: bool,
 }
 
@@ -103,6 +106,7 @@ impl<const CAPACITY: usize, const MAX_PAYLOAD: usize> JitterBuffer<CAPACITY, MAX
             slots: std::array::from_fn(|_| None),
             buffered: 0,
             next_sequence: None,
+            sequence_exhausted: false,
             playout_started: false,
         }
     }
@@ -136,6 +140,9 @@ impl<const CAPACITY: usize, const MAX_PAYLOAD: usize> JitterBuffer<CAPACITY, MAX
         if CAPACITY == 0 {
             return InsertOutcome::Disabled;
         }
+        if self.sequence_exhausted {
+            return InsertOutcome::SequenceExhausted;
+        }
         if self.next_sequence.is_some_and(|next| frame.sequence < next) {
             return InsertOutcome::Late;
         }
@@ -166,19 +173,19 @@ impl<const CAPACITY: usize, const MAX_PAYLOAD: usize> JitterBuffer<CAPACITY, MAX
             if !self.playout_started {
                 return PlayoutOutcome::NotReady;
             }
-            self.next_sequence = sequence.checked_add(1);
+            self.advance_sequence(sequence);
             return PlayoutOutcome::Missing { sequence };
         }
 
         let index = sequence as usize % CAPACITY;
         if let Some(frame) = self.slots[index].take_if(|frame| frame.sequence == sequence) {
             self.buffered -= 1;
-            self.next_sequence = sequence.checked_add(1);
+            self.advance_sequence(sequence);
             self.playout_started = true;
             return PlayoutOutcome::Frame(frame);
         }
 
-        self.next_sequence = sequence.checked_add(1);
+        self.advance_sequence(sequence);
         self.playout_started = true;
         PlayoutOutcome::Missing { sequence }
     }
@@ -188,6 +195,7 @@ impl<const CAPACITY: usize, const MAX_PAYLOAD: usize> JitterBuffer<CAPACITY, MAX
         self.slots.fill_with(|| None);
         self.buffered = 0;
         self.next_sequence = None;
+        self.sequence_exhausted = false;
         self.playout_started = false;
     }
 
@@ -196,6 +204,11 @@ impl<const CAPACITY: usize, const MAX_PAYLOAD: usize> JitterBuffer<CAPACITY, MAX
         self.reset();
         self.next_sequence = Some(sequence);
         self.playout_started = true;
+    }
+
+    fn advance_sequence(&mut self, sequence: u32) {
+        self.next_sequence = sequence.checked_add(1);
+        self.sequence_exhausted = self.next_sequence.is_none();
     }
 
     fn resynchronize(&mut self, frame: EncodedFrame<MAX_PAYLOAD>) -> InsertOutcome {
@@ -218,7 +231,7 @@ mod tests {
         EncodedFrame::new(
             sequence,
             u64::from(sequence) * 960,
-            &[u8::try_from(sequence).unwrap()],
+            &[sequence.to_le_bytes()[0]],
         )
         .unwrap()
     }
@@ -288,5 +301,54 @@ mod tests {
         assert_eq!(buffer.take_next(), PlayoutOutcome::Missing { sequence: 21 });
         buffer.insert(frame(22));
         assert!(matches!(buffer.take_next(), PlayoutOutcome::Frame(_)));
+    }
+
+    #[test]
+    fn consumes_the_final_sequence_without_wrapping() {
+        let mut buffer = JitterBuffer::<4, 8>::with_start_sequence(u32::MAX - 1);
+        buffer.insert(frame(u32::MAX - 1));
+        buffer.insert(frame(u32::MAX));
+
+        assert!(
+            matches!(buffer.take_next(), PlayoutOutcome::Frame(actual) if actual.sequence == u32::MAX - 1)
+        );
+        assert!(
+            matches!(buffer.take_next(), PlayoutOutcome::Frame(actual) if actual.sequence == u32::MAX)
+        );
+        assert_eq!(buffer.take_next(), PlayoutOutcome::NotReady);
+    }
+
+    #[test]
+    fn rejects_new_frames_after_sequence_exhaustion() {
+        let mut buffer = JitterBuffer::<4, 8>::with_start_sequence(u32::MAX);
+        buffer.insert(frame(u32::MAX));
+        assert!(matches!(buffer.take_next(), PlayoutOutcome::Frame(_)));
+
+        assert_eq!(buffer.insert(frame(0)), InsertOutcome::SequenceExhausted);
+    }
+
+    #[test]
+    fn reports_plc_for_a_missing_final_sequence_once() {
+        let mut buffer = JitterBuffer::<4, 8>::with_start_sequence(u32::MAX);
+
+        assert_eq!(
+            buffer.take_next(),
+            PlayoutOutcome::Missing { sequence: u32::MAX }
+        );
+        assert_eq!(buffer.take_next(), PlayoutOutcome::NotReady);
+    }
+
+    #[test]
+    fn fresh_epoch_rearms_sequence_admission_after_exhaustion() {
+        let mut buffer = JitterBuffer::<4, 8>::with_start_sequence(u32::MAX);
+        buffer.insert(frame(u32::MAX));
+        assert!(matches!(buffer.take_next(), PlayoutOutcome::Frame(_)));
+        assert_eq!(buffer.insert(frame(0)), InsertOutcome::SequenceExhausted);
+
+        buffer.reset_to(0);
+        assert_eq!(buffer.insert(frame(0)), InsertOutcome::Inserted);
+        assert!(
+            matches!(buffer.take_next(), PlayoutOutcome::Frame(actual) if actual.sequence == 0)
+        );
     }
 }

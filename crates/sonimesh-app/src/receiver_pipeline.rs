@@ -203,6 +203,7 @@ where
             InsertOutcome::Duplicate => self.counters.duplicate(),
             InsertOutcome::Late => self.counters.late(),
             InsertOutcome::Resynchronized { .. } => self.counters.stream_reset(),
+            InsertOutcome::SequenceExhausted => self.counters.rejected(),
             InsertOutcome::Inserted | InsertOutcome::Disabled => {}
         }
     }

@@ -47,7 +47,8 @@ Cover at least:
 - packet header encoding, decoding, byte order, and size limits;
 - published Rust/Kotlin vectors for media key derivation, nonce construction, and
   AEAD packet authentication;
-- sequence wrap, duplicate detection, and replay windows;
+- sequence exhaustion at the epoch boundary, duplicate detection, and replay
+  windows;
 - nonce uniqueness across streams, directions, epochs, and reconnects;
 - Protobuf size limits, unknown fields, and capability negotiation;
 - jitter ordering, late packets, overflow, resynchronization, and bounded memory;

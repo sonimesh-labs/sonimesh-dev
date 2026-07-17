@@ -15,7 +15,8 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
 - exact extended-header preservation for future AEAD associated data;
 - a fixed 64-packet replay window advanced only through authenticated ingress;
 - per-stream fixed-capacity encoded jitter storage with duplicate, late-frame,
-  gap/PLC, and controlled-resynchronization results;
+  gap/PLC, controlled-resynchronization, and explicit sequence-exhaustion
+  results;
 - a preallocated PCM block ring that drops the oldest block on overflow and
   emits initialized silence on underflow;
 - a lock-free cross-thread PCM queue with non-cloneable logical endpoints,

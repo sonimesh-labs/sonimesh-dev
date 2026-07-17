@@ -121,7 +121,7 @@ pub fn simulate(config: ScenarioConfig) -> Result<SimulationReport, ScenarioErro
                 InsertOutcome::Duplicate => report.duplicate_frames += 1,
                 InsertOutcome::Late => report.late_frames += 1,
                 InsertOutcome::Resynchronized { .. } => report.resynchronizations += 1,
-                InsertOutcome::Disabled => {
+                InsertOutcome::SequenceExhausted | InsertOutcome::Disabled => {
                     return Err(ScenarioError::InternalCapacityInvariant);
                 }
             }

@@ -139,6 +139,9 @@ fn authenticated_pipeline_stays_bounded_under_impairment() {
                         InsertOutcome::Inserted => {}
                         InsertOutcome::Resynchronized { .. } => jitter_resets += 1,
                         InsertOutcome::Duplicate | InsertOutcome::Late => rejected += 1,
+                        InsertOutcome::SequenceExhausted => {
+                            panic!("test sequence range must not exhaust")
+                        }
                         InsertOutcome::Disabled => panic!("test jitter buffer must be enabled"),
                     }
                 }
