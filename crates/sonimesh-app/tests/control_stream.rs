@@ -472,6 +472,42 @@ fn stale_rotation_completion_cannot_commit_an_identical_fresh_session_request() 
 }
 
 #[test]
+fn output_loss_invalidates_a_pending_rotation_before_recovery() {
+    let capabilities = [Capability::FrameDuration20Ms];
+    let mut coordinator = coordinator(&capabilities);
+    activate(&mut coordinator, 0);
+    let ControlStreamAction::Rotate {
+        token,
+        previous,
+        next,
+    } = coordinator.accept(&start(1)).unwrap()
+    else {
+        panic!("expected rotation action");
+    };
+
+    coordinator
+        .acknowledge_platform_event(SessionEvent::OutputLost)
+        .unwrap();
+    assert_eq!(
+        coordinator.state().phase(),
+        sonimesh_app::SessionPhase::OutputUnavailable
+    );
+    coordinator
+        .acknowledge_platform_event(SessionEvent::OutputRestored)
+        .unwrap();
+
+    assert!(matches!(
+        coordinator.complete_rotation(token, previous, next),
+        Err(ControlStreamError::CompletionMismatch)
+    ));
+    assert_eq!(coordinator.active(), Some(previous));
+    assert!(matches!(
+        coordinator.accept(&start(1)),
+        Ok(ControlStreamAction::Rotate { .. })
+    ));
+}
+
+#[test]
 fn stale_stop_completion_cannot_stop_an_identical_fresh_session_stream() {
     let capabilities = [Capability::FrameDuration20Ms];
     let mut coordinator = coordinator(&capabilities);

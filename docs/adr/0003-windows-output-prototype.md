@@ -38,6 +38,8 @@ Add an optional `cpal-output` feature to `sonimesh-platform` for the first Windo
   execution;
 - output recovery creates a fresh bounded PCM producer/consumer pair and source,
   then resets only the affected receiver stream's playout state before restart;
+- output loss invalidates pending platform or media completions before recovery,
+  so a late operation cannot commit across fresh output endpoints;
 - keep CPAL behind SoniMesh-owned adapter contracts so a direct-WASAPI adapter can
   be compared without changing the audio engine.
 

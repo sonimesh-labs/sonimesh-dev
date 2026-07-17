@@ -175,12 +175,19 @@ impl ControlStreamCoordinator {
         event: SessionEvent,
     ) -> Result<(), ControlStreamError> {
         match event {
-            SessionEvent::ConnectionLost
-            | SessionEvent::OutputLost
-            | SessionEvent::OutputRestored => self
+            SessionEvent::ConnectionLost | SessionEvent::OutputRestored => self
                 .state
                 .apply(event)
                 .map_err(ControlStreamError::Transition),
+            SessionEvent::OutputLost => {
+                self.state
+                    .apply(SessionEvent::OutputLost)
+                    .map_err(ControlStreamError::Transition)?;
+                // Fresh output endpoints invalidate in-flight platform or media
+                // work. A late completion cannot commit across this boundary.
+                self.pending = None;
+                Ok(())
+            }
             SessionEvent::Reconnected => {
                 self.state
                     .apply(SessionEvent::Reconnected)
