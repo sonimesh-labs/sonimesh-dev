@@ -69,6 +69,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
 - an application-domain UDP receiver pipeline that feeds one socket datagram
   through protected ingress, bounded jitter admission, and non-realtime decode;
   control-session and output lifecycle wiring remain separate.
+- a bounded incremental TCP control-frame reader that validates the existing
+  length-prefixed Protobuf envelope; it is explicitly unauthenticated and is
+  not a TLS or pairing implementation.
 - a buildable Vue/Vite receiver-control preview with a single low-rate bridge
   boundary, session controls, output selection, pairing-invitation state, and
   diagnostics presentation; it uses in-memory preview data and has no Tauri,
@@ -108,8 +111,8 @@ jitter, and output-backend ADRs using measured 10/20 ms and device results.
 - first pairing, TLS, QR bootstrap, identity storage, revocation, or root-secret
   provisioning; AEAD/HKDF media protection and bounded epoch rotation exist only
   after a caller supplies an authenticated control-session secret;
-- control sockets, discovery, and address migration; the bounded UDP media
-  receiver is wired only to the per-stream pipeline, not to session lifecycle.
+- authenticated TLS control transport, discovery, and address migration; the
+  untrusted TCP framing reader is not a trusted control session.
 - direct-WASAPI comparison adapter and backend selection evidence;
 - Tauri integration, signing, packaging, and firewall integration;
 - a concrete drift ASRC, nominal rate conversion, acoustic latency, and soak
