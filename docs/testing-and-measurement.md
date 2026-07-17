@@ -75,6 +75,9 @@ They also cover nominal linear sample-rate conversion and phase continuity. They
 do not qualify filter quality, drift correction, acoustic latency, or long-run
 rate stability.
 
+The source adapter tests cover atomic ppm adjustment publication and explicit
+hard-resync handoff; they do not prove controller gains on a physical device.
+
 ## Network simulation
 
 The protocol and audio crates should run against an in-memory virtual transport

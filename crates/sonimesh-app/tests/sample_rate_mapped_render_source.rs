@@ -3,9 +3,13 @@
 use std::sync::Arc;
 
 use sonimesh_app::{
-    PcmRenderSource, SampleRateMappedRenderSource, SampleRateMappedRenderSourceError,
+    DriftAdjustmentError, PcmRenderSource, SampleRateMappedRenderSource,
+    SampleRateMappedRenderSourceError,
 };
-use sonimesh_audio::{ResamplerError, realtime_pcm_queue};
+use sonimesh_audio::{
+    DriftDecision, DriftResyncDirection, MAX_DRIFT_ADJUSTMENT_PPM, ResamplerError,
+    realtime_pcm_queue,
+};
 use sonimesh_diagnostics::StreamCounters;
 use sonimesh_platform::{MAX_CALLBACK_FRAMES, RenderSource};
 
@@ -75,6 +79,38 @@ fn long_callback_preserves_phase_across_internal_chunks() {
         let expected = f32::from(u16::try_from(index).unwrap());
         assert!((*sample - expected).abs() < f32::EPSILON);
     }
+}
+
+#[test]
+fn drift_decisions_reach_the_resampler_without_moving_controller_state_into_callback() {
+    let (mut source, handle) = SampleRateMappedRenderSource::new_with_drift_control(
+        Box::new(RampSource { next: 0.0 }),
+        48_000,
+        48_000,
+        1,
+        MAX_CALLBACK_FRAMES,
+    )
+    .unwrap();
+    handle
+        .apply_decision(DriftDecision::Adjust { ppm: 1_000 })
+        .unwrap();
+    let mut output = [f32::NAN; 3];
+
+    source.render(&mut output);
+
+    assert_samples(&output, &[0.0, 1.001, 2.002]);
+    assert_eq!(
+        handle.apply_decision(DriftDecision::HardResync {
+            direction: DriftResyncDirection::High,
+        }),
+        Err(DriftAdjustmentError::HardResyncRequired(
+            DriftResyncDirection::High
+        ))
+    );
+    assert_eq!(
+        handle.set_ppm(MAX_DRIFT_ADJUSTMENT_PPM + 1),
+        Err(DriftAdjustmentError::InvalidPpm)
+    );
 }
 
 #[test]

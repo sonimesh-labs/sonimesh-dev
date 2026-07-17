@@ -1,6 +1,6 @@
 use core::fmt;
 
-use crate::MAX_AUDIO_CHANNELS;
+use crate::{MAX_AUDIO_CHANNELS, MAX_DRIFT_ADJUSTMENT_PPM};
 
 /// Lowest sample rate accepted by the bounded linear resampler.
 pub const MIN_RESAMPLE_RATE_HZ: u32 = 8_000;
@@ -16,6 +16,8 @@ pub enum ResamplerError {
     InvalidOutputSampleRate,
     /// The channel count is outside the shared audio bound.
     InvalidChannelCount,
+    /// The requested drift correction exceeds the shared ppm bound.
+    InvalidAdjustmentPpm,
     /// Input samples do not contain a whole number of interleaved frames.
     InputNotFrameAligned,
     /// Output samples do not contain a whole number of interleaved frames.
@@ -28,6 +30,7 @@ impl fmt::Display for ResamplerError {
             Self::InvalidInputSampleRate => "invalid resampler input sample rate",
             Self::InvalidOutputSampleRate => "invalid resampler output sample rate",
             Self::InvalidChannelCount => "invalid resampler channel count",
+            Self::InvalidAdjustmentPpm => "invalid resampler adjustment ppm",
             Self::InputNotFrameAligned => "resampler input is not frame-aligned",
             Self::OutputNotFrameAligned => "resampler output is not frame-aligned",
         };
@@ -54,6 +57,7 @@ pub struct ResampleOutcome {
 /// source adapter contract.
 pub struct LinearResampler {
     channels: u16,
+    nominal_ratio: f64,
     ratio: f64,
     phase: f64,
 }
@@ -79,9 +83,11 @@ impl LinearResampler {
         if channels == 0 || channels > MAX_AUDIO_CHANNELS {
             return Err(ResamplerError::InvalidChannelCount);
         }
+        let nominal_ratio = f64::from(input_sample_rate_hz) / f64::from(output_sample_rate_hz);
         Ok(Self {
             channels,
-            ratio: f64::from(input_sample_rate_hz) / f64::from(output_sample_rate_hz),
+            nominal_ratio,
+            ratio: nominal_ratio,
             phase: 0.0,
         })
     }
@@ -90,6 +96,26 @@ impl LinearResampler {
     #[must_use]
     pub const fn channels(&self) -> u16 {
         self.channels
+    }
+
+    /// Applies a bounded ppm correction to the nominal input/output ratio.
+    ///
+    /// Positive values consume input faster, matching [`DriftDecision::Adjust`]
+    /// and the occupancy controller's sign convention. This method is intended
+    /// for the control boundary; the realtime adapter may only consume the
+    /// resulting prevalidated value.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ResamplerError::InvalidAdjustmentPpm`] when the correction is
+    /// outside the shared drift bound.
+    pub fn set_rate_adjustment_ppm(&mut self, adjustment_ppm: i32) -> Result<(), ResamplerError> {
+        if !(-MAX_DRIFT_ADJUSTMENT_PPM..=MAX_DRIFT_ADJUSTMENT_PPM).contains(&adjustment_ppm) {
+            return Err(ResamplerError::InvalidAdjustmentPpm);
+        }
+        let multiplier = 1.0 + f64::from(adjustment_ppm) / 1_000_000.0;
+        self.ratio = self.nominal_ratio * multiplier;
+        Ok(())
     }
 
     /// Returns the input-frame capacity needed for a bounded output chunk.
@@ -228,6 +254,10 @@ mod tests {
         ));
 
         let mut resampler = LinearResampler::new(48_000, 48_000, 2).unwrap();
+        assert_eq!(
+            resampler.set_rate_adjustment_ppm(MAX_DRIFT_ADJUSTMENT_PPM + 1),
+            Err(ResamplerError::InvalidAdjustmentPpm)
+        );
         let mut output = [f32::NAN; 2];
         assert_eq!(
             resampler.process(&[1.0], &mut output),

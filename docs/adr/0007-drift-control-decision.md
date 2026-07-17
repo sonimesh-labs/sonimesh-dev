@@ -37,6 +37,12 @@ A hard resynchronization resets controller history and leaves buffer flushing,
 fade behavior, and decoder/ASRC recreation to the stream owner. The output
 callback receives only precomputed PCM blocks and never reads controller state.
 
+The nominal sample-rate source may expose a control-domain adjustment handle.
+An `Adjust` decision is published through a bounded atomic ppm value that the
+source observes on its next callback; the callback never invokes the controller.
+A `HardResync` decision is returned to the stream owner and is never silently
+applied to a running source.
+
 The initial controller works in integral block units and ppm values. It does not
 claim that the selected gains or thresholds meet a hardware latency target.
 

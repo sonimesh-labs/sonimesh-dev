@@ -1,5 +1,8 @@
 use core::fmt;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicI32, Ordering};
 
+use sonimesh_audio::{DriftDecision, DriftResyncDirection, MAX_DRIFT_ADJUSTMENT_PPM};
 use sonimesh_audio::{LinearResampler, ResamplerError};
 use sonimesh_platform::{MAX_CALLBACK_FRAMES, RenderSource};
 
@@ -32,6 +35,70 @@ impl fmt::Display for SampleRateMappedRenderSourceError {
 
 impl std::error::Error for SampleRateMappedRenderSourceError {}
 
+/// Failure while applying a non-realtime drift decision to a source.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DriftAdjustmentError {
+    /// The requested ppm correction exceeds the shared bound.
+    InvalidPpm,
+    /// The stream owner must recreate or flush state before continuing.
+    HardResyncRequired(DriftResyncDirection),
+}
+
+impl fmt::Display for DriftAdjustmentError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidPpm => formatter.write_str("drift adjustment exceeds the ppm bound"),
+            Self::HardResyncRequired(direction) => {
+                write!(
+                    formatter,
+                    "drift controller requires a {direction:?} hard resync"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for DriftAdjustmentError {}
+
+/// Control-domain handle for the source's bounded ppm correction.
+#[derive(Clone)]
+pub struct DriftAdjustmentHandle {
+    ppm: Arc<AtomicI32>,
+}
+
+impl DriftAdjustmentHandle {
+    /// Applies a precomputed drift decision without touching source phase state.
+    ///
+    /// A hard resynchronization is returned to the stream owner instead of
+    /// being silently applied to a running source.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DriftAdjustmentError`] for an invalid correction or hard reset.
+    pub fn apply_decision(&self, decision: DriftDecision) -> Result<(), DriftAdjustmentError> {
+        match decision {
+            DriftDecision::Adjust { ppm } => self.set_ppm(ppm),
+            DriftDecision::HardResync { direction } => {
+                Err(DriftAdjustmentError::HardResyncRequired(direction))
+            }
+        }
+    }
+
+    /// Stores one bounded ppm correction for the next source callback.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DriftAdjustmentError::InvalidPpm`] when the value is outside
+    /// the shared controller bound.
+    pub fn set_ppm(&self, ppm: i32) -> Result<(), DriftAdjustmentError> {
+        if !(-MAX_DRIFT_ADJUSTMENT_PPM..=MAX_DRIFT_ADJUSTMENT_PPM).contains(&ppm) {
+            return Err(DriftAdjustmentError::InvalidPpm);
+        }
+        self.ppm.store(ppm, Ordering::Release);
+        Ok(())
+    }
+}
+
 /// Realtime-safe nominal sample-rate conversion source wrapper.
 ///
 /// The wrapped source and this adapter use the same interleaved channel layout.
@@ -41,6 +108,8 @@ impl std::error::Error for SampleRateMappedRenderSourceError {}
 pub struct SampleRateMappedRenderSource {
     source: Box<dyn RenderSource>,
     resampler: LinearResampler,
+    drift_ppm: Arc<AtomicI32>,
+    applied_drift_ppm: i32,
     input_scratch: Box<[f32]>,
     input_frames: usize,
     maximum_output_frames: usize,
@@ -60,6 +129,33 @@ impl SampleRateMappedRenderSource {
         channels: u16,
         maximum_callback_frames: u32,
     ) -> Result<Self, SampleRateMappedRenderSourceError> {
+        Self::new_with_drift_control(
+            source,
+            input_sample_rate_hz,
+            output_sample_rate_hz,
+            channels,
+            maximum_callback_frames,
+        )
+        .map(|(source, _handle)| source)
+    }
+
+    /// Constructs a source and its control-domain drift handle.
+    ///
+    /// The returned handle may be retained by a stream owner. Applying a ppm
+    /// decision only performs an atomic store; the callback observes it on its
+    /// next invocation and updates local resampler state without a lock.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error before realtime work when rates, channels, or scratch
+    /// bounds are invalid.
+    pub fn new_with_drift_control(
+        source: Box<dyn RenderSource>,
+        input_sample_rate_hz: u32,
+        output_sample_rate_hz: u32,
+        channels: u16,
+        maximum_callback_frames: u32,
+    ) -> Result<(Self, DriftAdjustmentHandle), SampleRateMappedRenderSourceError> {
         let resampler = LinearResampler::new(input_sample_rate_hz, output_sample_rate_hz, channels)
             .map_err(SampleRateMappedRenderSourceError::Resampler)?;
         if maximum_callback_frames == 0 || maximum_callback_frames > MAX_CALLBACK_FRAMES {
@@ -76,13 +172,22 @@ impl SampleRateMappedRenderSource {
             .checked_mul(usize::from(resampler.channels()))
             .ok_or(SampleRateMappedRenderSourceError::ScratchSizeOverflow)?;
 
-        Ok(Self {
-            source,
-            resampler,
-            input_scratch: vec![0.0; input_samples].into_boxed_slice(),
-            input_frames: 0,
-            maximum_output_frames,
-        })
+        let drift_ppm = Arc::new(AtomicI32::new(0));
+        let handle = DriftAdjustmentHandle {
+            ppm: Arc::clone(&drift_ppm),
+        };
+        Ok((
+            Self {
+                source,
+                resampler,
+                drift_ppm,
+                applied_drift_ppm: 0,
+                input_scratch: vec![0.0; input_samples].into_boxed_slice(),
+                input_frames: 0,
+                maximum_output_frames,
+            },
+            handle,
+        ))
     }
 
     /// Returns the fixed channel layout shared by the wrapped source and output.
@@ -124,6 +229,17 @@ impl SampleRateMappedRenderSource {
 impl RenderSource for SampleRateMappedRenderSource {
     fn render(&mut self, output: &mut [f32]) {
         output.fill(0.0);
+        let requested_drift_ppm = self.drift_ppm.load(Ordering::Acquire);
+        if requested_drift_ppm != self.applied_drift_ppm {
+            if self
+                .resampler
+                .set_rate_adjustment_ppm(requested_drift_ppm)
+                .is_err()
+            {
+                return;
+            }
+            self.applied_drift_ppm = requested_drift_ppm;
+        }
         let channels = usize::from(self.channels());
         let output_frames = output.len() / channels;
         if output_frames > self.maximum_output_frames {

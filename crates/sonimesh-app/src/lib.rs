@@ -25,7 +25,8 @@ pub use pairing_record::{
 pub use pcm_render_source::PcmRenderSource;
 pub use receiver_pipeline::{ReceiverPipelineError, ReceiverStreamPipeline};
 pub use sample_rate_mapped_render_source::{
-    SampleRateMappedRenderSource, SampleRateMappedRenderSourceError,
+    DriftAdjustmentError, DriftAdjustmentHandle, SampleRateMappedRenderSource,
+    SampleRateMappedRenderSourceError,
 };
 pub use session::{SessionEvent, SessionPhase, SessionState, SessionTransitionError};
 pub use udp_receiver_pipeline::{

@@ -23,6 +23,8 @@ Add a bounded linear interpolation stage in `sonimesh-audio` and a pull-based
   ratios from creating an unbounded callback scratch allocation;
 - interpolation retains the final input frame needed by the next step and
   preserves phase across output callbacks and internal chunks;
+- a separate control-domain handle can publish the controller's bounded ppm
+  adjustment atomically, while hard-resync decisions remain stream-owner work;
 - invalid alignment, rate, channel, and callback bounds fail closed to silence;
 - the source factory already receives `OutputConfig`, so nominal conversion can
   be composed after channel mapping and before the platform stream;
