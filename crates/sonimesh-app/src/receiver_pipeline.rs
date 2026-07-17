@@ -132,6 +132,7 @@ where
                 frame.opus_payload,
             )
         };
+        plaintext.fill(0);
         match admission {
             Ok(outcome) => {
                 self.record_jitter_outcome(outcome);

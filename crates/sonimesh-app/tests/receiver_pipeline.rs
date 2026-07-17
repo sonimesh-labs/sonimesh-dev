@@ -110,6 +110,7 @@ fn receives_authenticated_media_then_decodes_into_realtime_pcm() {
         pipeline.receive(&packet.datagram, &mut plaintext).unwrap(),
         InsertOutcome::Inserted
     );
+    assert!(plaintext.iter().all(|byte| *byte == 0));
     assert!(matches!(
         pipeline.decode_next().unwrap(),
         DecodeStep::Decoded { sequence: 0, .. }
