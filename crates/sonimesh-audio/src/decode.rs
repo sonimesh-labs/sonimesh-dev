@@ -214,6 +214,18 @@ where
         self.reset_stream_state();
     }
 
+    /// Retires decoded PCM after the jitter buffer accepted a new resync point.
+    ///
+    /// The caller invokes this only after [`Self::admit`] returns
+    /// [`InsertOutcome::Resynchronized`]. The jitter buffer already contains
+    /// the new frame, so this clears only decoder history, reusable PCM scratch,
+    /// and the previous PCM epoch without discarding that frame.
+    pub fn reset_after_jitter_resynchronization(&mut self) {
+        self.decoder.reset();
+        self.pcm.fill(0.0);
+        self.producer.begin_epoch();
+    }
+
     /// Replaces the PCM producer after the old platform output source stopped.
     ///
     /// The new queue starts empty, so pending jitter, decoder history, and PCM

@@ -372,6 +372,61 @@ fn pipeline_publishes_late_and_controlled_resynchronization_metrics() {
 }
 
 #[test]
+fn jitter_resynchronization_retires_old_pcm_but_keeps_the_new_packet() {
+    let secret = SessionSecret::new([0xA5; 32]);
+    let context = context(2);
+    let mut sealer = MediaSealer::new(&secret, context).unwrap();
+    let first = sealer.seal(0, 0, &[1]).unwrap();
+    let buffered = sealer.seal(0, 960, &[2]).unwrap();
+    let _skipped = sealer.seal(0, 1_920, &[0]).unwrap();
+    let resync_point = sealer.seal(0, 2_880, &[3]).unwrap();
+    let (producer, mut consumer) = realtime_pcm_queue::<4>(4).unwrap();
+    let counters = Arc::new(StreamCounters::default());
+    let mut pipeline = ReceiverStreamPipeline::<ByteDecoder, 2, 8, 4>::new(
+        &secret,
+        context,
+        ByteDecoder,
+        producer,
+        Arc::clone(&counters),
+        0,
+    )
+    .unwrap();
+    let mut plaintext = [0_u8; 8];
+
+    pipeline.receive(&first.datagram, &mut plaintext).unwrap();
+    assert!(matches!(
+        pipeline.decode_next().unwrap(),
+        DecodeStep::Decoded { sequence: 0, .. }
+    ));
+    pipeline
+        .receive(&buffered.datagram, &mut plaintext)
+        .unwrap();
+    assert_eq!(
+        pipeline
+            .receive(&resync_point.datagram, &mut plaintext)
+            .unwrap(),
+        InsertOutcome::Resynchronized { dropped_frames: 1 }
+    );
+    assert_eq!(counters.snapshot().queued_pcm_blocks, 0);
+    assert!(matches!(
+        pipeline.decode_next().unwrap(),
+        DecodeStep::Decoded { sequence: 3, .. }
+    ));
+
+    let mut output = [f32::NAN; 4];
+    assert!(matches!(
+        consumer.pop_into(&mut output),
+        RealtimePcmPopOutcome::Filled {
+            discontinuity: true,
+            discarded_stale_blocks: 1,
+            ..
+        }
+    ));
+    assert!((output[0] - 3.0).abs() < f32::EPSILON);
+    assert_eq!(counters.snapshot().stream_resets, 1);
+}
+
+#[test]
 fn hard_resync_retires_only_the_current_stream_playout_state() {
     let secret = SessionSecret::new([0xA5; 32]);
     let context = context(2);

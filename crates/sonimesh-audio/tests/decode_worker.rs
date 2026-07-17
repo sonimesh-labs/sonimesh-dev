@@ -5,8 +5,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use sonimesh_audio::{
-    DecodeStep, DecodeWorkerError, FrameDecoder, RealtimePcmPopOutcome, RealtimePcmPushOutcome,
-    StreamDecodeWorker, realtime_pcm_queue,
+    DecodeStep, DecodeWorkerError, FrameDecoder, InsertOutcome, RealtimePcmPopOutcome,
+    RealtimePcmPushOutcome, StreamDecodeWorker, realtime_pcm_queue,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -248,6 +248,48 @@ fn hard_resync_clears_jitter_decoder_history_and_retired_pcm() {
             sequence: 0,
             discontinuity: true,
             discarded_stale_blocks: 0,
+            ..
+        }
+    ));
+    assert!((output[0] - 3.0).abs() < f32::EPSILON);
+}
+
+#[test]
+fn jitter_resync_preserves_the_new_frame_and_retires_previous_pcm() {
+    let resets = Arc::new(AtomicUsize::new(0));
+    let (producer, mut consumer) = realtime_pcm_queue::<4>(4).unwrap();
+    let mut worker = StreamDecodeWorker::<ResetTrackingDecoder, 2, 8, 4>::new(
+        ResetTrackingDecoder {
+            resets: Arc::clone(&resets),
+        },
+        producer,
+        0,
+    );
+    worker.admit(0, 0, &[1]).unwrap();
+    assert!(matches!(
+        worker.decode_next().unwrap(),
+        DecodeStep::Decoded { sequence: 0, .. }
+    ));
+    worker.admit(1, 960, &[2]).unwrap();
+
+    assert_eq!(
+        worker.admit(3, 2_880, &[3]).unwrap(),
+        InsertOutcome::Resynchronized { dropped_frames: 1 }
+    );
+    worker.reset_after_jitter_resynchronization();
+
+    assert_eq!(resets.load(Ordering::Relaxed), 1);
+    assert_eq!(worker.queued_blocks(), 0);
+    assert!(matches!(
+        worker.decode_next().unwrap(),
+        DecodeStep::Decoded { sequence: 3, .. }
+    ));
+    let mut output = [f32::NAN; 4];
+    assert!(matches!(
+        consumer.pop_into(&mut output),
+        RealtimePcmPopOutcome::Filled {
+            discontinuity: true,
+            discarded_stale_blocks: 1,
             ..
         }
     ));

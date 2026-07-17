@@ -135,6 +135,10 @@ where
         plaintext.fill(0);
         match admission {
             Ok(outcome) => {
+                if matches!(outcome, InsertOutcome::Resynchronized { .. }) {
+                    self.decode.reset_after_jitter_resynchronization();
+                    self.counters.set_queued_pcm_blocks(0);
+                }
                 self.record_jitter_outcome(outcome);
                 Ok(outcome)
             }
