@@ -8,8 +8,8 @@ mod receiver_pipeline;
 mod session;
 
 pub use control_stream::{
-    ControlStreamAction, ControlStreamCoordinator, ControlStreamError, MediaStreamIdentity,
-    StreamStartRequest,
+    ControlOperationToken, ControlStreamAction, ControlStreamCoordinator, ControlStreamError,
+    MediaStreamIdentity, StreamStartRequest,
 };
 pub use output_controller::{OutputController, OutputLifecycleError, OutputSelection};
 pub use pairing_controller::{PairingInvitationController, PairingInvitationError};

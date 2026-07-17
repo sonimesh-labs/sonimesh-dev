@@ -33,7 +33,11 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   field limits for controlled-lab command exchange.
 - bounded version-one hello negotiation that selects the exact supported
   protocol version and a canonical fixed intersection of known capabilities;
-  receiver start commands reject unnegotiated frame durations before media work.
+  receiver start commands require this one-time negotiation and reject
+  unnegotiated frame durations before media work; control-session expiry retires
+  the selected capabilities and stream lifecycle state together; tokenized
+  start/rotation/stop acknowledgements reject stale asynchronous completions;
+  reconnection with fresh session material requires a new hello.
 - a per-stream, non-realtime decode-worker boundary that schedules ordinary
   decode and PLC from authenticated jitter decisions, then writes bounded PCM
   blocks to the existing lock-free output queue; no concrete Opus binding yet.

@@ -45,6 +45,31 @@ when its 10 ms or 20 ms duration capability appears in that selected
 intersection. A semantically valid but unnegotiated command does not prepare
 output or media work.
 
+The receiver retains exactly one successful authenticated hello per trusted,
+ready control session. A hello received before pairing establishes that state is
+rejected. A malformed or incompatible ready-session hello leaves that session
+unnegotiated so the transport may deliver a corrected authenticated hello; a
+second successful hello is rejected rather than silently changing active
+capability policy.
+
+When the authenticated control session expires, the receiver retires its
+negotiation, active stream identity, and pending operation together. A later
+paired session must complete a fresh hello; it cannot inherit a retired peer's
+capabilities.
+
+A successful reconnect also uses fresh control-session material. The receiver
+returns to `Ready` while retiring the prior negotiation, active media identity,
+and pending completion; the reconnected peer must send a new hello before it
+can issue another stream command.
+
+Each prepared start, key rotation, and stop carries a receiver-issued opaque
+operation token. The platform owner must return that token with its completion
+or failure acknowledgement. Tokens are never reused during the coordinator's
+lifetime, including after control-session expiry, so a delayed completion cannot
+commit an identical command in a later paired session. Lifecycle state is owned
+by the coordinator: start and stop transitions occur only with matching
+completion tokens, and session expiry uses the dedicated retirement operation.
+
 ## Security implications
 
 The codec does bounded length validation before allocating/decode work. It is not a

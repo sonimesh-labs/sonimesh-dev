@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use sonimesh_app::{
     ControlStreamAction, ControlStreamCoordinator, PairingAttemptOutcome, PairingId,
-    PairingInvitationController, PairingSource, ReceiverStreamPipeline, SessionEvent, SessionState,
+    PairingInvitationController, PairingSource, ReceiverStreamPipeline, SessionState,
 };
 use sonimesh_audio::{
     DecodeStep, FrameDecoder, InsertOutcome, RealtimePcmPopOutcome, realtime_pcm_queue,
@@ -14,7 +14,7 @@ use sonimesh_diagnostics::StreamCounters;
 use sonimesh_network::IngressError;
 use sonimesh_protocol::{
     CONTROL_PROTOCOL_VERSION, Capability, Envelope, Hello, MediaDirection, MediaKeyContext,
-    MediaSealer, SessionSecret, StartStream, envelope, negotiate_hello,
+    MediaSealer, SessionSecret, StartStream, envelope,
 };
 
 struct ByteDecoder;
@@ -72,16 +72,20 @@ fn trusted_session() -> SessionState {
     session
 }
 
-fn negotiation() -> sonimesh_protocol::NegotiatedControl {
-    negotiate_hello(
-        &Hello {
+fn negotiate(coordinator: &mut ControlStreamCoordinator) {
+    let hello = Envelope {
+        protocol_version: CONTROL_PROTOCOL_VERSION,
+        request_id: 1,
+        payload: Some(envelope::Payload::Hello(Hello {
             supported_versions: vec![CONTROL_PROTOCOL_VERSION],
             capabilities: vec![Capability::FrameDuration20Ms as i32],
             display_name: "Lab sender".to_owned(),
-        },
-        &[Capability::FrameDuration20Ms],
-    )
-    .unwrap()
+        })),
+    };
+    assert!(matches!(
+        coordinator.accept(&hello),
+        Ok(ControlStreamAction::Negotiated(_))
+    ));
 }
 
 #[test]
@@ -190,20 +194,25 @@ fn control_epoch_rotation_commits_only_after_pipeline_context_rotates() {
         0,
     )
     .unwrap();
-    let mut coordinator = ControlStreamCoordinator::new(trusted_session(), negotiation());
-    let ControlStreamAction::Start(initial_request) =
-        coordinator.accept(&start_command(2)).unwrap()
+    let mut coordinator =
+        ControlStreamCoordinator::new(trusted_session(), &[Capability::FrameDuration20Ms]).unwrap();
+    negotiate(&mut coordinator);
+    let ControlStreamAction::Start {
+        token: initial_token,
+        request: initial_request,
+    } = coordinator.accept(&start_command(2)).unwrap()
     else {
         panic!("expected initial start action");
     };
     coordinator
-        .state_mut()
-        .apply(SessionEvent::StartStream)
+        .complete_start(initial_token, initial_request)
         .unwrap();
-    coordinator.complete_start(initial_request).unwrap();
 
-    let ControlStreamAction::Rotate { previous, next } =
-        coordinator.accept(&start_command(3)).unwrap()
+    let ControlStreamAction::Rotate {
+        token,
+        previous,
+        next,
+    } = coordinator.accept(&start_command(3)).unwrap()
     else {
         panic!("expected rotate action");
     };
@@ -212,7 +221,9 @@ fn control_epoch_rotation_commits_only_after_pipeline_context_rotates() {
         .media_key_context(MediaDirection::AndroidToDesktop)
         .unwrap();
     pipeline.rotate(&secret, next_context, 0).unwrap();
-    coordinator.complete_rotation(previous, next).unwrap();
+    coordinator
+        .complete_rotation(token, previous, next)
+        .unwrap();
 
     assert_eq!(pipeline.context(), next_context);
     assert_eq!(coordinator.active(), Some(next.identity));
