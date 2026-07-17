@@ -35,10 +35,11 @@ farther into that clamp, the integral accumulator is not advanced.
 
 A hard resynchronization resets controller history. The stream owner invokes its
 stream-local hard-resynchronization boundary to discard undecoded jitter, reset
-decoder state, and retire queued PCM from the active output epoch. Output fade
-behavior and platform stream recreation remain control-domain responsibilities.
-The output callback receives only precomputed PCM blocks and never reads
-controller state.
+decoder state, and retire queued PCM from the active output epoch. The
+queue-backed render source applies its bounded discontinuity fade-in when it
+observes the resulting epoch gap; platform stream recreation remains a
+control-domain responsibility. The output callback receives only precomputed
+PCM blocks and never reads controller state.
 
 `sonimesh-app::StreamDriftController` is the control-domain composition point:
 it samples the receiver pipeline's bounded PCM occupancy, applies ordinary ppm

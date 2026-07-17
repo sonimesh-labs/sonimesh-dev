@@ -52,6 +52,24 @@ fn empty_blocks_cannot_make_the_callback_loop_unbounded() {
     assert_eq!(counters.snapshot().pcm_underflows, 1);
 }
 
+#[test]
+fn sequence_gap_fades_pcm_back_in_and_records_the_discontinuity() {
+    let (mut producer, consumer) = realtime_pcm_queue::<4>(1).unwrap();
+    producer.push(&[1.0; 4]);
+    producer.push(&[1.0; 4]);
+    let counters = Arc::new(StreamCounters::default());
+    let mut source = PcmRenderSource::new(consumer, Arc::clone(&counters));
+    let mut first = [f32::NAN; 2];
+    let mut second = [f32::NAN; 2];
+
+    source.render(&mut first);
+    source.render(&mut second);
+
+    assert_samples(&first, &[1.0 / 128.0, 2.0 / 128.0]);
+    assert_samples(&second, &[3.0 / 128.0, 4.0 / 128.0]);
+    assert_eq!(counters.snapshot().pcm_discontinuities, 1);
+}
+
 fn assert_samples(actual: &[f32], expected: &[f32]) {
     assert_eq!(actual.len(), expected.len());
     assert!(

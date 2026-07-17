@@ -31,6 +31,9 @@ and consumer endpoints in `sonimesh-audio`.
   and detect every remaining gap;
 - callback reads always initialize their complete output slice, using silence on
   underflow or when only stale blocks were available;
+- the queue-backed render source turns an observed epoch or sequence gap into a
+  fixed 128-sample fade-in before returning to full PCM, without allocation or
+  controller work in the callback;
 - the public SoniMesh implementation contains no unsafe block.
 
 Although `ArrayQueue` is an MPMC implementation, SoniMesh creates exactly one
@@ -57,9 +60,10 @@ actual WASAPI devices; lock-free does not by itself prove a latency target.
 ## Validation evidence
 
 Tests cover invalid capacities, oldest replacement, stale epoch discard,
-underflow initialization, and a 50,000-block concurrent producer/consumer stress
-run. The stress test proves ordering and accounts every block as consumed or
-overwritten; it is not a substitute for Loom, Miri, or hardware timing evidence.
+underflow initialization, queue-discontinuity fade-in, and a 50,000-block
+concurrent producer/consumer stress run. The stress test proves ordering and
+accounts every block as consumed or overwritten; it is not a substitute for
+Loom, Miri, or hardware timing evidence.
 
 ## Rollback plan
 

@@ -11,6 +11,7 @@ pub struct StreamCounters {
     plc_frames: AtomicU64,
     pcm_underflows: AtomicU64,
     pcm_overflows: AtomicU64,
+    pcm_discontinuities: AtomicU64,
     queued_pcm_blocks: AtomicU16,
     queued_pcm_high_water_blocks: AtomicU16,
     stream_resets: AtomicU64,
@@ -61,6 +62,11 @@ impl StreamCounters {
         self.pcm_overflows.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Records a sequence or epoch gap observed by the PCM render source.
+    pub fn pcm_discontinuity(&self) {
+        self.pcm_discontinuities.fetch_add(1, Ordering::Relaxed);
+    }
+
     /// Publishes the current count of PCM blocks in the active stream epoch.
     pub fn set_queued_pcm_blocks(&self, blocks: u16) {
         self.queued_pcm_blocks.store(blocks, Ordering::Relaxed);
@@ -108,6 +114,7 @@ impl StreamCounters {
             plc_frames: self.plc_frames.load(Ordering::Relaxed),
             pcm_underflows: self.pcm_underflows.load(Ordering::Relaxed),
             pcm_overflows: self.pcm_overflows.load(Ordering::Relaxed),
+            pcm_discontinuities: self.pcm_discontinuities.load(Ordering::Relaxed),
             queued_pcm_blocks: self.queued_pcm_blocks.load(Ordering::Relaxed),
             queued_pcm_high_water_blocks: self.queued_pcm_high_water_blocks.load(Ordering::Relaxed),
             stream_resets: self.stream_resets.load(Ordering::Relaxed),
@@ -140,6 +147,8 @@ pub struct StreamMetricsSnapshot {
     pub pcm_underflows: u64,
     /// Bounded oldest-region PCM drops.
     pub pcm_overflows: u64,
+    /// Sequence or epoch gaps observed by the PCM render source.
+    pub pcm_discontinuities: u64,
     /// Current PCM blocks belonging to the active stream epoch.
     pub queued_pcm_blocks: u16,
     /// Largest active-epoch PCM block count observed since stream creation.
@@ -196,6 +205,7 @@ mod tests {
         counters.rejected();
         counters.plc_frame();
         counters.pcm_underflow();
+        counters.pcm_discontinuity();
         counters.set_queued_pcm_blocks(4);
         counters.set_queued_pcm_blocks(2);
         counters.set_nominal_sample_rates(48_000, 44_100);
@@ -207,6 +217,7 @@ mod tests {
         assert_eq!(snapshot.rejected_packets, 1);
         assert_eq!(snapshot.plc_frames, 1);
         assert_eq!(snapshot.pcm_underflows, 1);
+        assert_eq!(snapshot.pcm_discontinuities, 1);
         assert_eq!(snapshot.queued_pcm_blocks, 2);
         assert_eq!(snapshot.queued_pcm_high_water_blocks, 4);
         assert_eq!(snapshot.nominal_input_sample_rate_hz, 48_000);

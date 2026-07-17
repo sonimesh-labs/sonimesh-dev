@@ -1,8 +1,12 @@
 use std::sync::Arc;
 
-use sonimesh_audio::{MAX_PCM_QUEUE_BLOCKS, RealtimePcmConsumer, RealtimePcmPopOutcome};
+use sonimesh_audio::{
+    GainSmoother, MAX_PCM_QUEUE_BLOCKS, RealtimePcmConsumer, RealtimePcmPopOutcome,
+};
 use sonimesh_diagnostics::StreamCounters;
 use sonimesh_platform::RenderSource;
+
+const DISCONTINUITY_FADE_SAMPLES: u16 = 128;
 
 /// Realtime output source backed by one stream's decoded PCM queue.
 ///
@@ -14,6 +18,7 @@ pub struct PcmRenderSource<const SAMPLES_PER_BLOCK: usize> {
     scratch: [f32; SAMPLES_PER_BLOCK],
     scratch_len: usize,
     scratch_offset: usize,
+    discontinuity_fade: GainSmoother,
     counters: Arc<StreamCounters>,
 }
 
@@ -29,6 +34,7 @@ impl<const SAMPLES_PER_BLOCK: usize> PcmRenderSource<SAMPLES_PER_BLOCK> {
             scratch: [0.0; SAMPLES_PER_BLOCK],
             scratch_len: 0,
             scratch_offset: 0,
+            discontinuity_fade: GainSmoother::new(1.0),
             counters,
         }
     }
@@ -47,7 +53,17 @@ impl<const SAMPLES_PER_BLOCK: usize> RenderSource for PcmRenderSource<SAMPLES_PE
                 }
                 refills += 1;
                 match self.consumer.pop_into(&mut self.scratch) {
-                    RealtimePcmPopOutcome::Filled { samples, .. } => {
+                    RealtimePcmPopOutcome::Filled {
+                        samples,
+                        discontinuity,
+                        ..
+                    } => {
+                        if discontinuity {
+                            self.counters.pcm_discontinuity();
+                            self.discontinuity_fade = GainSmoother::new(0.0);
+                            self.discontinuity_fade
+                                .set_target(1.0, DISCONTINUITY_FADE_SAMPLES);
+                        }
                         self.scratch_len = samples;
                         self.scratch_offset = 0;
                         if samples == 0 {
@@ -66,6 +82,8 @@ impl<const SAMPLES_PER_BLOCK: usize> RenderSource for PcmRenderSource<SAMPLES_PE
             output[written..written + copy_len].copy_from_slice(
                 &self.scratch[self.scratch_offset..self.scratch_offset + copy_len],
             );
+            self.discontinuity_fade
+                .apply(&mut output[written..written + copy_len]);
             written += copy_len;
             self.scratch_offset += copy_len;
         }
