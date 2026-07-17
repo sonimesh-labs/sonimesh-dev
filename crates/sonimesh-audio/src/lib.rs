@@ -1,7 +1,7 @@
 //! Bounded audio-domain primitives for SoniMesh.
 //!
 //! Types in this crate allocate no memory after construction. Platform output,
-//! Opus bindings, and nominal sample-rate conversion remain separate adapters.
+//! Opus bindings, and realtime source adapters remain separate boundaries.
 
 mod channel_map;
 mod decode;
@@ -10,6 +10,7 @@ mod gain;
 mod jitter;
 mod pcm_ring;
 mod realtime_queue;
+mod resampler;
 
 pub use channel_map::{ChannelMapper, ChannelMappingError, MAX_AUDIO_CHANNELS};
 pub use decode::{DecodeStep, DecodeWorkerError, FrameDecoder, StreamDecodeWorker};
@@ -23,4 +24,7 @@ pub use pcm_ring::{PcmBlockRing, PcmPopOutcome, PcmPushOutcome};
 pub use realtime_queue::{
     MAX_PCM_QUEUE_BLOCKS, RealtimePcmConsumer, RealtimePcmPopOutcome, RealtimePcmProducer,
     RealtimePcmPushOutcome, RealtimeQueueConfigError, realtime_pcm_queue,
+};
+pub use resampler::{
+    LinearResampler, MAX_RESAMPLE_RATE_HZ, MIN_RESAMPLE_RATE_HZ, ResampleOutcome, ResamplerError,
 };

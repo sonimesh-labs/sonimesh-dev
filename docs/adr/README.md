@@ -28,6 +28,8 @@ security implications, test evidence, and rollback plan.
     user visibility for capture limitations.
 11. **Channel layout mapping** — bounded interleaved mapping, speaker-layout
     evidence, and the boundary between decoded PCM and device output.
+12. **Nominal sample-rate conversion** — bounded conversion, drift separation,
+    filter quality, and rate-mismatch evidence.
 
 Do not mark an ADR complete merely because an API name has been selected. The
 decision is complete only when its failure modes and validation evidence are
@@ -59,3 +61,5 @@ documented.
   explicit, bounded, redacted desktop export design deferred to Phase 2.
 - [ADR 0012: Bounded channel layout mapping](./0012-channel-layout-mapping.md) —
   provisional index-based mapping between decoded PCM and output layouts.
+- [ADR 0013: Bounded nominal sample-rate conversion](./0013-nominal-sample-rate-conversion.md) —
+  provisional linear conversion separated from drift control and quality claims.

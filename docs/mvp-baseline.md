@@ -23,6 +23,8 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   oldest-block replacement, and exact discontinuity detection;
 - a bounded index-based Float32 channel mapper and preallocated realtime source
   adapter for mono/stereo-to-device layout conversion without callback allocation;
+- a bounded linear nominal sample-rate converter and preallocated source adapter
+  for rate mismatch without callback allocation; drift control remains separate;
 - a bounded queue-backed realtime render source that preserves partial PCM
   blocks, initializes callback underflow to silence, and caps refill attempts;
 - allocation-free gain smoothing, atomic diagnostic counters, endpoint
@@ -123,8 +125,9 @@ jitter, and output-backend ADRs using measured 10/20 ms and device results.
   untrusted TCP framing reader is not a trusted control session.
 - direct-WASAPI comparison adapter and backend selection evidence;
 - Tauri integration, signing, packaging, and firewall integration;
-- a concrete drift ASRC, nominal rate conversion, acoustic latency, and soak
-  validation; the occupancy controller alone does not establish any timing claim.
+- a quality-qualified resampler/ASRC, acoustic latency, and soak validation; the
+  nominal converter and occupancy controller do not establish timing or quality
+  claims.
 
 An optional Windows CPAL adapter and read-only device probe are now available for
 phase 0B measurement. Their presence does not close the direct-WASAPI comparison,

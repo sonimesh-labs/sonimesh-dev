@@ -7,6 +7,7 @@ mod pairing_controller;
 mod pairing_record;
 mod pcm_render_source;
 mod receiver_pipeline;
+mod sample_rate_mapped_render_source;
 mod session;
 mod udp_receiver_pipeline;
 
@@ -23,6 +24,9 @@ pub use pairing_record::{
 };
 pub use pcm_render_source::PcmRenderSource;
 pub use receiver_pipeline::{ReceiverPipelineError, ReceiverStreamPipeline};
+pub use sample_rate_mapped_render_source::{
+    SampleRateMappedRenderSource, SampleRateMappedRenderSourceError,
+};
 pub use session::{SessionEvent, SessionPhase, SessionState, SessionTransitionError};
 pub use udp_receiver_pipeline::{
     UdpPollOutcome, UdpReceiverError, UdpReceiverPipeline, UdpReceiverSetupError,

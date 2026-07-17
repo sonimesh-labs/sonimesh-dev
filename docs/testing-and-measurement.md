@@ -71,6 +71,10 @@ Deterministic audio tests also cover the provisional bounded channel mapper and
 its callback source adapter. They do not qualify physical speaker positions or
 OEM-specific channel routing.
 
+They also cover nominal linear sample-rate conversion and phase continuity. They
+do not qualify filter quality, drift correction, acoustic latency, or long-run
+rate stability.
+
 ## Network simulation
 
 The protocol and audio crates should run against an in-memory virtual transport

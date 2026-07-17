@@ -63,12 +63,12 @@ maximum produced:
 
 This second endpoint again delivered a callback larger than the reported fixed
 range. It also confirms that default-device changes are observable at the control
-boundary. The silent source filled all eight output channels; source-to-device
-channel mapping has not been implemented or qualified by this smoke test.
+boundary. The silent source filled all eight output channels; semantic speaker
+routing has not been implemented or qualified by this smoke test.
 
 ## Remaining evidence
 
-- repeat on a Realtek endpoint and define source-to-device channel mapping;
+- repeat on a Realtek endpoint and qualify semantic source-to-device routing;
 - record direct-WASAPI results on the same device/configuration;
 - test device removal, default-role change, sleep/wake, and stream recreation;
 - collect callback-gap/underrun counters under load and an 8-hour run;

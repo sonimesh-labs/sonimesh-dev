@@ -410,10 +410,10 @@ Android and the output device have independent clocks. Drift compensation must
 use a slow occupancy/error controller, bounded ratio changes, anti-windup, and a
 hard resynchronization policy when occupancy leaves the safe region.
 
-A fast polynomial resampler may be suitable for near-unity drift correction, but
-it is not automatically a high-quality general converter for 48 kHz to 44.1 kHz.
-Nominal sample-rate conversion and small-ratio drift correction may require
-different filters or stages.
+A bounded linear nominal-rate adapter now covers the feasibility path for rate
+mismatches such as 48 kHz to 44.1 kHz. It is not automatically a high-quality
+general converter or a drift controller; nominal conversion and small-ratio
+clock correction remain separate stages until measurement selects their filters.
 
 ## 12. Mixing and DSP
 
