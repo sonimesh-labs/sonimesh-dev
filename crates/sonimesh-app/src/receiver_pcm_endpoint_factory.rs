@@ -114,6 +114,10 @@ impl<const SAMPLES_PER_BLOCK: usize> ReceiverPcmEndpointFactory<SAMPLES_PER_BLOC
         &self,
         config: &OutputConfig,
     ) -> Result<ReceiverPcmEndpoint<SAMPLES_PER_BLOCK>, ReceiverPcmEndpointError> {
+        config
+            .validate()
+            .map_err(RenderSourceFactoryError::InvalidConfig)
+            .map_err(ReceiverPcmEndpointError::Source)?;
         let (producer, consumer) =
             realtime_pcm_queue(self.queue_capacity).map_err(ReceiverPcmEndpointError::Queue)?;
         let source = Box::new(PcmRenderSource::new(consumer, Arc::clone(&self.counters)));

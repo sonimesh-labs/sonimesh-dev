@@ -51,6 +51,26 @@ fn endpoint_factory_rejects_invalid_queue_capacity_before_output_start() {
     ));
 }
 
+#[test]
+fn endpoint_factory_validates_output_before_creating_the_queue() {
+    let factory = ReceiverPcmEndpointFactory::<4>::new(
+        0,
+        SourcePcmFormat::new(48_000, 1).unwrap(),
+        Arc::new(StreamCounters::default()),
+    );
+    let invalid_output = OutputConfig {
+        channels: 0,
+        ..output_config()
+    };
+
+    assert!(matches!(
+        factory.create(&invalid_output),
+        Err(ReceiverPcmEndpointError::Source(
+            sonimesh_platform::RenderSourceFactoryError::InvalidConfig(_)
+        ))
+    ));
+}
+
 fn assert_samples(actual: &[f32], expected: &[f32]) {
     assert_eq!(actual.len(), expected.len());
     assert!(
