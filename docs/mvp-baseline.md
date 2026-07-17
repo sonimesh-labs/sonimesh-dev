@@ -69,9 +69,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
 - an application-domain UDP receiver pipeline that feeds one socket datagram
   through protected ingress, bounded jitter admission, and non-realtime decode;
   control-session and output lifecycle wiring remain separate.
-- a bounded incremental TCP control-frame reader that validates the existing
-  length-prefixed Protobuf envelope; it is explicitly unauthenticated and is
-  not a TLS or pairing implementation.
+- a bounded incremental TCP control-frame reader/writer that validates the
+  existing length-prefixed Protobuf envelope; it is explicitly unauthenticated
+  and is not a TLS or pairing implementation.
 - a buildable Vue/Vite receiver-control preview with a single low-rate bridge
   boundary, session controls, output selection, pairing-invitation state, and
   diagnostics presentation; it uses in-memory preview data and has no Tauri,

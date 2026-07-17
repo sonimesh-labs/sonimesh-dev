@@ -1,17 +1,19 @@
 //! Bounded incremental control framing tests without transport authentication.
 
-use std::io::Write;
+use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::thread;
 
-use sonimesh_network::{UntrustedControlError, UntrustedControlPoll, UntrustedControlStream};
+use sonimesh_network::{
+    UntrustedControlError, UntrustedControlPoll, UntrustedControlStream, UntrustedControlWrite,
+};
 use sonimesh_protocol::{
     CONTROL_PROTOCOL_VERSION, Capability, Envelope, Hello, MAX_CONTROL_FRAME_BYTES,
     encode_control_frame, envelope,
 };
 
-fn hello_frame() -> Vec<u8> {
-    encode_control_frame(&Envelope {
+fn hello_envelope() -> Envelope {
+    Envelope {
         protocol_version: CONTROL_PROTOCOL_VERSION,
         request_id: 7,
         payload: Some(envelope::Payload::Hello(Hello {
@@ -19,8 +21,11 @@ fn hello_frame() -> Vec<u8> {
             capabilities: vec![Capability::FrameDuration20Ms as i32],
             display_name: "loopback".to_owned(),
         })),
-    })
-    .unwrap()
+    }
+}
+
+fn hello_frame() -> Vec<u8> {
+    encode_control_frame(&hello_envelope()).unwrap()
 }
 
 fn connected_reader() -> (TcpStream, UntrustedControlStream) {
@@ -60,6 +65,20 @@ fn fragmented_frame_is_held_until_complete_and_then_validated() {
         }
     }
     panic!("complete control frame was not decoded");
+}
+
+#[test]
+fn writer_uses_the_same_validated_length_prefixed_frame() {
+    let (mut peer, mut writer) = connected_reader();
+    let expected = hello_frame();
+
+    assert_eq!(
+        writer.send(&hello_envelope()).unwrap(),
+        UntrustedControlWrite::Complete
+    );
+    let mut actual = vec![0; expected.len()];
+    peer.read_exact(&mut actual).unwrap();
+    assert_eq!(actual, expected);
 }
 
 #[test]

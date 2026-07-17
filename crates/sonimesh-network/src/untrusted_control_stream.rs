@@ -1,9 +1,10 @@
 use core::fmt;
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::net::TcpStream;
 
 use sonimesh_protocol::{
     ControlFrameError, Envelope, MAX_CONTROL_FRAME_BYTES, decode_control_frame,
+    encode_control_frame,
 };
 
 const CONTROL_LENGTH_BYTES: usize = 4;
@@ -25,8 +26,10 @@ pub enum UntrustedControlPoll {
 pub enum UntrustedControlError {
     /// The peer sent a malformed or semantically invalid frame.
     Protocol(ControlFrameError),
-    /// The operating system rejected a socket read.
+    /// The operating system rejected a socket operation.
     Io(io::Error),
+    /// A previous encoded frame is still waiting for socket progress.
+    WritePending,
 }
 
 impl fmt::Display for UntrustedControlError {
@@ -34,6 +37,9 @@ impl fmt::Display for UntrustedControlError {
         match self {
             Self::Protocol(error) => write!(formatter, "untrusted control frame rejected: {error}"),
             Self::Io(error) => write!(formatter, "untrusted control stream read failed: {error}"),
+            Self::WritePending => {
+                formatter.write_str("untrusted control stream has a pending write")
+            }
         }
     }
 }
@@ -43,11 +49,23 @@ impl std::error::Error for UntrustedControlError {
         match self {
             Self::Protocol(error) => Some(error),
             Self::Io(error) => Some(error),
+            Self::WritePending => None,
         }
     }
 }
 
-/// Incremental, non-blocking length-prefixed control reader without transport security.
+/// Result of one non-blocking control frame write.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum UntrustedControlWrite {
+    /// The complete frame was accepted by the operating system.
+    Complete,
+    /// The frame remains buffered and requires another flush.
+    Pending,
+    /// The peer has closed the connection.
+    Closed,
+}
+
+/// Incremental, non-blocking length-prefixed control reader/writer without transport security.
 ///
 /// This type only provides bounded framing and semantic Protobuf validation. It
 /// must be placed behind the future authenticated TLS/pairing transport before
@@ -55,6 +73,9 @@ impl std::error::Error for UntrustedControlError {
 pub struct UntrustedControlStream {
     stream: TcpStream,
     buffer: Box<[u8]>,
+    write_buffer: Box<[u8]>,
+    write_len: usize,
+    write_offset: usize,
     length_filled: usize,
     frame_len: Option<usize>,
     frame_filled: usize,
@@ -72,6 +93,9 @@ impl UntrustedControlStream {
         Ok(Self {
             stream,
             buffer: vec![0; CONTROL_BUFFER_BYTES].into_boxed_slice(),
+            write_buffer: vec![0; CONTROL_BUFFER_BYTES].into_boxed_slice(),
+            write_len: 0,
+            write_offset: 0,
             length_filled: 0,
             frame_len: None,
             frame_filled: 0,
@@ -86,6 +110,81 @@ impl UntrustedControlStream {
     /// Returns an operating-system error when the peer endpoint cannot be queried.
     pub fn peer_addr(&self) -> Result<std::net::SocketAddr, io::Error> {
         self.stream.peer_addr()
+    }
+
+    /// Queues and advances one semantically validated control frame.
+    ///
+    /// The frame is copied into one bounded write buffer. A second frame cannot
+    /// overwrite it until [`Self::flush_write`] reports completion.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`UntrustedControlError::Protocol`] when envelope validation or
+    /// encoding fails, [`UntrustedControlError::WritePending`] when a previous
+    /// frame is still buffered, or [`UntrustedControlError::Io`] for a socket
+    /// failure.
+    pub fn send(
+        &mut self,
+        envelope: &Envelope,
+    ) -> Result<UntrustedControlWrite, UntrustedControlError> {
+        if self.terminated {
+            return Ok(UntrustedControlWrite::Closed);
+        }
+        if self.write_offset < self.write_len {
+            return Err(UntrustedControlError::WritePending);
+        }
+
+        let frame = encode_control_frame(envelope).map_err(UntrustedControlError::Protocol)?;
+        if frame.len() > self.write_buffer.len() {
+            return Err(UntrustedControlError::Protocol(
+                ControlFrameError::FrameTooLarge,
+            ));
+        }
+        self.write_buffer[..frame.len()].copy_from_slice(&frame);
+        self.write_len = frame.len();
+        self.write_offset = 0;
+        self.flush_write()
+    }
+
+    /// Advances a previously queued frame without waiting for socket capacity.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`UntrustedControlError::Io`] when the socket write fails.
+    pub fn flush_write(&mut self) -> Result<UntrustedControlWrite, UntrustedControlError> {
+        if self.terminated {
+            return Ok(UntrustedControlWrite::Closed);
+        }
+        if self.write_offset == self.write_len {
+            return Ok(UntrustedControlWrite::Complete);
+        }
+
+        match self
+            .stream
+            .write(&self.write_buffer[self.write_offset..self.write_len])
+        {
+            Ok(0) => {
+                self.terminated = true;
+                Ok(UntrustedControlWrite::Closed)
+            }
+            Ok(written) => {
+                self.write_offset += written;
+                if self.write_offset == self.write_len {
+                    self.write_len = 0;
+                    self.write_offset = 0;
+                    Ok(UntrustedControlWrite::Complete)
+                } else {
+                    Ok(UntrustedControlWrite::Pending)
+                }
+            }
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                Ok(UntrustedControlWrite::Pending)
+            }
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {
+                Ok(UntrustedControlWrite::Pending)
+            }
+            Err(error) => Err(UntrustedControlError::Io(error)),
+        }
     }
 
     /// Reads at most one complete frame without waiting for network data.

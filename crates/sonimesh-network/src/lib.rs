@@ -11,5 +11,5 @@ pub use protected_ingress::{ProtectedIngressError, ProtectedMediaIngress};
 pub use protocol_authenticator::ProtocolAuthenticator;
 pub use udp_receiver::{ReceivedDatagram, UdpMediaReceiver, UdpReceiveError};
 pub use untrusted_control_stream::{
-    UntrustedControlError, UntrustedControlPoll, UntrustedControlStream,
+    UntrustedControlError, UntrustedControlPoll, UntrustedControlStream, UntrustedControlWrite,
 };

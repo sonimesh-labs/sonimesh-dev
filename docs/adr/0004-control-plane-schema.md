@@ -34,11 +34,12 @@ The initial schema covers hello/capability exchange, start/stop stream commands,
 stream state, and structured errors for controlled-lab work. It contains no keys,
 pairing code, IP address, audio data, or device fingerprint.
 
-The repository also provides an untrusted, non-blocking TCP reader that incrementally
-collects the four-byte length prefix and bounded payload before calling the same
-frame validator. A framing or semantic error terminates that reader. This is a
-transport-framing adapter only; it must remain behind the authenticated
-TLS/pairing boundary before envelopes can affect a trusted session.
+The repository also provides an untrusted, non-blocking TCP reader/writer that
+incrementally collects the four-byte length prefix and bounded payload before
+calling the same frame validator, and queues at most one bounded outgoing frame.
+A framing or semantic error terminates that connection. This is a transport-
+framing adapter only; it must remain behind the authenticated TLS/pairing
+boundary before envelopes can affect a trusted session.
 
 The version-one protocol implementation selects only its exact protocol version
 and constructs a fixed, canonical intersection of known capabilities. Unknown
