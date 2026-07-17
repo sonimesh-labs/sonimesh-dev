@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">SoniMesh Capture</string>
+    <string name="capture_channel_name">SoniMesh capture</string>
+    <string name="capture_notification_title">SoniMesh capture is active</string>
+    <string name="capture_notification_text">Audio playback capture feasibility run</string>
+    <string name="stop_capture">Stop capture</string>
+</resources>
