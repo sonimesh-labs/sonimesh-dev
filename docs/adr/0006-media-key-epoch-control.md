@@ -37,6 +37,10 @@ The exact control identity is the tuple:
 - `StopStream` applies only to the matching active tuple. A stop for an older or
   unknown epoch is idempotently ignored or reported as `STREAM_NOT_FOUND`; it
   must never stop a newer epoch.
+- A fresh media-session installation must use a new `media_session_id`. It
+  replaces the ingress and replay window only after the control domain has
+  authenticated fresh session material; it must not be used to clear replay
+  history for an unchanged session/epoch.
 - The controlled-lab implementation has no overlapping old/new epoch grace
   window. On a rotation it drops old media packets and installs the new context
   before media admission resumes. A future grace window requires a separate
