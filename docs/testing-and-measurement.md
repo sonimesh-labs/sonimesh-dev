@@ -141,6 +141,11 @@ A subsequent read-only endpoint enumeration is recorded in
 It validates only current WASAPI endpoint/default-format discovery and does not
 open an output stream.
 
+A current-default silent stream run is recorded in
+[2026-07-18 Windows CPAL smoke](./measurements/2026-07-18-windows-cpal-smoke.md).
+It confirms the bounded callback observation path only, not latency or output
+device qualification.
+
 ## Resource and power acceptance
 
 The Android sender must record CPU, memory, thermal state, and battery impact
