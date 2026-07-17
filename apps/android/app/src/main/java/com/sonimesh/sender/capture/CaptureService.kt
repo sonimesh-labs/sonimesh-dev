@@ -228,6 +228,7 @@ class CaptureService : Service() {
                     }
                     return
                 }
+                val readCompletedAtMillis = SystemClock.elapsedRealtime()
                 if (read == 0) {
                     try {
                         Thread.sleep(CAPTURE_POLL_INTERVAL_MS)
@@ -265,8 +266,12 @@ class CaptureService : Service() {
                     }
                     index++
                 }
-                CaptureStateStore.evidence.recordRead(read / format.channels, silent)
-                if (evidenceThrottle.shouldPublish(SystemClock.elapsedRealtime())) {
+                CaptureStateStore.evidence.recordRead(
+                    frames = read / format.channels,
+                    silent = silent,
+                    completedAtMillis = readCompletedAtMillis,
+                )
+                if (evidenceThrottle.shouldPublish(readCompletedAtMillis)) {
                     mainHandler.post {
                         if (!teardownGate.isTeardownStarted()) {
                             CaptureStateStore.publishEvidence()

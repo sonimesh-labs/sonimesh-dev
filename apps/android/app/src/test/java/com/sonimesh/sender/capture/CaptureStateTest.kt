@@ -66,13 +66,14 @@ class CaptureStateTest {
         val evidence = CaptureEvidence()
         evidence.begin(captureStartedAtMillis = 1_000)
 
-        evidence.recordRead(frames = 480, silent = true)
-        evidence.recordRead(frames = 240, silent = false)
+        evidence.recordRead(frames = 480, silent = true, completedAtMillis = 1_020)
+        evidence.recordRead(frames = 240, silent = false, completedAtMillis = 1_030)
         evidence.recordReadError()
 
         assertEquals(
             CaptureEvidenceSnapshot(
                 captureDurationMillis = 750,
+                lastReadCompletionOffsetMillis = 30,
                 capturedFrames = 720,
                 silentReads = 1,
                 readErrors = 1,
@@ -85,7 +86,7 @@ class CaptureStateTest {
     fun evidence_reset_discards_only_counters() {
         val evidence = CaptureEvidence()
         evidence.begin(captureStartedAtMillis = 1_000)
-        evidence.recordRead(frames = 480, silent = true)
+        evidence.recordRead(frames = 480, silent = true, completedAtMillis = 1_020)
 
         evidence.reset()
 
@@ -98,6 +99,30 @@ class CaptureStateTest {
         evidence.begin(captureStartedAtMillis = 1_000)
 
         assertEquals(0, evidence.snapshot(nowMillis = 999).captureDurationMillis)
+    }
+
+    @Test
+    fun evidence_keeps_the_latest_valid_read_completion_offset() {
+        val evidence = CaptureEvidence()
+        evidence.begin(captureStartedAtMillis = 1_000)
+
+        evidence.recordRead(frames = 480, silent = false, completedAtMillis = 1_020)
+        evidence.recordRead(frames = 480, silent = false, completedAtMillis = 1_010)
+        evidence.recordRead(frames = 480, silent = false, completedAtMillis = 999)
+
+        assertEquals(20L, evidence.snapshot(nowMillis = 1_100).lastReadCompletionOffsetMillis)
+    }
+
+    @Test
+    fun evidence_rejects_a_negative_read_completion_time() {
+        val evidence = CaptureEvidence()
+
+        try {
+            evidence.recordRead(frames = 480, silent = false, completedAtMillis = -1)
+            fail("expected a negative read completion time to be rejected")
+        } catch (_: IllegalArgumentException) {
+            // Expected: capture evidence uses the local monotonic clock only.
+        }
     }
 
     @Test

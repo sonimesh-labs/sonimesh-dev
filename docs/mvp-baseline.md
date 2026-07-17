@@ -98,7 +98,8 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
 - a capture-only Kotlin/Compose Android phase 0A bootstrap with direct,
   non-persisted MediaProjection consent transfer, a media-projection foreground
   service, a fixed PCM16 AudioRecord read buffer, low-rate state publication,
-  bounded evidence counters, and one idempotent teardown path; this is build
+  bounded evidence counters including local read-completion offsets, and one
+  idempotent teardown path; this is build
   evidence only and has no physical-device capture result yet.
 - a buildable Vue/Vite receiver-control preview with a single low-rate bridge
   boundary, session controls, output selection, pairing-invitation state, and

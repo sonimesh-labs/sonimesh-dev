@@ -160,8 +160,12 @@ private fun CaptureStatus.description(): String = when (this) {
     is CaptureStatus.Failed -> "Capture failed: $message"
 }
 
-private fun CaptureEvidenceSnapshot.description(): String =
-    "Observed ${capturedFrames} frames over ${formatDuration(captureDurationMillis)}, ${silentReads} silent reads, ${readErrors} read errors."
+private fun CaptureEvidenceSnapshot.description(): String {
+    val latestRead = lastReadCompletionOffsetMillis?.let { offset ->
+        " Last successful read at +${formatDuration(offset)}."
+    }.orEmpty()
+    return "Observed ${capturedFrames} frames over ${formatDuration(captureDurationMillis)}, ${silentReads} silent reads, ${readErrors} read errors.$latestRead"
+}
 
 private fun CaptureEvidenceSnapshot.hasObservations(): Boolean =
     captureDurationMillis != 0L || capturedFrames != 0L || silentReads != 0L || readErrors != 0L

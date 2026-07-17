@@ -8,13 +8,20 @@ import kotlinx.coroutines.flow.asStateFlow
 
 class CaptureEvidence {
     private val captureStartedAtMillis = AtomicLong(NO_CAPTURE_START)
+    private val lastReadCompletedAtMillis = AtomicLong(NO_READ_COMPLETION)
     private val capturedFrames = AtomicLong()
     private val silentReads = AtomicLong()
     private val readErrors = AtomicLong()
 
-    fun recordRead(frames: Int, silent: Boolean) {
+    /** Records one successful read and its local monotonic completion time. */
+    fun recordRead(frames: Int, silent: Boolean, completedAtMillis: Long) {
+        require(completedAtMillis >= 0) { "read completion time must be monotonic" }
         capturedFrames.addAndGet(frames.toLong())
         if (silent) silentReads.incrementAndGet()
+        val startedAtMillis = captureStartedAtMillis.get()
+        if (startedAtMillis != NO_CAPTURE_START && completedAtMillis >= startedAtMillis) {
+            recordLatestReadCompletion(completedAtMillis)
+        }
     }
 
     fun recordReadError() {
@@ -30,6 +37,7 @@ class CaptureEvidence {
 
     fun reset() {
         captureStartedAtMillis.set(NO_CAPTURE_START)
+        lastReadCompletedAtMillis.set(NO_READ_COMPLETION)
         capturedFrames.set(0)
         silentReads.set(0)
         readErrors.set(0)
@@ -43,16 +51,34 @@ class CaptureEvidence {
         } else {
             (nowMillis - startedAtMillis).coerceAtLeast(0)
         }
+        val lastReadCompletionOffsetMillis = lastReadCompletedAtMillis.get()
+            .takeIf { completedAtMillis ->
+                startedAtMillis != NO_CAPTURE_START && completedAtMillis >= startedAtMillis
+            }
+            ?.minus(startedAtMillis)
         return CaptureEvidenceSnapshot(
             captureDurationMillis = captureDurationMillis,
+            lastReadCompletionOffsetMillis = lastReadCompletionOffsetMillis,
             capturedFrames = capturedFrames.get(),
             silentReads = silentReads.get(),
             readErrors = readErrors.get(),
         )
     }
 
+    private fun recordLatestReadCompletion(completedAtMillis: Long) {
+        while (true) {
+            val previous = lastReadCompletedAtMillis.get()
+            if (completedAtMillis <= previous
+                || lastReadCompletedAtMillis.compareAndSet(previous, completedAtMillis)
+            ) {
+                return
+            }
+        }
+    }
+
     private companion object {
         const val NO_CAPTURE_START = -1L
+        const val NO_READ_COMPLETION = -1L
     }
 }
 
