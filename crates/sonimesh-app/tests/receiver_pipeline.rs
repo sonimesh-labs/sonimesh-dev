@@ -173,12 +173,13 @@ fn rotation_rejects_old_packets_and_retires_old_pcm() {
     let initial = context(2);
     let mut old_sealer = MediaSealer::new(&secret, initial).unwrap();
     let (producer, mut consumer) = realtime_pcm_queue::<4>(4).unwrap();
+    let counters = Arc::new(StreamCounters::default());
     let mut pipeline = ReceiverStreamPipeline::<ByteDecoder, 4, 8, 4>::new(
         &secret,
         initial,
         ByteDecoder,
         producer,
-        Arc::new(StreamCounters::default()),
+        Arc::clone(&counters),
         0,
     )
     .unwrap();
@@ -191,6 +192,7 @@ fn rotation_rejects_old_packets_and_retires_old_pcm() {
     pipeline.decode_next().unwrap();
     let next = context(3);
     pipeline.rotate(&secret, next, 0).unwrap();
+    assert_eq!(counters.snapshot().queued_pcm_high_water_blocks, 0);
 
     plaintext.fill(0xFF);
     assert!(matches!(
@@ -421,6 +423,7 @@ fn jitter_resynchronization_retires_old_pcm_but_keeps_the_new_packet() {
         InsertOutcome::Resynchronized { dropped_frames: 1 }
     );
     assert_eq!(counters.snapshot().queued_pcm_blocks, 0);
+    assert_eq!(counters.snapshot().queued_pcm_high_water_blocks, 0);
     assert!(matches!(
         pipeline.decode_next().unwrap(),
         DecodeStep::Decoded { sequence: 3, .. }
@@ -471,6 +474,7 @@ fn hard_resync_retires_only_the_current_stream_playout_state() {
     pipeline.hard_resynchronize();
 
     assert_eq!(pipeline.decode_next().unwrap(), DecodeStep::NotReady);
+    assert_eq!(counters.snapshot().queued_pcm_high_water_blocks, 0);
     let mut output = [f32::NAN; 4];
     assert_eq!(
         consumer.pop_into(&mut output),
@@ -526,6 +530,7 @@ fn replacing_pcm_producer_restarts_only_the_output_side_of_one_stream() {
     pipeline.replace_pcm_producer(replacement);
 
     assert_eq!(pipeline.decode_next().unwrap(), DecodeStep::NotReady);
+    assert_eq!(counters.snapshot().queued_pcm_high_water_blocks, 0);
     pipeline
         .receive(&after_replacement.datagram, &mut plaintext)
         .unwrap();

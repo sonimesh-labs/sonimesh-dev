@@ -137,7 +137,7 @@ where
             Ok(outcome) => {
                 if matches!(outcome, InsertOutcome::Resynchronized { .. }) {
                     self.decode.reset_after_jitter_resynchronization();
-                    self.counters.set_queued_pcm_blocks(0);
+                    self.counters.reset_queued_pcm_epoch();
                 }
                 self.record_jitter_outcome(outcome);
                 Ok(outcome)
@@ -192,7 +192,7 @@ where
     ) -> Result<(), ProtectedIngressError> {
         self.ingress.rotate(secret, next)?;
         self.decode.begin_epoch(initial_sequence);
-        self.counters.set_queued_pcm_blocks(0);
+        self.counters.reset_queued_pcm_epoch();
         self.counters.stream_reset();
         Ok(())
     }
@@ -204,7 +204,7 @@ where
     /// realtime consumer retires PCM queued before this reset.
     pub fn hard_resynchronize(&mut self) {
         self.decode.hard_resynchronize();
-        self.counters.set_queued_pcm_blocks(0);
+        self.counters.reset_queued_pcm_epoch();
         self.counters.stream_reset();
     }
 
@@ -216,7 +216,7 @@ where
     /// boundary.
     pub fn replace_pcm_producer(&mut self, producer: RealtimePcmProducer<PCM_SAMPLES_PER_BLOCK>) {
         self.decode.replace_pcm_producer(producer);
-        self.counters.set_queued_pcm_blocks(0);
+        self.counters.reset_queued_pcm_epoch();
         self.counters.stream_reset();
     }
 

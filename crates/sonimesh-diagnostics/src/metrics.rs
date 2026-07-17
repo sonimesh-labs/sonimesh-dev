@@ -87,6 +87,16 @@ impl StreamCounters {
             .fetch_max(blocks, Ordering::Relaxed);
     }
 
+    /// Starts a fresh PCM queue diagnostic epoch after stream-local retirement.
+    ///
+    /// The current occupancy and high-water mark both become zero. Stream-wide
+    /// counters intentionally remain cumulative.
+    pub fn reset_queued_pcm_epoch(&self) {
+        self.queued_pcm_blocks.store(0, Ordering::Relaxed);
+        self.queued_pcm_high_water_blocks
+            .store(0, Ordering::Relaxed);
+    }
+
     /// Records a stream-local reset.
     pub fn stream_reset(&self) {
         self.stream_resets.fetch_add(1, Ordering::Relaxed);
@@ -268,6 +278,12 @@ mod tests {
             snapshot.effective_resampling_ratio(),
             Some((48_000.0 / 44_100.0) * 1.000_125)
         );
+
+        counters.reset_queued_pcm_epoch();
+        let reset_snapshot = counters.snapshot();
+        assert_eq!(reset_snapshot.queued_pcm_blocks, 0);
+        assert_eq!(reset_snapshot.queued_pcm_high_water_blocks, 0);
+        assert_eq!(reset_snapshot.authenticated_packets, 1);
     }
 
     #[test]
