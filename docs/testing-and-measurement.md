@@ -136,6 +136,11 @@ The first Windows CPAL silent-output smoke is recorded in
 [2026-07-17 Windows CPAL smoke](./measurements/2026-07-17-windows-cpal-smoke.md).
 It validates callback observation only, not a latency target.
 
+A subsequent read-only endpoint enumeration is recorded in
+[2026-07-18 Windows CPAL probe](./measurements/2026-07-18-windows-cpal-probe.md).
+It validates only current WASAPI endpoint/default-format discovery and does not
+open an output stream.
+
 ## Resource and power acceptance
 
 The Android sender must record CPU, memory, thermal state, and battery impact
