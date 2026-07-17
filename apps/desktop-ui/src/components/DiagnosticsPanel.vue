@@ -36,14 +36,18 @@ function formatPpm(ppm: number) {
     </div>
     <div class="metric-grid">
       <div class="metric"><ShieldCheck :size="17" aria-hidden="true" /><span>Authenticated</span><strong>{{ metrics.authenticatedPackets.toLocaleString() }}</strong></div>
+      <div class="metric"><ShieldCheck :size="17" aria-hidden="true" /><span>Duplicates</span><strong>{{ metrics.duplicatePackets }}</strong></div>
       <div class="metric"><ShieldCheck :size="17" aria-hidden="true" /><span>Rejected</span><strong>{{ metrics.rejectedPackets }}</strong></div>
+      <div class="metric"><Activity :size="17" aria-hidden="true" /><span>Late packets</span><strong>{{ metrics.latePackets }}</strong></div>
       <div class="metric"><Activity :size="17" aria-hidden="true" /><span>Reordered</span><strong>{{ metrics.reorderedPackets }}</strong></div>
       <div class="metric"><RefreshCcwDot :size="17" aria-hidden="true" /><span>Jitter drops</span><strong>{{ metrics.jitterResyncDroppedFrames }}</strong></div>
       <div class="metric"><Waves :size="17" aria-hidden="true" /><span>PLC frames</span><strong>{{ metrics.plcFrames }}</strong></div>
       <div class="metric"><Waves :size="17" aria-hidden="true" /><span>Decode errors</span><strong>{{ metrics.decodeErrors }}</strong></div>
       <div class="metric"><Waves :size="17" aria-hidden="true" /><span>Underflows</span><strong>{{ metrics.pcmUnderflows }}</strong></div>
+      <div class="metric"><Waves :size="17" aria-hidden="true" /><span>Overflows</span><strong>{{ metrics.pcmOverflows }}</strong></div>
       <div class="metric"><RefreshCcwDot :size="17" aria-hidden="true" /><span>Discontinuities</span><strong>{{ metrics.pcmDiscontinuities }}</strong></div>
       <div class="metric"><RefreshCcwDot :size="17" aria-hidden="true" /><span>Hard resyncs</span><strong>{{ metrics.driftHardResyncs }}</strong></div>
+      <div class="metric"><RefreshCcwDot :size="17" aria-hidden="true" /><span>Stream resets</span><strong>{{ metrics.streamResets }}</strong></div>
     </div>
     <div class="resampling-row" aria-label="PCM queue and resampling state">
       <div><Layers :size="17" aria-hidden="true" /><span>PCM queue</span><strong>{{ metrics.queuedPcmBlocks }} / {{ metrics.queuedPcmHighWaterBlocks }} blocks</strong></div>

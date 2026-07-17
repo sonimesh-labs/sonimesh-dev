@@ -15,15 +15,19 @@ export interface PairingStatus {
 
 export interface StreamMetrics {
   authenticatedPackets: number
+  duplicatePackets: number
   rejectedPackets: number
+  latePackets: number
   reorderedPackets: number
   jitterResyncDroppedFrames: number
   plcFrames: number
   decodeErrors: number
   pcmUnderflows: number
+  pcmOverflows: number
   pcmDiscontinuities: number
   queuedPcmBlocks: number
   queuedPcmHighWaterBlocks: number
+  streamResets: number
   nominalInputSampleRateHz: number
   nominalOutputSampleRateHz: number
   driftAdjustmentPpm: number
