@@ -188,4 +188,49 @@ mod tests {
         assert_eq!(report.low_resynchronizations, 0);
         assert!(report.high_resynchronizations > 0);
     }
+
+    #[test]
+    fn uncorrectable_negative_source_drift_requests_low_side_resynchronization() {
+        let config = DriftScenarioConfig {
+            ticks: 10_000,
+            initial_occupancy_blocks: 4,
+            source_rate_ppm: -(MAX_DRIFT_ADJUSTMENT_PPM + 500),
+            controller: CONTROLLER,
+        };
+
+        let report = simulate_drift(config).unwrap();
+
+        assert!(report.hard_resynchronizations > 0);
+        assert!(report.low_resynchronizations > 0);
+        assert_eq!(report.high_resynchronizations, 0);
+    }
+
+    #[test]
+    fn rejects_synthetic_input_outside_explicit_model_bounds() {
+        let base = DriftScenarioConfig {
+            ticks: 1,
+            initial_occupancy_blocks: 4,
+            source_rate_ppm: 0,
+            controller: CONTROLLER,
+        };
+
+        assert_eq!(
+            simulate_drift(DriftScenarioConfig { ticks: 0, ..base }),
+            Err(DriftScenarioError::InvalidTickCount)
+        );
+        assert_eq!(
+            simulate_drift(DriftScenarioConfig {
+                initial_occupancy_blocks: u16::try_from(MAX_PCM_QUEUE_BLOCKS + 1).unwrap(),
+                ..base
+            }),
+            Err(DriftScenarioError::InvalidInitialOccupancy)
+        );
+        assert_eq!(
+            simulate_drift(DriftScenarioConfig {
+                source_rate_ppm: MAX_SOURCE_RATE_PPM + 1,
+                ..base
+            }),
+            Err(DriftScenarioError::InvalidSourceRate)
+        );
+    }
 }
