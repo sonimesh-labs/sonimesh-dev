@@ -154,11 +154,17 @@ where
     ///
     /// # Errors
     ///
-    /// Returns a bounded decoder failure without invoking platform output work.
+    /// Returns a bounded decoder failure after retiring only this stream's
+    /// decoder, jitter, and PCM state without invoking platform output work.
     pub fn decode_next(&mut self) -> Result<DecodeStep, DecodeWorkerError<D::Error>> {
-        let step = self.decode.decode_next().inspect_err(|_error| {
-            self.counters.decode_error();
-        })?;
+        let step = match self.decode.decode_next() {
+            Ok(step) => step,
+            Err(error) => {
+                self.counters.decode_error();
+                self.hard_resynchronize();
+                return Err(error);
+            }
+        };
         match step {
             DecodeStep::Decoded { queue, .. } => self.record_queue_outcome(queue),
             DecodeStep::Concealed { queue, .. } => {

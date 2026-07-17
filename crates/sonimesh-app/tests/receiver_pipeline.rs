@@ -2,6 +2,7 @@
 
 use core::convert::Infallible;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use sonimesh_app::{
     ControlStreamAction, ControlStreamCoordinator, PairingAttemptOutcome, PairingId,
@@ -45,17 +46,29 @@ impl std::fmt::Display for FailingDecoderError {
 
 impl std::error::Error for FailingDecoderError {}
 
-struct FailingDecoder;
+struct FailingDecoder {
+    fail_next_decode: bool,
+    reset_count: Arc<AtomicUsize>,
+}
 
 impl FrameDecoder for FailingDecoder {
     type Error = FailingDecoderError;
 
-    fn decode(&mut self, _encoded: &[u8], _output: &mut [f32]) -> Result<usize, Self::Error> {
-        Err(FailingDecoderError)
+    fn decode(&mut self, encoded: &[u8], output: &mut [f32]) -> Result<usize, Self::Error> {
+        if core::mem::replace(&mut self.fail_next_decode, false) {
+            return Err(FailingDecoderError);
+        }
+        output[0] = f32::from(encoded[0]);
+        Ok(1)
     }
 
-    fn decode_plc(&mut self, _output: &mut [f32]) -> Result<usize, Self::Error> {
-        Err(FailingDecoderError)
+    fn decode_plc(&mut self, output: &mut [f32]) -> Result<usize, Self::Error> {
+        output[0] = 0.0;
+        Ok(1)
+    }
+
+    fn reset(&mut self) {
+        self.reset_count.fetch_add(1, Ordering::Relaxed);
     }
 }
 
@@ -534,34 +547,59 @@ fn replacing_pcm_producer_restarts_only_the_output_side_of_one_stream() {
 }
 
 #[test]
-fn decoder_failure_is_published_without_treating_the_packet_as_network_rejection() {
+fn decoder_failure_retires_only_its_stream_and_accepts_the_next_packet() {
     let secret = SessionSecret::new([0xA5; 32]);
     let context = context(2);
     let mut sealer = MediaSealer::new(&secret, context).unwrap();
-    let (producer, _consumer) = realtime_pcm_queue::<4>(4).unwrap();
+    let first = sealer.seal(0, 0, &[1]).unwrap();
+    let second = sealer.seal(0, 960, &[2]).unwrap();
+    let (producer, mut consumer) = realtime_pcm_queue::<4>(4).unwrap();
     let counters = Arc::new(StreamCounters::default());
+    let reset_count = Arc::new(AtomicUsize::new(0));
     let mut pipeline = ReceiverStreamPipeline::<FailingDecoder, 4, 8, 4>::new(
         &secret,
         context,
-        FailingDecoder,
+        FailingDecoder {
+            fail_next_decode: true,
+            reset_count: Arc::clone(&reset_count),
+        },
         producer,
         Arc::clone(&counters),
         0,
     )
     .unwrap();
-    let packet = sealer.seal(0, 0, &[1]).unwrap();
     let mut plaintext = [0_u8; 8];
 
-    pipeline.receive(&packet.datagram, &mut plaintext).unwrap();
+    pipeline.receive(&first.datagram, &mut plaintext).unwrap();
 
     assert_eq!(
         pipeline.decode_next(),
         Err(DecodeWorkerError::Decoder(FailingDecoderError))
     );
+    assert_eq!(reset_count.load(Ordering::Relaxed), 1);
+    assert_eq!(counters.snapshot().queued_pcm_blocks, 0);
+
+    pipeline.receive(&second.datagram, &mut plaintext).unwrap();
+    assert!(matches!(
+        pipeline.decode_next().unwrap(),
+        DecodeStep::Decoded { sequence: 1, .. }
+    ));
+    let mut output = [f32::NAN; 4];
+    assert!(matches!(
+        consumer.pop_into(&mut output),
+        RealtimePcmPopOutcome::Filled {
+            discontinuity: true,
+            discarded_stale_blocks: 0,
+            ..
+        }
+    ));
+    assert!((output[0] - 2.0).abs() < f32::EPSILON);
+
     let snapshot = counters.snapshot();
-    assert_eq!(snapshot.authenticated_packets, 1);
+    assert_eq!(snapshot.authenticated_packets, 2);
     assert_eq!(snapshot.rejected_packets, 0);
     assert_eq!(snapshot.decode_errors, 1);
+    assert_eq!(snapshot.stream_resets, 1);
 }
 
 #[test]
