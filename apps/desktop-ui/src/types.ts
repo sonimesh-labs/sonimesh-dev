@@ -18,6 +18,13 @@ export interface StreamMetrics {
   rejectedPackets: number
   plcFrames: number
   pcmUnderflows: number
+  pcmDiscontinuities: number
+  queuedPcmBlocks: number
+  queuedPcmHighWaterBlocks: number
+  nominalInputSampleRateHz: number
+  nominalOutputSampleRateHz: number
+  driftAdjustmentPpm: number
+  driftHardResyncs: number
   currentJitterMs: number
   playoutDelayMs: number
 }
