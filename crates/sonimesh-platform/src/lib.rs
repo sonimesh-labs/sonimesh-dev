@@ -23,4 +23,7 @@ pub use cpal_probe::{CpalBufferSize, CpalDeviceProbe};
 #[cfg(all(windows, feature = "cpal-output"))]
 pub use cpal_status::CpalOutputStatus;
 pub use device::{OutputDeviceId, OutputDeviceInfo};
-pub use output::{AudioOutput, OutputError, OutputHealth, RenderSource, RenderSourceFactory};
+pub use output::{
+    AudioOutput, OutputError, OutputHealth, RenderSource, RenderSourceFactory,
+    RenderSourceFactoryError,
+};

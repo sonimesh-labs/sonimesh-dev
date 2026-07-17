@@ -20,8 +20,36 @@ pub trait RenderSourceFactory {
     ///
     /// The selected output configuration is provided so a factory can install
     /// a bounded channel mapper or other format adapter before stream start.
-    fn create(&mut self, config: &OutputConfig) -> Box<dyn RenderSource>;
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RenderSourceFactoryError`] before the platform stream starts
+    /// when source ownership, format adaptation, or preallocation fails.
+    fn create(
+        &mut self,
+        config: &OutputConfig,
+    ) -> Result<Box<dyn RenderSource>, RenderSourceFactoryError>;
 }
+
+/// Stable source-construction failure suitable for output lifecycle handling.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RenderSourceFactoryError {
+    /// The selected output format violates a platform-neutral bound.
+    InvalidConfig(OutputConfigError),
+    /// Source setup failed without a more stable platform-neutral category.
+    Build(String),
+}
+
+impl fmt::Display for RenderSourceFactoryError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidConfig(error) => write!(formatter, "{error}"),
+            Self::Build(message) => write!(formatter, "render source setup failed: {message}"),
+        }
+    }
+}
+
+impl std::error::Error for RenderSourceFactoryError {}
 
 /// Low-rate health state published by a platform output adapter.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

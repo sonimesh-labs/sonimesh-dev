@@ -34,7 +34,9 @@ Add a bounded `ChannelMapper` in `sonimesh-audio` and a
   copies and arithmetic, and emits silence for an out-of-bound callback;
 - `RenderSourceFactory` receives the selected `OutputConfig`, allowing the
   control-domain factory to install this adapter with the negotiated source
-  layout and selected device layout.
+  layout and selected device layout; source construction is fallible, so an
+  invalid layout or failed preallocation prevents backend start and remains
+  recoverable by the output lifecycle owner.
 
 This is an index-based compatibility policy, not a claim that channel index
 zero is a particular physical speaker. A future speaker-aware policy may replace

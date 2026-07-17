@@ -2,6 +2,7 @@ use core::fmt;
 
 use sonimesh_platform::{
     AudioOutput, OutputConfig, OutputDeviceId, OutputError, OutputHealth, RenderSourceFactory,
+    RenderSourceFactoryError,
 };
 
 /// Pinned or default output selection retained for control-domain recovery.
@@ -46,12 +47,17 @@ where
     /// Returns [`OutputLifecycleError`] when stream creation fails. The caller
     /// commits `Streaming` through the control-session completion token.
     pub fn start(&mut self, selection: OutputSelection) -> Result<(), OutputLifecycleError> {
+        selection
+            .config
+            .validate()
+            .map_err(RenderSourceFactoryError::InvalidConfig)
+            .map_err(OutputLifecycleError::SourceFactory)?;
+        let source = self
+            .source_factory
+            .create(&selection.config)
+            .map_err(OutputLifecycleError::SourceFactory)?;
         self.output
-            .start(
-                selection.device.as_ref(),
-                selection.config,
-                self.source_factory.create(&selection.config),
-            )
+            .start(selection.device.as_ref(), selection.config, source)
             .map_err(OutputLifecycleError::Output)?;
         self.selection = Some(selection);
         self.stream_active = true;
@@ -91,12 +97,17 @@ where
             .selection
             .clone()
             .ok_or(OutputLifecycleError::MissingSelection)?;
+        selection
+            .config
+            .validate()
+            .map_err(RenderSourceFactoryError::InvalidConfig)
+            .map_err(OutputLifecycleError::SourceFactory)?;
+        let source = self
+            .source_factory
+            .create(&selection.config)
+            .map_err(OutputLifecycleError::SourceFactory)?;
         self.output
-            .start(
-                selection.device.as_ref(),
-                selection.config,
-                self.source_factory.create(&selection.config),
-            )
+            .start(selection.device.as_ref(), selection.config, source)
             .map_err(OutputLifecycleError::Output)?;
         self.stream_active = true;
         self.fault_reported = false;
@@ -127,6 +138,8 @@ where
 pub enum OutputLifecycleError {
     /// No successful start has supplied a recovery selection.
     MissingSelection,
+    /// Render-source construction failed before reaching the platform adapter.
+    SourceFactory(RenderSourceFactoryError),
     /// Platform stream operation failed.
     Output(OutputError),
 }
@@ -135,6 +148,9 @@ impl fmt::Display for OutputLifecycleError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::MissingSelection => formatter.write_str("output recovery has no saved selection"),
+            Self::SourceFactory(error) => {
+                write!(formatter, "render source creation failed: {error}")
+            }
             Self::Output(error) => write!(formatter, "output backend failed: {error}"),
         }
     }

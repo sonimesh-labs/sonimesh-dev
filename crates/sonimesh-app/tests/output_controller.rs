@@ -1,12 +1,12 @@
 //! Control-domain output recovery tests using a deterministic platform double.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use sonimesh_app::{OutputController, OutputLifecycleError, OutputSelection};
 use sonimesh_platform::{
     AudioOutput, OutputConfig, OutputDeviceInfo, OutputError, OutputHealth, RenderSource,
-    RenderSourceFactory, SampleFormat,
+    RenderSourceFactory, RenderSourceFactoryError, SampleFormat,
 };
 
 #[derive(Default)]
@@ -21,14 +21,23 @@ impl RenderSource for Silence {
 struct TestFactory {
     created: Arc<AtomicUsize>,
     last_output_channels: Arc<AtomicUsize>,
+    fail_create: Arc<AtomicBool>,
 }
 
 impl RenderSourceFactory for TestFactory {
-    fn create(&mut self, config: &OutputConfig) -> Box<dyn RenderSource> {
+    fn create(
+        &mut self,
+        config: &OutputConfig,
+    ) -> Result<Box<dyn RenderSource>, RenderSourceFactoryError> {
         self.created.fetch_add(1, Ordering::Relaxed);
+        if self.fail_create.load(Ordering::Relaxed) {
+            return Err(RenderSourceFactoryError::Build(
+                "test source construction failure".to_owned(),
+            ));
+        }
         self.last_output_channels
             .store(usize::from(config.channels), Ordering::Relaxed);
-        Box::new(Silence)
+        Ok(Box::new(Silence))
     }
 }
 
@@ -82,6 +91,7 @@ fn selection() -> OutputSelection {
 fn controller(
     created: Arc<AtomicUsize>,
     last_output_channels: Arc<AtomicUsize>,
+    fail_create: Arc<AtomicBool>,
 ) -> OutputController<TestOutput, TestFactory> {
     OutputController::new(
         TestOutput {
@@ -93,6 +103,7 @@ fn controller(
         TestFactory {
             created,
             last_output_channels,
+            fail_create,
         },
     )
 }
@@ -101,7 +112,11 @@ fn controller(
 fn faults_stop_and_recover_without_leaving_streaming_state() {
     let created = Arc::new(AtomicUsize::new(0));
     let last_output_channels = Arc::new(AtomicUsize::new(0));
-    let mut controller = controller(Arc::clone(&created), Arc::clone(&last_output_channels));
+    let mut controller = controller(
+        Arc::clone(&created),
+        Arc::clone(&last_output_channels),
+        Arc::new(AtomicBool::new(false)),
+    );
     controller.start(selection()).unwrap();
     assert_eq!(last_output_channels.load(Ordering::Relaxed), 2);
 
@@ -125,7 +140,11 @@ fn faults_stop_and_recover_without_leaving_streaming_state() {
 fn failed_recovery_preserves_retryable_output_state() {
     let created = Arc::new(AtomicUsize::new(0));
     let last_output_channels = Arc::new(AtomicUsize::new(0));
-    let mut controller = controller(created, last_output_channels);
+    let mut controller = controller(
+        created,
+        last_output_channels,
+        Arc::new(AtomicBool::new(false)),
+    );
     controller.start(selection()).unwrap();
     controller.output_mut().health = OutputHealth::CallbackCapacityExceeded;
     controller.monitor();
@@ -141,7 +160,11 @@ fn failed_recovery_preserves_retryable_output_state() {
 fn starts_without_mutating_external_session_state() {
     let created = Arc::new(AtomicUsize::new(0));
     let last_output_channels = Arc::new(AtomicUsize::new(0));
-    let mut controller = controller(created, last_output_channels);
+    let mut controller = controller(
+        created,
+        last_output_channels,
+        Arc::new(AtomicBool::new(false)),
+    );
     controller.start(selection()).unwrap();
     assert_eq!(controller.output().start_calls, 1);
 }
@@ -150,7 +173,11 @@ fn starts_without_mutating_external_session_state() {
 fn explicit_stop_disarms_stale_health_until_a_new_start() {
     let created = Arc::new(AtomicUsize::new(0));
     let last_output_channels = Arc::new(AtomicUsize::new(0));
-    let mut controller = controller(created, last_output_channels);
+    let mut controller = controller(
+        created,
+        last_output_channels,
+        Arc::new(AtomicBool::new(false)),
+    );
     controller.start(selection()).unwrap();
     controller.output_mut().health = OutputHealth::StreamError;
 
@@ -165,4 +192,33 @@ fn explicit_stop_disarms_stale_health_until_a_new_start() {
 
     assert_eq!(controller.monitor(), Some(OutputHealth::StreamError));
     assert_eq!(controller.output().stop_calls, 2);
+}
+
+#[test]
+fn source_creation_failure_does_not_start_the_backend_and_recovery_can_retry() {
+    let created = Arc::new(AtomicUsize::new(0));
+    let last_output_channels = Arc::new(AtomicUsize::new(0));
+    let fail_create = Arc::new(AtomicBool::new(false));
+    let mut controller = controller(
+        Arc::clone(&created),
+        last_output_channels,
+        Arc::clone(&fail_create),
+    );
+    controller.start(selection()).unwrap();
+    controller.output_mut().health = OutputHealth::StreamError;
+    controller.monitor();
+    fail_create.store(true, Ordering::Relaxed);
+
+    assert!(matches!(
+        controller.recover(),
+        Err(OutputLifecycleError::SourceFactory(
+            RenderSourceFactoryError::Build(_)
+        ))
+    ));
+    assert_eq!(controller.output().start_calls, 1);
+
+    fail_create.store(false, Ordering::Relaxed);
+    controller.recover().unwrap();
+    assert_eq!(controller.output().start_calls, 2);
+    assert_eq!(created.load(Ordering::Relaxed), 3);
 }

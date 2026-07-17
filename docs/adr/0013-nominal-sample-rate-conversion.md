@@ -27,7 +27,8 @@ Add a bounded linear interpolation stage in `sonimesh-audio` and a pull-based
   adjustment atomically, while hard-resync decisions remain stream-owner work;
 - invalid alignment, rate, channel, and callback bounds fail closed to silence;
 - the source factory already receives `OutputConfig`, so nominal conversion can
-  be composed after channel mapping and before the platform stream;
+  be composed after channel mapping and before the platform stream; source
+  construction errors are returned before the platform stream starts;
 - the converter is a nominal-rate feasibility primitive, not a drift controller,
   quality-qualified resampler, or physical latency measurement.
 
