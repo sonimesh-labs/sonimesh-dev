@@ -82,6 +82,29 @@ fn writer_uses_the_same_validated_length_prefixed_frame() {
 }
 
 #[test]
+fn writer_rejects_a_second_frame_while_the_first_is_pending() {
+    let (_peer, mut writer) = connected_reader();
+    let mut pending = false;
+
+    for _ in 0..100_000 {
+        match writer.send(&hello_envelope()).unwrap() {
+            UntrustedControlWrite::Complete => {}
+            UntrustedControlWrite::Pending => {
+                pending = true;
+                break;
+            }
+            UntrustedControlWrite::Closed => panic!("loopback writer closed unexpectedly"),
+        }
+    }
+
+    assert!(pending, "loopback socket never applied backpressure");
+    assert!(matches!(
+        writer.send(&hello_envelope()),
+        Err(UntrustedControlError::WritePending)
+    ));
+}
+
+#[test]
 fn consecutive_frames_are_decoded_one_at_a_time() {
     let (mut sender, mut reader) = connected_reader();
     let first = hello_frame();

@@ -36,7 +36,7 @@ impl fmt::Display for UntrustedControlError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Protocol(error) => write!(formatter, "untrusted control frame rejected: {error}"),
-            Self::Io(error) => write!(formatter, "untrusted control stream read failed: {error}"),
+            Self::Io(error) => write!(formatter, "untrusted control stream I/O failed: {error}"),
             Self::WritePending => {
                 formatter.write_str("untrusted control stream has a pending write")
             }
