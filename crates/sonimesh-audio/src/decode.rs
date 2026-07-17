@@ -8,8 +8,8 @@ use crate::{
 /// Per-stream decoder boundary invoked outside the realtime output callback.
 ///
 /// Implementations may wrap an Opus decoder once its policy and platform adapter
-/// are selected. They must initialize at most `output.len()` samples and must
-/// implement packet-loss concealment without allocating.
+/// are selected. They must initialize between one and `output.len()` samples
+/// and must implement packet-loss concealment without allocating.
 pub trait FrameDecoder {
     /// Decoder-specific failure type.
     type Error;
@@ -61,7 +61,7 @@ pub enum DecodeStep {
 pub enum DecodeWorkerError<DecoderError> {
     /// An authenticated payload exceeded inline jitter storage.
     Frame(FrameError),
-    /// The decoder reported more PCM samples than caller-owned storage holds.
+    /// The decoder reported no PCM or more samples than caller-owned storage holds.
     InvalidOutputLength,
     /// The concrete decoder rejected an authenticated frame or PLC request.
     Decoder(DecoderError),
@@ -72,7 +72,7 @@ impl<DecoderError: fmt::Display> fmt::Display for DecodeWorkerError<DecoderError
         match self {
             Self::Frame(error) => write!(formatter, "encoded frame rejected: {error:?}"),
             Self::InvalidOutputLength => {
-                formatter.write_str("decoder reported PCM beyond the bounded output block")
+                formatter.write_str("decoder reported PCM outside the bounded output block")
             }
             Self::Decoder(error) => write!(formatter, "stream decoder failed: {error}"),
         }
@@ -167,7 +167,7 @@ where
                     .map_err(DecodeWorkerError::Decoder)?,
             ),
         };
-        if samples > PCM_SAMPLES_PER_BLOCK {
+        if samples == 0 || samples > PCM_SAMPLES_PER_BLOCK {
             self.pcm.fill(0.0);
             return Err(DecodeWorkerError::InvalidOutputLength);
         }
