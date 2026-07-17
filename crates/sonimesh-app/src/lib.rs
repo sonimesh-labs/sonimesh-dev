@@ -2,6 +2,7 @@
 
 mod channel_mapped_render_source;
 mod control_stream;
+mod format_adapted_render_source_factory;
 mod output_controller;
 mod pairing_controller;
 mod pairing_record;
@@ -16,6 +17,9 @@ pub use channel_mapped_render_source::{ChannelMappedRenderSource, ChannelMappedR
 pub use control_stream::{
     ControlOperationToken, ControlStreamAction, ControlStreamCoordinator, ControlStreamError,
     MediaStreamIdentity, StreamStartRequest,
+};
+pub use format_adapted_render_source_factory::{
+    FormatAdaptedRenderSourceFactory, SourcePcmFormat, SourcePcmFormatError,
 };
 pub use output_controller::{OutputController, OutputLifecycleError, OutputSelection};
 pub use pairing_controller::{PairingInvitationController, PairingInvitationError};

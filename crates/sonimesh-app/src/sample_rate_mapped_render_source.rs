@@ -69,6 +69,15 @@ pub struct DriftAdjustmentHandle {
 }
 
 impl DriftAdjustmentHandle {
+    /// Creates a control-domain adjustment handle with optional diagnostics.
+    #[must_use]
+    pub fn new(metrics: Option<Arc<StreamCounters>>) -> Self {
+        Self {
+            ppm: Arc::new(AtomicI32::new(0)),
+            metrics,
+        }
+    }
+
     /// Applies a precomputed drift decision without touching source phase state.
     ///
     /// A hard resynchronization is returned to the stream owner instead of
@@ -112,6 +121,13 @@ impl DriftAdjustmentHandle {
     #[must_use]
     pub fn current_ppm(&self) -> i32 {
         self.ppm.load(Ordering::Acquire)
+    }
+
+    fn publish_nominal_sample_rates(&self, input_sample_rate_hz: u32, output_sample_rate_hz: u32) {
+        if let Some(metrics) = &self.metrics {
+            metrics.set_nominal_sample_rates(input_sample_rate_hz, output_sample_rate_hz);
+            metrics.set_drift_adjustment_ppm(self.current_ppm());
+        }
     }
 }
 
@@ -199,6 +215,35 @@ impl SampleRateMappedRenderSource {
         maximum_callback_frames: u32,
         metrics: Option<Arc<StreamCounters>>,
     ) -> Result<(Self, DriftAdjustmentHandle), SampleRateMappedRenderSourceError> {
+        let handle = DriftAdjustmentHandle::new(metrics);
+        let source = Self::new_with_drift_handle(
+            source,
+            input_sample_rate_hz,
+            output_sample_rate_hz,
+            channels,
+            maximum_callback_frames,
+            &handle,
+        )?;
+        Ok((source, handle))
+    }
+
+    /// Constructs a source sharing an existing control-domain drift handle.
+    ///
+    /// Reusing the handle across output recreation preserves the latest bounded
+    /// correction without putting controller state in the realtime callback.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error before realtime work when rates, channels, or scratch
+    /// bounds are invalid.
+    pub fn new_with_drift_handle(
+        source: Box<dyn RenderSource>,
+        input_sample_rate_hz: u32,
+        output_sample_rate_hz: u32,
+        channels: u16,
+        maximum_callback_frames: u32,
+        handle: &DriftAdjustmentHandle,
+    ) -> Result<Self, SampleRateMappedRenderSourceError> {
         let resampler = LinearResampler::new(input_sample_rate_hz, output_sample_rate_hz, channels)
             .map_err(SampleRateMappedRenderSourceError::Resampler)?;
         if maximum_callback_frames == 0 || maximum_callback_frames > MAX_CALLBACK_FRAMES {
@@ -215,27 +260,16 @@ impl SampleRateMappedRenderSource {
             .checked_mul(usize::from(resampler.channels()))
             .ok_or(SampleRateMappedRenderSourceError::ScratchSizeOverflow)?;
 
-        if let Some(metrics) = &metrics {
-            metrics.set_nominal_sample_rates(input_sample_rate_hz, output_sample_rate_hz);
-            metrics.set_drift_adjustment_ppm(0);
-        }
-        let drift_ppm = Arc::new(AtomicI32::new(0));
-        let handle = DriftAdjustmentHandle {
-            ppm: Arc::clone(&drift_ppm),
-            metrics,
-        };
-        Ok((
-            Self {
-                source,
-                resampler,
-                drift_ppm,
-                applied_drift_ppm: 0,
-                input_scratch: vec![0.0; input_samples].into_boxed_slice(),
-                input_frames: 0,
-                maximum_output_frames,
-            },
-            handle,
-        ))
+        handle.publish_nominal_sample_rates(input_sample_rate_hz, output_sample_rate_hz);
+        Ok(Self {
+            source,
+            resampler,
+            drift_ppm: Arc::clone(&handle.ppm),
+            applied_drift_ppm: 0,
+            input_scratch: vec![0.0; input_samples].into_boxed_slice(),
+            input_frames: 0,
+            maximum_output_frames,
+        })
     }
 
     /// Returns the fixed channel layout shared by the wrapped source and output.
