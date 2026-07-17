@@ -183,6 +183,9 @@ fn recovery_replaces_the_pipeline_producer_only_after_platform_start() {
     controller.output_mut().health = OutputHealth::StreamError;
     assert_eq!(controller.monitor(), Some(OutputHealth::StreamError));
     assert_eq!(controller.output().stop_calls, 1);
+    let stopped = counters.snapshot();
+    assert_eq!(stopped.nominal_input_sample_rate_hz, 0);
+    assert_eq!(stopped.nominal_output_sample_rate_hz, 0);
 
     controller.output_mut().fail_start = true;
     assert!(matches!(
@@ -195,6 +198,8 @@ fn recovery_replaces_the_pipeline_producer_only_after_platform_start() {
     let failed_recovery = counters.snapshot();
     assert_eq!(failed_recovery.stream_resets, 1);
     assert_eq!(failed_recovery.queued_pcm_high_water_blocks, 1);
+    assert_eq!(failed_recovery.nominal_input_sample_rate_hz, 0);
+    assert_eq!(failed_recovery.nominal_output_sample_rate_hz, 0);
 
     controller.output_mut().fail_start = false;
     controller.recover(&mut pipeline).unwrap();
@@ -203,6 +208,8 @@ fn recovery_replaces_the_pipeline_producer_only_after_platform_start() {
     let recovered = counters.snapshot();
     assert_eq!(recovered.stream_resets, 2);
     assert_eq!(recovered.queued_pcm_high_water_blocks, 0);
+    assert_eq!(recovered.nominal_input_sample_rate_hz, 48_000);
+    assert_eq!(recovered.nominal_output_sample_rate_hz, 48_000);
 }
 
 #[test]

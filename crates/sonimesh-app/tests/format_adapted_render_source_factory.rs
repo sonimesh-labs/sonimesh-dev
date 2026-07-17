@@ -82,6 +82,12 @@ fn factory_preserves_drift_control_across_recreated_format_adapters() {
     assert_eq!(snapshot.nominal_input_sample_rate_hz, 48_000);
     assert_eq!(snapshot.nominal_output_sample_rate_hz, 96_000);
     assert_eq!(snapshot.drift_adjustment_ppm, 1_000);
+
+    factory.output_stopped();
+    let stopped = counters.snapshot();
+    assert_eq!(stopped.nominal_input_sample_rate_hz, 0);
+    assert_eq!(stopped.nominal_output_sample_rate_hz, 0);
+    assert_eq!(stopped.drift_adjustment_ppm, 1_000);
 }
 
 #[test]

@@ -44,6 +44,10 @@ impl RenderSourceFactory for TestFactory {
     fn output_started(&mut self, _config: &OutputConfig) {
         self.starts.fetch_add(1, Ordering::Relaxed);
     }
+
+    fn output_stopped(&mut self) {
+        self.starts.fetch_sub(1, Ordering::Relaxed);
+    }
 }
 
 struct TestOutput {
@@ -133,6 +137,7 @@ fn faults_stop_and_recover_without_leaving_streaming_state() {
     controller.output_mut().health = OutputHealth::StreamError;
     assert_eq!(controller.monitor(), Some(OutputHealth::StreamError));
     assert_eq!(controller.output().stop_calls, 1);
+    assert_eq!(starts.load(Ordering::Relaxed), 0);
     assert_eq!(controller.monitor(), None);
     assert_eq!(controller.output().stop_calls, 1);
 
@@ -140,11 +145,12 @@ fn faults_stop_and_recover_without_leaving_streaming_state() {
     controller.recover().unwrap();
     assert_eq!(controller.output().start_calls, 2);
     assert_eq!(created.load(Ordering::Relaxed), 2);
-    assert_eq!(starts.load(Ordering::Relaxed), 2);
+    assert_eq!(starts.load(Ordering::Relaxed), 1);
 
     controller.output_mut().health = OutputHealth::StreamError;
     assert_eq!(controller.monitor(), Some(OutputHealth::StreamError));
     assert_eq!(controller.output().stop_calls, 2);
+    assert_eq!(starts.load(Ordering::Relaxed), 0);
 }
 
 #[test]
@@ -162,13 +168,14 @@ fn failed_recovery_preserves_retryable_output_state() {
     assert_eq!(starts.load(Ordering::Relaxed), 1);
     controller.output_mut().health = OutputHealth::CallbackCapacityExceeded;
     controller.monitor();
+    assert_eq!(starts.load(Ordering::Relaxed), 0);
     controller.output_mut().fail_start = true;
 
     assert!(matches!(
         controller.recover(),
         Err(OutputLifecycleError::Output(OutputError::Backend(_)))
     ));
-    assert_eq!(starts.load(Ordering::Relaxed), 1);
+    assert_eq!(starts.load(Ordering::Relaxed), 0);
 }
 
 #[test]

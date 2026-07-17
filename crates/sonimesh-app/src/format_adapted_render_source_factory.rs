@@ -126,6 +126,10 @@ where
         self.adjustment
             .publish_nominal_sample_rates(self.source_format.sample_rate_hz, config.sample_rate_hz);
     }
+
+    fn output_stopped(&mut self) {
+        self.adjustment.clear_nominal_sample_rates();
+    }
 }
 
 /// Installs nominal-rate conversion followed by device-layout mapping.

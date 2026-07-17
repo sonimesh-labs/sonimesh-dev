@@ -109,6 +109,7 @@ where
         }
 
         self.output.stop();
+        self.endpoint_factory.clear_output_format();
         self.stream_active = false;
         self.fault_reported = true;
         Some(health)
@@ -137,6 +138,7 @@ where
     /// Stops the platform backend without mutating receiver lifecycle state.
     pub fn stop(&mut self) {
         self.output.stop();
+        self.endpoint_factory.clear_output_format();
         self.stream_active = false;
         self.fault_reported = true;
     }

@@ -36,6 +36,12 @@ pub trait RenderSourceFactory {
     /// Factories that publish low-rate metadata tied to a platform output
     /// lifetime can override it; ordinary factories need no lifecycle hook.
     fn output_started(&mut self, _config: &OutputConfig) {}
+
+    /// Records that the platform stopped its current source.
+    ///
+    /// This runs in the control domain after [`AudioOutput::stop`]. Factories
+    /// can clear metadata that is valid only while a callback source is active.
+    fn output_stopped(&mut self) {}
 }
 
 /// Stable source-construction failure suitable for output lifecycle handling.

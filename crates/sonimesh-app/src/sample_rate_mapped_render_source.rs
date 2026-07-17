@@ -134,6 +134,12 @@ impl DriftAdjustmentHandle {
         }
     }
 
+    pub(crate) fn clear_nominal_sample_rates(&self) {
+        if let Some(metrics) = &self.metrics {
+            metrics.set_nominal_sample_rates(0, 0);
+        }
+    }
+
     pub(crate) fn without_metrics(&self) -> Self {
         Self {
             ppm: Arc::clone(&self.ppm),

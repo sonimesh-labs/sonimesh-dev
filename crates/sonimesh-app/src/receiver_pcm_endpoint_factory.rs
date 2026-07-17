@@ -136,6 +136,11 @@ impl<const SAMPLES_PER_BLOCK: usize> ReceiverPcmEndpointFactory<SAMPLES_PER_BLOC
             .publish_nominal_sample_rates(self.source_format.sample_rate_hz, config.sample_rate_hz);
     }
 
+    /// Clears the format pair once its accepted callback source has stopped.
+    pub(crate) fn clear_output_format(&self) {
+        self.adjustment.clear_nominal_sample_rates();
+    }
+
     fn create_with_adjustment(
         &self,
         config: &OutputConfig,
