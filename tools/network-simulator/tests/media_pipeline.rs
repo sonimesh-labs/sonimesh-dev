@@ -5,8 +5,11 @@ use sonimesh_audio::{
     RealtimePcmPushOutcome, StreamDecodeWorker, realtime_pcm_queue,
 };
 use sonimesh_network::{IngressError, ProtectedMediaIngress};
-use sonimesh_network_simulator::{NetworkProfile, VirtualNetwork};
-use sonimesh_protocol::{MediaDirection, MediaKeyContext, MediaSealer, SessionSecret};
+use sonimesh_network_simulator::{NetworkProfile, SendOutcome, VirtualNetwork};
+use sonimesh_protocol::{
+    CONTROL_PROTOCOL_VERSION, Capability, Envelope, Hello, MediaDirection, MediaKeyContext,
+    MediaSealer, SessionSecret, encode_control_frame, envelope,
+};
 
 const FRAMES: u32 = 200;
 const FRAME_MS: u64 = 20;
@@ -65,6 +68,19 @@ fn media_datagram(sealer: &mut MediaSealer, sequence: u32) -> Vec<u8> {
         .unwrap();
     assert_eq!(protected.header.sequence, sequence);
     protected.datagram
+}
+
+fn control_frame() -> Vec<u8> {
+    encode_control_frame(&Envelope {
+        protocol_version: CONTROL_PROTOCOL_VERSION,
+        request_id: 1,
+        payload: Some(envelope::Payload::Hello(Hello {
+            supported_versions: vec![CONTROL_PROTOCOL_VERSION],
+            capabilities: vec![Capability::FrameDuration20Ms as i32],
+            display_name: "simulated-control".to_owned(),
+        })),
+    })
+    .unwrap()
 }
 
 type Worker = StreamDecodeWorker<LabDecoder, 16, 8, 1>;
@@ -193,6 +209,55 @@ fn authenticated_pipeline_stays_bounded_under_impairment() {
             && network.stats().random_loss_packets > 0
             && network.queued_copies() <= profile.max_in_flight_packets
     );
+}
+
+#[test]
+fn control_loss_does_not_block_an_independent_authenticated_media_path() {
+    let mut control_profile = NetworkProfile::stable(0x0C01_1055);
+    control_profile.loss_percent = 100;
+    control_profile.base_delay_ms = 0;
+    control_profile.jitter_ms = 0;
+    let mut control_network = VirtualNetwork::new(control_profile).unwrap();
+    let control = control_frame();
+    assert_eq!(
+        control_network.send(0, control.clone(), u64::try_from(control.len()).unwrap()),
+        SendOutcome::DroppedByLoss
+    );
+    assert!(control_network.drain_ready(0).is_empty());
+    assert_eq!(control_network.stats().random_loss_packets, 1);
+
+    let mut media_profile = NetworkProfile::stable(0x0DA7_A055);
+    media_profile.base_delay_ms = 0;
+    media_profile.jitter_ms = 0;
+    let mut media_network = VirtualNetwork::new(media_profile).unwrap();
+    let secret = SessionSecret::new([0xA5; 32]);
+    let context = context();
+    let mut sealer = MediaSealer::new(&secret, context).unwrap();
+    let mut ingress = ProtectedMediaIngress::new(&secret, context).unwrap();
+    let (producer, mut consumer) = realtime_pcm_queue::<1>(4).unwrap();
+    let mut worker = StreamDecodeWorker::<LabDecoder, 16, 8, 1>::new(LabDecoder, producer, 0);
+    let mut plaintext = [0_u8; 8];
+    let datagram = media_datagram(&mut sealer, 0);
+    let datagram_bytes = u64::try_from(datagram.len()).unwrap();
+    assert_eq!(
+        media_network.send(0, datagram, datagram_bytes),
+        SendOutcome::Scheduled { copies: 1 }
+    );
+
+    let delivery = media_network.drain_ready(0).pop().unwrap();
+    let frame = ingress.receive(&delivery.payload, &mut plaintext).unwrap();
+    assert_eq!(
+        worker
+            .admit(
+                frame.header.sequence,
+                frame.header.sample_timestamp,
+                frame.opus_payload,
+            )
+            .unwrap(),
+        InsertOutcome::Inserted
+    );
+    assert!(!decode_and_render(&mut worker, &mut consumer, 0));
+    assert_eq!(media_network.stats().delivered_copies, 1);
 }
 
 #[test]

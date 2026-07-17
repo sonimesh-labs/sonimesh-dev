@@ -105,7 +105,8 @@ test exercises bounded packet parsing, reviewed AEAD authentication and replay
 rejection, jitter/PLC decisions, controlled jitter resynchronization, the
 non-realtime decode worker, and realtime PCM transfer. An independent integerized
 occupancy model exercises bounded drift controller decisions and stream-local
-hard-resynchronization requests.
+hard-resynchronization requests. A separate deterministic case drops a valid
+control envelope while an independent authenticated media path still reaches PCM.
 
 This is evidence for deterministic core behavior only. It does not yet model
 socket buffers, address migration, real ASRC/device clocks, or operating-system
