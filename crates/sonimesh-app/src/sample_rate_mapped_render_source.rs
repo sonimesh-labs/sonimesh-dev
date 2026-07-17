@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicI32, Ordering};
 
 use sonimesh_audio::{DriftDecision, DriftResyncDirection, MAX_DRIFT_ADJUSTMENT_PPM};
 use sonimesh_audio::{LinearResampler, ResamplerError};
+use sonimesh_diagnostics::StreamCounters;
 use sonimesh_platform::{MAX_CALLBACK_FRAMES, RenderSource};
 
 const OUTPUT_CHUNK_FRAMES: usize = 256;
@@ -64,6 +65,7 @@ impl std::error::Error for DriftAdjustmentError {}
 #[derive(Clone)]
 pub struct DriftAdjustmentHandle {
     ppm: Arc<AtomicI32>,
+    metrics: Option<Arc<StreamCounters>>,
 }
 
 impl DriftAdjustmentHandle {
@@ -79,6 +81,11 @@ impl DriftAdjustmentHandle {
         match decision {
             DriftDecision::Adjust { ppm } => self.set_ppm(ppm),
             DriftDecision::HardResync { direction } => {
+                self.ppm.store(0, Ordering::Release);
+                if let Some(metrics) = &self.metrics {
+                    metrics.set_drift_adjustment_ppm(0);
+                    metrics.drift_hard_resync();
+                }
                 Err(DriftAdjustmentError::HardResyncRequired(direction))
             }
         }
@@ -95,7 +102,16 @@ impl DriftAdjustmentHandle {
             return Err(DriftAdjustmentError::InvalidPpm);
         }
         self.ppm.store(ppm, Ordering::Release);
+        if let Some(metrics) = &self.metrics {
+            metrics.set_drift_adjustment_ppm(ppm);
+        }
         Ok(())
+    }
+
+    /// Returns the last control-domain ppm value published to the source.
+    #[must_use]
+    pub fn current_ppm(&self) -> i32 {
+        self.ppm.load(Ordering::Acquire)
     }
 }
 
@@ -156,6 +172,33 @@ impl SampleRateMappedRenderSource {
         channels: u16,
         maximum_callback_frames: u32,
     ) -> Result<(Self, DriftAdjustmentHandle), SampleRateMappedRenderSourceError> {
+        Self::new_with_drift_control_and_metrics(
+            source,
+            input_sample_rate_hz,
+            output_sample_rate_hz,
+            channels,
+            maximum_callback_frames,
+            None,
+        )
+    }
+
+    /// Constructs a source and publishes its low-rate resampling metrics.
+    ///
+    /// The metrics object is updated only by control-domain construction and
+    /// handle writes; the realtime callback never serializes or formats it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error before realtime work when rates, channels, or scratch
+    /// bounds are invalid.
+    pub fn new_with_drift_control_and_metrics(
+        source: Box<dyn RenderSource>,
+        input_sample_rate_hz: u32,
+        output_sample_rate_hz: u32,
+        channels: u16,
+        maximum_callback_frames: u32,
+        metrics: Option<Arc<StreamCounters>>,
+    ) -> Result<(Self, DriftAdjustmentHandle), SampleRateMappedRenderSourceError> {
         let resampler = LinearResampler::new(input_sample_rate_hz, output_sample_rate_hz, channels)
             .map_err(SampleRateMappedRenderSourceError::Resampler)?;
         if maximum_callback_frames == 0 || maximum_callback_frames > MAX_CALLBACK_FRAMES {
@@ -172,9 +215,14 @@ impl SampleRateMappedRenderSource {
             .checked_mul(usize::from(resampler.channels()))
             .ok_or(SampleRateMappedRenderSourceError::ScratchSizeOverflow)?;
 
+        if let Some(metrics) = &metrics {
+            metrics.set_nominal_sample_rates(input_sample_rate_hz, output_sample_rate_hz);
+            metrics.set_drift_adjustment_ppm(0);
+        }
         let drift_ppm = Arc::new(AtomicI32::new(0));
         let handle = DriftAdjustmentHandle {
             ppm: Arc::clone(&drift_ppm),
+            metrics,
         };
         Ok((
             Self {

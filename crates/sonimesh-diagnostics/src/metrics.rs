@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicU32, AtomicU64, Ordering};
 
 /// Lock-free counters writable from realtime or network domains.
 #[derive(Debug, Default)]
@@ -12,6 +12,10 @@ pub struct StreamCounters {
     pcm_underflows: AtomicU64,
     pcm_overflows: AtomicU64,
     stream_resets: AtomicU64,
+    nominal_input_sample_rate_hz: AtomicU32,
+    nominal_output_sample_rate_hz: AtomicU32,
+    drift_adjustment_ppm: AtomicI32,
+    drift_hard_resyncs: AtomicU64,
 }
 
 impl StreamCounters {
@@ -60,6 +64,26 @@ impl StreamCounters {
         self.stream_resets.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Publishes the validated nominal input/output sample rates.
+    ///
+    /// Zero means that the stream has not published a nominal format yet.
+    pub fn set_nominal_sample_rates(&self, input_sample_rate_hz: u32, output_sample_rate_hz: u32) {
+        self.nominal_input_sample_rate_hz
+            .store(input_sample_rate_hz, Ordering::Relaxed);
+        self.nominal_output_sample_rate_hz
+            .store(output_sample_rate_hz, Ordering::Relaxed);
+    }
+
+    /// Publishes the currently requested bounded drift correction.
+    pub fn set_drift_adjustment_ppm(&self, ppm: i32) {
+        self.drift_adjustment_ppm.store(ppm, Ordering::Relaxed);
+    }
+
+    /// Records a stream-owner hard resynchronization request.
+    pub fn drift_hard_resync(&self) {
+        self.drift_hard_resyncs.fetch_add(1, Ordering::Relaxed);
+    }
+
     /// Reads a non-transactional diagnostic snapshot.
     ///
     /// Counters use relaxed ordering because they describe telemetry, not
@@ -76,6 +100,12 @@ impl StreamCounters {
             pcm_underflows: self.pcm_underflows.load(Ordering::Relaxed),
             pcm_overflows: self.pcm_overflows.load(Ordering::Relaxed),
             stream_resets: self.stream_resets.load(Ordering::Relaxed),
+            nominal_input_sample_rate_hz: self.nominal_input_sample_rate_hz.load(Ordering::Relaxed),
+            nominal_output_sample_rate_hz: self
+                .nominal_output_sample_rate_hz
+                .load(Ordering::Relaxed),
+            drift_adjustment_ppm: self.drift_adjustment_ppm.load(Ordering::Relaxed),
+            drift_hard_resyncs: self.drift_hard_resyncs.load(Ordering::Relaxed),
         }
     }
 }
@@ -101,6 +131,43 @@ pub struct StreamMetricsSnapshot {
     pub pcm_overflows: u64,
     /// Stream-local resets.
     pub stream_resets: u64,
+    /// Validated nominal input sample rate, or zero before publication.
+    pub nominal_input_sample_rate_hz: u32,
+    /// Validated nominal output sample rate, or zero before publication.
+    pub nominal_output_sample_rate_hz: u32,
+    /// Current requested bounded drift adjustment in ppm.
+    pub drift_adjustment_ppm: i32,
+    /// Stream-owner hard resynchronizations requested by the drift controller.
+    pub drift_hard_resyncs: u64,
+}
+
+impl StreamMetricsSnapshot {
+    /// Returns the nominal input-frames-per-output-frame conversion ratio.
+    ///
+    /// Returns `None` until the stream has published both nominal sample rates.
+    #[must_use]
+    pub fn nominal_resampling_ratio(&self) -> Option<f64> {
+        ratio_from_rates(
+            self.nominal_input_sample_rate_hz,
+            self.nominal_output_sample_rate_hz,
+        )
+    }
+
+    /// Returns the effective conversion ratio after the current ppm correction.
+    ///
+    /// Positive ppm consumes input faster. Returns `None` until the stream has
+    /// published both nominal sample rates.
+    #[must_use]
+    pub fn effective_resampling_ratio(&self) -> Option<f64> {
+        self.nominal_resampling_ratio().map(|nominal_ratio| {
+            nominal_ratio * (1.0 + f64::from(self.drift_adjustment_ppm) / 1_000_000.0)
+        })
+    }
+}
+
+fn ratio_from_rates(input_sample_rate_hz: u32, output_sample_rate_hz: u32) -> Option<f64> {
+    (input_sample_rate_hz != 0 && output_sample_rate_hz != 0)
+        .then(|| f64::from(input_sample_rate_hz) / f64::from(output_sample_rate_hz))
 }
 
 #[cfg(test)]
@@ -114,11 +181,34 @@ mod tests {
         counters.rejected();
         counters.plc_frame();
         counters.pcm_underflow();
+        counters.set_nominal_sample_rates(48_000, 44_100);
+        counters.set_drift_adjustment_ppm(125);
+        counters.drift_hard_resync();
 
         let snapshot = counters.snapshot();
         assert_eq!(snapshot.authenticated_packets, 1);
         assert_eq!(snapshot.rejected_packets, 1);
         assert_eq!(snapshot.plc_frames, 1);
         assert_eq!(snapshot.pcm_underflows, 1);
+        assert_eq!(snapshot.nominal_input_sample_rate_hz, 48_000);
+        assert_eq!(snapshot.nominal_output_sample_rate_hz, 44_100);
+        assert_eq!(snapshot.drift_adjustment_ppm, 125);
+        assert_eq!(snapshot.drift_hard_resyncs, 1);
+        assert_eq!(
+            snapshot.nominal_resampling_ratio(),
+            Some(48_000.0 / 44_100.0)
+        );
+        assert_eq!(
+            snapshot.effective_resampling_ratio(),
+            Some((48_000.0 / 44_100.0) * 1.000_125)
+        );
+    }
+
+    #[test]
+    fn unpublished_rates_do_not_produce_resampling_ratios() {
+        let snapshot = StreamCounters::default().snapshot();
+
+        assert_eq!(snapshot.nominal_resampling_ratio(), None);
+        assert_eq!(snapshot.effective_resampling_ratio(), None);
     }
 }

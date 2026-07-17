@@ -114,6 +114,48 @@ fn drift_decisions_reach_the_resampler_without_moving_controller_state_into_call
 }
 
 #[test]
+fn drift_control_publishes_low_rate_resampling_diagnostics() {
+    let counters = Arc::new(StreamCounters::default());
+    let (_source, handle) = SampleRateMappedRenderSource::new_with_drift_control_and_metrics(
+        Box::new(RampSource { next: 0.0 }),
+        48_000,
+        44_100,
+        1,
+        MAX_CALLBACK_FRAMES,
+        Some(Arc::clone(&counters)),
+    )
+    .unwrap();
+
+    handle.set_ppm(1_000).unwrap();
+    let adjusted = counters.snapshot();
+    assert_eq!(handle.current_ppm(), 1_000);
+    assert_eq!(adjusted.nominal_input_sample_rate_hz, 48_000);
+    assert_eq!(adjusted.nominal_output_sample_rate_hz, 44_100);
+    assert_eq!(adjusted.drift_adjustment_ppm, 1_000);
+    assert_eq!(
+        adjusted.nominal_resampling_ratio(),
+        Some(48_000.0 / 44_100.0)
+    );
+    assert_eq!(
+        adjusted.effective_resampling_ratio(),
+        Some((48_000.0 / 44_100.0) * 1.001)
+    );
+
+    assert_eq!(
+        handle.apply_decision(DriftDecision::HardResync {
+            direction: DriftResyncDirection::Low,
+        }),
+        Err(DriftAdjustmentError::HardResyncRequired(
+            DriftResyncDirection::Low
+        ))
+    );
+    let resynchronized = counters.snapshot();
+    assert_eq!(handle.current_ppm(), 0);
+    assert_eq!(resynchronized.drift_adjustment_ppm, 0);
+    assert_eq!(resynchronized.drift_hard_resyncs, 1);
+}
+
+#[test]
 fn output_tail_and_oversized_callbacks_are_silence() {
     let mut source = resampled_source(&[1.0, 2.0], 48_000, 48_000);
     let mut tail = [f32::NAN; 2];
