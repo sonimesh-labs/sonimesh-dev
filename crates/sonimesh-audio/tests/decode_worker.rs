@@ -227,6 +227,7 @@ fn hard_resync_clears_jitter_decoder_history_and_retired_pcm() {
     worker.hard_resynchronize();
 
     assert_eq!(resets.load(Ordering::Relaxed), 1);
+    assert_eq!(worker.queued_blocks(), 0);
     assert_eq!(worker.decode_next().unwrap(), DecodeStep::NotReady);
     let mut output = [f32::NAN; 4];
     assert_eq!(

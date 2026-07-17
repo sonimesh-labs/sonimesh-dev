@@ -193,6 +193,12 @@ where
         self.counters.stream_reset();
     }
 
+    /// Returns the approximate queued PCM-block count for a low-rate controller.
+    #[must_use]
+    pub fn queued_pcm_blocks(&self) -> usize {
+        self.decode.queued_blocks()
+    }
+
     fn record_ingress_error(&self, error: &IngressError<MediaCryptoError>) {
         if let IngressError::Replay(decision) = error {
             self.counters.authenticated();

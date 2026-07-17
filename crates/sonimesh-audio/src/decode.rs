@@ -217,7 +217,7 @@ where
     /// Returns the number of queued PCM blocks for low-rate diagnostics.
     #[must_use]
     pub fn queued_blocks(&self) -> usize {
-        self.producer.len()
+        self.producer.active_len()
     }
 
     fn reset_stream_state(&mut self) {

@@ -53,8 +53,13 @@ fn new_epoch_discards_queued_stale_blocks_before_playing_current_pcm() {
     let (mut producer, mut consumer) = realtime_pcm_queue::<1>(2).unwrap();
     producer.push(&[1.0]);
     producer.push(&[1.5]);
+    assert_eq!(producer.active_len(), 2);
     producer.begin_epoch();
+    assert_eq!(producer.len(), 2);
+    assert_eq!(producer.active_len(), 0);
+    assert_eq!(consumer.active_len(), 0);
     producer.push(&[2.0]);
+    assert_eq!(producer.active_len(), 1);
     let mut output = [0.0];
     assert!(matches!(
         consumer.pop_into(&mut output),
@@ -65,6 +70,7 @@ fn new_epoch_discards_queued_stale_blocks_before_playing_current_pcm() {
         }
     ));
     assert!((output[0] - 2.0).abs() < f32::EPSILON);
+    assert_eq!(consumer.active_len(), 0);
 }
 
 #[test]

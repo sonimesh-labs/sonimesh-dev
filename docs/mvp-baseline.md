@@ -62,6 +62,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   decisions or stream-local hard-resynchronization requests; hard resync clears
   only that stream's jitter, decoder state, and queued PCM epoch; no
   quality-qualified drift ASRC is selected or performance-claimed yet.
+- an app-domain drift coordinator that samples bounded PCM occupancy, publishes
+  normal ppm changes to the source handle, and performs the matching
+  stream-local hard resynchronization without touching ingress or output state.
 - a pairing-invitation control owner that synchronizes bounded record expiry,
   monotonic-clock failure, user expiry, and externally verified proof outcomes
   with the desktop session state; only a consumed proof can establish trust. It

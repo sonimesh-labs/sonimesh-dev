@@ -9,6 +9,7 @@ mod pcm_render_source;
 mod receiver_pipeline;
 mod sample_rate_mapped_render_source;
 mod session;
+mod stream_drift_controller;
 mod udp_receiver_pipeline;
 
 pub use channel_mapped_render_source::{ChannelMappedRenderSource, ChannelMappedRenderSourceError};
@@ -29,6 +30,7 @@ pub use sample_rate_mapped_render_source::{
     SampleRateMappedRenderSourceError,
 };
 pub use session::{SessionEvent, SessionPhase, SessionState, SessionTransitionError};
+pub use stream_drift_controller::StreamDriftController;
 pub use udp_receiver_pipeline::{
     UdpPollOutcome, UdpReceiverError, UdpReceiverPipeline, UdpReceiverSetupError,
 };

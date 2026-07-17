@@ -40,6 +40,11 @@ behavior and platform stream recreation remain control-domain responsibilities.
 The output callback receives only precomputed PCM blocks and never reads
 controller state.
 
+`sonimesh-app::StreamDriftController` is the control-domain composition point:
+it samples the receiver pipeline's bounded PCM occupancy, applies ordinary ppm
+decisions through the source handle, and invokes the stream-local cleanup path
+when the decision requires a hard resynchronization.
+
 The nominal sample-rate source may expose a control-domain adjustment handle.
 An `Adjust` decision is published through a bounded atomic ppm value that the
 source observes on its next callback; the callback never invokes the controller.

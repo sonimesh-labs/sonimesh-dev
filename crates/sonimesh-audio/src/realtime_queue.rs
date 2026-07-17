@@ -1,6 +1,6 @@
 use std::fmt;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use crossbeam_queue::ArrayQueue;
 
@@ -78,6 +78,7 @@ struct PcmBlock<const SAMPLES_PER_BLOCK: usize> {
 struct QueueState<const SAMPLES_PER_BLOCK: usize> {
     queue: ArrayQueue<PcmBlock<SAMPLES_PER_BLOCK>>,
     active_epoch: AtomicU64,
+    active_blocks: AtomicUsize,
 }
 
 /// Decoder-domain endpoint of a bounded logical SPSC PCM queue.
@@ -106,8 +107,13 @@ impl<const SAMPLES_PER_BLOCK: usize> RealtimePcmProducer<SAMPLES_PER_BLOCK> {
             initialized: samples.len(),
         };
         self.next_sequence = self.next_sequence.wrapping_add(1);
+        self.state.active_blocks.fetch_add(1, Ordering::Relaxed);
 
-        if self.state.queue.force_push(block).is_some() {
+        let discarded = self.state.queue.force_push(block);
+        if let Some(discarded) = discarded {
+            if discarded.epoch == self.epoch {
+                decrement_active_blocks(&self.state.active_blocks);
+            }
             RealtimePcmPushOutcome::ReplacedOldest
         } else {
             RealtimePcmPushOutcome::Inserted
@@ -122,12 +128,22 @@ impl<const SAMPLES_PER_BLOCK: usize> RealtimePcmProducer<SAMPLES_PER_BLOCK> {
         self.epoch = self.epoch.wrapping_add(1);
         self.next_sequence = 0;
         self.state.active_epoch.store(self.epoch, Ordering::Release);
+        self.state.active_blocks.store(0, Ordering::Release);
     }
 
     /// Approximate occupied block count for diagnostics.
     #[must_use]
     pub fn len(&self) -> usize {
         self.state.queue.len()
+    }
+
+    /// Approximate count of blocks from the active stream epoch.
+    ///
+    /// Unlike [`Self::len`], this excludes retired blocks that the realtime
+    /// consumer has not yet observed after a stream-local reset.
+    #[must_use]
+    pub fn active_len(&self) -> usize {
+        self.state.active_blocks.load(Ordering::Relaxed)
     }
 
     /// Returns whether no decoded block is currently queued.
@@ -163,6 +179,8 @@ impl<const SAMPLES_PER_BLOCK: usize> RealtimePcmConsumer<SAMPLES_PER_BLOCK> {
                 continue;
             }
 
+            decrement_active_blocks(&self.state.active_blocks);
+
             let samples = block.initialized.min(output.len());
             output[..samples].copy_from_slice(&block.samples[..samples]);
             let actual = (block.epoch, block.sequence);
@@ -185,6 +203,15 @@ impl<const SAMPLES_PER_BLOCK: usize> RealtimePcmConsumer<SAMPLES_PER_BLOCK> {
     #[must_use]
     pub fn len(&self) -> usize {
         self.state.queue.len()
+    }
+
+    /// Approximate count of blocks from the active stream epoch.
+    ///
+    /// Unlike [`Self::len`], this excludes retired blocks that the callback has
+    /// not yet removed after a stream-local reset.
+    #[must_use]
+    pub fn active_len(&self) -> usize {
+        self.state.active_blocks.load(Ordering::Relaxed)
     }
 
     /// Returns whether the callback would currently underflow.
@@ -225,6 +252,7 @@ pub fn realtime_pcm_queue<const SAMPLES_PER_BLOCK: usize>(
     let state = Arc::new(QueueState {
         queue: ArrayQueue::new(capacity),
         active_epoch: AtomicU64::new(0),
+        active_blocks: AtomicUsize::new(0),
     });
     Ok((
         RealtimePcmProducer {
@@ -237,4 +265,10 @@ pub fn realtime_pcm_queue<const SAMPLES_PER_BLOCK: usize>(
             expected: (0, 0),
         },
     ))
+}
+
+fn decrement_active_blocks(active_blocks: &AtomicUsize) {
+    let _ = active_blocks.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |count| {
+        count.checked_sub(1)
+    });
 }
