@@ -1,5 +1,6 @@
 //! Desktop control-domain coordination, independent of Tauri commands.
 
+mod channel_mapped_render_source;
 mod control_stream;
 mod output_controller;
 mod pairing_controller;
@@ -9,6 +10,7 @@ mod receiver_pipeline;
 mod session;
 mod udp_receiver_pipeline;
 
+pub use channel_mapped_render_source::{ChannelMappedRenderSource, ChannelMappedRenderSourceError};
 pub use control_stream::{
     ControlOperationToken, ControlStreamAction, ControlStreamCoordinator, ControlStreamError,
     MediaStreamIdentity, StreamStartRequest,

@@ -21,6 +21,8 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   emits initialized silence on underflow;
 - a lock-free cross-thread PCM queue with non-cloneable logical endpoints,
   oldest-block replacement, and exact discontinuity detection;
+- a bounded index-based Float32 channel mapper and preallocated realtime source
+  adapter for mono/stereo-to-device layout conversion without callback allocation;
 - a bounded queue-backed realtime render source that preserves partial PCM
   blocks, initializes callback underflow to silence, and caps refill attempts;
 - allocation-free gain smoothing, atomic diagnostic counters, endpoint
@@ -132,8 +134,8 @@ A two-second silent CPAL smoke on the Windows reference host observed callback
 sizes beyond both the requested and device-reported frame sizes. The evidence and
 remaining gaps are documented in
 [the Windows CPAL smoke record](./measurements/2026-07-17-windows-cpal-smoke.md).
-The second host sample used an eight-channel USB endpoint; actual source-channel
-mapping remains an explicit unimplemented audio-engine concern.
+The second host sample used an eight-channel USB endpoint; semantic speaker
+position mapping and physical source-to-device routing remain unqualified.
 
 These are not omissions hidden behind mocks. Each is a named roadmap/ADR gate,
 and no build should leave a controlled lab network before phase 0D is reviewed.

@@ -3,6 +3,7 @@
 //! Types in this crate allocate no memory after construction. Platform output,
 //! Opus bindings, and nominal sample-rate conversion remain separate adapters.
 
+mod channel_map;
 mod decode;
 mod drift;
 mod gain;
@@ -10,6 +11,7 @@ mod jitter;
 mod pcm_ring;
 mod realtime_queue;
 
+pub use channel_map::{ChannelMapper, ChannelMappingError, MAX_AUDIO_CHANNELS};
 pub use decode::{DecodeStep, DecodeWorkerError, FrameDecoder, StreamDecodeWorker};
 pub use drift::{
     DriftConfig, DriftConfigError, DriftController, DriftDecision, DriftResyncDirection,

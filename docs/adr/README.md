@@ -26,6 +26,8 @@ security implications, test evidence, and rollback plan.
    broad permission path, denial behavior, and manual address UX.
 10. **Privacy and diagnostics** — retention, redaction, diagnostic export, and
     user visibility for capture limitations.
+11. **Channel layout mapping** — bounded interleaved mapping, speaker-layout
+    evidence, and the boundary between decoded PCM and device output.
 
 Do not mark an ADR complete merely because an API name has been selected. The
 decision is complete only when its failure modes and validation evidence are
@@ -55,3 +57,5 @@ documented.
   Kotlin/Compose consent UI, foreground-service ownership, and capture-only evidence gate.
 - [ADR 0011: Diagnostic export boundary](./0011-diagnostic-export-boundary.md) —
   explicit, bounded, redacted desktop export design deferred to Phase 2.
+- [ADR 0012: Bounded channel layout mapping](./0012-channel-layout-mapping.md) —
+  provisional index-based mapping between decoded PCM and output layouts.

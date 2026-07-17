@@ -50,7 +50,7 @@ where
             .start(
                 selection.device.as_ref(),
                 selection.config,
-                self.source_factory.create(),
+                self.source_factory.create(&selection.config),
             )
             .map_err(OutputLifecycleError::Output)?;
         self.selection = Some(selection);
@@ -95,7 +95,7 @@ where
             .start(
                 selection.device.as_ref(),
                 selection.config,
-                self.source_factory.create(),
+                self.source_factory.create(&selection.config),
             )
             .map_err(OutputLifecycleError::Output)?;
         self.stream_active = true;

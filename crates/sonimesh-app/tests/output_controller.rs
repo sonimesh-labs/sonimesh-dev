@@ -20,11 +20,14 @@ impl RenderSource for Silence {
 
 struct TestFactory {
     created: Arc<AtomicUsize>,
+    last_output_channels: Arc<AtomicUsize>,
 }
 
 impl RenderSourceFactory for TestFactory {
-    fn create(&mut self) -> Box<dyn RenderSource> {
+    fn create(&mut self, config: &OutputConfig) -> Box<dyn RenderSource> {
         self.created.fetch_add(1, Ordering::Relaxed);
+        self.last_output_channels
+            .store(usize::from(config.channels), Ordering::Relaxed);
         Box::new(Silence)
     }
 }
@@ -76,7 +79,10 @@ fn selection() -> OutputSelection {
     }
 }
 
-fn controller(created: Arc<AtomicUsize>) -> OutputController<TestOutput, TestFactory> {
+fn controller(
+    created: Arc<AtomicUsize>,
+    last_output_channels: Arc<AtomicUsize>,
+) -> OutputController<TestOutput, TestFactory> {
     OutputController::new(
         TestOutput {
             health: OutputHealth::Healthy,
@@ -84,15 +90,20 @@ fn controller(created: Arc<AtomicUsize>) -> OutputController<TestOutput, TestFac
             stop_calls: 0,
             fail_start: false,
         },
-        TestFactory { created },
+        TestFactory {
+            created,
+            last_output_channels,
+        },
     )
 }
 
 #[test]
 fn faults_stop_and_recover_without_leaving_streaming_state() {
     let created = Arc::new(AtomicUsize::new(0));
-    let mut controller = controller(Arc::clone(&created));
+    let last_output_channels = Arc::new(AtomicUsize::new(0));
+    let mut controller = controller(Arc::clone(&created), Arc::clone(&last_output_channels));
     controller.start(selection()).unwrap();
+    assert_eq!(last_output_channels.load(Ordering::Relaxed), 2);
 
     controller.output_mut().health = OutputHealth::StreamError;
     assert_eq!(controller.monitor(), Some(OutputHealth::StreamError));
@@ -113,7 +124,8 @@ fn faults_stop_and_recover_without_leaving_streaming_state() {
 #[test]
 fn failed_recovery_preserves_retryable_output_state() {
     let created = Arc::new(AtomicUsize::new(0));
-    let mut controller = controller(created);
+    let last_output_channels = Arc::new(AtomicUsize::new(0));
+    let mut controller = controller(created, last_output_channels);
     controller.start(selection()).unwrap();
     controller.output_mut().health = OutputHealth::CallbackCapacityExceeded;
     controller.monitor();
@@ -128,7 +140,8 @@ fn failed_recovery_preserves_retryable_output_state() {
 #[test]
 fn starts_without_mutating_external_session_state() {
     let created = Arc::new(AtomicUsize::new(0));
-    let mut controller = controller(created);
+    let last_output_channels = Arc::new(AtomicUsize::new(0));
+    let mut controller = controller(created, last_output_channels);
     controller.start(selection()).unwrap();
     assert_eq!(controller.output().start_calls, 1);
 }
@@ -136,7 +149,8 @@ fn starts_without_mutating_external_session_state() {
 #[test]
 fn explicit_stop_disarms_stale_health_until_a_new_start() {
     let created = Arc::new(AtomicUsize::new(0));
-    let mut controller = controller(created);
+    let last_output_channels = Arc::new(AtomicUsize::new(0));
+    let mut controller = controller(created, last_output_channels);
     controller.start(selection()).unwrap();
     controller.output_mut().health = OutputHealth::StreamError;
 

@@ -418,6 +418,12 @@ different filters or stages.
 ## 12. Mixing and DSP
 
 All decoded streams enter a common Float32 bus with explicit channel mapping.
+The current compatibility mapper operates on interleaved channel indices before
+the platform callback: it duplicates mono, zero-extends a smaller layout, and
+folds a larger layout by bounded averaging. It does not infer physical speaker
+positions or perform sample-rate conversion; those claims require platform
+evidence and remain behind the same source boundary.
+
 Gain changes are smoothed across blocks. The single-stream MVP should avoid
 lookahead limiting; a multi-source release may add:
 

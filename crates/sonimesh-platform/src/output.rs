@@ -17,7 +17,10 @@ pub trait RenderSource: Send + 'static {
 /// method is only used for stream start and recreation, never from a callback.
 pub trait RenderSourceFactory {
     /// Creates the source consumed by the next output stream.
-    fn create(&mut self) -> Box<dyn RenderSource>;
+    ///
+    /// The selected output configuration is provided so a factory can install
+    /// a bounded channel mapper or other format adapter before stream start.
+    fn create(&mut self, config: &OutputConfig) -> Box<dyn RenderSource>;
 }
 
 /// Low-rate health state published by a platform output adapter.

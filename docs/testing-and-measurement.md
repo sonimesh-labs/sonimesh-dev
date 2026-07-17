@@ -67,6 +67,10 @@ The current Rust workspace includes deterministic adversarial-input regressions
 for bounded control/media parsing and invalid AEAD payloads. LibFuzzer targets
 remain a required follow-up once the `cargo-fuzz` toolchain is available.
 
+Deterministic audio tests also cover the provisional bounded channel mapper and
+its callback source adapter. They do not qualify physical speaker positions or
+OEM-specific channel routing.
+
 ## Network simulation
 
 The protocol and audio crates should run against an in-memory virtual transport
