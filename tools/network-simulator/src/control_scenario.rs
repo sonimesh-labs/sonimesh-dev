@@ -8,6 +8,8 @@ use sonimesh_protocol::{
     CONTROL_PROTOCOL_VERSION, Capability, Envelope, Hello, StartStream, envelope,
 };
 
+use crate::{NetworkProfile, VirtualNetwork};
+
 /// Observable result of one reconnect lifecycle simulation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ControlSimulationReport {
@@ -38,9 +40,20 @@ pub fn simulate_control_reconnect() -> Result<ControlSimulationReport, ControlSc
     let mut coordinator = ControlStreamCoordinator::new(SessionState::IDLE, &capabilities)
         .map_err(|_| ControlScenarioError::Control)?;
     pair(&mut coordinator, &mut pairing, 1)?;
-    hello(&mut coordinator, &capabilities)?;
+    let mut profile = NetworkProfile::stable(0xC011_2026);
+    profile.base_delay_ms = 15;
+    profile.jitter_ms = 0;
+    let mut network = VirtualNetwork::new(profile).map_err(|_| ControlScenarioError::Control)?;
+    let hello = deliver(&mut network, hello_frame(&capabilities))?;
+    if !matches!(
+        coordinator.accept(&hello),
+        Ok(ControlStreamAction::Negotiated(_))
+    ) {
+        return Err(ControlScenarioError::Control);
+    }
+    let start_frame = deliver(&mut network, start())?;
     let ControlStreamAction::Start { token, request } = coordinator
-        .accept(&start())
+        .accept(&start_frame)
         .map_err(|_| ControlScenarioError::Control)?
     else {
         return Err(ControlScenarioError::Control);
@@ -52,7 +65,8 @@ pub fn simulate_control_reconnect() -> Result<ControlSimulationReport, ControlSc
         .acknowledge_platform_event(SessionEvent::Reconnected)
         .map_err(|_| ControlScenarioError::Control)?;
     let stale_completion_rejected = coordinator.complete_start(token, request).is_err();
-    let fresh_hello_required = coordinator.accept(&start()).is_err();
+    let restarted_start = deliver(&mut network, start())?;
+    let fresh_hello_required = coordinator.accept(&restarted_start).is_err();
     Ok(ControlSimulationReport {
         stale_completion_rejected,
         fresh_hello_required,
@@ -75,11 +89,8 @@ fn pair(
     }
 }
 
-fn hello(
-    c: &mut ControlStreamCoordinator,
-    caps: &[Capability],
-) -> Result<(), ControlScenarioError> {
-    let frame = Envelope {
+fn hello_frame(caps: &[Capability]) -> Envelope {
+    Envelope {
         protocol_version: CONTROL_PROTOCOL_VERSION,
         request_id: 1,
         payload: Some(envelope::Payload::Hello(Hello {
@@ -87,10 +98,19 @@ fn hello(
             capabilities: caps.iter().map(|x| *x as i32).collect(),
             display_name: "sim".into(),
         })),
-    };
-    matches!(c.accept(&frame), Ok(ControlStreamAction::Negotiated(_)))
-        .then_some(())
-        .ok_or(ControlScenarioError::Control)
+    }
+}
+
+fn deliver(
+    network: &mut VirtualNetwork<Envelope>,
+    frame: Envelope,
+) -> Result<Envelope, ControlScenarioError> {
+    network.send(0, frame);
+    let mut ready = network.drain_ready(15);
+    if ready.len() != 1 {
+        return Err(ControlScenarioError::Control);
+    }
+    Ok(ready.pop().ok_or(ControlScenarioError::Control)?.payload)
 }
 
 fn start() -> Envelope {
