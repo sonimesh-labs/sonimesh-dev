@@ -566,6 +566,28 @@ fn fresh_session_replaces_replay_and_playout_state_without_recreating_output() {
 }
 
 #[test]
+fn fresh_session_rejects_reusing_the_active_session_id() {
+    let secret = SessionSecret::new([0xA5; 32]);
+    let active = context(2);
+    let (producer, _consumer) = realtime_pcm_queue::<4>(4).unwrap();
+    let mut pipeline = ReceiverStreamPipeline::<ByteDecoder, 4, 8, 4>::new(
+        &secret,
+        active,
+        ByteDecoder,
+        producer,
+        Arc::new(StreamCounters::default()),
+        0,
+    )
+    .unwrap();
+
+    assert_eq!(
+        pipeline.install_fresh_session(&secret, active, 0),
+        Err(sonimesh_network::ProtectedIngressError::FreshSessionRequired)
+    );
+    assert_eq!(pipeline.context(), active);
+}
+
+#[test]
 fn replacing_pcm_producer_restarts_only_the_output_side_of_one_stream() {
     let secret = SessionSecret::new([0xA5; 32]);
     let context = context(2);

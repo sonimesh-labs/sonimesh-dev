@@ -214,6 +214,9 @@ where
         context: MediaKeyContext,
         initial_sequence: u32,
     ) -> Result<(), ProtectedIngressError> {
+        if context.session_id == self.ingress.context().session_id {
+            return Err(ProtectedIngressError::FreshSessionRequired);
+        }
         let replacement = ProtectedMediaIngress::new(secret, context)?;
         self.ingress = replacement;
         self.decode.begin_epoch(initial_sequence);

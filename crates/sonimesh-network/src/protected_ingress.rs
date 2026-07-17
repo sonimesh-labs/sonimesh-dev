@@ -13,6 +13,8 @@ pub enum ProtectedIngressError {
     RotationContextMismatch,
     /// Rotation did not strictly advance the 16-bit key epoch.
     NonIncreasingEpoch,
+    /// A fresh-session installation reused the current media session ID.
+    FreshSessionRequired,
 }
 
 impl fmt::Display for ProtectedIngressError {
@@ -24,6 +26,9 @@ impl fmt::Display for ProtectedIngressError {
             }
             Self::NonIncreasingEpoch => {
                 formatter.write_str("media rotation key epoch must strictly increase")
+            }
+            Self::FreshSessionRequired => {
+                formatter.write_str("fresh media installation must use a new session ID")
             }
         }
     }
