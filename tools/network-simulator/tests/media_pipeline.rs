@@ -32,6 +32,23 @@ impl FrameDecoder for LabDecoder {
     }
 }
 
+struct SequenceDecoder;
+
+impl FrameDecoder for SequenceDecoder {
+    type Error = core::convert::Infallible;
+
+    fn decode(&mut self, encoded: &[u8], output: &mut [f32]) -> Result<usize, Self::Error> {
+        assert_eq!(encoded.len(), 4);
+        output[0] = f32::from(encoded[3]);
+        Ok(1)
+    }
+
+    fn decode_plc(&mut self, output: &mut [f32]) -> Result<usize, Self::Error> {
+        output[0] = 0.0;
+        Ok(1)
+    }
+}
+
 fn context() -> MediaKeyContext {
     MediaKeyContext::new(
         SESSION_ID,
@@ -137,7 +154,10 @@ fn authenticated_pipeline_stays_bounded_under_impairment() {
                         .unwrap()
                     {
                         InsertOutcome::Inserted | InsertOutcome::Reordered => {}
-                        InsertOutcome::Resynchronized { .. } => jitter_resets += 1,
+                        InsertOutcome::Resynchronized { .. } => {
+                            worker.reset_after_jitter_resynchronization();
+                            jitter_resets += 1;
+                        }
                         InsertOutcome::Duplicate | InsertOutcome::Late => rejected += 1,
                         InsertOutcome::SequenceExhausted => {
                             panic!("test sequence range must not exhaust")
@@ -171,4 +191,79 @@ fn authenticated_pipeline_stays_bounded_under_impairment() {
             && network.stats().random_loss_packets > 0
             && network.queued_copies() <= profile.max_in_flight_packets
     );
+}
+
+#[test]
+fn authenticated_jitter_resync_retires_old_pcm_and_keeps_the_resync_packet() {
+    let secret = SessionSecret::new([0xA5; 32]);
+    let context = context();
+    let mut sealer = MediaSealer::new(&secret, context).unwrap();
+    let first = media_datagram(&mut sealer, 0);
+    let buffered = media_datagram(&mut sealer, 1);
+    let _skipped = media_datagram(&mut sealer, 2);
+    let resync_point = media_datagram(&mut sealer, 3);
+    let mut ingress = ProtectedMediaIngress::new(&secret, context).unwrap();
+    let (producer, mut consumer) = realtime_pcm_queue::<1>(4).unwrap();
+    let mut worker =
+        StreamDecodeWorker::<SequenceDecoder, 2, 8, 1>::new(SequenceDecoder, producer, 0);
+    let mut plaintext = [0_u8; 8];
+
+    let frame = ingress.receive(&first, &mut plaintext).unwrap();
+    assert_eq!(
+        worker
+            .admit(
+                frame.header.sequence,
+                frame.header.sample_timestamp,
+                frame.opus_payload,
+            )
+            .unwrap(),
+        InsertOutcome::Inserted
+    );
+    plaintext.fill(0);
+    assert!(matches!(
+        worker.decode_next().unwrap(),
+        DecodeStep::Decoded { sequence: 0, .. }
+    ));
+
+    let frame = ingress.receive(&buffered, &mut plaintext).unwrap();
+    assert_eq!(
+        worker
+            .admit(
+                frame.header.sequence,
+                frame.header.sample_timestamp,
+                frame.opus_payload,
+            )
+            .unwrap(),
+        InsertOutcome::Inserted
+    );
+    plaintext.fill(0);
+    let frame = ingress.receive(&resync_point, &mut plaintext).unwrap();
+    assert_eq!(
+        worker
+            .admit(
+                frame.header.sequence,
+                frame.header.sample_timestamp,
+                frame.opus_payload,
+            )
+            .unwrap(),
+        InsertOutcome::Resynchronized { dropped_frames: 1 }
+    );
+    plaintext.fill(0);
+    worker.reset_after_jitter_resynchronization();
+
+    assert!(matches!(
+        worker.decode_next().unwrap(),
+        DecodeStep::Decoded { sequence: 3, .. }
+    ));
+    let mut output = [f32::NAN];
+    assert_eq!(
+        consumer.pop_into(&mut output),
+        RealtimePcmPopOutcome::Filled {
+            samples: 1,
+            sequence: 0,
+            discontinuity: true,
+            discarded_stale_blocks: 1,
+        }
+    );
+    assert!((output[0] - 3.0).abs() < f32::EPSILON);
 }
