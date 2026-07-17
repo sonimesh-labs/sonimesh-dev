@@ -97,11 +97,17 @@ fn faults_stop_and_recover_without_leaving_streaming_state() {
     controller.output_mut().health = OutputHealth::StreamError;
     assert_eq!(controller.monitor(), Some(OutputHealth::StreamError));
     assert_eq!(controller.output().stop_calls, 1);
+    assert_eq!(controller.monitor(), None);
+    assert_eq!(controller.output().stop_calls, 1);
 
     controller.output_mut().health = OutputHealth::Healthy;
     controller.recover().unwrap();
     assert_eq!(controller.output().start_calls, 2);
     assert_eq!(created.load(Ordering::Relaxed), 2);
+
+    controller.output_mut().health = OutputHealth::StreamError;
+    assert_eq!(controller.monitor(), Some(OutputHealth::StreamError));
+    assert_eq!(controller.output().stop_calls, 2);
 }
 
 #[test]
@@ -125,4 +131,24 @@ fn starts_without_mutating_external_session_state() {
     let mut controller = controller(created);
     controller.start(selection()).unwrap();
     assert_eq!(controller.output().start_calls, 1);
+}
+
+#[test]
+fn explicit_stop_disarms_stale_health_until_a_new_start() {
+    let created = Arc::new(AtomicUsize::new(0));
+    let mut controller = controller(created);
+    controller.start(selection()).unwrap();
+    controller.output_mut().health = OutputHealth::StreamError;
+
+    controller.stop();
+
+    assert_eq!(controller.monitor(), None);
+    assert_eq!(controller.output().stop_calls, 1);
+
+    controller.output_mut().health = OutputHealth::Healthy;
+    controller.start(selection()).unwrap();
+    controller.output_mut().health = OutputHealth::StreamError;
+
+    assert_eq!(controller.monitor(), Some(OutputHealth::StreamError));
+    assert_eq!(controller.output().stop_calls, 2);
 }

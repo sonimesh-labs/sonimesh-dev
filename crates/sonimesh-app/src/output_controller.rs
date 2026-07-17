@@ -18,6 +18,8 @@ pub struct OutputController<O, F> {
     output: O,
     source_factory: F,
     selection: Option<OutputSelection>,
+    stream_active: bool,
+    fault_reported: bool,
 }
 
 impl<O, F> OutputController<O, F>
@@ -32,6 +34,8 @@ where
             output,
             source_factory,
             selection: None,
+            stream_active: false,
+            fault_reported: false,
         }
     }
 
@@ -50,6 +54,8 @@ where
             )
             .map_err(OutputLifecycleError::Output)?;
         self.selection = Some(selection);
+        self.stream_active = true;
+        self.fault_reported = false;
         Ok(())
     }
 
@@ -60,12 +66,17 @@ where
     /// # Errors
     ///
     pub fn monitor(&mut self) -> Option<OutputHealth> {
+        if !self.stream_active || self.fault_reported {
+            return None;
+        }
         let health = self.output.health();
         if health == OutputHealth::Healthy {
             return None;
         }
 
         self.output.stop();
+        self.stream_active = false;
+        self.fault_reported = true;
         Some(health)
     }
 
@@ -87,12 +98,16 @@ where
                 self.source_factory.create(),
             )
             .map_err(OutputLifecycleError::Output)?;
+        self.stream_active = true;
+        self.fault_reported = false;
         Ok(())
     }
 
     /// Stops the backend; lifecycle completion remains owned by the caller.
     pub fn stop(&mut self) {
         self.output.stop();
+        self.stream_active = false;
+        self.fault_reported = true;
     }
 
     /// Borrows the platform adapter for control-domain device operations.
