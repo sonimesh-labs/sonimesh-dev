@@ -47,6 +47,26 @@ pub enum FreshSessionInstallError {
     Ingress(ProtectedIngressError),
 }
 
+impl fmt::Display for FreshSessionInstallError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ReusedSessionId => {
+                formatter.write_str("fresh media session reused the active session ID")
+            }
+            Self::Ingress(error) => write!(formatter, "fresh media ingress setup failed: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for FreshSessionInstallError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::ReusedSessionId => None,
+            Self::Ingress(error) => Some(error),
+        }
+    }
+}
+
 impl<DecoderError: fmt::Display> fmt::Display for ReceiverPipelineError<DecoderError> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
