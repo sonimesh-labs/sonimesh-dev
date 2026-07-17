@@ -21,6 +21,8 @@ Add an optional `cpal-output` feature to `sonimesh-platform` for the first Windo
 11 shared-mode feasibility path.
 
 - enumerate output devices with CPAL `DeviceId`, not display-name matching;
+- keep device enumeration independent from default-format probing so one endpoint
+  with an unavailable or unsupported format does not hide other devices;
 - keep the backend out of shared audio, network, protocol, diagnostics, and UI
   crates;
 - validate sample rate, channels, and callback frames against explicit hard bounds

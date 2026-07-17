@@ -33,6 +33,18 @@ pub struct CpalDeviceProbe {
     pub buffer_size: CpalBufferSize,
 }
 
+pub(crate) fn device_info(
+    device: &cpal::Device,
+    default_id: Option<&str>,
+) -> Result<OutputDeviceInfo, cpal::Error> {
+    let id = device.id()?.to_string();
+    Ok(OutputDeviceInfo {
+        is_default: default_id == Some(id.as_str()),
+        id: OutputDeviceId::new(id),
+        display_name: device.to_string(),
+    })
+}
+
 impl CpalDeviceProbe {
     /// Creates a bounded SoniMesh configuration from the probed default format.
     ///
@@ -62,7 +74,7 @@ pub(crate) fn probe_device(
     device: &cpal::Device,
     default_id: Option<&str>,
 ) -> Result<CpalDeviceProbe, cpal::Error> {
-    let id = device.id()?.to_string();
+    let device_info = device_info(device, default_id)?;
     let default = device.default_output_config()?;
     let sample_format = match default.sample_format() {
         cpal::SampleFormat::F32 => Some(SampleFormat::Float32),
@@ -78,11 +90,7 @@ pub(crate) fn probe_device(
     };
 
     Ok(CpalDeviceProbe {
-        device: OutputDeviceInfo {
-            is_default: default_id == Some(id.as_str()),
-            id: OutputDeviceId::new(id),
-            display_name: device.to_string(),
-        },
+        device: device_info,
         sample_rate_hz: default.sample_rate(),
         channels: default.channels(),
         sample_format,

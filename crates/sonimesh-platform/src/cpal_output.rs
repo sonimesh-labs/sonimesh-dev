@@ -4,7 +4,7 @@ use std::sync::Arc;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 use crate::cpal_callback::{build_float32_stream, build_signed16_stream};
-use crate::cpal_probe::{CpalDeviceProbe, probe_device};
+use crate::cpal_probe::{CpalDeviceProbe, device_info, probe_device};
 use crate::cpal_status::{CallbackStatus, CpalOutputStatus};
 use crate::{
     AudioOutput, OutputConfig, OutputDeviceId, OutputDeviceInfo, OutputError, OutputHealth,
@@ -112,11 +112,14 @@ impl Default for CpalOutput {
 
 impl AudioOutput for CpalOutput {
     fn devices(&self) -> Result<Vec<OutputDeviceInfo>, OutputError> {
-        Ok(self
-            .probe_devices()?
-            .into_iter()
-            .map(|probe| probe.device)
-            .collect())
+        let default_id = self.default_device_id();
+        self.host
+            .output_devices()
+            .map_err(|error| map_cpal_error(&error))?
+            .map(|device| {
+                device_info(&device, default_id.as_deref()).map_err(|error| map_cpal_error(&error))
+            })
+            .collect()
     }
 
     fn start(
