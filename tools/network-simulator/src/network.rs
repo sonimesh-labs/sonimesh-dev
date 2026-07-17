@@ -46,6 +46,12 @@ pub struct NetworkStats {
     pub duplicate_copies: u64,
     /// Packets receiving additional reorder delay.
     pub reordered_packets: u64,
+    /// Copies whose transfer completion was shaped by a finite link bandwidth.
+    pub bandwidth_shaped_copies: u64,
+    /// Bytes placed on the finite virtual link.
+    pub bandwidth_serialized_bytes: u64,
+    /// Total sender-side serialization wait before transfer began.
+    pub bandwidth_queue_delay_ms: u64,
 }
 
 /// Bounded deterministic virtual packet transport.
@@ -54,6 +60,7 @@ pub struct VirtualNetwork<T> {
     random: Lcg,
     events: BTreeMap<u64, VecDeque<Delivery<T>>>,
     queued_copies: usize,
+    next_transmit_available_ms: u64,
     burst_remaining: u16,
     stats: NetworkStats,
 }
@@ -71,13 +78,14 @@ impl<T: Clone> VirtualNetwork<T> {
             random: Lcg::new(profile.seed),
             events: BTreeMap::new(),
             queued_copies: 0,
+            next_transmit_available_ms: 0,
             burst_remaining: 0,
             stats: NetworkStats::default(),
         })
     }
 
     /// Applies configured impairments and schedules a payload.
-    pub fn send(&mut self, now_ms: u64, payload: T) -> SendOutcome {
+    pub fn send(&mut self, now_ms: u64, payload: T, payload_bytes: u64) -> SendOutcome {
         let ordinal = self.stats.submitted_packets;
         self.stats.submitted_packets += 1;
 
@@ -90,18 +98,27 @@ impl<T: Clone> VirtualNetwork<T> {
             return SendOutcome::DroppedByLoss;
         }
 
-        let delivery_ms = self.delivery_time(now_ms);
-        let duplicate = self.random.chance(self.profile.duplicate_percent);
-        let duplicate_payload = duplicate.then(|| payload.clone());
-        if !self.schedule(now_ms, delivery_ms, payload) {
+        if !self.has_capacity() {
+            self.record_capacity_drop();
             return SendOutcome::DroppedByCapacity;
         }
+        let delay_ms = self.impairment_delay();
+        let delivery_ms = self.delivery_time(now_ms, delay_ms, payload_bytes);
+        let duplicate = self.random.chance(self.profile.duplicate_percent);
+        let duplicate_payload = duplicate.then(|| payload.clone());
+        self.schedule(now_ms, delivery_ms, payload);
 
         let mut copies = 1;
         if let Some(copy) = duplicate_payload {
-            if self.schedule(now_ms, delivery_ms.saturating_add(1), copy) {
+            if self.has_capacity() {
+                let duplicate_delivery_ms = self
+                    .delivery_time(now_ms, delay_ms, payload_bytes)
+                    .max(delivery_ms.saturating_add(1));
+                self.schedule(now_ms, duplicate_delivery_ms, copy);
                 self.stats.duplicate_copies += 1;
                 copies += 1;
+            } else {
+                self.record_capacity_drop();
             }
         }
         SendOutcome::Scheduled { copies }
@@ -150,7 +167,7 @@ impl<T: Clone> VirtualNetwork<T> {
         false
     }
 
-    fn delivery_time(&mut self, now_ms: u64) -> u64 {
+    fn impairment_delay(&mut self) -> u64 {
         let jitter_span = self.profile.jitter_ms.saturating_mul(2).saturating_add(1);
         let offset = self.random.below_u64(jitter_span);
         let mut delay = self
@@ -162,14 +179,40 @@ impl<T: Clone> VirtualNetwork<T> {
             delay = delay.saturating_add(self.profile.reorder_delay_ms);
             self.stats.reordered_packets += 1;
         }
-        now_ms.saturating_add(delay)
+        delay
     }
 
-    fn schedule(&mut self, sent_at_ms: u64, delivered_at_ms: u64, payload: T) -> bool {
-        if self.queued_copies >= self.profile.max_in_flight_packets {
-            self.stats.capacity_dropped_copies += 1;
-            return false;
+    fn delivery_time(&mut self, now_ms: u64, delay_ms: u64, payload_bytes: u64) -> u64 {
+        if self.profile.bandwidth_bytes_per_second == 0 {
+            return now_ms.saturating_add(delay_ms);
         }
+
+        let transmit_start_ms = now_ms.max(self.next_transmit_available_ms);
+        self.stats.bandwidth_shaped_copies += 1;
+        self.stats.bandwidth_serialized_bytes = self
+            .stats
+            .bandwidth_serialized_bytes
+            .saturating_add(payload_bytes);
+        self.stats.bandwidth_queue_delay_ms = self
+            .stats
+            .bandwidth_queue_delay_ms
+            .saturating_add(transmit_start_ms.saturating_sub(now_ms));
+        let transfer_ms =
+            serialized_duration_ms(payload_bytes, self.profile.bandwidth_bytes_per_second);
+        let transmit_complete_ms = transmit_start_ms.saturating_add(transfer_ms);
+        self.next_transmit_available_ms = transmit_complete_ms;
+        transmit_complete_ms.saturating_add(delay_ms)
+    }
+
+    fn has_capacity(&self) -> bool {
+        self.queued_copies < self.profile.max_in_flight_packets
+    }
+
+    fn record_capacity_drop(&mut self) {
+        self.stats.capacity_dropped_copies += 1;
+    }
+
+    fn schedule(&mut self, sent_at_ms: u64, delivered_at_ms: u64, payload: T) {
         self.events
             .entry(delivered_at_ms)
             .or_default()
@@ -180,8 +223,19 @@ impl<T: Clone> VirtualNetwork<T> {
             });
         self.queued_copies += 1;
         self.stats.scheduled_copies += 1;
-        true
     }
+}
+
+fn serialized_duration_ms(payload_bytes: u64, bandwidth_bytes_per_second: u64) -> u64 {
+    let whole_seconds = payload_bytes / bandwidth_bytes_per_second;
+    let remainder = payload_bytes % bandwidth_bytes_per_second;
+    let partial_millis = remainder
+        .saturating_mul(1_000)
+        .saturating_add(bandwidth_bytes_per_second.saturating_sub(1))
+        / bandwidth_bytes_per_second;
+    whole_seconds
+        .saturating_mul(1_000)
+        .saturating_add(partial_millis)
 }
 
 struct Lcg(u64);
@@ -218,8 +272,8 @@ mod tests {
         profile.duplicate_percent = 100;
         let mut network = VirtualNetwork::new(profile).unwrap();
 
-        network.send(0, 1_u32);
-        network.send(0, 2_u32);
+        network.send(0, 1_u32, u64::from(u32::BITS / 8));
+        network.send(0, 2_u32, u64::from(u32::BITS / 8));
 
         assert_eq!(network.queued_copies(), 2);
         assert!(network.stats().capacity_dropped_copies > 0);
@@ -231,11 +285,60 @@ mod tests {
         profile.base_delay_ms = 10;
         profile.jitter_ms = 0;
         let mut network = VirtualNetwork::new(profile).unwrap();
-        network.send(0, 1_u32);
-        network.send(5, 2_u32);
+        network.send(0, 1_u32, u64::from(u32::BITS / 8));
+        network.send(5, 2_u32, u64::from(u32::BITS / 8));
 
         let ready = network.drain_ready(20);
         assert_eq!(ready.len(), 2);
         assert_eq!(network.queued_copies(), 0);
+    }
+
+    #[test]
+    fn bandwidth_serializes_back_to_back_packets() {
+        let mut profile = NetworkProfile::stable(1);
+        profile.base_delay_ms = 0;
+        profile.jitter_ms = 0;
+        profile.bandwidth_bytes_per_second = 1_000;
+        let mut network = VirtualNetwork::new(profile).unwrap();
+
+        network.send(0, 1_u32, 100);
+        network.send(0, 2_u32, 100);
+
+        assert!(network.drain_ready(99).is_empty());
+        let first = network.drain_ready(100);
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].payload, 1);
+        let second = network.drain_ready(200);
+        assert_eq!(second.len(), 1);
+        assert_eq!(second[0].payload, 2);
+        assert_eq!(network.stats().bandwidth_shaped_copies, 2);
+        assert_eq!(network.stats().bandwidth_serialized_bytes, 200);
+        assert_eq!(network.stats().bandwidth_queue_delay_ms, 100);
+    }
+
+    #[test]
+    fn capacity_drop_does_not_consume_bandwidth_time() {
+        let mut profile = NetworkProfile::stable(1);
+        profile.base_delay_ms = 0;
+        profile.jitter_ms = 0;
+        profile.bandwidth_bytes_per_second = 1_000;
+        profile.max_in_flight_packets = 1;
+        let mut network = VirtualNetwork::new(profile).unwrap();
+
+        assert_eq!(
+            network.send(0, 1_u32, 100),
+            SendOutcome::Scheduled { copies: 1 }
+        );
+        assert_eq!(network.send(0, 2_u32, 100), SendOutcome::DroppedByCapacity);
+        assert_eq!(network.drain_ready(100).len(), 1);
+        assert_eq!(
+            network.send(100, 3_u32, 100),
+            SendOutcome::Scheduled { copies: 1 }
+        );
+
+        let ready = network.drain_ready(200);
+        assert_eq!(ready.len(), 1);
+        assert_eq!(ready[0].payload, 3);
+        assert_eq!(network.stats().bandwidth_serialized_bytes, 200);
     }
 }

@@ -5,7 +5,8 @@ use sonimesh_app::{
     PairingInvitationController, PairingSource, SessionEvent, SessionState,
 };
 use sonimesh_protocol::{
-    CONTROL_PROTOCOL_VERSION, Capability, Envelope, Hello, StartStream, envelope,
+    CONTROL_PROTOCOL_VERSION, Capability, Envelope, Hello, StartStream, encode_control_frame,
+    envelope,
 };
 
 use crate::{NetworkProfile, VirtualNetwork};
@@ -74,7 +75,7 @@ pub fn simulate_control_reconnect() -> Result<ControlSimulationReport, ControlSc
     delayed_profile.reorder_delay_ms = 30;
     let mut delayed_network =
         VirtualNetwork::new(delayed_profile).map_err(|_| ControlScenarioError::Control)?;
-    delayed_network.send(0, start());
+    submit(&mut delayed_network, start())?;
     let delayed = delayed_network.drain_ready(45);
     let delayed_command_rejected = delayed
         .first()
@@ -120,12 +121,26 @@ fn deliver(
     network: &mut VirtualNetwork<Envelope>,
     frame: Envelope,
 ) -> Result<Envelope, ControlScenarioError> {
-    network.send(0, frame);
+    submit(network, frame)?;
     let mut ready = network.drain_ready(15);
     if ready.len() != 1 {
         return Err(ControlScenarioError::Control);
     }
     Ok(ready.pop().ok_or(ControlScenarioError::Control)?.payload)
+}
+
+fn submit(
+    network: &mut VirtualNetwork<Envelope>,
+    frame: Envelope,
+) -> Result<(), ControlScenarioError> {
+    let payload_bytes = u64::try_from(
+        encode_control_frame(&frame)
+            .map_err(|_| ControlScenarioError::Control)?
+            .len(),
+    )
+    .map_err(|_| ControlScenarioError::Control)?;
+    network.send(0, frame, payload_bytes);
+    Ok(())
 }
 
 fn start() -> Envelope {

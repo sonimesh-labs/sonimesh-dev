@@ -4,6 +4,8 @@ use std::fmt;
 pub const MAX_IN_FLIGHT_PACKETS: usize = 4_096;
 /// Hard bound on base, jitter, and reorder delay combined.
 pub const MAX_NETWORK_DELAY_MS: u64 = 60_000;
+/// Hard bound on one virtual-link bandwidth configuration.
+pub const MAX_BANDWIDTH_BYTES_PER_SECOND: u64 = 1_000_000_000;
 
 /// Deterministic network impairment configuration.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -20,6 +22,8 @@ pub struct NetworkProfile {
     pub jitter_ms: u64,
     /// Extra delay used to create deterministic reordering.
     pub reorder_delay_ms: u64,
+    /// Serial link bandwidth in bytes per second; zero disables shaping.
+    pub bandwidth_bytes_per_second: u64,
     /// Start one burst every N submitted packets; zero disables bursts.
     pub burst_interval_packets: u32,
     /// Consecutive packets dropped in each configured burst.
@@ -41,6 +45,7 @@ impl NetworkProfile {
             base_delay_ms: 20,
             jitter_ms: 5,
             reorder_delay_ms: 30,
+            bandwidth_bytes_per_second: 0,
             burst_interval_packets: 0,
             burst_length_packets: 0,
             max_in_flight_packets: 256,
@@ -72,6 +77,9 @@ impl NetworkProfile {
         if total_delay > MAX_NETWORK_DELAY_MS {
             return Err(ProfileError::DelayTooLarge);
         }
+        if self.bandwidth_bytes_per_second > MAX_BANDWIDTH_BYTES_PER_SECOND {
+            return Err(ProfileError::BandwidthTooLarge);
+        }
         if self.burst_interval_packets == 0 && self.burst_length_packets != 0 {
             return Err(ProfileError::BurstIntervalMissing);
         }
@@ -98,6 +106,8 @@ pub enum ProfileError {
     DelayTooLarge,
     /// Burst length was set without a non-zero interval.
     BurstIntervalMissing,
+    /// Link bandwidth exceeds [`MAX_BANDWIDTH_BYTES_PER_SECOND`].
+    BandwidthTooLarge,
 }
 
 impl fmt::Display for ProfileError {
@@ -107,3 +117,16 @@ impl fmt::Display for ProfileError {
 }
 
 impl std::error::Error for ProfileError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_an_unbounded_bandwidth_configuration() {
+        let mut profile = NetworkProfile::stable(1);
+        profile.bandwidth_bytes_per_second = MAX_BANDWIDTH_BYTES_PER_SECOND + 1;
+
+        assert_eq!(profile.validate(), Err(ProfileError::BandwidthTooLarge));
+    }
+}

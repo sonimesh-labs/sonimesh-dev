@@ -9,7 +9,8 @@ a physical latency claim.
 - `VirtualClock` rejects backward movement and numeric overflow.
 - `NetworkProfile` bounds probability fields, combined delay, and in-flight copies.
 - `VirtualNetwork<T>` schedules random loss, deterministic burst loss, jitter,
-  duplication, reorder delay, and capacity drops from one reproducible seed.
+  duplication, reorder delay, finite-bandwidth serialization, and capacity drops
+  from one reproducible seed. Senders provide payload byte counts explicitly.
 - `ScenarioConfig` drives sender and playout deadlines independently.
 - `DriftScenarioConfig` closes an integerized PCM-occupancy loop around the
   bounded ppm controller; it is not an ASRC or device-clock emulator.
@@ -24,6 +25,5 @@ cargo run -p sonimesh-network-simulator
 cargo test -p sonimesh-network-simulator
 ~~~
 
-Physical WLAN, bandwidth contention, socket-buffer behavior, operating-system
-scheduling, real ASRC/device-clock drift, and address migration remain separate
-validation work.
+Physical WLAN, socket-buffer behavior, operating-system scheduling, real
+ASRC/device-clock drift, and address migration remain separate validation work.

@@ -5,6 +5,7 @@ use sonimesh_audio::{EncodedFrame, InsertOutcome, JitterBuffer, PlayoutOutcome};
 use crate::{ClockError, NetworkProfile, NetworkStats, ProfileError, VirtualClock, VirtualNetwork};
 
 const MAX_SCENARIO_FRAMES: u32 = 100_000;
+const SYNTHETIC_ENCODED_FRAME_BYTES: u64 = 1;
 
 /// One deterministic encoded-audio simulation configuration.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -101,7 +102,7 @@ pub fn simulate(config: ScenarioConfig) -> Result<SimulationReport, ScenarioErro
     while clock.now_ms() <= end_ms {
         let now_ms = clock.now_ms();
         if next_send_sequence < config.frames && now_ms == next_send_ms {
-            network.send(now_ms, next_send_sequence);
+            network.send(now_ms, next_send_sequence, SYNTHETIC_ENCODED_FRAME_BYTES);
             next_send_sequence += 1;
             next_send_ms = next_send_ms.saturating_add(config.frame_duration_ms);
         }

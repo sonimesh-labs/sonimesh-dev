@@ -138,7 +138,9 @@ fn authenticated_pipeline_stays_bounded_under_impairment() {
 
     for now_ms in 0..=end_ms {
         if next_send < FRAMES && now_ms == u64::from(next_send) * FRAME_MS {
-            network.send(now_ms, media_datagram(&mut sealer, next_send));
+            let datagram = media_datagram(&mut sealer, next_send);
+            let payload_bytes = u64::try_from(datagram.len()).unwrap_or(u64::MAX);
+            network.send(now_ms, datagram, payload_bytes);
             next_send += 1;
         }
 

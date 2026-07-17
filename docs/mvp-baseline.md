@@ -1,7 +1,7 @@
 # MVP implementation baseline
 
 > Status: foundation implemented; platform feasibility remains open
-> Updated: 2026-07-17
+> Updated: 2026-07-18
 
 This baseline turns the architecture documents into a buildable core without
 claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
@@ -39,7 +39,8 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   render source; platform operations never mutate session state directly, which
   remains owned by the control-session coordinator;
 - deterministic virtual-clock/network profiles for random and burst loss,
-  jitter, duplication, reorder delay, capacity pressure, and Windows/Linux CI;
+  jitter, duplication, reorder delay, byte-counted bandwidth serialization,
+  capacity pressure, and Windows/Linux CI;
 - a cross-crate protected pipeline covering AEAD parse/authentication, replay
   rejection, jitter/PLC decisions, non-realtime decode scheduling, and realtime
   PCM transfer without claiming an Opus backend or physical audio result.
