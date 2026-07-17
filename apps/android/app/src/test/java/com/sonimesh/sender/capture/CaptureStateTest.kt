@@ -14,9 +14,11 @@ class CaptureStateTest {
             sampleRateHz = 48_000,
             channels = 2,
             bufferSizeBytes = 7_680,
+            minimumBufferBytes = 3_840,
         )
 
         assertEquals(1_920, format?.readSamples)
+        assertEquals(3_840, format?.minimumBufferBytes)
     }
 
     @Test
@@ -27,6 +29,7 @@ class CaptureStateTest {
                 sampleRateHz = 48_000,
                 channels = 2,
                 bufferSizeBytes = MAX_CAPTURE_BUFFER_BYTES + 1,
+                minimumBufferBytes = 3_840,
             ),
         )
         assertEquals(
@@ -35,6 +38,25 @@ class CaptureStateTest {
                 sampleRateHz = MAX_CAPTURE_SAMPLE_RATE_HZ + 1,
                 channels = 2,
                 bufferSizeBytes = MAX_CAPTURE_BUFFER_BYTES,
+                minimumBufferBytes = 3_840,
+            ),
+        )
+        assertEquals(
+            null,
+            CaptureFormat.fromObserved(
+                sampleRateHz = 48_000,
+                channels = 2,
+                bufferSizeBytes = MAX_CAPTURE_BUFFER_BYTES,
+                minimumBufferBytes = MAX_CAPTURE_BUFFER_BYTES + 1,
+            ),
+        )
+        assertEquals(
+            null,
+            CaptureFormat.fromObserved(
+                sampleRateHz = 48_000,
+                channels = 2,
+                bufferSizeBytes = 3_840,
+                minimumBufferBytes = 7_680,
             ),
         )
     }

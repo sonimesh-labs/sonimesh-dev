@@ -154,7 +154,7 @@ private fun CaptureStatus.description(): String = when (this) {
     CaptureStatus.Idle -> "Ready to request playback capture consent."
     CaptureStatus.AwaitingPermission -> "Waiting for microphone permission."
     CaptureStatus.AwaitingProjectionConsent -> "Waiting for playback capture consent."
-    is CaptureStatus.Capturing -> "Capturing ${format.sampleRateHz} Hz, ${format.channels} channels, ${format.bufferSizeBytes} byte buffer."
+    is CaptureStatus.Capturing -> "Capturing ${format.sampleRateHz} Hz, ${format.channels} channels, ${format.bufferSizeBytes} byte buffer (platform minimum ${format.minimumBufferBytes})."
     is CaptureStatus.NoCapturableAudio -> "No capturable audio detected. The source may be silent or policy-restricted; the cause is not identifiable here."
     is CaptureStatus.Stopped -> "Capture stopped: ${reason.displayName}."
     is CaptureStatus.Failed -> "Capture failed: $message"

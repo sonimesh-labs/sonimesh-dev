@@ -1,7 +1,7 @@
 # Android capture feasibility matrix
 
 > Status: test protocol and evidence template; no physical-device runs recorded
-> Updated: 2026-07-17
+> Updated: 2026-07-18
 
 This document is the evidence boundary for the capture-only Android bootstrap.
 A successful Gradle build proves only that the application and its bounded
@@ -15,7 +15,7 @@ possible.
 | --- | --- |
 | Capture format | PCM16, 48,000 Hz, stereo |
 | Read block | 20 ms, 960 frames, 1,920 interleaved samples |
-| AudioRecord buffer | Platform minimum, capped at 64 KiB |
+| AudioRecord buffer | Actual and platform-minimum values, each capped at 64 KiB |
 | Ownership | Foreground service after consent; UI receives low-rate state only |
 | Evidence publication | Duration, frames, silent reads, and errors at no more than 2 Hz |
 | PCM persistence | None; samples are scanned for silence and discarded |

@@ -10,6 +10,7 @@ data class CaptureFormat(
     val sampleRateHz: Int,
     val channels: Int,
     val bufferSizeBytes: Int,
+    val minimumBufferBytes: Int,
     val readSamples: Int,
 ) {
     companion object {
@@ -17,10 +18,13 @@ data class CaptureFormat(
             sampleRateHz: Int,
             channels: Int,
             bufferSizeBytes: Int,
+            minimumBufferBytes: Int,
         ): CaptureFormat? {
             if (sampleRateHz !in MIN_CAPTURE_SAMPLE_RATE_HZ..MAX_CAPTURE_SAMPLE_RATE_HZ
                 || channels !in 1..MAX_CAPTURE_CHANNELS
                 || bufferSizeBytes !in 1..MAX_CAPTURE_BUFFER_BYTES
+                || minimumBufferBytes !in 1..MAX_CAPTURE_BUFFER_BYTES
+                || minimumBufferBytes > bufferSizeBytes
             ) {
                 return null
             }
@@ -37,6 +41,7 @@ data class CaptureFormat(
                 sampleRateHz = sampleRateHz,
                 channels = channels,
                 bufferSizeBytes = bufferSizeBytes,
+                minimumBufferBytes = minimumBufferBytes,
                 readSamples = samples.toInt(),
             )
         }

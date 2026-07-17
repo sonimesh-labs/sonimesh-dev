@@ -104,12 +104,13 @@ class CaptureService : Service() {
             projectionCallback = callback
             projection.registerCallback(callback, mainHandler)
 
-            val record = createAudioRecord(projection).also { candidateRecord = it }
+            val setup = createAudioRecord(projection)
+            val record = setup.record.also { candidateRecord = it }
             if (record.state != AudioRecord.STATE_INITIALIZED) {
                 throw CaptureSetupException("AudioRecord did not initialize")
             }
 
-            val format = observedFormat(record)
+            val format = observedFormat(record, setup.minimumBufferBytes)
             audioRecord = record
             candidateRecord = null
             CaptureStateStore.evidence.begin(SystemClock.elapsedRealtime())
@@ -131,7 +132,7 @@ class CaptureService : Service() {
     }
 
     @android.annotation.SuppressLint("MissingPermission")
-    private fun createAudioRecord(projection: MediaProjection): AudioRecord {
+    private fun createAudioRecord(projection: MediaProjection): AudioRecordSetup {
         val captureConfig = android.media.AudioPlaybackCaptureConfiguration.Builder(projection)
             .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
             .addMatchingUsage(AudioAttributes.USAGE_GAME)
@@ -151,7 +152,7 @@ class CaptureService : Service() {
         val requestedBytes = REQUESTED_READ_SAMPLES * Short.SIZE_BYTES
         val bufferSize = maxOf(minimumBuffer, requestedBytes)
 
-        return AudioRecord.Builder()
+        val record = AudioRecord.Builder()
             .setAudioFormat(
                 AudioFormat.Builder()
                     .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
@@ -162,9 +163,10 @@ class CaptureService : Service() {
             .setBufferSizeInBytes(bufferSize)
             .setAudioPlaybackCaptureConfig(captureConfig)
             .build()
+        return AudioRecordSetup(record, minimumBuffer)
     }
 
-    private fun observedFormat(record: AudioRecord): CaptureFormat {
+    private fun observedFormat(record: AudioRecord, minimumBufferBytes: Int): CaptureFormat {
         val bufferBytes = record.bufferSizeInFrames.toLong()
             .times(record.channelCount.toLong())
             .times(Short.SIZE_BYTES.toLong())
@@ -175,6 +177,7 @@ class CaptureService : Service() {
             sampleRateHz = record.sampleRate,
             channels = record.channelCount,
             bufferSizeBytes = bufferBytes,
+            minimumBufferBytes = minimumBufferBytes,
         ) ?: throw CaptureSetupException("AudioRecord reported an unsupported format")
     }
 
@@ -380,6 +383,11 @@ class CaptureService : Service() {
         data class Stopped(val reason: CaptureStopReason) : TerminalOutcome
         data class Failed(val message: String) : TerminalOutcome
     }
+
+    private data class AudioRecordSetup(
+        val record: AudioRecord,
+        val minimumBufferBytes: Int,
+    )
 
     private class CaptureSetupException(message: String) : Exception(message)
 
