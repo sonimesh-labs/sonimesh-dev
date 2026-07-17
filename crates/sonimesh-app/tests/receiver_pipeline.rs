@@ -582,7 +582,7 @@ fn fresh_session_rejects_reusing_the_active_session_id() {
 
     assert_eq!(
         pipeline.install_fresh_session(&secret, active, 0),
-        Err(sonimesh_network::ProtectedIngressError::FreshSessionRequired)
+        Err(sonimesh_app::FreshSessionInstallError::ReusedSessionId)
     );
     assert_eq!(pipeline.context(), active);
 }

@@ -36,7 +36,9 @@ pub use receiver_output_controller::{
 pub use receiver_pcm_endpoint_factory::{
     ReceiverPcmEndpoint, ReceiverPcmEndpointError, ReceiverPcmEndpointFactory,
 };
-pub use receiver_pipeline::{ReceiverPipelineError, ReceiverStreamPipeline};
+pub use receiver_pipeline::{
+    FreshSessionInstallError, ReceiverPipelineError, ReceiverStreamPipeline,
+};
 pub use sample_rate_mapped_render_source::{
     DriftAdjustmentError, DriftAdjustmentHandle, SampleRateMappedRenderSource,
     SampleRateMappedRenderSourceError,

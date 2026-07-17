@@ -38,6 +38,15 @@ pub enum ReceiverPipelineError<DecoderError> {
     Rotation(ProtectedIngressError),
 }
 
+/// Failure while replacing a pipeline with authenticated fresh media state.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FreshSessionInstallError {
+    /// The replacement reused the active media session ID.
+    ReusedSessionId,
+    /// The replacement AEAD opener could not be derived.
+    Ingress(ProtectedIngressError),
+}
+
 impl<DecoderError: fmt::Display> fmt::Display for ReceiverPipelineError<DecoderError> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -213,11 +222,12 @@ where
         secret: &SessionSecret,
         context: MediaKeyContext,
         initial_sequence: u32,
-    ) -> Result<(), ProtectedIngressError> {
+    ) -> Result<(), FreshSessionInstallError> {
         if context.session_id == self.ingress.context().session_id {
-            return Err(ProtectedIngressError::FreshSessionRequired);
+            return Err(FreshSessionInstallError::ReusedSessionId);
         }
-        let replacement = ProtectedMediaIngress::new(secret, context)?;
+        let replacement = ProtectedMediaIngress::new(secret, context)
+            .map_err(FreshSessionInstallError::Ingress)?;
         self.ingress = replacement;
         self.decode.begin_epoch(initial_sequence);
         self.counters.reset_queued_pcm_epoch();

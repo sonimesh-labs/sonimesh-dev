@@ -10,7 +10,7 @@ use sonimesh_diagnostics::StreamCounters;
 use sonimesh_network::{ProtectedIngressError, UdpMediaReceiver, UdpReceiveError};
 use sonimesh_protocol::{MAX_MEDIA_PLAINTEXT_LEN, MediaKeyContext, SessionSecret};
 
-use crate::{ReceiverPipelineError, ReceiverStreamPipeline};
+use crate::{FreshSessionInstallError, ReceiverPipelineError, ReceiverStreamPipeline};
 
 /// Error while constructing a UDP-backed receiver pipeline.
 #[derive(Debug)]
@@ -208,7 +208,7 @@ where
         secret: &SessionSecret,
         context: MediaKeyContext,
         initial_sequence: u32,
-    ) -> Result<(), ProtectedIngressError> {
+    ) -> Result<(), FreshSessionInstallError> {
         self.pipeline
             .install_fresh_session(secret, context, initial_sequence)
     }
