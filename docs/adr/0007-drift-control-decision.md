@@ -52,6 +52,11 @@ source observes on its next callback; the callback never invokes the controller.
 A `HardResync` decision is returned to the stream owner and is never silently
 applied to a running source.
 
+Low-rate diagnostics publish the nominal input/output sample rates as one atomic
+pair so a device-format recreation cannot present a ratio assembled from two
+different output lifetimes. Counter snapshots otherwise remain non-transactional
+telemetry and must not drive control decisions.
+
 The initial controller works in integral block units and ppm values. It does not
 claim that the selected gains or thresholds meet a hardware latency target.
 

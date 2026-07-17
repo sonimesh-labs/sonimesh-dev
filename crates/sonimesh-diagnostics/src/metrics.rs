@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicI32, AtomicU16, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicU16, AtomicU64, Ordering};
 
 /// Lock-free counters writable from realtime or network domains.
 #[derive(Debug, Default)]
@@ -17,8 +17,7 @@ pub struct StreamCounters {
     queued_pcm_blocks: AtomicU16,
     queued_pcm_high_water_blocks: AtomicU16,
     stream_resets: AtomicU64,
-    nominal_input_sample_rate_hz: AtomicU32,
-    nominal_output_sample_rate_hz: AtomicU32,
+    nominal_sample_rates: AtomicU64,
     drift_adjustment_ppm: AtomicI32,
     drift_hard_resyncs: AtomicU64,
 }
@@ -97,10 +96,10 @@ impl StreamCounters {
     ///
     /// Zero means that the stream has not published a nominal format yet.
     pub fn set_nominal_sample_rates(&self, input_sample_rate_hz: u32, output_sample_rate_hz: u32) {
-        self.nominal_input_sample_rate_hz
-            .store(input_sample_rate_hz, Ordering::Relaxed);
-        self.nominal_output_sample_rate_hz
-            .store(output_sample_rate_hz, Ordering::Relaxed);
+        self.nominal_sample_rates.store(
+            pack_sample_rates(input_sample_rate_hz, output_sample_rate_hz),
+            Ordering::Relaxed,
+        );
     }
 
     /// Publishes the currently requested bounded drift correction.
@@ -119,6 +118,9 @@ impl StreamCounters {
     /// synchronization. A concurrent event may appear in the next snapshot.
     #[must_use]
     pub fn snapshot(&self) -> StreamMetricsSnapshot {
+        let (nominal_input_sample_rate_hz, nominal_output_sample_rate_hz) =
+            unpack_sample_rates(self.nominal_sample_rates.load(Ordering::Relaxed));
+
         StreamMetricsSnapshot {
             authenticated_packets: self.authenticated_packets.load(Ordering::Relaxed),
             duplicate_packets: self.duplicate_packets.load(Ordering::Relaxed),
@@ -134,10 +136,8 @@ impl StreamCounters {
             queued_pcm_blocks: self.queued_pcm_blocks.load(Ordering::Relaxed),
             queued_pcm_high_water_blocks: self.queued_pcm_high_water_blocks.load(Ordering::Relaxed),
             stream_resets: self.stream_resets.load(Ordering::Relaxed),
-            nominal_input_sample_rate_hz: self.nominal_input_sample_rate_hz.load(Ordering::Relaxed),
-            nominal_output_sample_rate_hz: self
-                .nominal_output_sample_rate_hz
-                .load(Ordering::Relaxed),
+            nominal_input_sample_rate_hz,
+            nominal_output_sample_rate_hz,
             drift_adjustment_ppm: self.drift_adjustment_ppm.load(Ordering::Relaxed),
             drift_hard_resyncs: self.drift_hard_resyncs.load(Ordering::Relaxed),
         }
@@ -214,6 +214,18 @@ fn ratio_from_rates(input_sample_rate_hz: u32, output_sample_rate_hz: u32) -> Op
         .then(|| f64::from(input_sample_rate_hz) / f64::from(output_sample_rate_hz))
 }
 
+const fn pack_sample_rates(input_sample_rate_hz: u32, output_sample_rate_hz: u32) -> u64 {
+    ((input_sample_rate_hz as u64) << u32::BITS) | output_sample_rate_hz as u64
+}
+
+fn unpack_sample_rates(packed_sample_rates: u64) -> (u32, u32) {
+    (
+        (packed_sample_rates >> u32::BITS) as u32,
+        u32::try_from(packed_sample_rates & u64::from(u32::MAX))
+            .expect("masked sample rate fits in u32"),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -264,5 +276,30 @@ mod tests {
 
         assert_eq!(snapshot.nominal_resampling_ratio(), None);
         assert_eq!(snapshot.effective_resampling_ratio(), None);
+    }
+
+    #[test]
+    fn nominal_sample_rates_are_published_as_one_snapshot_pair() {
+        let counters = StreamCounters::default();
+
+        counters.set_nominal_sample_rates(48_000, 44_100);
+        let snapshot = counters.snapshot();
+        assert_eq!(
+            (
+                snapshot.nominal_input_sample_rate_hz,
+                snapshot.nominal_output_sample_rate_hz,
+            ),
+            (48_000, 44_100),
+        );
+
+        counters.set_nominal_sample_rates(48_000, 96_000);
+        let snapshot = counters.snapshot();
+        assert_eq!(
+            (
+                snapshot.nominal_input_sample_rate_hz,
+                snapshot.nominal_output_sample_rate_hz,
+            ),
+            (48_000, 96_000),
+        );
     }
 }
