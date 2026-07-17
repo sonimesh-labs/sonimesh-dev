@@ -98,7 +98,8 @@ the first regression signal in CI.
 The buildable harness in `tools/network-simulator` currently provides a virtual
 monotonic clock, bounded in-flight event queue, seeded random and burst loss,
 jitter, duplication, reorder delay, byte-counted bandwidth serialization, and
-queue-capacity pressure. A cross-crate
+queue-capacity pressure. Its audio scenario accepts an explicit complete media
+datagram size bounded by the protocol limit. A cross-crate
 test exercises bounded packet parsing, reviewed AEAD authentication and replay
 rejection, jitter/PLC decisions, controlled jitter resynchronization, the
 non-realtime decode worker, and realtime PCM transfer. An independent integerized

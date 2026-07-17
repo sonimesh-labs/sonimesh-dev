@@ -1,11 +1,12 @@
 use std::fmt;
 
 use sonimesh_audio::{EncodedFrame, InsertOutcome, JitterBuffer, PlayoutOutcome};
+use sonimesh_protocol::MAX_MEDIA_DATAGRAM_LEN;
 
 use crate::{ClockError, NetworkProfile, NetworkStats, ProfileError, VirtualClock, VirtualNetwork};
 
 const MAX_SCENARIO_FRAMES: u32 = 100_000;
-const SYNTHETIC_ENCODED_FRAME_BYTES: u64 = 1;
+const DEFAULT_MEDIA_DATAGRAM_BYTES: u16 = 256;
 
 /// One deterministic encoded-audio simulation configuration.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -16,6 +17,8 @@ pub struct ScenarioConfig {
     pub frame_duration_ms: u64,
     /// Fixed initial playout delay.
     pub target_buffer_ms: u64,
+    /// Complete on-wire media datagram bytes, including header and authentication tag.
+    pub media_datagram_bytes: u16,
     /// Virtual network impairments.
     pub network: NetworkProfile,
 }
@@ -26,6 +29,7 @@ impl Default for ScenarioConfig {
             frames: 500,
             frame_duration_ms: 20,
             target_buffer_ms: 60,
+            media_datagram_bytes: DEFAULT_MEDIA_DATAGRAM_BYTES,
             network: NetworkProfile::default(),
         }
     }
@@ -59,6 +63,8 @@ pub enum ScenarioError {
     InvalidFrameDuration,
     /// Initial playout target must be no more than one second.
     InvalidTargetBuffer,
+    /// Complete media datagram size must fit the version-one packet limit.
+    InvalidMediaDatagramBytes,
     /// Network profile is invalid.
     Profile(ProfileError),
     /// Virtual time overflowed.
@@ -102,7 +108,11 @@ pub fn simulate(config: ScenarioConfig) -> Result<SimulationReport, ScenarioErro
     while clock.now_ms() <= end_ms {
         let now_ms = clock.now_ms();
         if next_send_sequence < config.frames && now_ms == next_send_ms {
-            network.send(now_ms, next_send_sequence, SYNTHETIC_ENCODED_FRAME_BYTES);
+            network.send(
+                now_ms,
+                next_send_sequence,
+                u64::from(config.media_datagram_bytes),
+            );
             next_send_sequence += 1;
             next_send_ms = next_send_ms.saturating_add(config.frame_duration_ms);
         }
@@ -151,6 +161,11 @@ fn validate(config: ScenarioConfig) -> Result<(), ScenarioError> {
     if config.target_buffer_ms > 1_000 {
         return Err(ScenarioError::InvalidTargetBuffer);
     }
+    if config.media_datagram_bytes == 0
+        || usize::from(config.media_datagram_bytes) > MAX_MEDIA_DATAGRAM_LEN
+    {
+        return Err(ScenarioError::InvalidMediaDatagramBytes);
+    }
     config.network.validate().map_err(ScenarioError::Profile)
 }
 
@@ -192,5 +207,48 @@ mod tests {
         let report = simulate(config).unwrap();
         assert_eq!(report.network.burst_loss_packets, 12);
         assert_eq!(report.plc_frames, 12);
+    }
+
+    #[test]
+    fn finite_bandwidth_applies_the_configured_datagram_size() {
+        let mut network = NetworkProfile::stable(9);
+        network.base_delay_ms = 0;
+        network.jitter_ms = 0;
+        network.bandwidth_bytes_per_second = 1_000;
+        let config = ScenarioConfig {
+            frames: 5,
+            target_buffer_ms: 60,
+            media_datagram_bytes: 100,
+            network,
+            ..ScenarioConfig::default()
+        };
+
+        let report = simulate(config).unwrap();
+
+        assert_eq!(report.network.bandwidth_shaped_copies, 5);
+        assert_eq!(report.network.bandwidth_serialized_bytes, 500);
+        assert!(report.plc_frames > 0);
+        assert_eq!(report.playout_frames + report.plc_frames, config.frames);
+    }
+
+    #[test]
+    fn rejects_media_datagrams_outside_the_protocol_bound() {
+        let zero = ScenarioConfig {
+            media_datagram_bytes: 0,
+            ..ScenarioConfig::default()
+        };
+        assert_eq!(
+            simulate(zero),
+            Err(ScenarioError::InvalidMediaDatagramBytes)
+        );
+
+        let too_large = ScenarioConfig {
+            media_datagram_bytes: u16::try_from(MAX_MEDIA_DATAGRAM_LEN + 1).unwrap(),
+            ..ScenarioConfig::default()
+        };
+        assert_eq!(
+            simulate(too_large),
+            Err(ScenarioError::InvalidMediaDatagramBytes)
+        );
     }
 }
