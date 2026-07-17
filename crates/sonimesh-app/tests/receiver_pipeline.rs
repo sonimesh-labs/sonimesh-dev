@@ -507,3 +507,44 @@ fn decoder_failure_is_published_without_treating_the_packet_as_network_rejection
     assert_eq!(snapshot.rejected_packets, 0);
     assert_eq!(snapshot.decode_errors, 1);
 }
+
+#[test]
+fn accepted_out_of_order_packet_increments_only_the_reordered_metric() {
+    let secret = SessionSecret::new([0xA5; 32]);
+    let context = context(2);
+    let mut sealer = MediaSealer::new(&secret, context).unwrap();
+    let first = sealer.seal(0, 0, &[0]).unwrap();
+    let reordered = sealer.seal(0, 960, &[1]).unwrap();
+    let future = sealer.seal(0, 1_920, &[2]).unwrap();
+    let (producer, _consumer) = realtime_pcm_queue::<4>(4).unwrap();
+    let counters = Arc::new(StreamCounters::default());
+    let mut pipeline = ReceiverStreamPipeline::<ByteDecoder, 4, 8, 4>::new(
+        &secret,
+        context,
+        ByteDecoder,
+        producer,
+        Arc::clone(&counters),
+        0,
+    )
+    .unwrap();
+    let mut plaintext = [0_u8; 8];
+
+    assert_eq!(
+        pipeline.receive(&first.datagram, &mut plaintext).unwrap(),
+        InsertOutcome::Inserted
+    );
+    assert_eq!(
+        pipeline.receive(&future.datagram, &mut plaintext).unwrap(),
+        InsertOutcome::Inserted
+    );
+    assert_eq!(
+        pipeline
+            .receive(&reordered.datagram, &mut plaintext)
+            .unwrap(),
+        InsertOutcome::Reordered
+    );
+    let snapshot = counters.snapshot();
+    assert_eq!(snapshot.reordered_packets, 1);
+    assert_eq!(snapshot.late_packets, 0);
+    assert_eq!(snapshot.rejected_packets, 0);
+}

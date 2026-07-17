@@ -37,6 +37,7 @@ function formatPpm(ppm: number) {
     <div class="metric-grid">
       <div class="metric"><ShieldCheck :size="17" aria-hidden="true" /><span>Authenticated</span><strong>{{ metrics.authenticatedPackets.toLocaleString() }}</strong></div>
       <div class="metric"><ShieldCheck :size="17" aria-hidden="true" /><span>Rejected</span><strong>{{ metrics.rejectedPackets }}</strong></div>
+      <div class="metric"><Activity :size="17" aria-hidden="true" /><span>Reordered</span><strong>{{ metrics.reorderedPackets }}</strong></div>
       <div class="metric"><Waves :size="17" aria-hidden="true" /><span>PLC frames</span><strong>{{ metrics.plcFrames }}</strong></div>
       <div class="metric"><Waves :size="17" aria-hidden="true" /><span>Decode errors</span><strong>{{ metrics.decodeErrors }}</strong></div>
       <div class="metric"><Waves :size="17" aria-hidden="true" /><span>Underflows</span><strong>{{ metrics.pcmUnderflows }}</strong></div>

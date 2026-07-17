@@ -16,6 +16,7 @@ export interface PairingStatus {
 export interface StreamMetrics {
   authenticatedPackets: number
   rejectedPackets: number
+  reorderedPackets: number
   plcFrames: number
   decodeErrors: number
   pcmUnderflows: number

@@ -89,7 +89,6 @@ pub fn simulate(config: ScenarioConfig) -> Result<SimulationReport, ScenarioErro
     let mut next_send_ms = 0_u64;
     let mut next_playout_ms = config.target_buffer_ms;
     let mut playout_decisions = 0_u32;
-    let mut highest_arrival = None;
     let last_playout_ms = config.target_buffer_ms.saturating_add(
         u64::from(config.frames.saturating_sub(1)).saturating_mul(config.frame_duration_ms),
     );
@@ -109,15 +108,11 @@ pub fn simulate(config: ScenarioConfig) -> Result<SimulationReport, ScenarioErro
 
         for delivery in network.drain_ready(now_ms) {
             let sequence = delivery.payload;
-            if highest_arrival.is_some_and(|highest| sequence < highest) {
-                report.reordered_arrivals += 1;
-            }
-            highest_arrival =
-                Some(highest_arrival.map_or(sequence, |highest| highest.max(sequence)));
             let frame = EncodedFrame::new(sequence, u64::from(sequence) * 960, &[0])
                 .map_err(|_| ScenarioError::InternalCapacityInvariant)?;
             match jitter.insert(frame) {
                 InsertOutcome::Inserted => {}
+                InsertOutcome::Reordered => report.reordered_arrivals += 1,
                 InsertOutcome::Duplicate => report.duplicate_frames += 1,
                 InsertOutcome::Late => report.late_frames += 1,
                 InsertOutcome::Resynchronized { .. } => report.resynchronizations += 1,

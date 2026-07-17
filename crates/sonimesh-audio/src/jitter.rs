@@ -49,6 +49,8 @@ impl<const MAX_PAYLOAD: usize> EncodedFrame<MAX_PAYLOAD> {
 pub enum InsertOutcome {
     /// Frame entered the bounded buffer.
     Inserted,
+    /// Frame entered after a higher sequence was already admitted this epoch.
+    Reordered,
     /// Frame sequence is already buffered.
     Duplicate,
     /// Frame is older than the current playout position.
@@ -86,6 +88,7 @@ pub struct JitterBuffer<const CAPACITY: usize, const MAX_PAYLOAD: usize> {
     slots: [Option<EncodedFrame<MAX_PAYLOAD>>; CAPACITY],
     buffered: usize,
     next_sequence: Option<u32>,
+    highest_admitted_sequence: Option<u32>,
     sequence_exhausted: bool,
     playout_started: bool,
 }
@@ -106,6 +109,7 @@ impl<const CAPACITY: usize, const MAX_PAYLOAD: usize> JitterBuffer<CAPACITY, MAX
             slots: std::array::from_fn(|_| None),
             buffered: 0,
             next_sequence: None,
+            highest_admitted_sequence: None,
             sequence_exhausted: false,
             playout_started: false,
         }
@@ -147,7 +151,11 @@ impl<const CAPACITY: usize, const MAX_PAYLOAD: usize> JitterBuffer<CAPACITY, MAX
             return InsertOutcome::Late;
         }
 
-        let index = frame.sequence as usize % CAPACITY;
+        let sequence = frame.sequence;
+        let reordered = self
+            .highest_admitted_sequence
+            .is_some_and(|highest| sequence < highest);
+        let index = sequence as usize % CAPACITY;
         if let Some(existing) = &self.slots[index] {
             if existing.sequence == frame.sequence {
                 return InsertOutcome::Duplicate;
@@ -158,10 +166,18 @@ impl<const CAPACITY: usize, const MAX_PAYLOAD: usize> JitterBuffer<CAPACITY, MAX
             return self.resynchronize(frame);
         }
 
-        self.next_sequence.get_or_insert(frame.sequence);
+        self.next_sequence.get_or_insert(sequence);
         self.slots[index] = Some(frame);
         self.buffered += 1;
-        InsertOutcome::Inserted
+        self.highest_admitted_sequence = Some(
+            self.highest_admitted_sequence
+                .map_or(sequence, |highest| highest.max(sequence)),
+        );
+        if reordered {
+            InsertOutcome::Reordered
+        } else {
+            InsertOutcome::Inserted
+        }
     }
 
     /// Takes the next sequence for decode or reports a missing frame.
@@ -195,6 +211,7 @@ impl<const CAPACITY: usize, const MAX_PAYLOAD: usize> JitterBuffer<CAPACITY, MAX
         self.slots.fill_with(|| None);
         self.buffered = 0;
         self.next_sequence = None;
+        self.highest_admitted_sequence = None;
         self.sequence_exhausted = false;
         self.playout_started = false;
     }
@@ -216,6 +233,7 @@ impl<const CAPACITY: usize, const MAX_PAYLOAD: usize> JitterBuffer<CAPACITY, MAX
         self.reset();
         let index = frame.sequence as usize % CAPACITY;
         self.next_sequence = Some(frame.sequence);
+        self.highest_admitted_sequence = Some(frame.sequence);
         self.playout_started = true;
         self.slots[index] = Some(frame);
         self.buffered = 1;
@@ -241,7 +259,7 @@ mod tests {
         let mut buffer = JitterBuffer::<4, 8>::new();
         assert_eq!(buffer.insert(frame(10)), InsertOutcome::Inserted);
         assert_eq!(buffer.insert(frame(12)), InsertOutcome::Inserted);
-        assert_eq!(buffer.insert(frame(11)), InsertOutcome::Inserted);
+        assert_eq!(buffer.insert(frame(11)), InsertOutcome::Reordered);
 
         for expected in [10, 11, 12] {
             let PlayoutOutcome::Frame(actual) = buffer.take_next() else {

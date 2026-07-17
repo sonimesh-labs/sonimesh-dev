@@ -136,7 +136,7 @@ fn authenticated_pipeline_stays_bounded_under_impairment() {
                         )
                         .unwrap()
                     {
-                        InsertOutcome::Inserted => {}
+                        InsertOutcome::Inserted | InsertOutcome::Reordered => {}
                         InsertOutcome::Resynchronized { .. } => jitter_resets += 1,
                         InsertOutcome::Duplicate | InsertOutcome::Late => rejected += 1,
                         InsertOutcome::SequenceExhausted => {

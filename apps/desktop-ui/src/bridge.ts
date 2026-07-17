@@ -23,6 +23,7 @@ class PreviewDesktopBridge implements DesktopBridge {
     metrics: {
       authenticatedPackets: 12_844,
       rejectedPackets: 3,
+      reorderedPackets: 11,
       plcFrames: 7,
       decodeErrors: 1,
       pcmUnderflows: 0,
