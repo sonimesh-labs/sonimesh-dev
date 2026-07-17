@@ -29,6 +29,13 @@ pub trait RenderSourceFactory {
         &mut self,
         config: &OutputConfig,
     ) -> Result<Box<dyn RenderSource>, RenderSourceFactoryError>;
+
+    /// Records that the platform accepted a source created for `config`.
+    ///
+    /// This runs in the control domain after [`AudioOutput::start`] succeeds.
+    /// Factories that publish low-rate metadata tied to a platform output
+    /// lifetime can override it; ordinary factories need no lifecycle hook.
+    fn output_started(&mut self, _config: &OutputConfig) {}
 }
 
 /// Stable source-construction failure suitable for output lifecycle handling.

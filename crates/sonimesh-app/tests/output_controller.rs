@@ -22,6 +22,7 @@ struct TestFactory {
     created: Arc<AtomicUsize>,
     last_output_channels: Arc<AtomicUsize>,
     fail_create: Arc<AtomicBool>,
+    starts: Arc<AtomicUsize>,
 }
 
 impl RenderSourceFactory for TestFactory {
@@ -38,6 +39,10 @@ impl RenderSourceFactory for TestFactory {
         self.last_output_channels
             .store(usize::from(config.channels), Ordering::Relaxed);
         Ok(Box::new(Silence))
+    }
+
+    fn output_started(&mut self, _config: &OutputConfig) {
+        self.starts.fetch_add(1, Ordering::Relaxed);
     }
 }
 
@@ -92,6 +97,7 @@ fn controller(
     created: Arc<AtomicUsize>,
     last_output_channels: Arc<AtomicUsize>,
     fail_create: Arc<AtomicBool>,
+    starts: Arc<AtomicUsize>,
 ) -> OutputController<TestOutput, TestFactory> {
     OutputController::new(
         TestOutput {
@@ -104,6 +110,7 @@ fn controller(
             created,
             last_output_channels,
             fail_create,
+            starts,
         },
     )
 }
@@ -112,13 +119,16 @@ fn controller(
 fn faults_stop_and_recover_without_leaving_streaming_state() {
     let created = Arc::new(AtomicUsize::new(0));
     let last_output_channels = Arc::new(AtomicUsize::new(0));
+    let starts = Arc::new(AtomicUsize::new(0));
     let mut controller = controller(
         Arc::clone(&created),
         Arc::clone(&last_output_channels),
         Arc::new(AtomicBool::new(false)),
+        Arc::clone(&starts),
     );
     controller.start(selection()).unwrap();
     assert_eq!(last_output_channels.load(Ordering::Relaxed), 2);
+    assert_eq!(starts.load(Ordering::Relaxed), 1);
 
     controller.output_mut().health = OutputHealth::StreamError;
     assert_eq!(controller.monitor(), Some(OutputHealth::StreamError));
@@ -130,6 +140,7 @@ fn faults_stop_and_recover_without_leaving_streaming_state() {
     controller.recover().unwrap();
     assert_eq!(controller.output().start_calls, 2);
     assert_eq!(created.load(Ordering::Relaxed), 2);
+    assert_eq!(starts.load(Ordering::Relaxed), 2);
 
     controller.output_mut().health = OutputHealth::StreamError;
     assert_eq!(controller.monitor(), Some(OutputHealth::StreamError));
@@ -140,12 +151,15 @@ fn faults_stop_and_recover_without_leaving_streaming_state() {
 fn failed_recovery_preserves_retryable_output_state() {
     let created = Arc::new(AtomicUsize::new(0));
     let last_output_channels = Arc::new(AtomicUsize::new(0));
+    let starts = Arc::new(AtomicUsize::new(0));
     let mut controller = controller(
         created,
         last_output_channels,
         Arc::new(AtomicBool::new(false)),
+        Arc::clone(&starts),
     );
     controller.start(selection()).unwrap();
+    assert_eq!(starts.load(Ordering::Relaxed), 1);
     controller.output_mut().health = OutputHealth::CallbackCapacityExceeded;
     controller.monitor();
     controller.output_mut().fail_start = true;
@@ -154,6 +168,7 @@ fn failed_recovery_preserves_retryable_output_state() {
         controller.recover(),
         Err(OutputLifecycleError::Output(OutputError::Backend(_)))
     ));
+    assert_eq!(starts.load(Ordering::Relaxed), 1);
 }
 
 #[test]
@@ -164,6 +179,7 @@ fn starts_without_mutating_external_session_state() {
         created,
         last_output_channels,
         Arc::new(AtomicBool::new(false)),
+        Arc::new(AtomicUsize::new(0)),
     );
     controller.start(selection()).unwrap();
     assert_eq!(controller.output().start_calls, 1);
@@ -177,6 +193,7 @@ fn explicit_stop_disarms_stale_health_until_a_new_start() {
         created,
         last_output_channels,
         Arc::new(AtomicBool::new(false)),
+        Arc::new(AtomicUsize::new(0)),
     );
     controller.start(selection()).unwrap();
     controller.output_mut().health = OutputHealth::StreamError;
@@ -203,6 +220,7 @@ fn source_creation_failure_does_not_start_the_backend_and_recovery_can_retry() {
         Arc::clone(&created),
         last_output_channels,
         Arc::clone(&fail_create),
+        Arc::new(AtomicUsize::new(0)),
     );
     controller.start(selection()).unwrap();
     controller.output_mut().health = OutputHealth::StreamError;

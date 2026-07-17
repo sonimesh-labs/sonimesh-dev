@@ -116,7 +116,15 @@ where
             .validate()
             .map_err(RenderSourceFactoryError::InvalidConfig)?;
         let source = self.source_factory.create(config)?;
-        adapt_render_source(source, self.source_format, config, &self.adjustment)
+        // The platform may still reject this source. Publish its nominal output
+        // format only from `output_started` after that boundary accepts it.
+        let adjustment = self.adjustment.without_metrics();
+        adapt_render_source(source, self.source_format, config, &adjustment)
+    }
+
+    fn output_started(&mut self, config: &OutputConfig) {
+        self.adjustment
+            .publish_nominal_sample_rates(self.source_format.sample_rate_hz, config.sample_rate_hz);
     }
 }
 
