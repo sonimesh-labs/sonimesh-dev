@@ -161,7 +161,10 @@ private fun CaptureStatus.description(): String = when (this) {
 }
 
 private fun CaptureEvidenceSnapshot.description(): String =
-    "Observed ${capturedFrames} frames, ${silentReads} silent reads, ${readErrors} read errors."
+    "Observed ${capturedFrames} frames over ${formatDuration(captureDurationMillis)}, ${silentReads} silent reads, ${readErrors} read errors."
 
 private fun CaptureEvidenceSnapshot.hasObservations(): Boolean =
-    capturedFrames != 0L || silentReads != 0L || readErrors != 0L
+    captureDurationMillis != 0L || capturedFrames != 0L || silentReads != 0L || readErrors != 0L
+
+private fun formatDuration(durationMillis: Long): String =
+    "${durationMillis / 1_000}.${(durationMillis % 1_000) / 100} s"

@@ -68,6 +68,7 @@ data class CaptureUiState(
 )
 
 data class CaptureEvidenceSnapshot(
+    val captureDurationMillis: Long = 0,
     val capturedFrames: Long = 0,
     val silentReads: Long = 0,
     val readErrors: Long = 0,

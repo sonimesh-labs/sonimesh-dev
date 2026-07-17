@@ -112,7 +112,7 @@ class CaptureService : Service() {
             val format = observedFormat(record)
             audioRecord = record
             candidateRecord = null
-            CaptureStateStore.evidence.reset()
+            CaptureStateStore.evidence.begin(SystemClock.elapsedRealtime())
 
             record.startRecording()
             CaptureStateStore.publishCapturing(format)

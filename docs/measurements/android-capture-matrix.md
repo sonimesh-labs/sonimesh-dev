@@ -17,7 +17,7 @@ possible.
 | Read block | 20 ms, 960 frames, 1,920 interleaved samples |
 | AudioRecord buffer | Platform minimum, capped at 64 KiB |
 | Ownership | Foreground service after consent; UI receives low-rate state only |
-| Evidence publication | Summarized counters at no more than 2 Hz |
+| Evidence publication | Duration, frames, silent reads, and errors at no more than 2 Hz |
 | PCM persistence | None; samples are scanned for silence and discarded |
 | Transport | None; no encoder, keys, pairing, or UDP |
 | Silence wording | "No capturable audio detected"; no source-specific cause |

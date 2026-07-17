@@ -42,6 +42,7 @@ class CaptureStateTest {
     @Test
     fun evidence_counts_frames_silence_and_errors_without_audio_storage() {
         val evidence = CaptureEvidence()
+        evidence.begin(captureStartedAtMillis = 1_000)
 
         evidence.recordRead(frames = 480, silent = true)
         evidence.recordRead(frames = 240, silent = false)
@@ -49,22 +50,44 @@ class CaptureStateTest {
 
         assertEquals(
             CaptureEvidenceSnapshot(
+                captureDurationMillis = 750,
                 capturedFrames = 720,
                 silentReads = 1,
                 readErrors = 1,
             ),
-            evidence.snapshot(),
+            evidence.snapshot(nowMillis = 1_750),
         )
     }
 
     @Test
     fun evidence_reset_discards_only_counters() {
         val evidence = CaptureEvidence()
+        evidence.begin(captureStartedAtMillis = 1_000)
         evidence.recordRead(frames = 480, silent = true)
 
         evidence.reset()
 
-        assertEquals(CaptureEvidenceSnapshot(0, 0, 0), evidence.snapshot())
+        assertEquals(CaptureEvidenceSnapshot(), evidence.snapshot(nowMillis = 1_500))
+    }
+
+    @Test
+    fun evidence_duration_stays_safe_when_a_snapshot_clock_is_earlier_than_start() {
+        val evidence = CaptureEvidence()
+        evidence.begin(captureStartedAtMillis = 1_000)
+
+        assertEquals(0, evidence.snapshot(nowMillis = 999).captureDurationMillis)
+    }
+
+    @Test
+    fun evidence_rejects_a_negative_capture_start_time() {
+        val evidence = CaptureEvidence()
+
+        try {
+            evidence.begin(captureStartedAtMillis = -1)
+            fail("expected a negative capture start time to be rejected")
+        } catch (_: IllegalArgumentException) {
+            // Expected: duration calculations require a monotonic timestamp.
+        }
     }
 
     @Test
