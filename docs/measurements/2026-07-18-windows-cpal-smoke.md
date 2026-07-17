@@ -42,6 +42,14 @@ endpoint's reported 480-frame range. This supports retaining the independent
 preallocated maximum callback bound. It does not establish callback cadence,
 device compatibility, semantic speaker routing, or latency.
 
+## Repeat Observation
+
+Re-running the same command on 2026-07-18 produced 198 callbacks. The latest
+and largest callback observations remained 3,840 and 8,448 interleaved samples,
+respectively; oversized callbacks and stream errors remained zero. This confirms
+the same bounded observation on this host only, not a latency or compatibility
+claim.
+
 ## Remaining Evidence
 
 - exercise device removal, default-role changes, sleep/wake, and stream
