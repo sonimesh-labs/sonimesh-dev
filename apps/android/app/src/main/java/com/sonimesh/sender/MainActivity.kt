@@ -5,6 +5,7 @@ import android.app.Activity
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.projection.MediaProjectionManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -30,9 +31,18 @@ class MainActivity : ComponentActivity() {
     private val audioPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             if (granted) {
-                launchProjectionConsent()
+                requestNotificationThenProjection()
             } else {
                 CaptureStateStore.publishFailure("Microphone permission was not granted")
+            }
+        }
+
+    private val notificationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (granted) {
+                launchProjectionConsent()
+            } else {
+                CaptureStateStore.publishFailure("Notification permission is required for capture")
             }
         }
 
@@ -46,7 +56,13 @@ class MainActivity : ComponentActivity() {
             val serviceIntent = Intent(this, CaptureService::class.java)
                 .putExtra(CaptureService.EXTRA_RESULT_CODE, result.resultCode)
                 .putExtra(CaptureService.EXTRA_RESULT_DATA, result.data)
-            ContextCompat.startForegroundService(this, serviceIntent)
+            try {
+                ContextCompat.startForegroundService(this, serviceIntent)
+            } catch (error: SecurityException) {
+                CaptureStateStore.publishFailure("Capture service permission was rejected")
+            } catch (error: IllegalStateException) {
+                CaptureStateStore.publishFailure("Capture service could not start in the current state")
+            }
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -71,6 +87,17 @@ class MainActivity : ComponentActivity() {
             != PackageManager.PERMISSION_GRANTED
         ) {
             audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        } else {
+            requestNotificationThenProjection()
+        }
+    }
+
+    private fun requestNotificationThenProjection() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+            && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         } else {
             launchProjectionConsent()
         }

@@ -27,6 +27,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 class CaptureService : Service() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val teardownStarted = AtomicBoolean(false)
+    private val readerExited = AtomicBoolean(true)
     private val noSignalPublished = AtomicBoolean(false)
 
     @Volatile
@@ -40,6 +41,9 @@ class CaptureService : Service() {
 
     private var projectionCallback: MediaProjection.Callback? = null
     private var activeFormat: CaptureFormat? = null
+
+    @Volatile
+    private var pendingOutcome: TerminalOutcome? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -106,18 +110,15 @@ class CaptureService : Service() {
                 throw CaptureSetupException("AudioRecord did not initialize")
             }
 
+            val format = observedFormat(record)
             audioRecord = record
-            activeFormat = CAPTURE_FORMAT.copy(
-                bufferSizeBytes = record.bufferSizeInFrames
-                    * CAPTURE_FORMAT.channels
-                    * Short.SIZE_BYTES,
-            )
+            activeFormat = format
             CaptureStateStore.evidence.reset()
             noSignalPublished.set(false)
 
             record.startRecording()
-            CaptureStateStore.publishCapturing(activeFormat!!)
-            startCaptureThread(record, activeFormat!!)
+            CaptureStateStore.publishCapturing(format)
+            startCaptureThread(record, format)
         } catch (error: SecurityException) {
             teardown(TerminalOutcome.Failed("Capture permission was rejected by the platform"))
         } catch (error: IllegalArgumentException) {
@@ -137,24 +138,24 @@ class CaptureService : Service() {
             .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
             .build()
         val minimumBuffer = AudioRecord.getMinBufferSize(
-            CAPTURE_FORMAT.sampleRateHz,
+            REQUESTED_SAMPLE_RATE_HZ,
             AudioFormat.CHANNEL_IN_STEREO,
             AudioFormat.ENCODING_PCM_16BIT,
         )
         if (minimumBuffer <= 0) {
             throw CaptureSetupException("Platform returned an invalid AudioRecord buffer size")
         }
-        val requestedBytes = READ_SAMPLES * Short.SIZE_BYTES
-        val bufferSize = maxOf(minimumBuffer, requestedBytes).coerceAtMost(MAX_BUFFER_BYTES)
-        if (bufferSize < requestedBytes) {
-            throw CaptureSetupException("AudioRecord buffer exceeds the prototype bound")
+        if (minimumBuffer > MAX_CAPTURE_BUFFER_BYTES) {
+            throw CaptureSetupException("AudioRecord minimum buffer exceeds the prototype bound")
         }
+        val requestedBytes = REQUESTED_READ_SAMPLES * Short.SIZE_BYTES
+        val bufferSize = maxOf(minimumBuffer, requestedBytes)
 
         return AudioRecord.Builder()
             .setAudioFormat(
                 AudioFormat.Builder()
                     .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                    .setSampleRate(CAPTURE_FORMAT.sampleRateHz)
+                    .setSampleRate(REQUESTED_SAMPLE_RATE_HZ)
                     .setChannelMask(AudioFormat.CHANNEL_IN_STEREO)
                     .build(),
             )
@@ -163,53 +164,113 @@ class CaptureService : Service() {
             .build()
     }
 
+    private fun observedFormat(record: AudioRecord): CaptureFormat {
+        val bufferBytes = record.bufferSizeInFrames.toLong()
+            .times(record.channelCount.toLong())
+            .times(Short.SIZE_BYTES.toLong())
+            .takeIf { it in 1..MAX_CAPTURE_BUFFER_BYTES.toLong() }
+            ?.toInt()
+            ?: throw CaptureSetupException("AudioRecord reported an unbounded buffer")
+        return CaptureFormat.fromObserved(
+            sampleRateHz = record.sampleRate,
+            channels = record.channelCount,
+            bufferSizeBytes = bufferBytes,
+        ) ?: throw CaptureSetupException("AudioRecord reported an unsupported format")
+    }
+
     private fun startCaptureThread(record: AudioRecord, format: CaptureFormat) {
+        readerExited.set(false)
         val thread = Thread({ readCaptureLoop(record, format) }, "sonimesh-capture")
         captureThread = thread
         thread.start()
     }
 
     private fun readCaptureLoop(record: AudioRecord, format: CaptureFormat) {
-        val buffer = ShortArray(READ_SAMPLES)
+        val buffer = ShortArray(MAX_READ_SAMPLES)
         var consecutiveSilentReads = 0
 
-        while (!teardownStarted.get()) {
-            val read = record.read(buffer, 0, buffer.size, AudioRecord.READ_BLOCKING)
-            if (read <= 0) {
-                CaptureStateStore.evidence.recordReadError()
-                mainHandler.post {
-                    teardown(TerminalOutcome.Failed("AudioRecord read failed"))
-                }
-                return
-            }
-
-            var silent = true
-            var index = 0
-            while (index < read) {
-                if (buffer[index] != 0.toShort()) {
-                    silent = false
-                    break
-                }
-                index++
-            }
-            CaptureStateStore.evidence.recordRead(read / format.channels, silent)
-            if (silent) {
-                consecutiveSilentReads++
-                if (consecutiveSilentReads == SILENT_READ_LIMIT
-                    && noSignalPublished.compareAndSet(false, true)
+        try {
+            while (!teardownStarted.get()) {
+                if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+                    != PackageManager.PERMISSION_GRANTED
                 ) {
                     mainHandler.post {
-                        CaptureStateStore.publishNoCapturableAudio(format)
+                        if (!teardownStarted.get()) {
+                            teardown(TerminalOutcome.Failed("Microphone permission was revoked"))
+                        }
                     }
+                    return
                 }
-            } else {
-                consecutiveSilentReads = 0
-                if (noSignalPublished.compareAndSet(true, false)) {
+
+                val read = try {
+                    record.read(buffer, 0, format.readSamples, AudioRecord.READ_BLOCKING)
+                } catch (error: IllegalStateException) {
+                    if (!teardownStarted.get()) {
+                        mainHandler.post {
+                            if (!teardownStarted.get()) {
+                                teardown(TerminalOutcome.Failed("AudioRecord read failed"))
+                            }
+                        }
+                    }
+                    return
+                } catch (error: SecurityException) {
+                    if (!teardownStarted.get()) {
+                        mainHandler.post {
+                            if (!teardownStarted.get()) {
+                                teardown(TerminalOutcome.Failed("Microphone permission was revoked"))
+                            }
+                        }
+                    }
+                    return
+                }
+                if (read <= 0) {
+                    CaptureStateStore.evidence.recordReadError()
                     mainHandler.post {
-                        CaptureStateStore.publishCapturing(format)
+                        if (!teardownStarted.get()) {
+                            teardown(TerminalOutcome.Failed("AudioRecord read failed"))
+                        }
+                    }
+                    return
+                }
+                if (teardownStarted.get()) {
+                    return
+                }
+
+                var silent = true
+                var index = 0
+                while (index < read) {
+                    if (buffer[index] != 0.toShort()) {
+                        silent = false
+                        break
+                    }
+                    index++
+                }
+                CaptureStateStore.evidence.recordRead(read / format.channels, silent)
+                if (silent) {
+                    consecutiveSilentReads++
+                    if (consecutiveSilentReads == SILENT_READ_LIMIT
+                        && noSignalPublished.compareAndSet(false, true)
+                    ) {
+                        mainHandler.post {
+                            if (!teardownStarted.get()) {
+                                CaptureStateStore.publishNoCapturableAudio(format)
+                            }
+                        }
+                    }
+                } else {
+                    consecutiveSilentReads = 0
+                    if (noSignalPublished.compareAndSet(true, false)) {
+                        mainHandler.post {
+                            if (!teardownStarted.get()) {
+                                CaptureStateStore.publishCapturing(format)
+                            }
+                        }
                     }
                 }
             }
+        } finally {
+            readerExited.set(true)
+            mainHandler.post { finishTeardownIfReady() }
         }
     }
 
@@ -257,14 +318,22 @@ class CaptureService : Service() {
         if (!teardownStarted.compareAndSet(false, true)) {
             return
         }
+        pendingOutcome = outcome
 
         captureThread?.interrupt()
+        audioRecord?.let { record -> runCatching { record.stop() } }
+        finishTeardownIfReady()
+    }
+
+    private fun finishTeardownIfReady() {
+        if (!teardownStarted.get() || !readerExited.get()) {
+            return
+        }
+
+        val outcome = pendingOutcome ?: return
         captureThread = null
 
-        audioRecord?.let { record ->
-            runCatching { record.stop() }
-            record.release()
-        }
+        audioRecord?.let { record -> record.release() }
         audioRecord = null
 
         mediaProjection?.let { projection ->
@@ -276,6 +345,7 @@ class CaptureService : Service() {
         mediaProjection = null
         projectionCallback = null
         activeFormat = null
+        pendingOutcome = null
 
         when (outcome) {
             is TerminalOutcome.Stopped -> CaptureStateStore.publishStopped(outcome.reason)
@@ -310,14 +380,15 @@ class CaptureService : Service() {
         private const val NOTIFICATION_ID = 1001
         private const val STOP_REQUEST_CODE = 1002
         private const val SILENT_READ_LIMIT = 100
-        private const val READ_FRAMES = 480
-        private const val CHANNELS = 2
-        private const val READ_SAMPLES = READ_FRAMES * CHANNELS
-        private const val MAX_BUFFER_BYTES = 64 * 1024
+        private const val REQUESTED_SAMPLE_RATE_HZ = 48_000
+        private const val REQUESTED_CHANNELS = 2
+        private const val REQUESTED_READ_FRAMES = 960
+        private const val REQUESTED_READ_SAMPLES = REQUESTED_READ_FRAMES * REQUESTED_CHANNELS
         private val CAPTURE_FORMAT = CaptureFormat(
-            sampleRateHz = 48_000,
-            channels = CHANNELS,
+            sampleRateHz = REQUESTED_SAMPLE_RATE_HZ,
+            channels = REQUESTED_CHANNELS,
             bufferSizeBytes = 0,
+            readSamples = REQUESTED_READ_SAMPLES,
         )
     }
 }
