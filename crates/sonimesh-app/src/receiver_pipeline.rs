@@ -82,6 +82,16 @@ impl<DecoderError> std::error::Error for ReceiverPipelineError<DecoderError> whe
 {
 }
 
+#[cfg(test)]
+mod fresh_session_error_tests {
+    use super::FreshSessionInstallError;
+
+    #[test]
+    fn reused_session_policy_error_has_no_synthetic_cause() {
+        assert!(std::error::Error::source(&FreshSessionInstallError::ReusedSessionId).is_none());
+    }
+}
+
 impl<
     D,
     const JITTER_CAPACITY: usize,
