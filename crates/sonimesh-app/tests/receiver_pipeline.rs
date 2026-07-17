@@ -8,7 +8,8 @@ use sonimesh_app::{
     PairingInvitationController, PairingSource, ReceiverStreamPipeline, SessionState,
 };
 use sonimesh_audio::{
-    DecodeStep, FrameDecoder, InsertOutcome, RealtimePcmPopOutcome, realtime_pcm_queue,
+    DecodeStep, DecodeWorkerError, FrameDecoder, InsertOutcome, RealtimePcmPopOutcome,
+    realtime_pcm_queue,
 };
 use sonimesh_diagnostics::StreamCounters;
 use sonimesh_network::IngressError;
@@ -30,6 +31,31 @@ impl FrameDecoder for ByteDecoder {
     fn decode_plc(&mut self, output: &mut [f32]) -> Result<usize, Self::Error> {
         output[0] = 0.0;
         Ok(1)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct FailingDecoderError;
+
+impl std::fmt::Display for FailingDecoderError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("test decoder failure")
+    }
+}
+
+impl std::error::Error for FailingDecoderError {}
+
+struct FailingDecoder;
+
+impl FrameDecoder for FailingDecoder {
+    type Error = FailingDecoderError;
+
+    fn decode(&mut self, _encoded: &[u8], _output: &mut [f32]) -> Result<usize, Self::Error> {
+        Err(FailingDecoderError)
+    }
+
+    fn decode_plc(&mut self, _output: &mut [f32]) -> Result<usize, Self::Error> {
+        Err(FailingDecoderError)
     }
 }
 
@@ -449,4 +475,35 @@ fn replacing_pcm_producer_restarts_only_the_output_side_of_one_stream() {
     ));
     assert!((output[0] - 2.0).abs() < f32::EPSILON);
     assert_eq!(counters.snapshot().stream_resets, 1);
+}
+
+#[test]
+fn decoder_failure_is_published_without_treating_the_packet_as_network_rejection() {
+    let secret = SessionSecret::new([0xA5; 32]);
+    let context = context(2);
+    let mut sealer = MediaSealer::new(&secret, context).unwrap();
+    let (producer, _consumer) = realtime_pcm_queue::<4>(4).unwrap();
+    let counters = Arc::new(StreamCounters::default());
+    let mut pipeline = ReceiverStreamPipeline::<FailingDecoder, 4, 8, 4>::new(
+        &secret,
+        context,
+        FailingDecoder,
+        producer,
+        Arc::clone(&counters),
+        0,
+    )
+    .unwrap();
+    let packet = sealer.seal(0, 0, &[1]).unwrap();
+    let mut plaintext = [0_u8; 8];
+
+    pipeline.receive(&packet.datagram, &mut plaintext).unwrap();
+
+    assert_eq!(
+        pipeline.decode_next(),
+        Err(DecodeWorkerError::Decoder(FailingDecoderError))
+    );
+    let snapshot = counters.snapshot();
+    assert_eq!(snapshot.authenticated_packets, 1);
+    assert_eq!(snapshot.rejected_packets, 0);
+    assert_eq!(snapshot.decode_errors, 1);
 }

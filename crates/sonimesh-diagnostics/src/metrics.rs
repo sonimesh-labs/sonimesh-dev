@@ -9,6 +9,7 @@ pub struct StreamCounters {
     late_packets: AtomicU64,
     reordered_packets: AtomicU64,
     plc_frames: AtomicU64,
+    decode_errors: AtomicU64,
     pcm_underflows: AtomicU64,
     pcm_overflows: AtomicU64,
     pcm_discontinuities: AtomicU64,
@@ -50,6 +51,11 @@ impl StreamCounters {
     /// Records one decoder-side packet-loss-concealment frame.
     pub fn plc_frame(&self) {
         self.plc_frames.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Records one stream-local decoder or bounded decoder-output failure.
+    pub fn decode_error(&self) {
+        self.decode_errors.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Records output silence caused by an empty PCM ring.
@@ -112,6 +118,7 @@ impl StreamCounters {
             late_packets: self.late_packets.load(Ordering::Relaxed),
             reordered_packets: self.reordered_packets.load(Ordering::Relaxed),
             plc_frames: self.plc_frames.load(Ordering::Relaxed),
+            decode_errors: self.decode_errors.load(Ordering::Relaxed),
             pcm_underflows: self.pcm_underflows.load(Ordering::Relaxed),
             pcm_overflows: self.pcm_overflows.load(Ordering::Relaxed),
             pcm_discontinuities: self.pcm_discontinuities.load(Ordering::Relaxed),
@@ -143,6 +150,8 @@ pub struct StreamMetricsSnapshot {
     pub reordered_packets: u64,
     /// Decoder-side packet-loss-concealment frames.
     pub plc_frames: u64,
+    /// Stream-local decoder or bounded decoder-output failures.
+    pub decode_errors: u64,
     /// Output callbacks that emitted bounded silence.
     pub pcm_underflows: u64,
     /// Bounded oldest-region PCM drops.
@@ -204,6 +213,7 @@ mod tests {
         counters.authenticated();
         counters.rejected();
         counters.plc_frame();
+        counters.decode_error();
         counters.pcm_underflow();
         counters.pcm_discontinuity();
         counters.set_queued_pcm_blocks(4);
@@ -216,6 +226,7 @@ mod tests {
         assert_eq!(snapshot.authenticated_packets, 1);
         assert_eq!(snapshot.rejected_packets, 1);
         assert_eq!(snapshot.plc_frames, 1);
+        assert_eq!(snapshot.decode_errors, 1);
         assert_eq!(snapshot.pcm_underflows, 1);
         assert_eq!(snapshot.pcm_discontinuities, 1);
         assert_eq!(snapshot.queued_pcm_blocks, 2);

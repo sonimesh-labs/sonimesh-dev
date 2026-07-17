@@ -152,7 +152,9 @@ where
     ///
     /// Returns a bounded decoder failure without invoking platform output work.
     pub fn decode_next(&mut self) -> Result<DecodeStep, DecodeWorkerError<D::Error>> {
-        let step = self.decode.decode_next()?;
+        let step = self.decode.decode_next().inspect_err(|_error| {
+            self.counters.decode_error();
+        })?;
         match step {
             DecodeStep::Decoded { queue, .. } => self.record_queue_outcome(queue),
             DecodeStep::Concealed { queue, .. } => {
