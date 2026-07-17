@@ -63,6 +63,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
 - ChaCha20-Poly1305 packet protection with HKDF-SHA256 per-stream keys, a
   reviewed nonce layout, sender sequence exhaustion, and authentication before
   replay admission; pairing/TLS root-secret creation remains unimplemented.
+- a non-blocking fixed-buffer UDP media receiver that rejects datagrams above
+  the protocol limit before parser ingress; authentication and address policy
+  remain separate boundaries.
 - a buildable Vue/Vite receiver-control preview with a single low-rate bridge
   boundary, session controls, output selection, pairing-invitation state, and
   diagnostics presentation; it uses in-memory preview data and has no Tauri,
@@ -102,7 +105,8 @@ jitter, and output-backend ADRs using measured 10/20 ms and device results.
 - first pairing, TLS, QR bootstrap, identity storage, revocation, or root-secret
   provisioning; AEAD/HKDF media protection and bounded epoch rotation exist only
   after a caller supplies an authenticated control-session secret;
-- UDP sockets, discovery, and address migration;
+- control sockets, discovery, and address migration; the bounded UDP media
+  receiver exists, but it is not yet wired to a complete runtime loop.
 - direct-WASAPI comparison adapter and backend selection evidence;
 - Tauri integration, signing, packaging, and firewall integration;
 - a concrete drift ASRC, nominal rate conversion, acoustic latency, and soak
