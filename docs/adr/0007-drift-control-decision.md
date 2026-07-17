@@ -33,9 +33,12 @@ remove the target safety margin or permit an unbounded correction. Integral
 updates use anti-windup: when output is clamped and the current error would push
 farther into that clamp, the integral accumulator is not advanced.
 
-A hard resynchronization resets controller history and leaves buffer flushing,
-fade behavior, and decoder/ASRC recreation to the stream owner. The output
-callback receives only precomputed PCM blocks and never reads controller state.
+A hard resynchronization resets controller history. The stream owner invokes its
+stream-local hard-resynchronization boundary to discard undecoded jitter, reset
+decoder state, and retire queued PCM from the active output epoch. Output fade
+behavior and platform stream recreation remain control-domain responsibilities.
+The output callback receives only precomputed PCM blocks and never reads
+controller state.
 
 The nominal sample-rate source may expose a control-domain adjustment handle.
 An `Adjust` decision is published through a bounded atomic ppm value that the

@@ -344,3 +344,59 @@ fn pipeline_publishes_late_and_controlled_resynchronization_metrics() {
     );
     assert_eq!(reset_counters.snapshot().stream_resets, 1);
 }
+
+#[test]
+fn hard_resync_retires_only_the_current_stream_playout_state() {
+    let secret = SessionSecret::new([0xA5; 32]);
+    let context = context(2);
+    let mut sealer = MediaSealer::new(&secret, context).unwrap();
+    let first = sealer.seal(0, 0, &[1]).unwrap();
+    let pending = sealer.seal(0, 960, &[2]).unwrap();
+    let after_reset = sealer.seal(0, 1_920, &[3]).unwrap();
+    let (producer, mut consumer) = realtime_pcm_queue::<4>(4).unwrap();
+    let counters = Arc::new(StreamCounters::default());
+    let mut pipeline = ReceiverStreamPipeline::<ByteDecoder, 4, 8, 4>::new(
+        &secret,
+        context,
+        ByteDecoder,
+        producer,
+        Arc::clone(&counters),
+        0,
+    )
+    .unwrap();
+    let mut plaintext = [0_u8; 8];
+
+    pipeline.receive(&first.datagram, &mut plaintext).unwrap();
+    pipeline.receive(&pending.datagram, &mut plaintext).unwrap();
+    assert!(matches!(
+        pipeline.decode_next().unwrap(),
+        DecodeStep::Decoded { sequence: 0, .. }
+    ));
+
+    pipeline.hard_resynchronize();
+
+    assert_eq!(pipeline.decode_next().unwrap(), DecodeStep::NotReady);
+    let mut output = [f32::NAN; 4];
+    assert_eq!(
+        consumer.pop_into(&mut output),
+        RealtimePcmPopOutcome::Underflow {
+            discarded_stale_blocks: 1,
+        }
+    );
+    pipeline
+        .receive(&after_reset.datagram, &mut plaintext)
+        .unwrap();
+    assert!(matches!(
+        pipeline.decode_next().unwrap(),
+        DecodeStep::Decoded { sequence: 2, .. }
+    ));
+    assert!(matches!(
+        consumer.pop_into(&mut output),
+        RealtimePcmPopOutcome::Filled {
+            discontinuity: true,
+            ..
+        }
+    ));
+    assert!((output[0] - 3.0).abs() < f32::EPSILON);
+    assert_eq!(counters.snapshot().stream_resets, 1);
+}

@@ -1,6 +1,8 @@
 //! Per-stream decode scheduling tests outside the realtime callback.
 
 use std::fmt;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use sonimesh_audio::{
     DecodeStep, DecodeWorkerError, FrameDecoder, RealtimePcmPopOutcome, RealtimePcmPushOutcome,
@@ -180,4 +182,73 @@ fn new_decode_epoch_discards_retired_jitter_and_pcm() {
         }
     ));
     assert_eq!(&output[..2], &[2.0, 0.5]);
+}
+
+struct ResetTrackingDecoder {
+    resets: Arc<AtomicUsize>,
+}
+
+impl FrameDecoder for ResetTrackingDecoder {
+    type Error = TestDecodeError;
+
+    fn decode(&mut self, encoded: &[u8], output: &mut [f32]) -> Result<usize, Self::Error> {
+        output[0] = f32::from(encoded[0]);
+        Ok(1)
+    }
+
+    fn decode_plc(&mut self, output: &mut [f32]) -> Result<usize, Self::Error> {
+        output[0] = -1.0;
+        Ok(1)
+    }
+
+    fn reset(&mut self) {
+        self.resets.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+#[test]
+fn hard_resync_clears_jitter_decoder_history_and_retired_pcm() {
+    let resets = Arc::new(AtomicUsize::new(0));
+    let (producer, mut consumer) = realtime_pcm_queue::<4>(4).unwrap();
+    let mut worker = StreamDecodeWorker::<ResetTrackingDecoder, 4, 8, 4>::new(
+        ResetTrackingDecoder {
+            resets: Arc::clone(&resets),
+        },
+        producer,
+        10,
+    );
+    worker.admit(10, 9_600, &[1]).unwrap();
+    worker.admit(11, 10_560, &[2]).unwrap();
+    assert!(matches!(
+        worker.decode_next().unwrap(),
+        DecodeStep::Decoded { sequence: 10, .. }
+    ));
+
+    worker.hard_resynchronize();
+
+    assert_eq!(resets.load(Ordering::Relaxed), 1);
+    assert_eq!(worker.decode_next().unwrap(), DecodeStep::NotReady);
+    let mut output = [f32::NAN; 4];
+    assert_eq!(
+        consumer.pop_into(&mut output),
+        RealtimePcmPopOutcome::Underflow {
+            discarded_stale_blocks: 1,
+        }
+    );
+
+    worker.admit(20, 19_200, &[3]).unwrap();
+    assert!(matches!(
+        worker.decode_next().unwrap(),
+        DecodeStep::Decoded { sequence: 20, .. }
+    ));
+    assert!(matches!(
+        consumer.pop_into(&mut output),
+        RealtimePcmPopOutcome::Filled {
+            sequence: 0,
+            discontinuity: true,
+            discarded_stale_blocks: 0,
+            ..
+        }
+    ));
+    assert!((output[0] - 3.0).abs() < f32::EPSILON);
 }

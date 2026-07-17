@@ -183,6 +183,16 @@ where
         Ok(())
     }
 
+    /// Clears this stream's playout state after a drift-controller hard resync.
+    ///
+    /// This leaves AEAD/replay state and other streams intact. The next
+    /// authenticated packet establishes a fresh playout sequence, while the
+    /// realtime consumer retires PCM queued before this reset.
+    pub fn hard_resynchronize(&mut self) {
+        self.decode.hard_resynchronize();
+        self.counters.stream_reset();
+    }
+
     fn record_ingress_error(&self, error: &IngressError<MediaCryptoError>) {
         if let IngressError::Replay(decision) = error {
             self.counters.authenticated();

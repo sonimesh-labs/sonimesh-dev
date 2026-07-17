@@ -197,6 +197,11 @@ where
         self.pipeline.rotate(secret, next, initial_sequence)
     }
 
+    /// Clears this stream's playout state after a drift-controller hard resync.
+    pub fn hard_resynchronize(&mut self) {
+        self.pipeline.hard_resynchronize();
+    }
+
     /// Borrows the stream's atomic diagnostics.
     #[must_use]
     pub fn counters(&self) -> &StreamCounters {

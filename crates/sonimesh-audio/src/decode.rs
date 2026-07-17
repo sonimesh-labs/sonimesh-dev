@@ -29,6 +29,12 @@ pub trait FrameDecoder {
     /// Returns a decoder-specific error when concealment cannot produce a
     /// bounded block.
     fn decode_plc(&mut self, output: &mut [f32]) -> Result<usize, Self::Error>;
+
+    /// Clears stream-local decoder history after a discontinuity.
+    ///
+    /// The default is suitable for stateless test decoders. Stateful decoders
+    /// should clear PLC, predictor, or packet history without allocating.
+    fn reset(&mut self) {}
 }
 
 /// Outcome of one per-stream decode scheduling decision.
@@ -195,14 +201,29 @@ where
     /// blocks from the retired epoch. The caller installs matching network AEAD
     /// state before admitting frames for `sequence`.
     pub fn begin_epoch(&mut self, sequence: u32) {
+        self.reset_stream_state();
         self.jitter.reset_to(sequence);
-        self.pcm.fill(0.0);
-        self.producer.begin_epoch();
+    }
+
+    /// Clears one stream's playout state after an external hard resynchronization.
+    ///
+    /// The next admitted frame establishes a new playout sequence. Existing PCM
+    /// is retired by advancing only this queue's local epoch, so the realtime
+    /// consumer discards it before rendering a later block.
+    pub fn hard_resynchronize(&mut self) {
+        self.reset_stream_state();
     }
 
     /// Returns the number of queued PCM blocks for low-rate diagnostics.
     #[must_use]
     pub fn queued_blocks(&self) -> usize {
         self.producer.len()
+    }
+
+    fn reset_stream_state(&mut self) {
+        self.jitter.reset();
+        self.decoder.reset();
+        self.pcm.fill(0.0);
+        self.producer.begin_epoch();
     }
 }

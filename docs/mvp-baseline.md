@@ -59,8 +59,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   and successful epoch resets; output-callback underflow remains owned by the
   future output adapter.
 - a bounded per-stream PCM occupancy controller that emits slew-limited ppm
-  decisions or stream-local hard-resynchronization requests; no quality-qualified
-  drift ASRC is selected or performance-claimed yet.
+  decisions or stream-local hard-resynchronization requests; hard resync clears
+  only that stream's jitter, decoder state, and queued PCM epoch; no
+  quality-qualified drift ASRC is selected or performance-claimed yet.
 - a pairing-invitation control owner that synchronizes bounded record expiry,
   monotonic-clock failure, user expiry, and externally verified proof outcomes
   with the desktop session state; only a consumed proof can establish trust. It
