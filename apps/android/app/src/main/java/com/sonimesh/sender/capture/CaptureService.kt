@@ -28,7 +28,6 @@ class CaptureService : Service() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val teardownStarted = AtomicBoolean(false)
     private val readerExited = AtomicBoolean(true)
-    private val noSignalPublished = AtomicBoolean(false)
 
     @Volatile
     private var audioRecord: AudioRecord? = null
@@ -113,7 +112,6 @@ class CaptureService : Service() {
             audioRecord = record
             candidateRecord = null
             CaptureStateStore.evidence.reset()
-            noSignalPublished.set(false)
 
             record.startRecording()
             CaptureStateStore.publishCapturing(format)
@@ -188,7 +186,7 @@ class CaptureService : Service() {
 
     private fun readCaptureLoop(record: AudioRecord, format: CaptureFormat) {
         val buffer = ShortArray(MAX_READ_SAMPLES)
-        var consecutiveSilentReads = 0
+        val signalMonitor = CaptureSignalMonitor(SILENT_READ_LIMIT)
 
         try {
             while (!teardownStarted.get()) {
@@ -263,26 +261,22 @@ class CaptureService : Service() {
                     index++
                 }
                 CaptureStateStore.evidence.recordRead(read / format.channels, silent)
-                if (silent) {
-                    consecutiveSilentReads++
-                    if (consecutiveSilentReads == SILENT_READ_LIMIT
-                        && noSignalPublished.compareAndSet(false, true)
-                    ) {
+                when (signalMonitor.observe(silent)) {
+                    CaptureSignalTransition.NoCapturableAudio -> {
                         mainHandler.post {
                             if (!teardownStarted.get()) {
                                 CaptureStateStore.publishNoCapturableAudio(format)
                             }
                         }
                     }
-                } else {
-                    consecutiveSilentReads = 0
-                    if (noSignalPublished.compareAndSet(true, false)) {
+                    CaptureSignalTransition.SignalDetected -> {
                         mainHandler.post {
                             if (!teardownStarted.get()) {
                                 CaptureStateStore.publishCapturing(format)
                             }
                         }
                     }
+                    null -> Unit
                 }
             }
         } finally {

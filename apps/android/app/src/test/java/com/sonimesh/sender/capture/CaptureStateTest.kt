@@ -1,6 +1,8 @@
 package com.sonimesh.sender.capture
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.fail
 import org.junit.Test
 
 class CaptureStateTest {
@@ -61,5 +63,37 @@ class CaptureStateTest {
         evidence.reset()
 
         assertEquals(CaptureEvidenceSnapshot(0, 0, 0), evidence.snapshot())
+    }
+
+    @Test
+    fun signal_monitor_reports_only_one_transition_after_the_silence_limit() {
+        val monitor = CaptureSignalMonitor(silentReadLimit = 3)
+
+        assertNull(monitor.observe(silent = true))
+        assertNull(monitor.observe(silent = true))
+        assertEquals(CaptureSignalTransition.NoCapturableAudio, monitor.observe(silent = true))
+        assertNull(monitor.observe(silent = true))
+    }
+
+    @Test
+    fun signal_monitor_reports_recovery_once_after_non_silent_audio_returns() {
+        val monitor = CaptureSignalMonitor(silentReadLimit = 2)
+
+        monitor.observe(silent = true)
+        assertEquals(CaptureSignalTransition.NoCapturableAudio, monitor.observe(silent = true))
+        assertEquals(CaptureSignalTransition.SignalDetected, monitor.observe(silent = false))
+        assertNull(monitor.observe(silent = false))
+        assertNull(monitor.observe(silent = true))
+        assertEquals(CaptureSignalTransition.NoCapturableAudio, monitor.observe(silent = true))
+    }
+
+    @Test
+    fun signal_monitor_rejects_a_non_positive_silence_threshold() {
+        try {
+            CaptureSignalMonitor(silentReadLimit = 0)
+            fail("expected an invalid silence threshold to be rejected")
+        } catch (_: IllegalArgumentException) {
+            // Expected: a zero threshold would publish a state without a read.
+        }
     }
 }
