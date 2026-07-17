@@ -34,6 +34,9 @@ and consumer endpoints in `sonimesh-audio`.
 - the queue-backed render source turns an observed epoch or sequence gap into a
   fixed 128-sample fade-in before returning to full PCM, without allocation or
   controller work in the callback;
+- output recovery creates a fresh producer/consumer pair and render source
+  together; the stream owner installs the new producer only after stopping the
+  old platform callback.
 - the public SoniMesh implementation contains no unsafe block.
 
 Although `ArrayQueue` is an MPMC implementation, SoniMesh creates exactly one

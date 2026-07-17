@@ -3,7 +3,9 @@ use std::sync::Arc;
 
 use sonimesh_audio::{MAX_AUDIO_CHANNELS, MAX_RESAMPLE_RATE_HZ, MIN_RESAMPLE_RATE_HZ};
 use sonimesh_diagnostics::StreamCounters;
-use sonimesh_platform::{OutputConfig, RenderSourceFactory, RenderSourceFactoryError};
+use sonimesh_platform::{
+    OutputConfig, RenderSource, RenderSourceFactory, RenderSourceFactoryError,
+};
 
 use crate::{ChannelMappedRenderSource, DriftAdjustmentHandle, SampleRateMappedRenderSource};
 
@@ -109,27 +111,37 @@ where
     fn create(
         &mut self,
         config: &OutputConfig,
-    ) -> Result<Box<dyn sonimesh_platform::RenderSource>, RenderSourceFactoryError> {
-        config
-            .validate()
-            .map_err(RenderSourceFactoryError::InvalidConfig)?;
+    ) -> Result<Box<dyn RenderSource>, RenderSourceFactoryError> {
         let source = self.source_factory.create(config)?;
-        let rate_mapped = SampleRateMappedRenderSource::new_with_drift_handle(
-            source,
-            self.source_format.sample_rate_hz,
-            config.sample_rate_hz,
-            self.source_format.channels,
-            config.maximum_callback_frames,
-            &self.adjustment,
-        )
-        .map_err(|error| RenderSourceFactoryError::Build(error.to_string()))?;
-        let channel_mapped = ChannelMappedRenderSource::new(
-            Box::new(rate_mapped),
-            self.source_format.channels,
-            config.channels,
-            config.maximum_callback_frames,
-        )
-        .map_err(|error| RenderSourceFactoryError::Build(error.to_string()))?;
-        Ok(Box::new(channel_mapped))
+        adapt_render_source(source, self.source_format, config, &self.adjustment)
     }
+}
+
+/// Installs nominal-rate conversion followed by device-layout mapping.
+pub(crate) fn adapt_render_source(
+    source: Box<dyn RenderSource>,
+    source_format: SourcePcmFormat,
+    config: &OutputConfig,
+    adjustment: &DriftAdjustmentHandle,
+) -> Result<Box<dyn RenderSource>, RenderSourceFactoryError> {
+    config
+        .validate()
+        .map_err(RenderSourceFactoryError::InvalidConfig)?;
+    let rate_mapped = SampleRateMappedRenderSource::new_with_drift_handle(
+        source,
+        source_format.sample_rate_hz,
+        config.sample_rate_hz,
+        source_format.channels,
+        config.maximum_callback_frames,
+        adjustment,
+    )
+    .map_err(|error| RenderSourceFactoryError::Build(error.to_string()))?;
+    let channel_mapped = ChannelMappedRenderSource::new(
+        Box::new(rate_mapped),
+        source_format.channels,
+        config.channels,
+        config.maximum_callback_frames,
+    )
+    .map_err(|error| RenderSourceFactoryError::Build(error.to_string()))?;
+    Ok(Box::new(channel_mapped))
 }

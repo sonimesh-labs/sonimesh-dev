@@ -28,7 +28,11 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
 - a control-domain atomic ppm handle for bounded drift adjustments; hard
   resynchronization remains owned by the stream lifecycle controller;
 - a bounded queue-backed realtime render source that preserves partial PCM
-  blocks, initializes callback underflow to silence, and caps refill attempts;
+  blocks, initializes callback underflow to silence, caps refill attempts, and
+  fades in after queue discontinuities;
+- an app-domain receiver PCM endpoint factory that creates a fresh bounded queue
+  pair and format-adapted render source together for output recovery; the
+  receiver pipeline can install the paired producer without resetting ingress.
 - allocation-free gain smoothing, atomic diagnostic counters, endpoint
   redaction, output adapter contracts, and a tested desktop session state machine;
 - control-domain output health monitoring and stream recreation with a fresh

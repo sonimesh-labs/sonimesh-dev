@@ -7,6 +7,7 @@ mod output_controller;
 mod pairing_controller;
 mod pairing_record;
 mod pcm_render_source;
+mod receiver_pcm_endpoint_factory;
 mod receiver_pipeline;
 mod sample_rate_mapped_render_source;
 mod session;
@@ -28,6 +29,9 @@ pub use pairing_record::{
     PairingRecordError, PairingRecordState, PairingSource,
 };
 pub use pcm_render_source::PcmRenderSource;
+pub use receiver_pcm_endpoint_factory::{
+    ReceiverPcmEndpoint, ReceiverPcmEndpointError, ReceiverPcmEndpointFactory,
+};
 pub use receiver_pipeline::{ReceiverPipelineError, ReceiverStreamPipeline};
 pub use sample_rate_mapped_render_source::{
     DriftAdjustmentError, DriftAdjustmentHandle, SampleRateMappedRenderSource,

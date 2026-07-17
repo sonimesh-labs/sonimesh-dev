@@ -196,6 +196,18 @@ where
         self.counters.stream_reset();
     }
 
+    /// Installs a producer paired with a freshly created output source.
+    ///
+    /// The caller stops and drops the old platform callback before this method.
+    /// Network admission remains active, while undecoded jitter and decoder
+    /// history are discarded so the new output queue starts from a clean stream
+    /// boundary.
+    pub fn replace_pcm_producer(&mut self, producer: RealtimePcmProducer<PCM_SAMPLES_PER_BLOCK>) {
+        self.decode.replace_pcm_producer(producer);
+        self.counters.set_queued_pcm_blocks(0);
+        self.counters.stream_reset();
+    }
+
     /// Returns the approximate queued PCM-block count for a low-rate controller.
     #[must_use]
     pub fn queued_pcm_blocks(&self) -> usize {

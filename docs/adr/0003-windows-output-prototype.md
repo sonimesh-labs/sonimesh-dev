@@ -36,6 +36,8 @@ Add an optional `cpal-output` feature to `sonimesh-platform` for the first Windo
 - callback errors set atomic status only; they do not log or call UI IPC;
 - stop, drop, device enumeration, and stream recreation remain outside realtime
   execution;
+- output recovery creates a fresh bounded PCM producer/consumer pair and source,
+  then resets only the affected receiver stream's playout state before restart;
 - keep CPAL behind SoniMesh-owned adapter contracts so a direct-WASAPI adapter can
   be compared without changing the audio engine.
 

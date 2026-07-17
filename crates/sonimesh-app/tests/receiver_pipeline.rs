@@ -400,3 +400,53 @@ fn hard_resync_retires_only_the_current_stream_playout_state() {
     assert!((output[0] - 3.0).abs() < f32::EPSILON);
     assert_eq!(counters.snapshot().stream_resets, 1);
 }
+
+#[test]
+fn replacing_pcm_producer_restarts_only_the_output_side_of_one_stream() {
+    let secret = SessionSecret::new([0xA5; 32]);
+    let context = context(2);
+    let mut sealer = MediaSealer::new(&secret, context).unwrap();
+    let first = sealer.seal(0, 0, &[1]).unwrap();
+    let after_replacement = sealer.seal(0, 960, &[2]).unwrap();
+    let (producer, _old_consumer) = realtime_pcm_queue::<4>(4).unwrap();
+    let counters = Arc::new(StreamCounters::default());
+    let mut pipeline = ReceiverStreamPipeline::<ByteDecoder, 4, 8, 4>::new(
+        &secret,
+        context,
+        ByteDecoder,
+        producer,
+        Arc::clone(&counters),
+        0,
+    )
+    .unwrap();
+    let mut plaintext = [0_u8; 8];
+
+    pipeline.receive(&first.datagram, &mut plaintext).unwrap();
+    assert!(matches!(
+        pipeline.decode_next().unwrap(),
+        DecodeStep::Decoded { sequence: 0, .. }
+    ));
+    let (replacement, mut replacement_consumer) = realtime_pcm_queue::<4>(4).unwrap();
+
+    pipeline.replace_pcm_producer(replacement);
+
+    assert_eq!(pipeline.decode_next().unwrap(), DecodeStep::NotReady);
+    pipeline
+        .receive(&after_replacement.datagram, &mut plaintext)
+        .unwrap();
+    assert!(matches!(
+        pipeline.decode_next().unwrap(),
+        DecodeStep::Decoded { sequence: 1, .. }
+    ));
+    let mut output = [f32::NAN; 4];
+    assert!(matches!(
+        replacement_consumer.pop_into(&mut output),
+        RealtimePcmPopOutcome::Filled {
+            sequence: 0,
+            discontinuity: false,
+            ..
+        }
+    ));
+    assert!((output[0] - 2.0).abs() < f32::EPSILON);
+    assert_eq!(counters.snapshot().stream_resets, 1);
+}

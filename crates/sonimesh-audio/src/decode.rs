@@ -214,6 +214,16 @@ where
         self.reset_stream_state();
     }
 
+    /// Replaces the PCM producer after the old platform output source stopped.
+    ///
+    /// The new queue starts empty, so pending jitter, decoder history, and PCM
+    /// scratch are cleared. Network admission remains owned by the caller's
+    /// ingress boundary and is not changed here.
+    pub fn replace_pcm_producer(&mut self, producer: RealtimePcmProducer<PCM_SAMPLES_PER_BLOCK>) {
+        self.producer = producer;
+        self.reset_decode_state();
+    }
+
     /// Returns the number of queued PCM blocks for low-rate diagnostics.
     #[must_use]
     pub fn queued_blocks(&self) -> usize {
@@ -221,9 +231,13 @@ where
     }
 
     fn reset_stream_state(&mut self) {
+        self.reset_decode_state();
+        self.producer.begin_epoch();
+    }
+
+    fn reset_decode_state(&mut self) {
         self.jitter.reset();
         self.decoder.reset();
         self.pcm.fill(0.0);
-        self.producer.begin_epoch();
     }
 }

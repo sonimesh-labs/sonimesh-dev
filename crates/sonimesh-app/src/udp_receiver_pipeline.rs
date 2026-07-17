@@ -202,6 +202,11 @@ where
         self.pipeline.hard_resynchronize();
     }
 
+    /// Installs a producer paired with a freshly created output source.
+    pub fn replace_pcm_producer(&mut self, producer: RealtimePcmProducer<PCM_SAMPLES_PER_BLOCK>) {
+        self.pipeline.replace_pcm_producer(producer);
+    }
+
     /// Borrows the stream's atomic diagnostics.
     #[must_use]
     pub fn counters(&self) -> &StreamCounters {
