@@ -98,6 +98,17 @@ mod tests {
         }
     }
 
+    struct CountingSource {
+        calls: usize,
+    }
+
+    impl RenderSource for CountingSource {
+        fn render(&mut self, output: &mut [f32]) {
+            self.calls += 1;
+            output.fill(1.0);
+        }
+    }
+
     #[test]
     fn oversized_float_callback_fails_closed() {
         let status = CallbackStatus::default();
@@ -121,5 +132,22 @@ mod tests {
 
         assert_eq!(output, [0, 0]);
         assert_eq!(status.snapshot().maximum_callback_samples, 2);
+    }
+
+    #[test]
+    fn oversized_signed_callback_fails_closed_without_rendering_the_source() {
+        let status = CallbackStatus::default();
+        let mut source = CountingSource { calls: 0 };
+        let mut output = [i16::MAX; 3];
+        let mut scratch = [0.0; 2];
+
+        render_signed16(&mut source, &mut output, &mut scratch, &status);
+
+        assert_eq!(source.calls, 0);
+        assert_eq!(output, [0, 0, 0]);
+        let snapshot = status.snapshot();
+        assert_eq!(snapshot.callback_count, 1);
+        assert_eq!(snapshot.oversized_callbacks, 1);
+        assert_eq!(snapshot.maximum_callback_samples, 3);
     }
 }
