@@ -1017,6 +1017,7 @@ dependencies = [
 name = "sonimesh-network-simulator"
 version = "0.1.0"
 dependencies = [
+ "sonimesh-app",
  "sonimesh-audio",
  "sonimesh-network",
  "sonimesh-protocol",
