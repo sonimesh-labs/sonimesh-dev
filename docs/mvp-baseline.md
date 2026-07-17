@@ -21,6 +21,8 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   emits initialized silence on underflow;
 - a lock-free cross-thread PCM queue with non-cloneable logical endpoints,
   oldest-block replacement, and exact discontinuity detection;
+- a bounded queue-backed realtime render source that preserves partial PCM
+  blocks, initializes callback underflow to silence, and caps refill attempts;
 - allocation-free gain smoothing, atomic diagnostic counters, endpoint
   redaction, output adapter contracts, and a tested desktop session state machine;
 - control-domain output health monitoring and stream recreation with a fresh
@@ -82,6 +84,7 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
 | Encoded frame | Compile-time capacity per stream | Reject oversized frame copy |
 | Local PCM ring | Compile-time blocks and samples | Drop oldest block; output silence when empty |
 | Cross-thread PCM queue | 1–128 inline blocks | Atomically replace oldest; report sequence gap |
+| Realtime render refills | 128 block pops per callback | Stop refilling and emit silence after the bound |
 | Output sample rate | 8–192 kHz | Reject outside platform-neutral bound |
 | Output channels | 1–8 | Reject zero or excessive layouts |
 | Requested callback | default or 16–8192 frames | Fixed request may be unsupported |

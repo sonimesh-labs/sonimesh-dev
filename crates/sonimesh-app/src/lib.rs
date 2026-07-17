@@ -4,6 +4,7 @@ mod control_stream;
 mod output_controller;
 mod pairing_controller;
 mod pairing_record;
+mod pcm_render_source;
 mod receiver_pipeline;
 mod session;
 
@@ -17,5 +18,6 @@ pub use pairing_record::{
     MAX_PAIRING_ATTEMPTS_PER_SOURCE, PairingAttemptOutcome, PairingId, PairingRecord,
     PairingRecordError, PairingRecordState, PairingSource,
 };
+pub use pcm_render_source::PcmRenderSource;
 pub use receiver_pipeline::{ReceiverPipelineError, ReceiverStreamPipeline};
 pub use session::{SessionEvent, SessionPhase, SessionState, SessionTransitionError};
