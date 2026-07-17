@@ -158,7 +158,7 @@ impl<A: Authenticator> MediaIngress<A> {
 
         let replay = self.replay.accept_authenticated(packet.header.sequence);
         if replay != ReplayDecision::Accepted {
-            plaintext[..plaintext_len].fill(0);
+            plaintext.fill(0);
             return Err(IngressError::Replay(replay));
         }
 
@@ -267,19 +267,20 @@ mod tests {
     }
 
     #[test]
-    fn rejects_authenticated_duplicate_and_clears_plaintext() {
+    fn rejects_authenticated_duplicate_and_clears_reused_plaintext_storage() {
         let mut ingress = ingress();
         let mut plaintext = [0_u8; 32];
         ingress
-            .receive(&datagram(2, &[0xAA, 8]), &mut plaintext)
+            .receive(&datagram(2, &[0xAA, 8, 9, 10]), &mut plaintext)
             .unwrap();
+        plaintext.fill(0xFF);
 
         let error = ingress
-            .receive(&datagram(2, &[0xAA, 9]), &mut plaintext)
+            .receive(&datagram(2, &[0xAA, 8]), &mut plaintext)
             .unwrap_err();
 
         assert_eq!(error, IngressError::Replay(ReplayDecision::Duplicate));
-        assert_eq!(plaintext[0], 0);
+        assert!(plaintext.iter().all(|byte| *byte == 0));
     }
 
     #[test]
