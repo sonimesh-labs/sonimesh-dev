@@ -23,7 +23,8 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
 - allocation-free gain smoothing, atomic diagnostic counters, endpoint
   redaction, output adapter contracts, and a tested desktop session state machine;
 - control-domain output health monitoring and stream recreation with a fresh
-  render source while preserving the streaming session state;
+  render source; platform operations never mutate session state directly, which
+  remains owned by the control-session coordinator;
 - deterministic virtual-clock/network profiles for random and burst loss,
   jitter, duplication, reorder delay, capacity pressure, and Windows/Linux CI;
 - a cross-crate protected pipeline covering AEAD parse/authentication, replay

@@ -3,10 +3,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use sonimesh_app::{
-    OutputController, OutputLifecycleError, OutputSelection, PairingAttemptOutcome, PairingId,
-    PairingInvitationController, PairingSource, SessionEvent, SessionPhase, SessionState,
-};
+use sonimesh_app::{OutputController, OutputLifecycleError, OutputSelection};
 use sonimesh_platform::{
     AudioOutput, OutputConfig, OutputDeviceInfo, OutputError, OutputHealth, RenderSource,
     RenderSourceFactory, SampleFormat,
@@ -91,38 +88,18 @@ fn controller(created: Arc<AtomicUsize>) -> OutputController<TestOutput, TestFac
     )
 }
 
-fn trusted_session() -> SessionState {
-    let mut pairing = PairingInvitationController::<1>::new();
-    let mut session = SessionState::IDLE;
-    pairing
-        .begin(&mut session, PairingId::new([1; 16]), 100, 50, 1)
-        .unwrap();
-    assert_eq!(
-        pairing.record_proof(&mut session, 101, PairingSource::new([2; 16]), true),
-        Ok(PairingAttemptOutcome::Paired)
-    );
-    session
-}
-
 #[test]
 fn faults_stop_and_recover_without_leaving_streaming_state() {
     let created = Arc::new(AtomicUsize::new(0));
     let mut controller = controller(Arc::clone(&created));
-    let mut session = trusted_session();
-    controller.start(&mut session, selection()).unwrap();
-    assert_eq!(session.phase(), SessionPhase::Streaming);
+    controller.start(selection()).unwrap();
 
     controller.output_mut().health = OutputHealth::StreamError;
-    assert_eq!(
-        controller.monitor(&mut session).unwrap(),
-        Some(OutputHealth::StreamError)
-    );
-    assert_eq!(session.phase(), SessionPhase::OutputUnavailable);
+    assert_eq!(controller.monitor(), Some(OutputHealth::StreamError));
     assert_eq!(controller.output().stop_calls, 1);
 
     controller.output_mut().health = OutputHealth::Healthy;
-    controller.recover(&mut session).unwrap();
-    assert_eq!(session.phase(), SessionPhase::Streaming);
+    controller.recover().unwrap();
     assert_eq!(controller.output().start_calls, 2);
     assert_eq!(created.load(Ordering::Relaxed), 2);
 }
@@ -131,28 +108,21 @@ fn faults_stop_and_recover_without_leaving_streaming_state() {
 fn failed_recovery_preserves_retryable_output_state() {
     let created = Arc::new(AtomicUsize::new(0));
     let mut controller = controller(created);
-    let mut session = trusted_session();
-    controller.start(&mut session, selection()).unwrap();
+    controller.start(selection()).unwrap();
     controller.output_mut().health = OutputHealth::CallbackCapacityExceeded;
-    controller.monitor(&mut session).unwrap();
+    controller.monitor();
     controller.output_mut().fail_start = true;
 
     assert!(matches!(
-        controller.recover(&mut session),
+        controller.recover(),
         Err(OutputLifecycleError::Output(OutputError::Backend(_)))
     ));
-    assert_eq!(session.phase(), SessionPhase::OutputUnavailable);
 }
 
 #[test]
-fn start_requires_trusted_ready_state_before_backend_call() {
+fn starts_without_mutating_external_session_state() {
     let created = Arc::new(AtomicUsize::new(0));
     let mut controller = controller(created);
-    let mut session = SessionState::IDLE;
-
-    assert!(matches!(
-        controller.start(&mut session, selection()),
-        Err(OutputLifecycleError::Transition(error)) if error.event == SessionEvent::StartStream
-    ));
-    assert_eq!(controller.output().start_calls, 0);
+    controller.start(selection()).unwrap();
+    assert_eq!(controller.output().start_calls, 1);
 }

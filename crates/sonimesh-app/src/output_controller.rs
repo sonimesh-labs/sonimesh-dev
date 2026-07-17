@@ -4,8 +4,6 @@ use sonimesh_platform::{
     AudioOutput, OutputConfig, OutputDeviceId, OutputError, OutputHealth, RenderSourceFactory,
 };
 
-use crate::{SessionEvent, SessionState, SessionTransitionError};
-
 /// Pinned or default output selection retained for control-domain recovery.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OutputSelection {
@@ -37,18 +35,13 @@ where
         }
     }
 
-    /// Starts a new output stream from the trusted ready state.
+    /// Starts a new output stream after the lifecycle owner prepared the action.
     ///
     /// # Errors
     ///
-    /// Returns [`OutputLifecycleError`] when session state is invalid or stream
-    /// creation fails. The state enters `Streaming` only after backend start.
-    pub fn start(
-        &mut self,
-        session: &mut SessionState,
-        selection: OutputSelection,
-    ) -> Result<(), OutputLifecycleError> {
-        require_state(*session, SessionState::READY, SessionEvent::StartStream)?;
+    /// Returns [`OutputLifecycleError`] when stream creation fails. The caller
+    /// commits `Streaming` through the control-session completion token.
+    pub fn start(&mut self, selection: OutputSelection) -> Result<(), OutputLifecycleError> {
         self.output
             .start(
                 selection.device.as_ref(),
@@ -56,47 +49,33 @@ where
                 self.source_factory.create(),
             )
             .map_err(OutputLifecycleError::Output)?;
-        transition(session, SessionEvent::StartStream, &mut self.output)?;
         self.selection = Some(selection);
         Ok(())
     }
 
     /// Detects a platform fault and stops the stream outside the callback.
     ///
-    /// Returns the observed fault once while changing `Streaming` to
-    /// `OutputUnavailable`; healthy and already-stopped sessions return `None`.
+    /// Returns the observed fault once after stopping the backend.
     ///
     /// # Errors
     ///
-    /// Returns [`OutputLifecycleError`] only if the session rejects the required
-    /// output-loss transition.
-    pub fn monitor(
-        &mut self,
-        session: &mut SessionState,
-    ) -> Result<Option<OutputHealth>, OutputLifecycleError> {
+    pub fn monitor(&mut self) -> Option<OutputHealth> {
         let health = self.output.health();
-        if health == OutputHealth::Healthy || *session != SessionState::STREAMING {
-            return Ok(None);
+        if health == OutputHealth::Healthy {
+            return None;
         }
 
         self.output.stop();
-        transition(session, SessionEvent::OutputLost, &mut self.output)?;
-        Ok(Some(health))
+        Some(health)
     }
 
     /// Recreates a failed stream using the last selection and a fresh source.
     ///
     /// # Errors
     ///
-    /// Returns [`OutputLifecycleError`] when no previous selection exists, the
-    /// session is not awaiting output, or backend creation fails. A failed
-    /// recovery leaves the session in `OutputUnavailable` for retry or stop.
-    pub fn recover(&mut self, session: &mut SessionState) -> Result<(), OutputLifecycleError> {
-        require_state(
-            *session,
-            SessionState::OUTPUT_UNAVAILABLE,
-            SessionEvent::OutputRestored,
-        )?;
+    /// Returns [`OutputLifecycleError`] when no previous selection exists or
+    /// backend creation fails. The caller commits recovery separately.
+    pub fn recover(&mut self) -> Result<(), OutputLifecycleError> {
         let selection = self
             .selection
             .clone()
@@ -108,17 +87,12 @@ where
                 self.source_factory.create(),
             )
             .map_err(OutputLifecycleError::Output)?;
-        transition(session, SessionEvent::OutputRestored, &mut self.output)
+        Ok(())
     }
 
-    /// Stops the backend and applies the idempotent stream-stop transition.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`OutputLifecycleError`] if the session transition is invalid.
-    pub fn stop(&mut self, session: &mut SessionState) -> Result<(), OutputLifecycleError> {
+    /// Stops the backend; lifecycle completion remains owned by the caller.
+    pub fn stop(&mut self) {
         self.output.stop();
-        transition(session, SessionEvent::StopStream, &mut self.output)
     }
 
     /// Borrows the platform adapter for control-domain device operations.
@@ -136,8 +110,6 @@ where
 /// Output lifecycle or backend failure.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum OutputLifecycleError {
-    /// Session event is not valid from the current state.
-    Transition(SessionTransitionError),
     /// No successful start has supplied a recovery selection.
     MissingSelection,
     /// Platform stream operation failed.
@@ -147,9 +119,6 @@ pub enum OutputLifecycleError {
 impl fmt::Display for OutputLifecycleError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Transition(error) => {
-                write!(formatter, "output lifecycle transition failed: {error}")
-            }
             Self::MissingSelection => formatter.write_str("output recovery has no saved selection"),
             Self::Output(error) => write!(formatter, "output backend failed: {error}"),
         }
@@ -157,29 +126,3 @@ impl fmt::Display for OutputLifecycleError {
 }
 
 impl std::error::Error for OutputLifecycleError {}
-
-fn require_state(
-    state: SessionState,
-    expected: SessionState,
-    event: SessionEvent,
-) -> Result<(), OutputLifecycleError> {
-    if state == expected {
-        return Ok(());
-    }
-    Err(OutputLifecycleError::Transition(SessionTransitionError {
-        state,
-        event,
-    }))
-}
-
-fn transition<O: AudioOutput>(
-    session: &mut SessionState,
-    event: SessionEvent,
-    output: &mut O,
-) -> Result<(), OutputLifecycleError> {
-    if let Err(error) = session.apply(event) {
-        output.stop();
-        return Err(OutputLifecycleError::Transition(error));
-    }
-    Ok(())
-}
