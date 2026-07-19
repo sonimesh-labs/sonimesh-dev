@@ -150,15 +150,19 @@ private fun CaptureStatus.isActive(): Boolean = when (this) {
     else -> false
 }
 
-private fun CaptureStatus.description(): String = when (this) {
+internal fun CaptureStatus.description(): String = when (this) {
     CaptureStatus.Idle -> "Ready to request playback capture consent."
     CaptureStatus.AwaitingPermission -> "Waiting for microphone permission."
     CaptureStatus.AwaitingProjectionConsent -> "Waiting for playback capture consent."
-    is CaptureStatus.Capturing -> "Capturing ${format.sampleRateHz} Hz, ${format.channels} channels, ${format.bufferSizeBytes} byte buffer (platform minimum ${format.minimumBufferBytes})."
-    is CaptureStatus.NoCapturableAudio -> "No capturable audio detected. The source may be silent or policy-restricted; the cause is not identifiable here."
+    is CaptureStatus.Capturing -> "Capturing ${format.description()}."
+    is CaptureStatus.NoCapturableAudio ->
+        "No capturable audio detected. ${format.description()}. The source may be silent or policy-restricted; the cause is not identifiable here."
     is CaptureStatus.Stopped -> "Capture stopped: ${reason.displayName}."
     is CaptureStatus.Failed -> "Capture failed: $message"
 }
+
+private fun com.sonimesh.sender.capture.CaptureFormat.description(): String =
+    "${sampleRateHz} Hz, ${channels} channels, ${bufferSizeBytes} byte buffer (platform minimum ${minimumBufferBytes})"
 
 private fun CaptureEvidenceSnapshot.description(): String {
     val latestRead = lastReadCompletionOffsetMillis?.let { offset ->
