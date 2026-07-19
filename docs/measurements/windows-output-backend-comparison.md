@@ -22,6 +22,11 @@ against a different endpoint, role, format, or callback request.
     cargo run -p sonimesh-platform --example output_smoke --features cpal-output
     cargo run -p windows-wasapi-prototype --bin wasapi_silence_smoke
 
+For the repeated start/stop baseline, run:
+
+    cargo run -p sonimesh-platform --example output_lifecycle_smoke --features cpal-output
+    cargo run -p windows-wasapi-prototype --bin wasapi_lifecycle_smoke
+
 The CPAL smoke accepts a 480-frame request and falls back explicitly to the
 backend default when that request is rejected. The direct prototype follows the
 same policy. Record which path actually started; a fallback result is not

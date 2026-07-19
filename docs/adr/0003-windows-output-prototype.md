@@ -74,7 +74,10 @@ share implementation details with the CPAL adapter.
   software observations are comparable with CPAL status but are not latency
   measurements;
 - stop requests wake the worker, which stops the audio client and releases COM
-  resources on its owning thread before control-domain join returns.
+  resources on its owning thread before control-domain join returns;
+- keep one-shot silent smoke and repeated start/stop smoke as explicit lab commands
+  for each backend; they report faults but do not attempt callback-thread recovery
+  or establish device-removal compatibility.
 
 The direct tool is not a selected backend and must not be linked by the desktop
 app. Its evidence record may compare only like-for-like endpoint, mix format,
