@@ -161,6 +161,7 @@ impl AudioOutput for CpalOutput {
 
     fn stop(&mut self) {
         self.stream.take();
+        self.status = Arc::new(CallbackStatus::default());
     }
 
     fn health(&self) -> OutputHealth {
@@ -184,5 +185,22 @@ fn map_cpal_error(error: &cpal::Error) -> OutputError {
             OutputError::UnsupportedFormat
         }
         _ => OutputError::Backend(error.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stop_clears_callback_status_from_the_released_stream() {
+        let mut output = CpalOutput::new();
+        output.status.callback(480);
+        output.status.stream_error();
+
+        output.stop();
+
+        assert_eq!(output.status(), CpalOutputStatus::default());
+        assert_eq!(output.health(), OutputHealth::Healthy);
     }
 }
