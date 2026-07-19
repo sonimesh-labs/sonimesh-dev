@@ -15,8 +15,11 @@ or library build path.
 `opus` 0.3.1 is the current desktop candidate because it provides safe Rust
 bindings to libopus through `audiopus_sys`. On Windows, its transitive build path
 builds bundled libopus through CMake unless a reviewed installed library path is
-supplied. The current reference host has neither CMake nor a verified libopus
-installation, so no dependency is added yet.
+supplied. On 2026-07-19, the reference workspace had no CMake executable in
+the conventional Program Files or per-user locations and no Android SDK NDK
+directory. The command host could not execute a PATH probe, so this is an
+incomplete preflight observation rather than a claim that no tool exists. No
+reviewed libopus installation is available, so no dependency is added yet.
 
 ## Decision
 
@@ -56,6 +59,8 @@ Before enabling the feature, publish reproducible native build instructions and
 CI results for Windows; add Android ABI build evidence; test valid decode, PLC,
 malformed authenticated payloads, oversized output reporting, reset behavior,
 and 10/20 ms vectors. Compare loss/PLC and CPU on representative media content.
+The build gate and proposed experiment cells are maintained in
+[Opus build and experiment matrix](../measurements/opus-build-and-experiment-matrix.md).
 Physical latency and Android capture claims remain separate tests.
 
 ## Rollback plan
