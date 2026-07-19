@@ -5,6 +5,8 @@ use sonimesh_platform::{
     RenderSourceFactoryError,
 };
 
+use crate::OutputSnapshot;
+
 /// Pinned or default output selection retained for control-domain recovery.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OutputSelection {
@@ -123,6 +125,17 @@ where
         self.source_factory.output_stopped();
         self.stream_active = false;
         self.fault_reported = true;
+    }
+
+    /// Returns a redacted low-rate output lifecycle snapshot.
+    #[must_use]
+    pub fn snapshot(&self) -> OutputSnapshot {
+        OutputSnapshot::from_health(
+            self.selection.is_some(),
+            self.stream_active,
+            self.fault_reported,
+            self.output.health(),
+        )
     }
 
     /// Borrows the platform adapter for control-domain device operations.

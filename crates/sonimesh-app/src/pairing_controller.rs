@@ -1,9 +1,11 @@
 use core::fmt;
 
 use crate::{
-    PairingAttemptOutcome, PairingId, PairingRecord, PairingRecordError, PairingRecordState,
-    PairingSource, SessionEvent, SessionState, SessionTransitionError,
+    DesktopControlSnapshot, OutputController, PairingAttemptOutcome, PairingId, PairingRecord,
+    PairingRecordError, PairingRecordState, PairingSource, SessionEvent, SessionState,
+    SessionTransitionError,
 };
+use sonimesh_platform::{AudioOutput, RenderSourceFactory};
 
 /// Control-domain owner for one short-lived pairing invitation.
 ///
@@ -73,6 +75,43 @@ impl<const MAX_SOURCES: usize> PairingInvitationController<MAX_SOURCES> {
     #[must_use]
     pub fn state(&self) -> Option<PairingRecordState> {
         self.record.as_ref().map(PairingRecord::state)
+    }
+
+    /// Observes pairing expiry and then projects receiver state for a low-rate
+    /// control-surface adapter with the actual output lifecycle owner.
+    ///
+    /// This is the public snapshot entry point so a bridge cannot present an
+    /// active invitation without first applying the pairing owner's monotonic
+    /// clock. No invitation ID, proof, address, credential, or media material is
+    /// included in the returned value. The output snapshot is read directly
+    /// from `output`, so a bridge cannot fabricate output lifecycle state.
+    ///
+    /// # Errors
+    ///
+    /// Returns a pairing observation error after synchronizing the session where
+    /// possible. An owner with no retained invitation still returns a snapshot.
+    pub fn snapshot_at<O, F>(
+        &mut self,
+        session: &mut SessionState,
+        now_ms: u64,
+        output: &OutputController<O, F>,
+    ) -> Result<DesktopControlSnapshot, PairingInvitationError>
+    where
+        O: AudioOutput,
+        F: RenderSourceFactory,
+    {
+        if self.record.is_some() {
+            self.observe(session, now_ms)?;
+        }
+        Ok(self.snapshot_after_observation(*session, output.snapshot()))
+    }
+
+    pub(crate) fn snapshot_after_observation(
+        &self,
+        session: SessionState,
+        output: crate::OutputSnapshot,
+    ) -> DesktopControlSnapshot {
+        DesktopControlSnapshot::from_pairing_state(session, self.state(), output)
     }
 
     /// Starts a new active invitation from an idle desktop session.
@@ -204,12 +243,11 @@ impl<const MAX_SOURCES: usize> PairingInvitationController<MAX_SOURCES> {
             Some(PairingRecordState::Active) if *session != SessionState::PAIRING => {
                 Err(PairingInvitationError::InvalidSessionState(*session))
             }
-            Some(PairingRecordState::Consumed) if *session != SessionState::READY => {
-                Err(PairingInvitationError::InvalidSessionState(*session))
-            }
             Some(PairingRecordState::Expired) => session
                 .apply(SessionEvent::SessionExpired)
                 .map_err(PairingInvitationError::Transition),
+            // A consumed record is retained audit state. The verified session may
+            // subsequently stream, reconnect, lose output, or later expire.
             Some(PairingRecordState::Active | PairingRecordState::Consumed) | None => Ok(()),
         }
     }

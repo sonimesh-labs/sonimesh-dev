@@ -2,7 +2,7 @@
 
 > Status: architecture draft for feasibility validation
 > Version: 1.0.0
-> Updated: 2026-07-14
+> Updated: 2026-07-20
 
 This document describes the intended product boundary and engineering constraints
 for SoniMesh. It deliberately separates verified platform facts, implementation
@@ -14,6 +14,15 @@ SoniMesh sends Android playback audio that the Android platform permits the
 application to capture to a desktop computer on the same local network. The
 desktop receives, authenticates, decrypts, decodes, buffers, resamples, and
 plays the stream through the selected system output device.
+
+The desktop control domain may project session phase, redacted invitation
+lifecycle, and redacted output lifecycle through a low-rate
+`DesktopControlSnapshot`. That projection is built through the pairing owner's
+`snapshot_at(session, now_ms, &output_controller)` call, which observes the
+pairing clock before projection and reads the output lifecycle from its actual
+owner. It excludes pairing IDs, proofs, addresses, session material, PCM,
+encoded media, realtime callbacks, platform output handles, and device-selection
+metadata.
 
 The system has two planes:
 

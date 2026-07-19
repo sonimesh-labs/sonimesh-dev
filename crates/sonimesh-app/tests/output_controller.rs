@@ -247,3 +247,44 @@ fn source_creation_failure_does_not_start_the_backend_and_recovery_can_retry() {
     assert_eq!(controller.output().start_calls, 2);
     assert_eq!(created.load(Ordering::Relaxed), 3);
 }
+
+#[test]
+fn snapshot_tracks_retained_selection_activity_and_fault_reporting() {
+    let created = Arc::new(AtomicUsize::new(0));
+    let last_output_channels = Arc::new(AtomicUsize::new(0));
+    let mut controller = controller(
+        created,
+        last_output_channels,
+        Arc::new(AtomicBool::new(false)),
+        Arc::new(AtomicUsize::new(0)),
+    );
+
+    let initial = controller.snapshot();
+    assert!(!initial.selection_retained());
+    assert!(!initial.stream_active());
+    assert!(!initial.fault_reported());
+    assert_eq!(initial.health(), OutputHealth::Healthy);
+
+    controller.start(selection()).unwrap();
+    let running = controller.snapshot();
+    assert!(running.selection_retained());
+    assert!(running.stream_active());
+    assert!(!running.fault_reported());
+    assert_eq!(running.health(), OutputHealth::Healthy);
+
+    controller.output_mut().health = OutputHealth::StreamError;
+    assert_eq!(controller.monitor(), Some(OutputHealth::StreamError));
+    let faulted = controller.snapshot();
+    assert!(faulted.selection_retained());
+    assert!(!faulted.stream_active());
+    assert!(faulted.fault_reported());
+    assert_eq!(faulted.health(), OutputHealth::StreamError);
+
+    controller.output_mut().health = OutputHealth::Healthy;
+    controller.recover().unwrap();
+    let recovered = controller.snapshot();
+    assert!(recovered.selection_retained());
+    assert!(recovered.stream_active());
+    assert!(!recovered.fault_reported());
+    assert_eq!(recovered.health(), OutputHealth::Healthy);
+}

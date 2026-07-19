@@ -50,7 +50,9 @@ Desktop long-term private keys and pairing records use DPAPI or Credential
 Manager. Android private keys use Android Keystore. Revocation removes the peer
 identity, session resumption material, pairing record, and any cached media
 context. Pairing records expire, allow one success, and enforce attempt and
-source-rate limits outside any realtime path.
+source-rate limits outside any realtime path. A consumed record remains redacted
+audit state while its verified session later streams, reconnects, or recovers
+output; only expiration or revocation retires that trusted session.
 
 ## Security implications
 
