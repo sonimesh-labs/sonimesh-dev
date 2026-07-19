@@ -7,6 +7,7 @@ members = [
     "crates/sonimesh-platform",
     "crates/sonimesh-protocol",
     "tools/network-simulator",
+    "tools/windows-wasapi-prototype",
 ]
 resolver = "3"
 

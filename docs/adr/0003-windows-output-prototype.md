@@ -52,6 +52,34 @@ Add an optional `cpal-output` feature to `sonimesh-platform` for the first Windo
 This decision does not select the release backend. It authorizes a measured CPAL
 prototype only.
 
+## Direct-WASAPI comparison boundary
+
+The direct-WASAPI comparison is a separate Windows-only experimental tool at
+`tools/windows-wasapi-prototype`. It implements the platform-neutral
+`AudioOutput` and `RenderSource` contracts but does not depend on, wrap, or
+share implementation details with the CPAL adapter.
+
+- keep `sonimesh-platform` under the workspace `unsafe_code = forbid` rule;
+  the tool is the narrow reviewed exception required to call Windows COM and use
+  the audio-engine-owned render buffer;
+- confine COM initialization, endpoint activation, event waiting, and all raw
+  buffer access to the tool's worker thread; no raw Windows handle or COM object
+  crosses into the shared crate;
+- use a shared-mode, event-driven default-render-endpoint path only; the tool
+  accepts a pinned identifier only when it still matches that current default;
+- use the endpoint mix format only when it exactly matches the bounded
+  `OutputConfig`; unsupported formats fail before the worker starts;
+- record endpoint buffer frames, source-render frame counts, maximum render gap,
+  priming silence, capacity faults, and backend errors with atomics; these
+  software observations are comparable with CPAL status but are not latency
+  measurements;
+- stop requests wake the worker, which stops the audio client and releases COM
+  resources on its owning thread before control-domain join returns.
+
+The direct tool is not a selected backend and must not be linked by the desktop
+app. Its evidence record may compare only like-for-like endpoint, mix format,
+and requested duration configurations.
+
 ## Security, privacy, and realtime implications
 
 Device IDs and descriptions are untrusted local presentation data and must not be
