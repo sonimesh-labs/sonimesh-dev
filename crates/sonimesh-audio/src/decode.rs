@@ -1,8 +1,8 @@
 use core::fmt;
 
 use crate::{
-    EncodedFrame, FrameError, InsertOutcome, JitterBuffer, PlayoutOutcome, RealtimePcmProducer,
-    RealtimePcmPushOutcome,
+    EncodedFrame, FrameError, InsertOutcome, JitterBuffer, OpusFrameConfig, OpusFrameConfigError,
+    PlayoutOutcome, RealtimePcmProducer, RealtimePcmPushOutcome,
 };
 
 /// Per-stream decoder boundary invoked outside the realtime output callback.
@@ -129,6 +129,26 @@ where
             producer,
             pcm: [0.0; PCM_SAMPLES_PER_BLOCK],
         }
+    }
+
+    /// Creates a stream-local worker for the initial validated Opus frame policy.
+    ///
+    /// This is a construction-time check in the non-realtime domain. A future
+    /// native Opus binding must use this entry point so its caller-owned PCM
+    /// block is proved large enough before any packet can reach the decoder.
+    ///
+    /// # Errors
+    ///
+    /// Returns the frame-policy error when the selected 48 kHz stereo 10/20 ms
+    /// shape does not fit this worker's compile-time PCM block capacity.
+    pub fn new_for_opus(
+        decoder: D,
+        producer: RealtimePcmProducer<PCM_SAMPLES_PER_BLOCK>,
+        sequence: u32,
+        frame: OpusFrameConfig,
+    ) -> Result<Self, OpusFrameConfigError> {
+        frame.validate_pcm_block_capacity(PCM_SAMPLES_PER_BLOCK)?;
+        Ok(Self::new(decoder, producer, sequence))
     }
 
     /// Admits a packet that has already passed network authentication and replay checks.

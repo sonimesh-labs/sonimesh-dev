@@ -50,6 +50,9 @@ The codec-neutral `OpusFrameConfig` now validates the selected 48 kHz stereo
 10/20 ms shape and its 960/1,920 interleaved Float32 PCM requirement before a
 native binding is introduced. It may validate a larger reserved block for a
 shorter selected frame, but does not relax decoder output-length checks.
+A native initial-path implementation must construct its stream worker through
+`StreamDecodeWorker::new_for_opus`, so insufficient fixed PCM capacity fails in
+the control/per-stream creation domain before decoder work is scheduled.
 
 ## Reliability and security implications
 

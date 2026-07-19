@@ -5,8 +5,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use sonimesh_audio::{
-    DecodeStep, DecodeWorkerError, FrameDecoder, InsertOutcome, RealtimePcmPopOutcome,
-    RealtimePcmPushOutcome, StreamDecodeWorker, realtime_pcm_queue,
+    DecodeStep, DecodeWorkerError, FrameDecoder, InsertOutcome, OpusFrameConfig,
+    OpusFrameConfigError, RealtimePcmPopOutcome, RealtimePcmPushOutcome, StreamDecodeWorker,
+    realtime_pcm_queue,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -294,4 +295,37 @@ fn jitter_resync_preserves_the_new_frame_and_retires_previous_pcm() {
         }
     ));
     assert!((output[0] - 3.0).abs() < f32::EPSILON);
+}
+
+#[test]
+fn opus_constructor_accepts_exact_twenty_ms_pcm_capacity() {
+    let (producer, _consumer) = realtime_pcm_queue::<1_920>(2).unwrap();
+    let frame = OpusFrameConfig::new(48_000, 2, 20).unwrap();
+
+    let worker = StreamDecodeWorker::<TestDecoder, 2, 8, 1_920>::new_for_opus(
+        TestDecoder,
+        producer,
+        0,
+        frame,
+    );
+
+    assert!(worker.is_ok());
+}
+
+#[test]
+fn opus_constructor_rejects_insufficient_pcm_capacity_before_decode() {
+    let (producer, _consumer) = realtime_pcm_queue::<1_919>(1).unwrap();
+    let frame = OpusFrameConfig::new(48_000, 2, 20).unwrap();
+
+    let worker = StreamDecodeWorker::<TestDecoder, 2, 8, 1_919>::new_for_opus(
+        TestDecoder,
+        producer,
+        0,
+        frame,
+    );
+
+    assert!(matches!(
+        worker,
+        Err(OpusFrameConfigError::PcmBlockTooSmall)
+    ));
 }
