@@ -46,6 +46,11 @@ No public API may expose a codec-owned PCM allocation to the realtime callback.
 The decoder writes to the existing fixed block supplied by `FrameDecoder`; a
 length beyond that block is rejected by `StreamDecodeWorker`.
 
+The codec-neutral `OpusFrameConfig` now validates the selected 48 kHz stereo
+10/20 ms shape and its 960/1,920 interleaved Float32 PCM requirement before a
+native binding is introduced. It may validate a larger reserved block for a
+shorter selected frame, but does not relax decoder output-length checks.
+
 ## Reliability and security implications
 
 Native code is isolated behind the decoder trait and one stream-local adapter.

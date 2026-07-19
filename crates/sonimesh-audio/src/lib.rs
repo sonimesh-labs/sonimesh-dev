@@ -8,6 +8,7 @@ mod decode;
 mod drift;
 mod gain;
 mod jitter;
+mod opus_frame;
 mod pcm_ring;
 mod realtime_queue;
 mod resampler;
@@ -20,6 +21,10 @@ pub use drift::{
 };
 pub use gain::GainSmoother;
 pub use jitter::{EncodedFrame, FrameError, InsertOutcome, JitterBuffer, PlayoutOutcome};
+pub use opus_frame::{
+    MAX_OPUS_FRAME_DURATION_MS, MIN_OPUS_FRAME_DURATION_MS, OPUS_CHANNELS, OPUS_SAMPLE_RATE_HZ,
+    OpusFrameConfig, OpusFrameConfigError,
+};
 pub use pcm_ring::{PcmBlockRing, PcmPopOutcome, PcmPushOutcome};
 pub use realtime_queue::{
     MAX_PCM_QUEUE_BLOCKS, RealtimePcmConsumer, RealtimePcmPopOutcome, RealtimePcmProducer,

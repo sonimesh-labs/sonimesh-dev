@@ -39,6 +39,7 @@ A build artifact must not be accepted through an unreviewed system library searc
 | Maximum authenticated Opus plaintext | 1,150 bytes, derived from the existing version-one media datagram bound |
 | Oversized PCM result | Rejected by StreamDecodeWorker; never queued to the realtime callback |
 | Decoder fault scope | One stream only; no session-wide reset from the callback |
+| Codec-neutral shape gate | Implemented as `OpusFrameConfig`; validates 48 kHz stereo 10/20 ms and caller-owned 960/1,920 sample capacity before any binding |
 
 ## Proposed frame and resilience matrix
 
