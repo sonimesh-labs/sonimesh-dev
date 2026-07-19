@@ -1,7 +1,7 @@
 # MVP implementation baseline
 
 > Status: foundation implemented; platform feasibility remains open
-> Updated: 2026-07-18
+> Updated: 2026-07-19
 
 This baseline turns the architecture documents into a buildable core without
 claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
@@ -101,8 +101,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   non-persisted MediaProjection consent transfer, a media-projection foreground
   service, a fixed PCM16 AudioRecord read buffer, low-rate state publication,
   bounded evidence counters including local read-completion offsets, and one
-  idempotent teardown path; this is build
-  evidence only and has no physical-device capture result yet.
+  idempotent teardown path; partial Vivo physical-device capture and background
+  evidence is recorded in the [Android capture matrix](./measurements/android-capture-matrix.md).
+  The remaining lifecycle, power, source-policy, and OEM matrix is still open.
 - a buildable Vue/Vite receiver-control preview with a single low-rate bridge
   boundary, session controls, output selection, pairing-invitation state, and
   diagnostics presentation for packet, PCM-queue, and resampling state; it uses
@@ -137,8 +138,9 @@ jitter, and output-backend ADRs using measured 10/20 ms and device results.
 
 ## Deliberately not implemented
 
-- Android capture hardware/OEM evidence, lifecycle matrix results, and power
-  measurements;
+- complete Android capture hardware/OEM evidence, lifecycle matrix results, and
+  power measurements; partial Vivo capture and background evidence is recorded
+  in the [Android capture matrix](./measurements/android-capture-matrix.md);
 - Opus encoder/decoder bindings and PLC/FEC evidence;
 - first pairing, TLS, QR bootstrap, identity storage, revocation, or root-secret
   provisioning; AEAD/HKDF media protection and bounded epoch rotation exist only
