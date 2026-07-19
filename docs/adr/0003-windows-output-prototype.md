@@ -28,7 +28,11 @@ Add an optional `cpal-output` feature to `sonimesh-platform` for the first Windo
 - validate sample rate, channels, and callback frames against explicit hard bounds
   before opening a stream;
 - request a fixed callback size when supported, allow an explicit backend-default
-  fallback, record actual callback samples, and keep a separate memory bound;
+  fallback, record actual callback samples and frames, and keep a separate memory
+  bound;
+- publish the latest and largest callback frame counts plus the largest monotonic
+  callback gap through atomics for low-rate comparison; these are software
+  scheduling observations, not a latency measurement;
 - render Float32 directly and convert signed 16-bit output through scratch memory
   allocated before stream start;
 - if a callback exceeds its preallocated bound, write silence and atomically expose

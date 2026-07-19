@@ -145,12 +145,22 @@ impl AudioOutput for CpalOutput {
         };
         let status = Arc::new(CallbackStatus::default());
         let stream = match config.sample_format {
-            SampleFormat::Float32 => {
-                build_float32_stream(&device, stream_config, maximum_samples, source, &status)
-            }
-            SampleFormat::Signed16 => {
-                build_signed16_stream(&device, stream_config, maximum_samples, source, &status)
-            }
+            SampleFormat::Float32 => build_float32_stream(
+                &device,
+                stream_config,
+                maximum_samples,
+                config.channels,
+                source,
+                &status,
+            ),
+            SampleFormat::Signed16 => build_signed16_stream(
+                &device,
+                stream_config,
+                maximum_samples,
+                config.channels,
+                source,
+                &status,
+            ),
         }
         .map_err(|error| map_cpal_error(&error))?;
         stream.play().map_err(|error| map_cpal_error(&error))?;
@@ -195,7 +205,7 @@ mod tests {
     #[test]
     fn stop_clears_callback_status_from_the_released_stream() {
         let mut output = CpalOutput::new();
-        output.status.callback(480);
+        output.status.callback(480, 240);
         output.status.stream_error();
 
         output.stop();

@@ -52,9 +52,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "latest interleaved samples: {}",
         status.last_callback_samples
     );
+    println!("latest callback frames: {}", status.last_callback_frames);
     println!(
         "maximum interleaved samples: {}",
         status.maximum_callback_samples
+    );
+    println!(
+        "maximum callback frames: {}",
+        status.maximum_callback_frames
+    );
+    println!(
+        "largest callback gap (ns): {}",
+        status.maximum_callback_gap_ns
     );
     println!("oversized callbacks: {}", status.oversized_callbacks);
     println!("stream errors: {}", status.stream_errors);
