@@ -245,6 +245,9 @@ class CaptureService : Service() {
                     continue
                 }
                 if (read < 0) {
+                    if (teardownGate.isTeardownStarted()) {
+                        return
+                    }
                     CaptureStateStore.evidence.recordReadError()
                     mainHandler.post {
                         if (!teardownGate.isTeardownStarted()) {
