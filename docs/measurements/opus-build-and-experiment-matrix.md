@@ -66,6 +66,7 @@ For every implemented cell, retain these results with the existing deterministic
 - reset after discontinuity and stream-local decoder error isolation;
 - output-length overflow rejection by the decode worker;
 - loss, reorder, bandwidth, and drift profiles with reproducible seed values;
+- 10 ms and 20 ms scheduler/sample timestamps derived from the same OpusFrameConfig used by the future decode worker;
 - decode CPU, allocation profile, and Android power/thermal observations; and
 - real-device subjective quality notes separated from physical latency results.
 

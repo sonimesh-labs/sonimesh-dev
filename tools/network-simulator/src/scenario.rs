@@ -1,13 +1,15 @@
 use std::fmt;
 
-use sonimesh_audio::{EncodedFrame, InsertOutcome, JitterBuffer, PlayoutOutcome};
+use sonimesh_audio::{
+    EncodedFrame, InsertOutcome, JitterBuffer, OPUS_CHANNELS, OPUS_SAMPLE_RATE_HZ, OpusFrameConfig,
+    PlayoutOutcome,
+};
 use sonimesh_protocol::MAX_MEDIA_DATAGRAM_LEN;
 
 use crate::{ClockError, NetworkProfile, NetworkStats, ProfileError, VirtualClock, VirtualNetwork};
 
 const MAX_SCENARIO_FRAMES: u32 = 100_000;
 const DEFAULT_MEDIA_DATAGRAM_BYTES: u16 = 256;
-const SIMULATED_SAMPLE_RATE_HZ: u64 = 48_000;
 
 /// One deterministic encoded-audio simulation configuration.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -88,7 +90,7 @@ impl std::error::Error for ScenarioError {}
 ///
 /// Returns [`ScenarioError`] when configuration or virtual time is invalid.
 pub fn simulate(config: ScenarioConfig) -> Result<SimulationReport, ScenarioError> {
-    validate(config)?;
+    let frame = validate(config)?;
     let mut network = VirtualNetwork::new(config.network).map_err(ScenarioError::Profile)?;
     let mut clock = VirtualClock::new();
     let mut jitter = JitterBuffer::<64, 8>::with_start_sequence(0);
@@ -120,12 +122,8 @@ pub fn simulate(config: ScenarioConfig) -> Result<SimulationReport, ScenarioErro
 
         for delivery in network.drain_ready(now_ms) {
             let sequence = delivery.payload;
-            let frame = EncodedFrame::new(
-                sequence,
-                sample_timestamp(sequence, config.frame_duration_ms),
-                &[0],
-            )
-            .map_err(|_| ScenarioError::InternalCapacityInvariant)?;
+            let frame = EncodedFrame::new(sequence, sample_timestamp(sequence, frame), &[0])
+                .map_err(|_| ScenarioError::InternalCapacityInvariant)?;
             match jitter.insert(frame) {
                 InsertOutcome::Inserted => {}
                 InsertOutcome::Reordered => report.reordered_arrivals += 1,
@@ -156,13 +154,14 @@ pub fn simulate(config: ScenarioConfig) -> Result<SimulationReport, ScenarioErro
     Ok(report)
 }
 
-fn validate(config: ScenarioConfig) -> Result<(), ScenarioError> {
+fn validate(config: ScenarioConfig) -> Result<OpusFrameConfig, ScenarioError> {
     if config.frames == 0 || config.frames > MAX_SCENARIO_FRAMES {
         return Err(ScenarioError::InvalidFrameCount);
     }
-    if !matches!(config.frame_duration_ms, 10 | 20) {
-        return Err(ScenarioError::InvalidFrameDuration);
-    }
+    let frame_duration_ms =
+        u16::try_from(config.frame_duration_ms).map_err(|_| ScenarioError::InvalidFrameDuration)?;
+    let frame = OpusFrameConfig::new(OPUS_SAMPLE_RATE_HZ, OPUS_CHANNELS, frame_duration_ms)
+        .map_err(|_| ScenarioError::InvalidFrameDuration)?;
     if config.target_buffer_ms > 1_000 {
         return Err(ScenarioError::InvalidTargetBuffer);
     }
@@ -171,12 +170,12 @@ fn validate(config: ScenarioConfig) -> Result<(), ScenarioError> {
     {
         return Err(ScenarioError::InvalidMediaDatagramBytes);
     }
-    config.network.validate().map_err(ScenarioError::Profile)
+    config.network.validate().map_err(ScenarioError::Profile)?;
+    Ok(frame)
 }
 
-fn sample_timestamp(sequence: u32, frame_duration_ms: u64) -> u64 {
-    let samples_per_frame = (SIMULATED_SAMPLE_RATE_HZ / 1_000) * frame_duration_ms;
-    u64::from(sequence).saturating_mul(samples_per_frame)
+fn sample_timestamp(sequence: u32, frame: OpusFrameConfig) -> u64 {
+    u64::from(sequence).saturating_mul(frame.samples_per_channel() as u64)
 }
 
 #[cfg(test)]
@@ -264,8 +263,36 @@ mod tests {
 
     #[test]
     fn negotiated_frame_duration_controls_48khz_sample_timestamps() {
-        assert_eq!(sample_timestamp(3, 10), 1_440);
-        assert_eq!(sample_timestamp(3, 20), 2_880);
+        let ten_ms = OpusFrameConfig::new(48_000, 2, 10).unwrap();
+        let twenty_ms = OpusFrameConfig::new(48_000, 2, 20).unwrap();
+
+        assert_eq!(sample_timestamp(3, ten_ms), 1_440);
+        assert_eq!(sample_timestamp(3, twenty_ms), 2_880);
+    }
+
+    #[test]
+    fn both_opus_frame_shapes_remain_lossless_on_a_stable_profile() {
+        let mut network = NetworkProfile::stable(0x0A0C_2026);
+        network.base_delay_ms = 0;
+        network.jitter_ms = 0;
+        let ten_ms = ScenarioConfig {
+            frames: 7,
+            frame_duration_ms: 10,
+            target_buffer_ms: 10,
+            network,
+            ..ScenarioConfig::default()
+        };
+        let twenty_ms = ScenarioConfig {
+            frame_duration_ms: 20,
+            target_buffer_ms: 20,
+            ..ten_ms
+        };
+
+        for config in [ten_ms, twenty_ms] {
+            let report = simulate(config).unwrap();
+            assert_eq!(report.playout_frames, config.frames);
+            assert_eq!(report.plc_frames, 0);
+        }
     }
 
     #[test]
