@@ -261,6 +261,92 @@ fn control_loss_does_not_block_an_independent_authenticated_media_path() {
 }
 
 #[test]
+fn decode_worker_generates_plc_before_the_callback_and_bounds_a_stalled_pcm_queue() {
+    let secret = SessionSecret::new([0xA5; 32]);
+    let context = context();
+    let mut sealer = MediaSealer::new(&secret, context).unwrap();
+    let first = media_datagram(&mut sealer, 0);
+    let _missing = media_datagram(&mut sealer, 1);
+    let third = media_datagram(&mut sealer, 2);
+    let mut ingress = ProtectedMediaIngress::new(&secret, context).unwrap();
+    let (producer, mut consumer) = realtime_pcm_queue::<1>(2).unwrap();
+    let mut worker =
+        StreamDecodeWorker::<SequenceDecoder, 4, 8, 1>::new(SequenceDecoder, producer, 0);
+    let mut plaintext = [0_u8; 8];
+
+    for datagram in [&first, &third] {
+        let frame = ingress.receive(datagram, &mut plaintext).unwrap();
+        assert_eq!(
+            worker
+                .admit(
+                    frame.header.sequence,
+                    frame.header.sample_timestamp,
+                    frame.opus_payload,
+                )
+                .unwrap(),
+            InsertOutcome::Inserted
+        );
+        plaintext.fill(0);
+    }
+
+    assert_eq!(
+        worker.decode_next().unwrap(),
+        DecodeStep::Decoded {
+            sequence: 0,
+            samples: 1,
+            queue: RealtimePcmPushOutcome::Inserted,
+        }
+    );
+    assert_eq!(
+        worker.decode_next().unwrap(),
+        DecodeStep::Concealed {
+            sequence: 1,
+            samples: 1,
+            queue: RealtimePcmPushOutcome::Inserted,
+        }
+    );
+    assert_eq!(
+        worker.decode_next().unwrap(),
+        DecodeStep::Decoded {
+            sequence: 2,
+            samples: 1,
+            queue: RealtimePcmPushOutcome::ReplacedOldest,
+        }
+    );
+    assert_eq!(worker.queued_blocks(), 2);
+
+    let mut output = [f32::NAN];
+    assert_eq!(
+        consumer.pop_into(&mut output),
+        RealtimePcmPopOutcome::Filled {
+            samples: 1,
+            sequence: 1,
+            discontinuity: true,
+            discarded_stale_blocks: 0,
+        }
+    );
+    assert!(output[0].abs() <= f32::EPSILON);
+
+    assert_eq!(
+        consumer.pop_into(&mut output),
+        RealtimePcmPopOutcome::Filled {
+            samples: 1,
+            sequence: 2,
+            discontinuity: false,
+            discarded_stale_blocks: 0,
+        }
+    );
+    assert!((output[0] - 2.0).abs() <= f32::EPSILON);
+    assert_eq!(
+        consumer.pop_into(&mut output),
+        RealtimePcmPopOutcome::Underflow {
+            discarded_stale_blocks: 0,
+        }
+    );
+    assert!(output[0].abs() <= f32::EPSILON);
+}
+
+#[test]
 fn authenticated_jitter_resync_retires_old_pcm_and_keeps_the_resync_packet() {
     let secret = SessionSecret::new([0xA5; 32]);
     let context = context();

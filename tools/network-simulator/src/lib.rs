@@ -17,7 +17,8 @@ pub use drift_scenario::{
 };
 pub use network::{Delivery, NetworkStats, SendOutcome, VirtualNetwork};
 pub use opus_experiment::{
-    OpusExperimentCase, OpusExperimentId, opus_experiment_cases, simulate_opus_experiment,
+    OpusExperimentCase, OpusExperimentId, OpusWorkerExperimentReport, opus_experiment_cases,
+    simulate_opus_experiment, simulate_opus_worker_experiment,
 };
 pub use profile::{
     MAX_BANDWIDTH_BYTES_PER_SECOND, MAX_IN_FLIGHT_PACKETS, MAX_NETWORK_DELAY_MS, NetworkProfile,

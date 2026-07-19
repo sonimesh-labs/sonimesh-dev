@@ -1,7 +1,7 @@
 # Opus build and experiment matrix
 
 > Status: pre-binding gate and proposed experiment plan; no Opus binding is enabled and no codec-quality result is recorded.
-> Updated: 2026-07-19
+> Updated: 2026-07-20
 
 This document turns the acceptance conditions in ADR 0009 into reproducible evidence. A passing Rust-only decoder mock, a dependency resolution, or a successful Windows build alone is insufficient to select a codec binding or media policy.
 
@@ -71,6 +71,23 @@ For every implemented cell, retain these results with the existing deterministic
 - 10 ms and 20 ms scheduler/sample timestamps derived from the same OpusFrameConfig used by the future decode worker;
 - decode CPU, allocation profile, and Android power/thermal observations; and
 - real-device subjective quality notes separated from physical latency results.
+
+## Codec-neutral media-path regression
+
+The deterministic cross-crate test in
+`tools/network-simulator/tests/media_pipeline.rs` now passes authenticated test
+datagrams through `ProtectedMediaIngress`, `StreamDecodeWorker`, a mock
+`FrameDecoder`, and the bounded realtime PCM queue. It asserts that a missing
+sequence produces `DecodeStep::Concealed` in the decode worker, not in the
+consumer callback, and that a stalled two-block queue reports
+`ReplacedOldest` at the worker producer boundary.
+
+This is codec-neutral control-flow and overflow-policy coverage only. The same
+eight A-F profiles also run through a `mock_worker` suite that constructs a
+`StreamDecodeWorker` with the selected 960/1,920 sample block, dispatches PLC
+in the worker, and lets a paired PCM consumer only copy queued blocks. It does
+not load libopus, configure an encoder, evaluate audio quality, measure
+CPU/power, or measure device or physical latency.
 
 ## Entry condition for the first binding commit
 

@@ -3,7 +3,7 @@
 use sonimesh_audio::DriftConfig;
 use sonimesh_network_simulator::{
     DriftScenarioConfig, NetworkProfile, ScenarioConfig, opus_experiment_cases, simulate,
-    simulate_drift, simulate_opus_experiment,
+    simulate_drift, simulate_opus_experiment, simulate_opus_worker_experiment,
 };
 
 fn main() {
@@ -49,6 +49,22 @@ fn main() {
             report.plc_frames,
             report.network.random_loss_packets + report.network.burst_loss_packets,
             report.reordered_arrivals,
+        );
+    }
+
+    println!("SoniMesh codec-neutral mock decode-worker suite");
+    for case_ in opus_experiment_cases() {
+        let report = simulate_opus_worker_experiment(case_)
+            .expect("built-in mock worker experiment cases are valid");
+        println!(
+            "mock_worker opus={} frame={}ms decoded={} plc={} resyncs={} pcm_high_water={} network_lost={}",
+            case_.id.label(),
+            case_.frame.frame_duration_ms(),
+            report.decoded_frames,
+            report.plc_frames,
+            report.resynchronizations,
+            report.queued_pcm_high_water_blocks,
+            report.network.random_loss_packets + report.network.burst_loss_packets,
         );
     }
 

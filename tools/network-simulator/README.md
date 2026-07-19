@@ -17,7 +17,11 @@ a physical latency claim.
   bounded ppm controller; it is not an ASRC or device-clock emulator.
 - the media-pipeline integration test crosses protocol parsing, ChaCha20-
   Poly1305 authentication, replay rejection, jitter/PLC decisions, the bounded
-  decode-worker boundary, and the realtime PCM queue.
+  decode-worker boundary, and the realtime PCM queue. A deterministic stalled
+  consumer case proves PLC is generated before the callback and overflow is
+  reported at the producer boundary. The A-F `mock_worker` runner uses the same
+  profile cadence with a fixed-capacity mock decoder; it is not a native Opus or
+  quality experiment.
 
 ## Run
 
