@@ -56,6 +56,8 @@ The following cells are proposed experiments, not product defaults. FEC and DTX 
 
 The bitrate values are test parameters only. No cell selects a release bitrate, FEC policy, DTX policy, or latency target.
 
+The deterministic simulator currently expands C and D into fixed 1% and 3% independent-loss runs, producing eight A-F cases total. Its bitrate field is report metadata only; no encoder is configured.
+
 ## Required decoder and simulator checks
 
 For every implemented cell, retain these results with the existing deterministic network simulator:

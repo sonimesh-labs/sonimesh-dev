@@ -2,7 +2,8 @@
 
 use sonimesh_audio::DriftConfig;
 use sonimesh_network_simulator::{
-    DriftScenarioConfig, NetworkProfile, ScenarioConfig, simulate, simulate_drift,
+    DriftScenarioConfig, NetworkProfile, ScenarioConfig, opus_experiment_cases, simulate,
+    simulate_drift, simulate_opus_experiment,
 };
 
 fn main() {
@@ -28,6 +29,26 @@ fn main() {
             report.duplicate_frames,
             report.late_frames,
             report.resynchronizations
+        );
+    }
+
+    println!("SoniMesh codec-neutral Opus experiment suite");
+    for case_ in opus_experiment_cases() {
+        let report =
+            simulate_opus_experiment(case_).expect("built-in Opus experiment cases are valid");
+        let loss_variant = case_
+            .independent_loss_percent
+            .map_or_else(|| "n/a".to_owned(), |percent| format!("{percent}%"));
+        println!(
+            "opus={} frame={}ms bitrate={}bps independent_loss={} decoded={} plc={} network_lost={} reordered={}",
+            case_.id.label(),
+            case_.frame.frame_duration_ms(),
+            case_.proposed_bitrate_bps,
+            loss_variant,
+            report.playout_frames,
+            report.plc_frames,
+            report.network.random_loss_packets + report.network.burst_loss_packets,
+            report.reordered_arrivals,
         );
     }
 
