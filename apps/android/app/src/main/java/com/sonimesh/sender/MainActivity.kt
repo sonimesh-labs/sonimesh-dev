@@ -9,8 +9,8 @@ import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.getValue
@@ -20,10 +20,15 @@ import androidx.core.content.ContextCompat
 import com.sonimesh.sender.capture.CaptureService
 import com.sonimesh.sender.capture.CaptureStateStore
 import com.sonimesh.sender.capture.CaptureStatus
+import com.sonimesh.sender.capture.canStart
+import com.sonimesh.sender.capture.isAwaitingAuthorization
 
 class MainActivity : ComponentActivity() {
     private val audioPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (CaptureStateStore.state.value.status != CaptureStatus.AwaitingPermission) {
+                return@registerForActivityResult
+            }
             if (granted) {
                 requestNotificationThenProjection()
             } else {
@@ -33,6 +38,9 @@ class MainActivity : ComponentActivity() {
 
     private val notificationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (CaptureStateStore.state.value.status != CaptureStatus.AwaitingNotificationPermission) {
+                return@registerForActivityResult
+            }
             if (granted) {
                 launchProjectionConsent()
             } else {
@@ -42,6 +50,9 @@ class MainActivity : ComponentActivity() {
 
     private val projectionLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            if (CaptureStateStore.state.value.status != CaptureStatus.AwaitingProjectionConsent) {
+                return@registerForActivityResult
+            }
             if (result.resultCode != Activity.RESULT_OK || result.data == null) {
                 CaptureStateStore.publishFailure("Screen capture consent was not granted")
                 return@registerForActivityResult
@@ -61,9 +72,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         setContent {
             val state by CaptureStateStore.state.collectAsState()
-            MaterialTheme {
+            SoniMeshTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     CaptureScreen(
                         state = state,
@@ -76,6 +88,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun requestCapture() {
+        if (!CaptureStateStore.state.value.status.canStart()) {
+            return
+        }
+
         CaptureStateStore.publishAwaitingPermission()
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
             != PackageManager.PERMISSION_GRANTED
@@ -87,10 +103,14 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun requestNotificationThenProjection() {
+        if (CaptureStateStore.state.value.status != CaptureStatus.AwaitingPermission) {
+            return
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
             && ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
             != PackageManager.PERMISSION_GRANTED
         ) {
+            CaptureStateStore.publishAwaitingNotificationPermission()
             notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         } else {
             launchProjectionConsent()
@@ -98,6 +118,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun launchProjectionConsent() {
+        if (!CaptureStateStore.state.value.status.isAwaitingAuthorization()) {
+            return
+        }
         CaptureStateStore.publishAwaitingProjectionConsent()
         val manager = getSystemService(MediaProjectionManager::class.java)
         projectionLauncher.launch(manager.createScreenCaptureIntent())
@@ -108,14 +131,11 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-internal fun CaptureStatus.isActive(): Boolean = when (this) {
-    is CaptureStatus.Capturing, is CaptureStatus.NoCapturableAudio -> true
-    else -> false
-}
 
 internal fun CaptureStatus.description(): String = when (this) {
     CaptureStatus.Idle -> "Ready to request playback capture consent."
     CaptureStatus.AwaitingPermission -> "Waiting for microphone permission."
+    CaptureStatus.AwaitingNotificationPermission -> "Waiting for notification permission."
     CaptureStatus.AwaitingProjectionConsent -> "Waiting for playback capture consent."
     is CaptureStatus.Capturing -> "Capturing ${format.description()}."
     is CaptureStatus.NoCapturableAudio ->

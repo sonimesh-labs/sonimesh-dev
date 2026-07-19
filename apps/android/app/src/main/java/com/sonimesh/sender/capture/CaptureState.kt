@@ -60,6 +60,7 @@ enum class CaptureStopReason(val displayName: String) {
 sealed interface CaptureStatus {
     data object Idle : CaptureStatus
     data object AwaitingPermission : CaptureStatus
+    data object AwaitingNotificationPermission : CaptureStatus
     data object AwaitingProjectionConsent : CaptureStatus
     data class Capturing(val format: CaptureFormat) : CaptureStatus
     data class NoCapturableAudio(val format: CaptureFormat) : CaptureStatus
@@ -80,3 +81,22 @@ data class CaptureEvidenceSnapshot(
     val silentReads: Long = 0,
     val readErrors: Long = 0,
 )
+
+
+/** True while the foreground service owns an active capture lifecycle. */
+internal fun CaptureStatus.isActive(): Boolean = when (this) {
+    is CaptureStatus.Capturing, is CaptureStatus.NoCapturableAudio -> true
+    else -> false
+}
+
+/** True while the activity has already opened a system authorization path. */
+internal fun CaptureStatus.isAwaitingAuthorization(): Boolean = when (this) {
+    CaptureStatus.AwaitingPermission,
+    CaptureStatus.AwaitingNotificationPermission,
+    CaptureStatus.AwaitingProjectionConsent,
+    -> true
+    else -> false
+}
+
+/** True when a fresh capture request may begin from the current UI state. */
+internal fun CaptureStatus.canStart(): Boolean = !isActive() && !isAwaitingAuthorization()

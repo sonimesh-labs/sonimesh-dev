@@ -26,7 +26,11 @@ The future Android application uses Kotlin and Jetpack Compose for its activity
 UI. The activity owns only user interaction and the platform consent launch:
 
 - explain capture limits before requesting consent and present low-rate service
-  state after the request;
+  state after the request; microphone permission, notification permission, and
+  projection consent are separate pending states. Repeated start requests while
+  authorization is pending or capture is active are ignored, and each async
+  result only advances its matching pending state, so stale callbacks cannot
+  open overlapping consent flows or create a second capture session;
 - transfer the one current consent result directly to the foreground service for
   immediate setup; never persist, cache, or reuse the projection token;
 - emit no PCM, encoded frames, keys, or high-rate metering events to Compose;

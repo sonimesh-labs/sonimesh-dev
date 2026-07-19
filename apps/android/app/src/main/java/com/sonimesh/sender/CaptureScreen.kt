@@ -1,5 +1,10 @@
 package com.sonimesh.sender
 
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -8,7 +13,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -27,11 +35,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.sonimesh.sender.capture.CaptureEvidenceSnapshot
 import com.sonimesh.sender.capture.CaptureStatus
 import com.sonimesh.sender.capture.CaptureUiState
+import com.sonimesh.sender.capture.isActive
+import com.sonimesh.sender.capture.isAwaitingAuthorization
 import java.util.Locale
 
 @Composable
@@ -44,7 +58,9 @@ internal fun CaptureScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface)
+            .statusBarsPadding()
             .verticalScroll(rememberScrollState())
+            .navigationBarsPadding()
             .padding(horizontal = 20.dp, vertical = 24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
@@ -56,6 +72,7 @@ internal fun CaptureScreen(
         }
         CaptureActionCard(
             active = state.status.isActive(),
+            starting = state.status.isAwaitingAuthorization(),
             onStart = onStart,
             onStop = onStop,
         )
@@ -89,9 +106,11 @@ private fun CaptureHeader() {
 private fun CaptureStatusCard(status: CaptureStatus) {
     val palette = status.palette()
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics { liveRegion = LiveRegionMode.Polite },
         colors = CardDefaults.cardColors(containerColor = palette.container),
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(8.dp),
     ) {
         Column(
             modifier = Modifier.padding(20.dp),
@@ -110,7 +129,11 @@ private fun CaptureStatusCard(status: CaptureStatus) {
                         style = MaterialTheme.typography.titleLarge,
                     )
                 }
-                StatusIndicator(color = palette.indicator)
+                if (status is CaptureStatus.Capturing) {
+                    BreathingStatusIndicator(color = palette.indicator)
+                } else {
+                    StatusIndicator(color = palette.indicator)
+                }
             }
             Text(
                 text = status.description(),
@@ -129,7 +152,7 @@ private fun CaptureSummaryCard(
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(8.dp),
     ) {
         Column(
             modifier = Modifier.padding(18.dp),
@@ -173,7 +196,7 @@ private fun CaptureEvidenceCard(evidence: CaptureEvidenceSnapshot) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(8.dp),
     ) {
         Column(
             modifier = Modifier.padding(18.dp),
@@ -203,13 +226,14 @@ private fun CaptureEvidenceCard(evidence: CaptureEvidenceSnapshot) {
 @Composable
 private fun CaptureActionCard(
     active: Boolean,
+    starting: Boolean,
     onStart: () -> Unit,
     onStop: () -> Unit,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(8.dp),
     ) {
         Column(
             modifier = Modifier.padding(18.dp),
@@ -217,16 +241,22 @@ private fun CaptureActionCard(
         ) {
             SectionHeader(
                 eyebrow = "CONTROL",
-                title = if (active) "Capture is running" else "Ready to start",
-                supporting = if (active) {
-                    "Stopping ends the current bounded run and leaves the latest evidence on screen."
-                } else {
-                    "Starting asks for permission and a fresh projection consent before capture begins."
+                title = when {
+                    active -> "Capture is running"
+                    starting -> "Waiting for authorization"
+                    else -> "Ready to start"
+                },
+                supporting = when {
+                    active -> "Stopping ends the current bounded run and leaves the latest evidence on screen."
+                    starting -> "Complete or dismiss the system permission request before starting another run."
+                    else -> "Starting asks for permission and a fresh projection consent before capture begins."
                 },
             )
             if (active) {
                 OutlinedButton(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp),
                     onClick = onStop,
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
                 ) {
@@ -234,10 +264,13 @@ private fun CaptureActionCard(
                 }
             } else {
                 Button(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp),
+                    enabled = !starting,
                     onClick = onStart,
                 ) {
-                    Text("Start capture")
+                    Text(if (starting) "Waiting for system consent" else "Start capture")
                 }
             }
         }
@@ -249,7 +282,7 @@ private fun CaptureBoundaryCard() {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(8.dp),
     ) {
         Column(
             modifier = Modifier.padding(18.dp),
@@ -303,7 +336,7 @@ private fun SummaryMetric(
 ) {
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(8.dp),
         color = MaterialTheme.colorScheme.surface,
     ) {
         Column(
@@ -320,7 +353,7 @@ private fun SummaryMetric(
 private fun EvidenceItem(label: String, value: String, modifier: Modifier) {
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(8.dp),
         color = MaterialTheme.colorScheme.surface,
     ) {
         Column(
@@ -353,6 +386,32 @@ private fun StatusPill(
 }
 
 @Composable
+private fun BreathingStatusIndicator(color: Color) {
+    val transition = rememberInfiniteTransition(label = "capture-status")
+    val scale = transition.animateFloat(
+        initialValue = 1f,
+        targetValue = 1.22f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1_200),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "status-pulse",
+    ).value
+
+    Box(
+        modifier = Modifier
+            .width(14.dp)
+            .height(14.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clip(CircleShape)
+            .background(color),
+    )
+}
+
+@Composable
 private fun StatusIndicator(color: Color) {
     Box(
         modifier = Modifier
@@ -371,7 +430,11 @@ private data class StatusPalette(
 
 @Composable
 private fun CaptureStatus.palette(): StatusPalette = when (this) {
-    CaptureStatus.Idle, CaptureStatus.AwaitingPermission, CaptureStatus.AwaitingProjectionConsent -> StatusPalette(
+    CaptureStatus.Idle,
+    CaptureStatus.AwaitingPermission,
+    CaptureStatus.AwaitingNotificationPermission,
+    CaptureStatus.AwaitingProjectionConsent,
+    -> StatusPalette(
         container = MaterialTheme.colorScheme.surfaceContainerHighest,
         indicator = MaterialTheme.colorScheme.secondary,
         onIndicator = MaterialTheme.colorScheme.onSecondary,
@@ -396,6 +459,7 @@ private fun CaptureStatus.palette(): StatusPalette = when (this) {
 private fun CaptureStatus.label(): String = when (this) {
     CaptureStatus.Idle -> "READY"
     CaptureStatus.AwaitingPermission -> "PERMISSION"
+    CaptureStatus.AwaitingNotificationPermission -> "NOTIFICATIONS"
     CaptureStatus.AwaitingProjectionConsent -> "CONSENT"
     is CaptureStatus.Capturing -> "ACTIVE"
     is CaptureStatus.NoCapturableAudio -> "NO SIGNAL"
@@ -406,6 +470,7 @@ private fun CaptureStatus.label(): String = when (this) {
 private fun CaptureStatus.metricLabel(): String = when (this) {
     CaptureStatus.Idle -> "Idle"
     CaptureStatus.AwaitingPermission -> "Permission"
+    CaptureStatus.AwaitingNotificationPermission -> "Notifications"
     CaptureStatus.AwaitingProjectionConsent -> "Consent"
     is CaptureStatus.Capturing -> "Capturing"
     is CaptureStatus.NoCapturableAudio -> "No signal"
@@ -416,6 +481,7 @@ private fun CaptureStatus.metricLabel(): String = when (this) {
 private fun CaptureStatus.headline(): String = when (this) {
     CaptureStatus.Idle -> "Ready for a fresh capture session"
     CaptureStatus.AwaitingPermission -> "Waiting for microphone permission"
+    CaptureStatus.AwaitingNotificationPermission -> "Waiting for notification permission"
     CaptureStatus.AwaitingProjectionConsent -> "Waiting for screen-capture consent"
     is CaptureStatus.Capturing -> "Capture is active"
     is CaptureStatus.NoCapturableAudio -> "No capturable audio detected"

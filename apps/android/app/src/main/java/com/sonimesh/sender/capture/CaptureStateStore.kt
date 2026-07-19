@@ -93,6 +93,10 @@ object CaptureStateStore {
         publish(CaptureStatus.AwaitingPermission)
     }
 
+    fun publishAwaitingNotificationPermission() {
+        publish(CaptureStatus.AwaitingNotificationPermission)
+    }
+
     fun publishAwaitingProjectionConsent() {
         publish(CaptureStatus.AwaitingProjectionConsent)
     }
