@@ -50,6 +50,14 @@ respectively; oversized callbacks and stream errors remained zero. This confirms
 the same bounded observation on this host only, not a latency or compatibility
 claim.
 
+## 2026-07-19 Reconfirmation
+
+A further run against the current default endpoint produced 199 callbacks. The
+latest callback contained 3,840 interleaved samples (480 frames), and the
+largest contained 8,448 samples (1,056 frames). Oversized callbacks and stream
+errors both remained zero. This is another observation of the same host and
+configuration, not evidence of callback cadence, latency, or compatibility.
+
 ## Remaining Evidence
 
 - exercise device removal, default-role changes, sleep/wake, and stream
