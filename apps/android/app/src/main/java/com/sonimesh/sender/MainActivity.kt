@@ -10,24 +10,16 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.sonimesh.sender.capture.CaptureService
-import com.sonimesh.sender.capture.CaptureEvidenceSnapshot
 import com.sonimesh.sender.capture.CaptureStateStore
 import com.sonimesh.sender.capture.CaptureStatus
-import com.sonimesh.sender.capture.CaptureUiState
 
 class MainActivity : ComponentActivity() {
     private val audioPermissionLauncher =
@@ -116,36 +108,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@androidx.compose.runtime.Composable
-private fun CaptureScreen(
-    state: CaptureUiState,
-    onStart: () -> Unit,
-    onStop: () -> Unit,
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        Text("SoniMesh capture feasibility", style = MaterialTheme.typography.headlineSmall)
-        Text(
-            "Playback capture can be silent or policy-limited. This prototype reports observations without identifying a source-specific cause.",
-            style = MaterialTheme.typography.bodyMedium,
-        )
-        Text(state.status.description(), style = MaterialTheme.typography.bodyLarge)
-        if (state.evidence.hasObservations()) {
-            Text(state.evidence.description(), style = MaterialTheme.typography.bodyMedium)
-        }
-        if (state.status.isActive()) {
-            Button(onClick = onStop) { Text("Stop capture") }
-        } else {
-            Button(onClick = onStart) { Text("Start capture") }
-        }
-    }
-}
-
-private fun CaptureStatus.isActive(): Boolean = when (this) {
+internal fun CaptureStatus.isActive(): Boolean = when (this) {
     is CaptureStatus.Capturing, is CaptureStatus.NoCapturableAudio -> true
     else -> false
 }
@@ -164,15 +127,15 @@ internal fun CaptureStatus.description(): String = when (this) {
 private fun com.sonimesh.sender.capture.CaptureFormat.description(): String =
     "${sampleRateHz} Hz, ${channels} channels, ${bufferSizeBytes} byte buffer (platform minimum ${minimumBufferBytes})"
 
-private fun CaptureEvidenceSnapshot.description(): String {
+internal fun com.sonimesh.sender.capture.CaptureEvidenceSnapshot.description(): String {
     val latestRead = lastReadCompletionOffsetMillis?.let { offset ->
         " Last successful read at +${formatDuration(offset)}."
     }.orEmpty()
     return "Observed ${capturedFrames} frames over ${formatDuration(captureDurationMillis)}, ${silentReads} silent reads, ${readErrors} read errors.$latestRead"
 }
 
-private fun CaptureEvidenceSnapshot.hasObservations(): Boolean =
+internal fun com.sonimesh.sender.capture.CaptureEvidenceSnapshot.hasObservations(): Boolean =
     captureDurationMillis != 0L || capturedFrames != 0L || silentReads != 0L || readErrors != 0L
 
-private fun formatDuration(durationMillis: Long): String =
+internal fun formatDuration(durationMillis: Long): String =
     "${durationMillis / 1_000}.${(durationMillis % 1_000) / 100} s"
