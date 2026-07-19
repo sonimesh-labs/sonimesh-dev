@@ -29,15 +29,15 @@ behavior matches the lifecycle invariant, not that audio is necessarily present.
 
 | Scenario | Required observation | Result |
 | --- | --- | --- |
-| Microphone permission denied | Capture does not start; no service retains consent data | Not run |
+| Microphone permission denied | Capture does not start; no service retains consent data | Observed |
 | Projection consent cancelled | Capture does not start; UI reports cancellation | Observed |
 | Allowed media source | Record actual format, buffer, frames, and silent periods | Observed nonzero signal; source not recorded |
 | Idle or silent source | Keep running and report non-definitive no-audio wording | Observed; no source-specific conclusion |
 | Protected or policy-limited source | Do not identify a source-specific denial | Not run |
-| Lock screen/background | Service and notification remain observable; record power behavior | Partial: background observed; lock/power not run |
-| Notification stop | Same teardown as projection revocation; resources are released | Not run; action registration observed only |
-| Projection `onStop()` | AudioRecord, projection, and capture thread are retired once | Not run |
-| Process recreation | No consent token or capture session is reused | Not run |
+| Lock screen/background | Service and notification remain observable; record power behavior | Partial: lock and background observed; power not recorded |
+| Notification stop | Same teardown as projection revocation; resources are released | Observed |
+| Projection `onStop()` | AudioRecord, projection, and capture thread are retired once | Observed |
+| Process recreation | No consent token or capture session is reused | Observed |
 
 ## Physical Run: Vivo PD2309, 2026-07-19
 
@@ -91,6 +91,44 @@ Cancelling that page returned the UI to `Capture failed: Screen capture consent
 was not granted`. Android reported neither an active SoniMesh service nor an
 active `MediaProjection` entry afterward. No capture session was started.
 
+### Lifecycle Observations
+
+The microphone permission was revoked for the debug package before the operator
+requested capture. The system permission prompt was denied by the operator. The
+app then displayed `Capture failed: Microphone permission was not granted`, with
+no active SoniMesh service or `MediaProjection` entry. The original permission
+state was restored after this test.
+
+For a locked-screen run, the initial snapshot was 23.1 s, 1,106,944 frames,
+2,162 silent reads, and zero read errors. After at least 30 seconds locked and
+subsequent unlock, the same session reported 114.7 s, 5,506,048 frames, 10,754
+silent reads, and zero read errors. The foreground service, application
+notification, and active `MediaProjection` entry remained present. This run did
+not measure CPU, memory, thermal state, or battery impact.
+
+The operator used the `Stop capture` action from the SoniMesh notification. The
+UI reported `Capture stopped: user requested` with 7,613,440 frames over
+158.7 s and zero read errors. The service, notification, and
+`MediaProjection` entry were all absent afterward.
+
+The operator separately stopped capture through the Android system
+recording/sharing control. The UI reported `Capture stopped: projection
+revoked`, and the service and `MediaProjection` entry were absent afterward.
+The first observation recorded one negative `AudioRecord.read` result while
+teardown was already active. This exposed a diagnostic race: the reader counted
+the platform wake-up as an error after revocation. The capture service now
+suppresses a negative read after its teardown gate is set. A follow-up
+system-stop observation reported 129,024 frames over 3.7 s, 252 silent reads,
+and zero read errors while retaining the same `projection revoked` terminal
+state.
+
+For process recreation, an active 32.8 s capture session was terminated with
+`adb shell am force-stop com.sonimesh.sender`. Android then reported no active
+service or `MediaProjection` entry. After the operator reopened the app, it
+showed `Ready to request playback capture consent` with no restored evidence
+counters. This verifies that the observed process recreation does not resume the
+prior capture session; it does not inspect any platform-private token storage.
+
 ### Supplemental Silent Observation
 
 An earlier capture-only session on the same device produced 1,696,768 frames
@@ -100,11 +138,9 @@ condition only; it does not identify why any particular application was silent.
 
 ### Not Yet Measured
 
-- lock-screen continuation, CPU, memory, thermal behavior, and battery impact;
-- microphone-permission denial and projection-consent cancellation;
+- CPU, memory, thermal behavior, and battery impact during an extended
+  locked-screen run;
 - protected or policy-limited playback behavior;
-- notification action dispatch and `MediaProjection.Callback.onStop()`;
-- process recreation and any attempt to reuse stale consent; and
 - physical or end-to-end latency.
 
 ## Evidence fields
