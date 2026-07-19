@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { Headphones } from '@lucide/vue'
+import { computed } from 'vue'
+import { Check, Headphones } from '@lucide/vue'
 
 import type { OutputDevice } from '../types'
 
-defineProps<{
+const props = defineProps<{
   devices: OutputDevice[]
   selectedId: string | null
   busy: boolean
@@ -12,6 +13,8 @@ defineProps<{
 const emit = defineEmits<{
   select: [id: string]
 }>()
+
+const selectedDevice = computed(() => props.devices.find((device) => device.id === props.selectedId) ?? null)
 </script>
 
 <template>
@@ -29,8 +32,9 @@ const emit = defineEmits<{
         {{ device.label }}{{ device.isDefault ? ' (default)' : '' }}
       </option>
     </select>
-    <p v-if="devices.find((device) => device.id === selectedId)" class="hint">
-      {{ devices.find((device) => device.id === selectedId)?.sampleRateHz.toLocaleString() }} Hz · {{ devices.find((device) => device.id === selectedId)?.channels }} channels
+    <p v-if="selectedDevice" class="hint device-summary">
+      <Check :size="15" aria-hidden="true" />
+      {{ selectedDevice.sampleRateHz.toLocaleString() }} Hz · {{ selectedDevice.channels }} channels
     </p>
   </section>
 </template>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { MonitorSpeaker, RefreshCw, SlidersHorizontal } from '@lucide/vue'
+import { Activity, AudioLines, RefreshCw, SlidersHorizontal } from '@lucide/vue'
 
 import DiagnosticsPanel from './components/DiagnosticsPanel.vue'
 import OutputPanel from './components/OutputPanel.vue'
@@ -13,23 +13,33 @@ const { busy, createPairing, error, expirePairing, refresh, selectOutput, snapsh
 <template>
   <main class="app-shell">
     <aside class="sidebar">
-      <div class="brand"><MonitorSpeaker :size="23" aria-hidden="true" /><span>SoniMesh</span></div>
+      <div class="brand"><AudioLines :size="23" aria-hidden="true" /><span>SoniMesh</span></div>
       <nav aria-label="Application sections">
         <a class="nav-item nav-active" href="#session"><SlidersHorizontal :size="18" aria-hidden="true" />Receiver</a>
-        <a class="nav-item" href="#diagnostics"><RefreshCw :size="18" aria-hidden="true" />Diagnostics</a>
+        <a class="nav-item" href="#diagnostics"><Activity :size="18" aria-hidden="true" />Diagnostics</a>
       </nav>
-      <p v-if="snapshot?.previewAdapter" class="adapter-note">Preview adapter</p>
+      <div class="sidebar-footer">
+        <span class="sidebar-dot" aria-hidden="true"></span>
+        <p v-if="snapshot?.previewAdapter">Preview adapter</p>
+        <p v-else>Control bridge</p>
+      </div>
     </aside>
 
     <div class="content-shell">
       <header class="topbar">
         <div>
-          <p class="eyebrow">Desktop control</p>
-          <h1>Receiver</h1>
+          <p class="eyebrow">Desktop receiver</p>
+          <h1>Listen without the noise.</h1>
+          <p class="topbar-copy">One stream, one output, low-rate control.</p>
         </div>
-        <button class="icon-action refresh" title="Refresh state" :disabled="busy" @click="refresh">
-          <RefreshCw :size="18" :class="{ spinning: busy }" aria-hidden="true" />
-        </button>
+        <div class="topbar-actions">
+          <span v-if="snapshot" class="session-chip" :class="`chip-${snapshot.session}`">
+            <span class="chip-dot" aria-hidden="true"></span>{{ snapshot.session }}
+          </span>
+          <button class="icon-action refresh" title="Refresh state" aria-label="Refresh state" :disabled="busy" @click="refresh">
+            <RefreshCw :size="18" :class="{ spinning: busy }" aria-hidden="true" />
+          </button>
+        </div>
       </header>
 
       <p v-if="error" class="command-error" role="alert">{{ error }}</p>
