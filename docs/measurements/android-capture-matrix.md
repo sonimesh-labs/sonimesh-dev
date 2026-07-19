@@ -30,7 +30,7 @@ behavior matches the lifecycle invariant, not that audio is necessarily present.
 | Scenario | Required observation | Result |
 | --- | --- | --- |
 | Microphone permission denied | Capture does not start; no service retains consent data | Not run |
-| Projection consent cancelled | Capture does not start; UI reports cancellation | Not run |
+| Projection consent cancelled | Capture does not start; UI reports cancellation | Observed |
 | Allowed media source | Record actual format, buffer, frames, and silent periods | Observed nonzero signal; source not recorded |
 | Idle or silent source | Keep running and report non-definitive no-audio wording | Observed; no source-specific conclusion |
 | Protected or policy-limited source | Do not identify a source-specific denial | Not run |
@@ -83,6 +83,13 @@ The app's explicit Stop control retired both the service and the active
 notification registered a `Stop capture` action. Vivo's system capture notice
 hid that action from the automation hierarchy, so notification-UI dispatch was
 not exercised in this run.
+
+### Cancelled Consent Observation
+
+From a stopped state, the app displayed the system screen-capture consent page.
+Cancelling that page returned the UI to `Capture failed: Screen capture consent
+was not granted`. Android reported neither an active SoniMesh service nor an
+active `MediaProjection` entry afterward. No capture session was started.
 
 ### Supplemental Silent Observation
 
