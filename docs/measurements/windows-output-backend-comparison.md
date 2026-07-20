@@ -52,6 +52,20 @@ For the repeated start/stop baseline, run:
     cargo run -p sonimesh-platform --example output_lifecycle_smoke --features cpal-output
     cargo run -p windows-wasapi-prototype --bin wasapi_lifecycle_smoke
 
+Both commands default to five cycles with a 250 ms active stream. For an
+explicit lifecycle experiment, set the same bounded values for both backends:
+
+    $env:SONIMESH_OUTPUT_LIFECYCLE_CYCLES = "500"
+    $env:SONIMESH_OUTPUT_LIFECYCLE_ACTIVE_MILLIS = "250"
+    cargo run -p sonimesh-platform --example output_lifecycle_smoke --features cpal-output
+    cargo run -p windows-wasapi-prototype --bin wasapi_lifecycle_smoke
+
+`SONIMESH_OUTPUT_LIFECYCLE_CYCLES` accepts 1 through 500 and
+`SONIMESH_OUTPUT_LIFECYCLE_ACTIVE_MILLIS` accepts 1 through 1,000. Retain every
+cycle line or a redacted aggregation derived from every line. This exercises
+only repeated output start/stop in the control domain. It is not a network
+connection-loop result, device-removal evidence, or sleep/wake recovery.
+
 For a manual default-role-change and explicit recreation experiment, run one
 backend at a time, switch the Windows default render endpoint during the wait,
 then retain both the pre-stop and recovered status lines:

@@ -105,6 +105,15 @@ or recreate a stream from the callback. The commands redact endpoint identifiers
 and require an observed endpoint change by default; a local command check may
 explicitly disable that assertion but cannot count as default-role evidence.
 
+The backend-specific repeated start/stop commands default to five 250 ms silent
+cycles. For an explicit lifecycle experiment, each accepts
+`SONIMESH_OUTPUT_LIFECYCLE_CYCLES` from 1 through 500 and
+`SONIMESH_OUTPUT_LIFECYCLE_ACTIVE_MILLIS` from 1 through 1,000. The values are
+control-domain timing only; they do not change endpoint selection, requested
+callback frames, source capacity, or callback behavior. A 500-cycle result
+records output-stream recreation only. It is not a 500-connection network
+result and does not establish device-removal or sleep/wake recovery.
+
 Device-removal and sleep/wake experiments use the same control-domain recovery
 shape, but are recorded as separate HIL scenarios. For a current-default
 experiment, the operator starts the silent stream, performs the physical

@@ -3,26 +3,27 @@
 #[cfg(all(windows, feature = "cpal-output"))]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     use std::thread;
-    use std::time::Duration;
 
     use sonimesh_platform::{AudioOutput, CpalOutput, OutputHealth};
 
-    const CYCLES: u32 = 5;
-    const ACTIVE_DURATION: Duration = Duration::from_millis(250);
-
+    let experiment = experiment_config()?;
     let mut output = CpalOutput::new();
     let probe = output.default_device_probe()?;
     let fixed_config = probe.output_config(Some(480), 8_192)?;
 
-    println!("cycles: {CYCLES}");
+    println!("cycles: {}", experiment.cycles);
+    println!(
+        "active duration (ms): {}",
+        experiment.active_duration.as_millis()
+    );
     println!(
         "default format: {} Hz, {} channels, {}",
         probe.sample_rate_hz, probe.channels, probe.backend_sample_format
     );
 
-    for cycle in 1..=CYCLES {
+    for cycle in 1..=experiment.cycles {
         let config = start_with_fixed_or_default(&mut output, fixed_config)?;
-        thread::sleep(ACTIVE_DURATION);
+        thread::sleep(experiment.active_duration);
         let status = output.status();
         let health = output.health();
         output.stop();
@@ -54,6 +55,92 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[cfg(all(windows, feature = "cpal-output"))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct ExperimentConfig {
+    cycles: u32,
+    active_duration: std::time::Duration,
+}
+
+#[cfg(all(windows, feature = "cpal-output"))]
+fn experiment_config() -> Result<ExperimentConfig, std::io::Error> {
+    const DEFAULT_CYCLES: u32 = 5;
+    const MAXIMUM_CYCLES: u32 = 500;
+    const DEFAULT_ACTIVE_MILLIS: u64 = 250;
+    const MAXIMUM_ACTIVE_MILLIS: u64 = 1_000;
+    Ok(ExperimentConfig {
+        cycles: environment_u32(
+            "SONIMESH_OUTPUT_LIFECYCLE_CYCLES",
+            DEFAULT_CYCLES,
+            MAXIMUM_CYCLES,
+        )?,
+        active_duration: std::time::Duration::from_millis(environment_u64(
+            "SONIMESH_OUTPUT_LIFECYCLE_ACTIVE_MILLIS",
+            DEFAULT_ACTIVE_MILLIS,
+            MAXIMUM_ACTIVE_MILLIS,
+        )?),
+    })
+}
+
+#[cfg(all(windows, feature = "cpal-output"))]
+fn environment_u32(name: &str, default: u32, maximum: u32) -> Result<u32, std::io::Error> {
+    let value = match std::env::var(name) {
+        Ok(value) => value,
+        Err(std::env::VarError::NotPresent) => return Ok(default),
+        Err(std::env::VarError::NotUnicode(_)) => {
+            return invalid_input(name, "must be valid Unicode");
+        }
+    };
+    parse_u32(&value, name, maximum)
+}
+
+#[cfg(all(windows, feature = "cpal-output"))]
+fn environment_u64(name: &str, default: u64, maximum: u64) -> Result<u64, std::io::Error> {
+    let value = match std::env::var(name) {
+        Ok(value) => value,
+        Err(std::env::VarError::NotPresent) => return Ok(default),
+        Err(std::env::VarError::NotUnicode(_)) => {
+            return invalid_input(name, "must be valid Unicode");
+        }
+    };
+    parse_u64(&value, name, maximum)
+}
+
+#[cfg(all(windows, feature = "cpal-output"))]
+fn parse_u32(value: &str, name: &str, maximum: u32) -> Result<u32, std::io::Error> {
+    let parsed = value
+        .parse::<u32>()
+        .map_err(|_| invalid_input_error(name, "must be numeric"))?;
+    if !(1..=maximum).contains(&parsed) {
+        return invalid_input(name, "is outside the accepted bound");
+    }
+    Ok(parsed)
+}
+
+#[cfg(all(windows, feature = "cpal-output"))]
+fn parse_u64(value: &str, name: &str, maximum: u64) -> Result<u64, std::io::Error> {
+    let parsed = value
+        .parse::<u64>()
+        .map_err(|_| invalid_input_error(name, "must be numeric"))?;
+    if !(1..=maximum).contains(&parsed) {
+        return invalid_input(name, "is outside the accepted bound");
+    }
+    Ok(parsed)
+}
+
+#[cfg(all(windows, feature = "cpal-output"))]
+fn invalid_input<T>(name: &str, message: &str) -> Result<T, std::io::Error> {
+    Err(invalid_input_error(name, message))
+}
+
+#[cfg(all(windows, feature = "cpal-output"))]
+fn invalid_input_error(name: &str, message: &str) -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
+        format!("{name} {message}"),
+    )
+}
+
+#[cfg(all(windows, feature = "cpal-output"))]
 fn start_with_fixed_or_default(
     output: &mut sonimesh_platform::CpalOutput,
     fixed_config: sonimesh_platform::OutputConfig,
@@ -79,6 +166,23 @@ fn start_with_fixed_or_default(
             output.start(None, default_config, Box::new(Silence))?;
             Ok(default_config)
         }
+    }
+}
+
+#[cfg(all(test, windows, feature = "cpal-output"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lifecycle_parameter_bounds_are_explicit() {
+        assert_eq!(parse_u32("1", "cycles", 500).unwrap(), 1);
+        assert_eq!(parse_u32("500", "cycles", 500).unwrap(), 500);
+        assert!(parse_u32("0", "cycles", 500).is_err());
+        assert!(parse_u32("501", "cycles", 500).is_err());
+        assert_eq!(parse_u64("1", "duration", 1_000).unwrap(), 1);
+        assert_eq!(parse_u64("1000", "duration", 1_000).unwrap(), 1_000);
+        assert!(parse_u64("0", "duration", 1_000).is_err());
+        assert!(parse_u64("1001", "duration", 1_000).is_err());
     }
 }
 
