@@ -3,7 +3,6 @@
 #[cfg(all(windows, feature = "cpal-output"))]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     use std::thread;
-    use std::time::Duration;
 
     use sonimesh_platform::{AudioOutput, CpalOutput, OutputConfig, RenderSource};
 
@@ -35,10 +34,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             default_config
         }
     };
-    thread::sleep(Duration::from_secs(2));
+    let active_duration = smoke_duration()?;
+    thread::sleep(active_duration);
     let status = output.status();
     output.stop();
 
+    println!("active duration (s): {}", active_duration.as_secs());
     println!(
         "requested frames: {}",
         config
@@ -76,6 +77,58 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("silent output smoke test did not remain active".into());
     }
     Ok(())
+}
+
+#[cfg(all(windows, feature = "cpal-output"))]
+fn smoke_duration() -> Result<std::time::Duration, std::io::Error> {
+    const DEFAULT_SECONDS: u64 = 2;
+    const MAXIMUM_SECONDS: u64 = 28_800;
+
+    let seconds = match std::env::var("SONIMESH_OUTPUT_SMOKE_SECONDS") {
+        Ok(value) => smoke_duration_from_value(&value)?.as_secs(),
+        Err(std::env::VarError::NotPresent) => DEFAULT_SECONDS,
+        Err(std::env::VarError::NotUnicode(_)) => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "SONIMESH_OUTPUT_SMOKE_SECONDS must be valid Unicode",
+            ));
+        }
+    };
+    debug_assert!(seconds <= MAXIMUM_SECONDS);
+    Ok(std::time::Duration::from_secs(seconds))
+}
+
+#[cfg(all(windows, feature = "cpal-output"))]
+fn smoke_duration_from_value(value: &str) -> Result<std::time::Duration, std::io::Error> {
+    const MAXIMUM_SECONDS: u64 = 28_800;
+
+    let seconds = value.parse::<u64>().map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "SONIMESH_OUTPUT_SMOKE_SECONDS must be an integer from 1 through 28800",
+        )
+    })?;
+    if !(1..=MAXIMUM_SECONDS).contains(&seconds) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "SONIMESH_OUTPUT_SMOKE_SECONDS must be an integer from 1 through 28800",
+        ));
+    }
+    Ok(std::time::Duration::from_secs(seconds))
+}
+
+#[cfg(all(test, windows, feature = "cpal-output"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn smoke_duration_bounds_are_explicit() {
+        assert!(smoke_duration_from_value("1").is_ok());
+        assert!(smoke_duration_from_value("28800").is_ok());
+        assert!(smoke_duration_from_value("0").is_err());
+        assert!(smoke_duration_from_value("28801").is_err());
+        assert!(smoke_duration_from_value("ten").is_err());
+    }
 }
 
 #[cfg(not(all(windows, feature = "cpal-output")))]

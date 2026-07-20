@@ -80,6 +80,13 @@ share implementation details with the CPAL adapter.
   for each backend; they report faults but do not attempt callback-thread recovery
   or establish device-removal compatibility.
 
+The matching silent-smoke commands run for two seconds by default. For an
+explicit long-duration experiment, each accepts `SONIMESH_OUTPUT_SMOKE_SECONDS`
+from 1 through 28,800 seconds (eight hours). The selected duration is a
+control-domain parameter only; it does not alter the requested callback frames,
+maximum source capacity, endpoint selection, or callback behavior. Results must
+record the actual duration and retain capacity faults and backend errors.
+
 The direct tool is not a selected backend and must not be linked by the desktop
 app. Its evidence record may compare only like-for-like endpoint, mix format,
 and requested duration configurations.

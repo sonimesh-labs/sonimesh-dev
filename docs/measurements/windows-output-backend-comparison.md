@@ -22,6 +22,16 @@ against a different endpoint, role, format, or callback request.
     cargo run -p sonimesh-platform --example output_smoke --features cpal-output
     cargo run -p windows-wasapi-prototype --bin wasapi_silence_smoke
 
+Both commands default to two seconds. Set the same bounded duration for an
+explicit long silent run; it changes only the control-domain wait interval:
+
+    $env:SONIMESH_OUTPUT_SMOKE_SECONDS = "900"
+    cargo run -p sonimesh-platform --example output_smoke --features cpal-output
+    cargo run -p windows-wasapi-prototype --bin wasapi_silence_smoke
+
+The accepted range is 1 through 28,800 seconds. Record the selected duration
+and do not compare runs with different durations as equivalent scheduling data.
+
 For the repeated start/stop baseline, run:
 
     cargo run -p sonimesh-platform --example output_lifecycle_smoke --features cpal-output
