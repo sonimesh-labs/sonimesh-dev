@@ -38,6 +38,7 @@ jobs:
           python tools/check_output_soak_log.py --self-test
           python tools/check_output_realtime_boundary.py --self-test
           python tools/check_output_realtime_boundary.py
+          python tools/check_output_lifecycle_log.py --self-test
       - name: Check formatting
         if: runner.os == 'Linux'
         run: cargo fmt --all -- --check

@@ -22,6 +22,7 @@ python tools/check_workspace_boundaries.py
 python tools/check_android_capture_boundary.py
 python tools/check_output_soak_log.py --self-test
 python tools/check_output_realtime_boundary.py
+python tools/check_output_lifecycle_log.py --self-test
 ~~~
 
 On Windows, the read-only CPAL feasibility probe can enumerate output devices

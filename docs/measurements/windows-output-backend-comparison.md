@@ -77,6 +77,18 @@ cycle line or a redacted aggregation derived from every line. This exercises
 only repeated output start/stop in the control domain. It is not a network
 connection-loop result, device-removal evidence, or sleep/wake recovery.
 
+Before recording a raw completed transcript, verify its declared configuration
+and every cycle line:
+
+    python tools/check_output_lifecycle_log.py --backend cpal output/cpal-output-lifecycle.log
+    python tools/check_output_lifecycle_log.py --backend wasapi output/wasapi-output-lifecycle.log
+
+The verifier requires a contiguous status line for every configured cycle,
+positive observed callback/render work, valid observed frame bounds, zero
+faults/errors, and `Healthy` status. It accepts either the fixed request or an
+explicit per-cycle default-request fallback, and it does not make a lifecycle
+or latency claim beyond transcript integrity.
+
 For a manual default-role-change and explicit recreation experiment, run one
 backend at a time, switch the Windows default render endpoint during the wait,
 then retain both the pre-stop and recovered status lines:

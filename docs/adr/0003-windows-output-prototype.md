@@ -111,6 +111,15 @@ source-level regression guard for the reviewed adapter-owned code, not a proof
 of allocation behavior in CPAL, Windows APIs, or arbitrary `RenderSource`
 implementations; those still require code review and hardware evidence.
 
+`tools/check_output_lifecycle_log.py` validates a retained completed CPAL or
+direct-WASAPI lifecycle transcript against its declared bounded cycle count and
+active duration. It requires one contiguous healthy status per cycle with a
+positive observed callback/render count and zero capacity faults/errors. It
+retains each cycle's actual request and observed frame sizes, without assuming
+that a fixed request was accepted. It validates transcript completeness only;
+it does not prove device removal, default-role change, sleep/wake recovery,
+network reconnects, or latency.
+
 Separate default-role recovery commands exercise one manual lifecycle sequence:
 start a default-endpoint silent stream, wait for the operator to change the
 Windows default render role, capture the old stream's status, stop it in the
