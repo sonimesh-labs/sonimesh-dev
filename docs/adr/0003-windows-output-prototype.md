@@ -122,6 +122,16 @@ that a fixed request was accepted. It validates transcript completeness only;
 it does not prove device removal, default-role change, sleep/wake recovery,
 network reconnects, or latency.
 
+`tools/check_output_recovery_log.py` validates retained default-role and CPAL
+pinned-device recovery transcripts. A default-role record must retain both
+healthy status stages and explicitly report `require default change: true` and
+`default changed: true`; a no-change command check is rejected as evidence. A
+pinned record must retain the pre-stop observation and distinguish a healthy
+fresh restart from `pinned_device_unavailable`. The checker validates command
+transcript integrity only. It does not establish that an operator performed a
+physical removal or power transition, nor that an old stream fault proves a
+backend recovery capability.
+
 Separate default-role recovery commands exercise one manual lifecycle sequence:
 start a default-endpoint silent stream, wait for the operator to change the
 Windows default render role, capture the old stream's status, stop it in the

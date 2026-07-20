@@ -104,6 +104,15 @@ The commands require an endpoint change by default. They accept
 `SONIMESH_OUTPUT_REQUIRE_DEFAULT_CHANGE=false` is only for command validation;
 it must never be recorded as a successful default-role transition.
 
+Validate a completed physical default-role transcript before recording it:
+
+    python tools/check_output_recovery_log.py --scenario default --backend cpal output/cpal-default-recovery.log
+    python tools/check_output_recovery_log.py --scenario default --backend wasapi output/wasapi-default-recovery.log
+
+The verifier requires two healthy status stages and the explicit values
+`require default change: true` and `default changed: true`. It rejects a
+no-change command check as default-role evidence.
+
 For a CPAL pinned-device removal experiment, first obtain the opaque identifier
 from the local `output_probe` command. Do not paste that identifier into an
 exported record. Start the dedicated command with the identifier only in the
@@ -119,6 +128,15 @@ start. A fault on the old stream is an observation, not a command failure; only
 the fresh stream must be healthy for the restarted result. The unavailable
 result is also an observation and is not a command failure; retain either result
 with the physical removal event and any old-stream error.
+
+Validate a completed CPAL pinned-device transcript before recording it:
+
+    python tools/check_output_recovery_log.py --scenario pinned --backend cpal output/cpal-pinned-recovery.log
+
+The verifier requires the pre-stop observation and accepts exactly one outcome:
+`recovery_result=pinned_device_unavailable`, or a healthy recovered status with
+`pre_stop_healthy=true` and `recovery_result=pinned_device_restarted`. The
+unavailable result remains a negative observation, not proof of recovery.
 
 ## Manual device and power recovery procedure
 
