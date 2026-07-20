@@ -13,6 +13,8 @@ from pathlib import Path
 
 
 MAXIMUM_SOAK_SECONDS = 28_800
+MINIMUM_CALLBACK_FRAMES = 16
+MAXIMUM_CALLBACK_FRAMES = 8_192
 HEADER_PATTERN = re.compile(r"^(?P<name>soak duration|report interval) \(s\): (?P<value>\d+)$")
 MAXIMUM_FRAMES_PATTERN = re.compile(r"^maximum frames: (?P<value>\d+)$")
 REQUEST_PATTERN = re.compile(r"^requested frames: (?P<value>default|\d+)$")
@@ -200,10 +202,12 @@ def validate_report(lines: list[str], backend: str) -> SoakReport:
         raise ValueError("soak duration is outside the accepted command bound")
     if not 1 <= interval <= duration:
         raise ValueError("report interval is outside the accepted command bound")
-    if maximum_frames <= 0:
-        raise ValueError("maximum frames header must be positive")
-    if requested_frames != "default" and int(requested_frames) <= 0:
-        raise ValueError("requested frames header must be default or positive")
+    if not MINIMUM_CALLBACK_FRAMES <= maximum_frames <= MAXIMUM_CALLBACK_FRAMES:
+        raise ValueError("maximum frames header is outside the OutputConfig bound")
+    if requested_frames != "default" and not (
+        MINIMUM_CALLBACK_FRAMES <= int(requested_frames) <= MAXIMUM_CALLBACK_FRAMES
+    ):
+        raise ValueError("requested frames header is outside the OutputConfig bound")
     if requested_frames != "default" and int(requested_frames) > maximum_frames:
         raise ValueError("requested frames header exceeds declared maximum frames")
     if final_status is None:
@@ -443,6 +447,18 @@ class OutputSoakLogTests(unittest.TestCase):
         ]
         with self.assertRaisesRegex(ValueError, "requested frames header exceeds"):
             validate_report(invalid_request, "cpal")
+
+        invalid_output_bounds = [
+            "soak duration (s): 5",
+            "report interval (s): 5",
+            "default format: 48000 Hz, 8 channels, F32",
+            "requested frames: 15",
+            "maximum frames: 15",
+            cpal_status(5, 500),
+            f"final {cpal_status(5, 500)}",
+        ]
+        with self.assertRaisesRegex(ValueError, "maximum frames header is outside"):
+            validate_report(invalid_output_bounds, "cpal")
 
     def test_rejects_invalid_wasapi_endpoint_priming_observation(self) -> None:
         transcript = [

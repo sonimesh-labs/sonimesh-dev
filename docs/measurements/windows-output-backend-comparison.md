@@ -57,11 +57,12 @@ number of periodic snapshots, strictly advancing periodic callback/render and
 local-offset observations, nondecreasing maximum observations, zero capacity
 faults/errors, one final healthy status, and retained format/request/capacity
 headers. It rejects a numeric request or observed quantum above the declared
-maximum-frame bound. A direct-WASAPI transcript must retain equal positive
-endpoint-buffer and priming-frame observations. The immediate final snapshot
-may equal the last periodic snapshot. It does not inspect the callback,
-establish physical latency, or substitute for a manual device, default-role, or
-power-transition scenario.
+maximum-frame bound, and numeric request/maximum headers outside the shared
+16--8,192 `OutputConfig` bounds. A direct-WASAPI transcript must retain equal
+positive endpoint-buffer and priming-frame observations. The immediate final
+snapshot may equal the last periodic snapshot. It does not inspect the
+callback, establish physical latency, or substitute for a manual device,
+default-role, or power-transition scenario.
 
 For the repeated start/stop baseline, run:
 

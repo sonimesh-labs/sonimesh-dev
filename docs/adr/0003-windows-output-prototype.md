@@ -105,7 +105,8 @@ time, callback/render count, and local offset; the immediate final snapshot may
 equal the final periodic observation. It also requires the retained default
 format, actual request, and declared maximum-frame headers, rejects a numeric
 request above that declared bound, and rejects an observed quantum above the
-declared bound. A direct-WASAPI transcript must also retain positive endpoint
+declared bound. Its numeric frame headers must remain within the shared
+16--8,192 `OutputConfig` bounds. A direct-WASAPI transcript must also retain positive endpoint
 and priming frame counts that agree with its single full-buffer silent prime.
 It is a control-domain
 evidence-integrity check: it neither observes the audio callback directly nor
