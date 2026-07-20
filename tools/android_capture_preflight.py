@@ -81,7 +81,12 @@ def collect_record(
     missing = [label for label, value in values.items() if not value]
     if missing:
         raise RuntimeError(f"connected device did not report required fields: {', '.join(missing)}")
-    package_path = run_adb(adb, serial, ["shell", "cmd", "package", "path", PACKAGE_NAME], runner)
+    installed_packages = run_adb(
+        adb,
+        serial,
+        ["shell", "pm", "list", "packages", "--user", "0", PACKAGE_NAME],
+        runner,
+    )
     return DeviceRecord(
         manufacturer=values["Manufacturer"],
         model=values["Model"],
@@ -89,7 +94,7 @@ def collect_record(
         android_api=values["Android API"],
         build_fingerprint=values["Build fingerprint"],
         abi=values["ABI"],
-        capture_package_installed=package_path.startswith("package:"),
+        capture_package_installed=f"package:{PACKAGE_NAME}" in installed_packages.splitlines(),
     )
 
 
@@ -134,8 +139,10 @@ class AndroidCapturePreflightTests(unittest.TestCase):
         }
 
         def runner(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+            if command[-6:] == ["pm", "list", "packages", "--user", "0", PACKAGE_NAME]:
+                return subprocess.CompletedProcess(command, 0, f"package:{PACKAGE_NAME}\n", "")
             property_name = command[-1]
-            output = values.get(property_name, "package:/data/app/example/base.apk")
+            output = values[property_name]
             return subprocess.CompletedProcess(command, 0, output, "")
 
         record = collect_record("adb", "private-serial", runner)
@@ -157,6 +164,24 @@ class AndroidCapturePreflightTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "device offline") as failure:
             collect_record("adb", "private-serial", failed_runner)
         self.assertNotIn("private-serial", str(failure.exception))
+
+    def test_reports_capture_package_as_not_installed_without_failing_preflight(self) -> None:
+        values = {
+            "ro.product.manufacturer": "Example OEM",
+            "ro.product.model": "Model X",
+            "ro.build.version.release": "15",
+            "ro.build.version.sdk": "35",
+            "ro.build.fingerprint": "example/model/build:15/ABC/123:userdebug/test-keys",
+            "ro.product.cpu.abi": "arm64-v8a",
+        }
+
+        def runner(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+            property_name = command[-1]
+            return subprocess.CompletedProcess(command, 0, values.get(property_name, ""), "")
+
+        record = collect_record("adb", "private-serial", runner)
+        self.assertFalse(record.capture_package_installed)
+        self.assertIn("not installed", format_record(record))
 
     def test_uses_sdk_adb_only_when_present(self) -> None:
         explicit = Path("C:/tools/adb.exe")
