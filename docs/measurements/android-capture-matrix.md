@@ -240,6 +240,14 @@ full battery throughout, so this observation cannot establish discharge rate,
 power consumption, thermal stability, or a sustained memory bound. No PCM,
 projection token, source name, or raw ADB serial was retained.
 
+After the operator ended this capture session, Android reported no active
+`CaptureService`, no SoniMesh MediaProjection entry, and no active SoniMesh
+foreground notification record. The remaining application process was in
+background state (`curProcState=16`) with no foreground-service marker. This
+confirms resource retirement after the locked-screen observation, but it does
+not identify the operator's stop entry point or replace the separate
+notification-stop and projection-revocation scenarios above.
+
 The operator used the `Stop capture` action from the SoniMesh notification. The
 UI reported `Capture stopped: user requested` with 7,613,440 frames over
 158.7 s and zero read errors. The service, notification, and
