@@ -28,13 +28,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         output.stop();
 
         println!(
-            "cycle {cycle}: request={}, callbacks={}, latest_frames={}, max_frames={}, max_gap_ns={}, oversized={}, errors={}, health={health:?}",
+            "cycle {cycle}: request={}, callbacks={}, latest_frames={}, max_frames={}, latest_offset_ns={}, max_gap_ns={}, oversized={}, errors={}, health={health:?}",
             config
                 .requested_callback_frames
                 .map_or_else(|| "default".to_owned(), |frames| frames.to_string()),
             status.callback_count,
             status.last_callback_frames,
             status.maximum_callback_frames,
+            status.last_callback_offset_ns,
             status.maximum_callback_gap_ns,
             status.oversized_callbacks,
             status.stream_errors,

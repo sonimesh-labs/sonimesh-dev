@@ -62,6 +62,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         status.maximum_callback_frames
     );
     println!(
+        "latest callback offset (ns): {}",
+        status.last_callback_offset_ns
+    );
+    println!(
         "largest callback gap (ns): {}",
         status.maximum_callback_gap_ns
     );

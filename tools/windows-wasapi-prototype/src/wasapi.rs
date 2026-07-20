@@ -131,12 +131,12 @@ impl AudioOutput for WasapiOutput {
             .name("sonimesh-wasapi-render".to_owned())
             .spawn(move || {
                 run_worker(
-                    requested_id,
+                    requested_id.as_deref(),
                     config,
                     source,
-                    worker_status,
+                    worker_status.as_ref(),
                     worker_control,
-                    ready_tx,
+                    &ready_tx,
                 );
             })
             .map_err(|error| OutputError::Backend(error.to_string()))?;
@@ -221,7 +221,8 @@ impl ComApartment {
     fn initialize() -> Result<Self, OutputError> {
         // The direct tool confines COM to short-lived control threads or its
         // dedicated render worker, so MTA initialization cannot leak into app UI.
-        unsafe { CoInitializeEx(None, COINIT_MULTITHREADED).ok() }.map_err(backend_error)?;
+        unsafe { CoInitializeEx(None, COINIT_MULTITHREADED).ok() }
+            .map_err(|error| backend_error(&error))?;
         Ok(Self)
     }
 }
@@ -241,8 +242,8 @@ struct RegisteredEvent {
 impl RegisteredEvent {
     fn create(control: Arc<WorkerControl>) -> Result<Self, OutputError> {
         // Anonymous auto-reset event is owned solely by the render worker.
-        let handle =
-            unsafe { CreateEventW(None, false, false, PCWSTR::null()) }.map_err(backend_error)?;
+        let handle = unsafe { CreateEventW(None, false, false, PCWSTR::null()) }
+            .map_err(|error| backend_error(&error))?;
         control.register_wake_handle(handle);
         Ok(Self { handle, control })
     }
@@ -327,6 +328,7 @@ impl RenderStream {
         }
     }
 
+    #[allow(clippy::cast_ptr_alignment)]
     fn render_available(
         &mut self,
         source: &mut dyn RenderSource,
@@ -381,31 +383,26 @@ struct MixFormat {
 }
 
 fn run_worker(
-    requested_id: Option<String>,
+    requested_id: Option<&str>,
     config: OutputConfig,
     mut source: Box<dyn RenderSource>,
-    status: Arc<WasapiStatus>,
+    status: &WasapiStatus,
     control: Arc<WorkerControl>,
-    ready_tx: mpsc::SyncSender<Result<(), OutputError>>,
+    ready_tx: &mpsc::SyncSender<Result<(), OutputError>>,
 ) {
-    let mut stream = match open_render_stream(
-        requested_id.as_deref(),
-        config,
-        Arc::clone(&control),
-        &status,
-    ) {
+    let mut stream = match open_render_stream(requested_id, config, control, status) {
         Ok(stream) => stream,
         Err(error) => {
             let _ = ready_tx.send(Err(error));
             return;
         }
     };
-    if let Err(error) = stream.prime_silence(&status) {
-        let _ = ready_tx.send(Err(backend_error(error)));
+    if let Err(error) = stream.prime_silence(status) {
+        let _ = ready_tx.send(Err(backend_error(&error)));
         return;
     }
     if let Err(error) = unsafe { stream.client.Start() } {
-        let _ = ready_tx.send(Err(backend_error(error)));
+        let _ = ready_tx.send(Err(backend_error(&error)));
         return;
     }
     if ready_tx.send(Ok(())).is_err() {
@@ -413,7 +410,8 @@ fn run_worker(
         return;
     }
 
-    stream.run(source.as_mut(), &config, &status, &control);
+    let control = Arc::clone(&stream.event.control);
+    stream.run(source.as_mut(), &config, status, control.as_ref());
 }
 
 fn open_render_stream(
@@ -430,8 +428,8 @@ fn open_render_stream(
     }
 
     let client: IAudioClient =
-        unsafe { device.Activate(CLSCTX_ALL, None) }.map_err(backend_error)?;
-    let raw_format = unsafe { client.GetMixFormat() }.map_err(backend_error)?;
+        unsafe { device.Activate(CLSCTX_ALL, None) }.map_err(|error| backend_error(&error))?;
+    let raw_format = unsafe { client.GetMixFormat() }.map_err(|error| backend_error(&error))?;
     let mix_format = WaveFormatAllocation(raw_format);
     let mix = parse_mix_format(mix_format.as_ptr())?;
     validate_mix_config(mix, config)?;
@@ -446,9 +444,11 @@ fn open_render_stream(
             None,
         )
     }
-    .map_err(backend_error)?;
-    let endpoint_buffer_frames = unsafe { client.GetBufferSize() }.map_err(backend_error)?;
-    let renderer = unsafe { client.GetService::<IAudioRenderClient>() }.map_err(backend_error)?;
+    .map_err(|error| backend_error(&error))?;
+    let endpoint_buffer_frames =
+        unsafe { client.GetBufferSize() }.map_err(|error| backend_error(&error))?;
+    let renderer = unsafe { client.GetService::<IAudioRenderClient>() }
+        .map_err(|error| backend_error(&error))?;
     let scratch = vec![
         0.0_f32;
         config
@@ -456,7 +456,7 @@ fn open_render_stream(
             .map_err(OutputError::InvalidConfig)?
     ];
     let event = RegisteredEvent::create(control)?;
-    unsafe { client.SetEventHandle(event.handle) }.map_err(backend_error)?;
+    unsafe { client.SetEventHandle(event.handle) }.map_err(|error| backend_error(&error))?;
     status.endpoint_buffer(endpoint_buffer_frames);
 
     Ok(RenderStream {
@@ -483,8 +483,8 @@ fn default_device_info() -> Result<OutputDeviceInfo, OutputError> {
 fn default_mix_format() -> Result<MixFormat, OutputError> {
     let device = default_device()?;
     let client: IAudioClient =
-        unsafe { device.Activate(CLSCTX_ALL, None) }.map_err(backend_error)?;
-    let raw_format = unsafe { client.GetMixFormat() }.map_err(backend_error)?;
+        unsafe { device.Activate(CLSCTX_ALL, None) }.map_err(|error| backend_error(&error))?;
+    let raw_format = unsafe { client.GetMixFormat() }.map_err(|error| backend_error(&error))?;
     let format = WaveFormatAllocation(raw_format);
     parse_mix_format(format.as_ptr())
 }
@@ -492,13 +492,13 @@ fn default_mix_format() -> Result<MixFormat, OutputError> {
 fn default_device() -> Result<IMMDevice, OutputError> {
     let enumerator: IMMDeviceEnumerator =
         unsafe { CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL) }
-            .map_err(backend_error)?;
+            .map_err(|error| backend_error(&error))?;
     unsafe { enumerator.GetDefaultAudioEndpoint(eRender, eConsole) }
         .map_err(|_| OutputError::DeviceUnavailable)
 }
 
 fn endpoint_id(device: &IMMDevice) -> Result<String, OutputError> {
-    let raw = unsafe { device.GetId() }.map_err(backend_error)?;
+    let raw = unsafe { device.GetId() }.map_err(|error| backend_error(&error))?;
     // The returned PWSTR remains valid until the paired CoTaskMemFree call below.
     let text = unsafe { raw.to_string() }.map_err(|error| OutputError::Backend(error.to_string()));
     unsafe { CoTaskMemFree(Some(raw.0.cast())) };
@@ -594,7 +594,7 @@ fn float_to_i16(sample: f32) -> i16 {
     (sample * f32::from(i16::MAX)).round() as i16
 }
 
-fn backend_error(error: WindowsError) -> OutputError {
+fn backend_error(error: &WindowsError) -> OutputError {
     OutputError::Backend(error.to_string())
 }
 

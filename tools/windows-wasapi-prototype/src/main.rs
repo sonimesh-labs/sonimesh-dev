@@ -48,6 +48,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("render cycles: {}", status.render_count);
     println!("latest render frames: {}", status.last_render_frames);
     println!("maximum render frames: {}", status.maximum_render_frames);
+    println!(
+        "latest render offset (ns): {}",
+        status.last_render_offset_ns
+    );
     println!("largest render gap (ns): {}", status.maximum_render_gap_ns);
     println!("oversized renders: {}", status.oversized_renders);
     println!("stream errors: {}", status.stream_errors);

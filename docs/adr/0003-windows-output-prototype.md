@@ -30,9 +30,10 @@ Add an optional `cpal-output` feature to `sonimesh-platform` for the first Windo
 - request a fixed callback size when supported, allow an explicit backend-default
   fallback, record actual callback samples and frames, and keep a separate memory
   bound;
-- publish the latest and largest callback frame counts plus the largest monotonic
-  callback gap through atomics for low-rate comparison; these are software
-  scheduling observations, not a latency measurement;
+- publish the latest and largest callback frame counts, latest monotonic
+  callback offset, and largest callback gap through atomics for low-rate
+  comparison; these are software scheduling observations, not a latency
+  measurement;
 - render Float32 directly and convert signed 16-bit output through scratch memory
   allocated before stream start;
 - if a callback exceeds its preallocated bound, write silence and atomically expose
@@ -69,10 +70,10 @@ share implementation details with the CPAL adapter.
   accepts a pinned identifier only when it still matches that current default;
 - use the endpoint mix format only when it exactly matches the bounded
   `OutputConfig`; unsupported formats fail before the worker starts;
-- record endpoint buffer frames, source-render frame counts, maximum render gap,
-  priming silence, capacity faults, and backend errors with atomics; these
-  software observations are comparable with CPAL status but are not latency
-  measurements;
+- record endpoint buffer frames, source-render frame counts, latest monotonic
+  render offset, maximum render gap, priming silence, capacity faults, and
+  backend errors with atomics; these software observations are comparable with
+  CPAL status but are not latency measurements;
 - stop requests wake the worker, which stops the audio client and releases COM
   resources on its owning thread before control-domain join returns;
 - keep one-shot silent smoke and repeated start/stop smoke as explicit lab commands

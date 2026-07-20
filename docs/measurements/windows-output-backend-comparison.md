@@ -47,6 +47,7 @@ like-for-like with a fixed-request result.
 | Render/callback count | — | — | Two-second smoke only unless duration changes. |
 | Latest observed frames | — | — | Actual worker quantum. |
 | Largest observed frames | — | — | Actual worker quantum. |
+| Latest callback/render offset | — | — | Same-clock offset from backend status creation; software timeline only. |
 | Largest observed scheduling gap | — | — | Same-clock software observation only. |
 | Priming silence frames | n/a | — | Direct-WASAPI initialization detail. |
 | Capacity faults | — | — | Must remain zero for a successful smoke. |

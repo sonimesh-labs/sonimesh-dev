@@ -46,13 +46,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         output.stop();
 
         println!(
-            "cycle {cycle}: request={}, renders={}, latest_frames={}, max_frames={}, max_gap_ns={}, primed_frames={}, oversized={}, errors={}, health={health:?}",
+            "cycle {cycle}: request={}, renders={}, latest_frames={}, max_frames={}, latest_offset_ns={}, max_gap_ns={}, primed_frames={}, oversized={}, errors={}, health={health:?}",
             config
                 .requested_callback_frames
                 .map_or_else(|| "default".to_owned(), |frames| frames.to_string()),
             status.render_count,
             status.last_render_frames,
             status.maximum_render_frames,
+            status.last_render_offset_ns,
             status.maximum_render_gap_ns,
             status.primed_silence_frames,
             status.oversized_renders,
