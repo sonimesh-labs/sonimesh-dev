@@ -162,10 +162,12 @@ class AndroidTlsProviderSpikeTest {
                     clientProtocol = socket.session.protocol
                     clientExporter = export(socket)
                 }
-            } catch (_: CertificateException) {
-                clientRejectedPin = true
-            } catch (_: javax.net.ssl.SSLException) {
-                clientRejectedPin = true
+            } catch (failure: javax.net.ssl.SSLException) {
+                if (containsPinMismatch(failure)) {
+                    clientRejectedPin = true
+                } else {
+                    throw failure
+                }
             }
         } finally {
             listener.close()
@@ -199,6 +201,17 @@ class AndroidTlsProviderSpikeTest {
     private fun export(socket: SSLSocket): ByteArray =
         requireNotNull(Conscrypt.exportKeyingMaterial(socket, EXPORTER_LABEL, EXPORTER_CONTEXT, EXPORTER_BYTES))
 
+    private fun containsPinMismatch(failure: Throwable): Boolean {
+        var current: Throwable? = failure
+        while (current != null) {
+            if (current is SpkiPinMismatchException) {
+                return true
+            }
+            current = current.cause
+        }
+        return false
+    }
+
     private data class ProbeResult(
         val clientProtocol: String?,
         val serverProtocol: String?,
@@ -217,12 +230,14 @@ class AndroidTlsProviderSpikeTest {
 
         override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {
             if (chain.size != 1 || !MessageDigest.isEqual(chain[0].publicKey.encoded, expectedSpki)) {
-                throw CertificateException("server SPKI did not match the test pin")
+                throw SpkiPinMismatchException()
             }
         }
 
         override fun getAcceptedIssuers(): Array<X509Certificate> = emptyArray()
     }
+
+    private class SpkiPinMismatchException : CertificateException()
 
     private class AliasOnlyKeyManager(
         private val delegate: X509ExtendedKeyManager,
