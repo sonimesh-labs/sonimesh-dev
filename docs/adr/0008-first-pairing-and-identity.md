@@ -128,6 +128,33 @@ vector result, and clean up all listeners and temporary key material. A host-onl
 HKDF vector test does not prove provider exporter support, pin enforcement, or
 TLS interoperability.
 
+The Windows provider spike may use an isolated loopback Rust tool with Rustls
+0.23.27 and its `ring` provider, both selected only for feasibility evidence.
+The tool must create one in-memory self-signed lab certificate per run, force
+TLS 1.3, and use a custom verifier whose only trust anchor is the expected DER
+SPKI. It must reject a presented certificate whose SPKI differs from that pin
+and verify the TLS 1.3 `CertificateVerify` signature using that same pinned
+SPKI and the selected provider's supported algorithms. It must not substitute a
+temporary root store, a hostname-only verifier, or an assertion-only custom
+verifier. The positive path must show that client and server export equal,
+exactly 32-byte values for the specified label and a fixed public 16-byte
+context; an altered expected SPKI must make the handshake fail. The tool may
+reuse only the public exporter constants from `sonimesh-protocol`; it must not
+implement QR encoding, pairing records, proof exchange, trust storage,
+revocation, discovery, or media networking.
+
+The spike must use a bounded loopback listener, join its server thread, and
+retain no certificate, SPKI, private-key DER, exporter, pairing input, or
+identity material after process exit. It may print only stage success/failure
+categories, negotiated TLS version, and requested exporter length. Temporary
+private-key byte copies must use zeroizing storage where the dependency API
+permits; an in-memory key object that cannot provide explicit zeroization must
+remain local to the run and be dropped before the tool returns. A dated result
+is valid only after a local run and must name the Windows build, Rust, Rustls,
+rcgen, and provider versions. It does not select Rustls for production, prove
+Android interoperability, establish a production certificate lifecycle, or
+enable pairing.
+
 ## Rollback plan
 
 Pairing protocol versions and QR payload versions are explicit. A future
