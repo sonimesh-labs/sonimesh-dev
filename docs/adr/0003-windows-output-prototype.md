@@ -105,6 +105,17 @@ or recreate a stream from the callback. The commands redact endpoint identifiers
 and require an observed endpoint change by default; a local command check may
 explicitly disable that assertion but cannot count as default-role evidence.
 
+Device-removal and sleep/wake experiments use the same control-domain recovery
+shape, but are recorded as separate HIL scenarios. For a current-default
+experiment, the operator starts the silent stream, performs the physical
+removal or power transition, retains the active stream status, then stops,
+re-probes, and explicitly starts a fresh stream. A CPAL pinned-device run must
+retain the selected opaque ID only in the local lab transcript and must record
+whether the stream faulted or continued before that explicit recovery. The
+direct-WASAPI tool does not claim pinned-device coverage: it can compare only
+the current default endpoint and must fail rather than silently bind a stale
+identifier. Neither adapter performs device or power recovery in the callback.
+
 The direct tool is not a selected backend and must not be linked by the desktop
 app. Its evidence record may compare only like-for-like endpoint, mix format,
 and requested duration configurations.

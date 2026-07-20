@@ -65,6 +65,51 @@ The commands require an endpoint change by default. They accept
 `SONIMESH_OUTPUT_REQUIRE_DEFAULT_CHANGE=false` is only for command validation;
 it must never be recorded as a successful default-role transition.
 
+For a CPAL pinned-device removal experiment, first obtain the opaque identifier
+from the local `output_probe` command. Do not paste that identifier into an
+exported record. Start the dedicated command with the identifier only in the
+local environment:
+
+    $env:SONIMESH_OUTPUT_PINNED_DEVICE_ID = "<local opaque device id>"
+    cargo run -p sonimesh-platform --example output_pinned_recovery --features cpal-output
+
+The command starts only the selected device, records the pre-stop status, stops
+outside the callback, and probes that same ID again. It prints either
+`recovery_result=pinned_device_unavailable` or a status for one fresh bounded
+start. A fault on the old stream is an observation, not a command failure; only
+the fresh stream must be healthy for the restarted result. The unavailable
+result is also an observation and is not a command failure; retain either result
+with the physical removal event and any old-stream error.
+
+## Manual device and power recovery procedure
+
+Run one backend at a time. These scenarios require a physical endpoint or a
+real Windows power transition, so the commands are intentionally not presented
+as automatic tests. The existing default-recovery command provides the bounded
+control-domain sequence; set `SONIMESH_OUTPUT_REQUIRE_DEFAULT_CHANGE=false`
+only because these scenarios do not require a default-role change, not to claim
+that no event occurred.
+
+1. Record the selected backend, endpoint category, current format, request,
+   source bound, Windows build, and the exact physical event to be performed.
+2. Start the command and wait until its stream is active. For CPAL pinned-device
+   removal, use `output_pinned_recovery` with an enumerated device ID; retain
+   that ID only in the non-exported lab transcript.
+3. During the wait, unplug or disable the chosen endpoint, or put the host to
+   sleep and wake it. Do not alter callback code or invoke recovery from an
+   audio thread.
+4. Retain the pre-stop atomic status and output health, then let the command
+   stop the old stream in the control domain, re-probe the current default, and
+   attempt one fresh bounded start.
+5. Record whether the old stream reported an error, whether the endpoint/default
+   changed, the fresh-start result, and the recovered status. A continued old
+   stream is an observation, not proof that removal or sleep/wake is supported.
+
+The direct-WASAPI prototype covers only the current-default endpoint. It must
+record `DeviceUnavailable` if its previously selected identifier is stale; it
+must not use that result as pinned-device evidence. A failed re-probe or fresh
+start is a valid negative result and must remain in the measurement record.
+
 The CPAL smoke accepts a 480-frame request and falls back explicitly to the
 backend default when that request is rejected. The direct prototype follows the
 same policy. Record which path actually started; a fallback result is not
@@ -98,6 +143,7 @@ Use the same row shape for these separate scenarios. Each is a lifecycle fact,
 not a latency qualification:
 
 - current-default endpoint unplugged while rendering;
+- CPAL pinned endpoint unplugged while rendering;
 - default-role change while rendering, then stop and recreation;
 - sleep/wake followed by explicit recreation;
 - repeated start/stop cycles; and
