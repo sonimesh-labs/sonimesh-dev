@@ -51,6 +51,29 @@ errors, and observed a 480-frame latest quantum.
 | Largest scheduling gap range | 10,135,200-10,301,400 ns | 10,073,100-17,827,700 ns |
 | Endpoint/priming frames | n/a | 1,056 / 1,056 in every cycle |
 
+## Pinned-device recovery command check
+
+The CPAL-only `output_pinned_recovery` command was checked against the current
+default endpoint with a locally supplied opaque identifier, a two-second event
+wait, and a two-second recovered stream. No device was unplugged, disabled, or
+otherwise changed during this command check, so this is not pinned-device
+removal evidence and the identifier is intentionally omitted.
+
+The initial stream reported 199 callbacks, a 480-frame latest callback, a
+1,056-frame maximum callback, a 17,642,800 ns maximum scheduling gap, and zero
+capacity faults or stream errors. After explicit control-domain stop, a fresh
+probe found the same selected endpoint and the recovered stream reported 200
+callbacks, a 480-frame latest callback, a 1,056-frame maximum callback, a
+10,200,900 ns maximum scheduling gap, and zero capacity faults or stream
+errors. The command printed `pre_stop_healthy=true` and
+`recovery_result=pinned_device_restarted`.
+
+This validates only the command's fixed selection, redacted reporting, explicit
+stop, re-probe, and fresh-start path. A future removal run must retain the old
+stream's status after the physical event and record either the observed
+unavailability result or the health of one new stream; an old-stream error is a
+lifecycle observation, not a command failure.
+
 ## Interpretation and remaining work
 
 This recheck repeats the known fact that CPAL can receive a 1,056-frame
