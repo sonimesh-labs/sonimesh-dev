@@ -82,6 +82,14 @@ It is a direct-boundary check, not proof that the capture implementation cannot
 reach every indirect dependency or that an instrumentation spike proves a
 production capability.
 
+`tools/android_capture_preflight.py` is a separate, read-only lab helper. It
+requires an explicitly selected ADB serial but does not print that serial. It
+collects the connected device's manufacturer/model, Android release/API/build,
+ABI, and installed capture-package state before an operator begins a matrix
+row. It does not install an APK, change a permission, request projection,
+inspect PCM, or automate any capture scenario, so its output is preparation
+metadata rather than capture, policy, lifecycle, power, or latency evidence.
+
 ## Security, privacy, and realtime implications
 
 The consent result, captured PCM, encoded audio, pairing secrets, session keys,

@@ -50,6 +50,15 @@ replacement for a device-side capture result.
    memory observations are available. `adb devices -l`, `adb shell getprop
    ro.build.fingerprint`, and `adb shell dumpsys battery` may assist local lab
    notes but their output format is not a stable product interface.
+   Before the first row for a connected device, the read-only helper may collect
+   the stable preparation fields without printing the ADB serial:
+
+       python tools/android_capture_preflight.py --serial <local-device-serial>
+
+   It reports device/build/ABI metadata and whether the capture package is
+   installed. It does not install, launch, grant, revoke, capture, or validate
+   the device; record only its displayed metadata alongside an actual operator
+   observation.
 2. Start from `Ready to request playback capture consent`. For every capture
    attempt, use fresh MediaProjection consent, select only the required source
    category, and record the displayed `CaptureFormat` fields: sample rate,
