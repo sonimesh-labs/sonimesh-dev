@@ -90,6 +90,18 @@ row. It does not install an APK, change a permission, request projection,
 inspect PCM, or automate any capture scenario, so its output is preparation
 metadata rather than capture, policy, lifecycle, power, or latency evidence.
 
+`tools/check_android_capture_record.py` validates an operator-authored,
+machine-readable Phase 0A record after a run. Its closed schema requires the
+device/build, observed capture format and buffers, initial/final local evidence
+snapshots, terminal state, lifecycle presence observations, and device-condition
+fields appropriate to the run. It mirrors the capture format's bounded 20 ms
+read calculation and validates counter/offset monotonicity, but it does not
+derive a sample cadence, capture policy, source identity, or latency result.
+The schema has no fields for PCM, source application names, ADB serials,
+projection tokens, keys, or opaque device identifiers. The tool is an offline
+record-integrity check; it does not connect to ADB, install or launch the app,
+grant/revoke permissions, or automate the physical matrix.
+
 ## Security, privacy, and realtime implications
 
 The consent result, captured PCM, encoded audio, pairing secrets, session keys,

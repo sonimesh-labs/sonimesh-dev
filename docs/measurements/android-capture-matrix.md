@@ -79,6 +79,50 @@ replacement for a device-side capture result.
    consent intents, projection tokens, source names, keys, or opaque device
    identifiers in an exported record.
 
+### Structured record validation
+
+After a physical run, operators may place a closed-schema JSON record outside
+the repository or in an approved redacted measurement location, then validate
+its evidence fields locally:
+
+    python tools/check_android_capture_record.py path/to/android-capture-record.json
+
+The record has these required top-level fields:
+
+```text
+schema_version, recorded_at, scenario, device, app, observed_source_category,
+capture_format, initial_snapshot, final_snapshot, terminal_state, lifecycle,
+device_conditions
+```
+
+`capture_format`, `initial_snapshot`, and `final_snapshot` are `null` only for
+the permission-denied and cancelled-consent scenarios, where no capture session
+may start. For a real capture scenario, `capture_format` retains
+`sample_rate_hz`, `channels`, `audio_source`, `channel_mask`,
+`pcm_format`, `buffer_size_bytes`, `minimum_buffer_bytes`, and `read_samples`.
+Each snapshot retains `capture_duration_ms`,
+`last_read_completion_offset_ms`, `captured_frames`, `silent_reads`, and
+`read_errors`. The validator requires final counters and local offsets to be
+nondecreasing, and it requires each completion offset to be at most its
+snapshot's local duration. It checks the same 20 ms read-size calculation and
+64 KiB buffer bound as the capture bootstrap.
+
+`observed_source_category` is limited to `allowed`, `idle`, `silent`, or
+`protected_unknown` for a capture session. It cannot contain an application
+name. `lifecycle` records only `present`, `absent`, or `not_measured` for the
+notification, service, and projection, plus the event duration and whether a
+teardown wake-up was suppressed. `device_conditions` records battery, thermal,
+CPU, and memory observations as a non-sensitive value or `not_measured`.
+The closed schema deliberately excludes free-form source identifiers, PCM,
+consent data, ADB serials, keys, and opaque device IDs.
+
+The validator proves only the internal consistency and redaction boundary of a
+record supplied by an operator. It neither runs the device scenario nor turns a
+silent-read count into a source-policy explanation, support claim, or latency
+measurement. Its synthetic self-test is not physical-device evidence:
+
+    python tools/check_android_capture_record.py --self-test
+
 Run the following scenarios one at a time. Do not combine a lock, source
 change, or process recreation with another scenario, because the terminal
 observation would no longer identify the relevant lifecycle event.
