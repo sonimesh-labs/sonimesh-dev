@@ -155,6 +155,31 @@ rcgen, and provider versions. It does not select Rustls for production, prove
 Android interoperability, establish a production certificate lifecycle, or
 enable pairing.
 
+The Android provider spike may use `conscrypt-android` 2.6.1, an Apache-2.0
+Android AAR with `arm64-v8a` and `x86_64` native libraries, solely in an API
+31-or-newer instrumentation test. It must generate a fresh AndroidKeyStore EC
+key under a randomized alias and request its short-lived self-signed lab
+certificate through `KeyGenParameterSpec` certificate fields, then delete the
+alias in `finally`. An Android-side TLS 1.3 client must pin the certificate's
+exact DER SPKI through a narrow test-only trust manager; a loopback server
+using the same temporary AndroidKeyStore key entry must complete its TLS 1.3
+handshake. Client and server must each call Conscrypt's public
+`exportKeyingMaterial` with the ADR label, a supplied fixed public 16-byte
+context, and length 32, then compare the results only in memory. A connection
+using an altered expected SPKI must fail. The test must not install a provider
+globally, rely on the device's ambient TLS provider, use a temporary root store,
+use a hostname-only verifier, or accept a trust-manager assertion without an
+SPKI comparison.
+
+This Android spike is isolated from MediaProjection, capture, QR parsing,
+pairing records, proof exchange, identity/trust storage, discovery, media
+networking, and the audio path. It may use loopback TCP and a bounded server
+thread only. It must neither print nor write certificate bytes, SPKI, private
+keys, exporters, aliases, or pairing inputs. A host Gradle build validates only
+test compilation; a dated API 31+ device/emulator record is required before
+claiming Android provider behavior. The spike does not choose Conscrypt for
+production, establish interoperability with Windows Rustls, or enable pairing.
+
 ## Rollback plan
 
 Pairing protocol versions and QR payload versions are explicit. A future
