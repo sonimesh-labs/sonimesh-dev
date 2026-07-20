@@ -104,6 +104,13 @@ capacity faults or backend errors. It is a control-domain evidence-integrity
 check: it neither observes the audio callback directly nor proves latency,
 device removal, default-role change, sleep/wake recovery, or audio quality.
 
+`tools/check_output_realtime_boundary.py` rejects direct allocation, locking,
+logging, IPC, device-enumeration, and blocking markers in the CPAL adapter's
+callback shells and the direct-WASAPI tool's post-wait render shell. It is a
+source-level regression guard for the reviewed adapter-owned code, not a proof
+of allocation behavior in CPAL, Windows APIs, or arbitrary `RenderSource`
+implementations; those still require code review and hardware evidence.
+
 Separate default-role recovery commands exercise one manual lifecycle sequence:
 start a default-endpoint silent stream, wait for the operator to change the
 Windows default render role, capture the old stream's status, stop it in the
