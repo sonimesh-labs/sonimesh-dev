@@ -1,4 +1,4 @@
-package com.sonimesh.sender.security
+package com.sonimesh.tlsproviderspike.security
 
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties

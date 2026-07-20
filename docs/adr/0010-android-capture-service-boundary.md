@@ -76,11 +76,12 @@ audio stream, or make a latency promise.
 The production Android source set remains capture-only until a later ADR admits
 the next boundary. CI checks the main manifest, production dependency
 declarations, and production Kotlin imports for direct networking, TLS/crypto,
-Android Keystore, Opus, and NDK integration. The guard deliberately excludes
-`src/androidTest`, where ADR 0008 permits isolated loopback TLS/Keystore spikes.
-It is a direct-boundary check, not proof that the capture implementation cannot
-reach every indirect dependency or that an instrumentation spike proves a
-production capability.
+Android Keystore, Opus, and NDK integration. ADR 0008's Keystore and loopback
+TLS spikes live in the separate `:tls-provider-spike` Android test app so its
+test-only `INTERNET` permission and Conscrypt dependency cannot execute in the
+capture app's UID. The guard is a direct-boundary check, not proof that the
+capture implementation cannot reach every indirect dependency or that an
+instrumentation spike proves a production capability.
 
 `tools/android_capture_preflight.py` is a separate, read-only lab helper. It
 requires an explicitly selected ADB serial but does not print that serial. It

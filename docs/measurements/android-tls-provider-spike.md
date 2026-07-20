@@ -11,20 +11,37 @@ which the Android client accepts only the expected DER SubjectPublicKeyInfo
 (SPKI), validates the server's proof of possession through the TLS handshake,
 and calls the exact exporter required by the pairing-binding vector.
 
-The test uses `org.conscrypt:conscrypt-android:2.6.1` only as an isolated
-instrumentation dependency. Its Maven metadata identifies Apache-2.0 licensing;
-its AAR contains `arm64-v8a`, `x86_64`, `armeabi-v7a`, and `x86` native
-libraries and declares minimum API 21. The project test remains limited to API
-31 or newer, matching the Android MVP baseline.
+The `:tls-provider-spike` Android app packages
+`org.conscrypt:conscrypt-android:2.6.1` only for the isolated probe. The
+runtime dependency belongs to that target app rather than its test APK because
+Android instrumentation code loads in the target app process and must resolve
+the Conscrypt JNI library there. Its Maven metadata identifies Apache-2.0
+licensing; its AAR contains `arm64-v8a`, `x86_64`, `armeabi-v7a`, and `x86`
+native libraries and declares minimum API 21. The project test remains limited
+to API 31 or newer, matching the Android MVP baseline. This separate tool app
+owns the test-only `INTERNET` permission needed to bind its loopback listener;
+the capture app does not receive that permission or dependency.
 
 ## Required command
 
 With a documented device or emulator connected, run:
 
-    .\gradlew.bat connectedDebugAndroidTest --no-daemon
+    .\gradlew.bat :tls-provider-spike:connectedDebugAndroidTest --no-daemon
 
 `testDebugUnitTest`, an instrumentation APK build, or a host-only loopback does
 not establish Android provider evidence.
+
+If the local Gradle/UTP install step times out after the same APKs have been
+built, install the target and test APKs directly, then invoke the declared
+AndroidJUnitRunner component. Record that alternate runner path and the UTP
+failure category with the device result:
+
+    adb install -r tls-provider-spike-debug.apk
+    adb install -r tls-provider-spike-debug-androidTest.apk
+    adb shell am instrument -w -r "com.sonimesh.tlsproviderspike.test/androidx.test.runner.AndroidJUnitRunner"
+
+This is a runner-install workaround only. It does not permit a host-only
+loopback, change the TLS/SPKI/exporter assertions, or select a provider.
 
 ## Tool boundary
 

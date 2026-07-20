@@ -183,8 +183,9 @@ SPKI comparison.
 This Android spike is isolated from MediaProjection, capture, QR parsing,
 pairing records, proof exchange, identity/trust storage, discovery, media
 networking, and the audio path. It may use loopback TCP and a bounded server
-thread only. Its `INTERNET` permission belongs solely to the instrumentation
-test APK manifest, not the capture-only application manifest. It must neither
+thread only. Its `INTERNET` permission belongs solely to the isolated spike
+target-app manifest, not the capture-only application manifest: Android
+instrumentation executes the probe in that target app's process. It must neither
 print nor write certificate bytes, SPKI, private keys, exporters, aliases, or
 pairing inputs. A host Gradle build validates only test compilation; a dated API
 31+ device/emulator record is required before claiming Android provider behavior.

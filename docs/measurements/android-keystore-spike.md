@@ -19,11 +19,23 @@ service and does not make an Android capture, pairing, or compatibility claim.
 
 With a documented device or emulator connected, run:
 
-    .\gradlew.bat connectedDebugAndroidTest --no-daemon
+    .\gradlew.bat :tls-provider-spike:connectedDebugAndroidTest --no-daemon
 
 The test requires Android API 31 or newer. It is not satisfied by
 `testDebugUnitTest`, `assembleDebug`, or an instrumentation APK build without
 execution on AndroidKeyStore.
+
+If the local Gradle/UTP install step times out after the same APKs have been
+built, install the target and test APKs directly, then invoke the declared
+AndroidJUnitRunner component. Record that alternate runner path and the UTP
+failure category with the device result:
+
+    adb install -r tls-provider-spike-debug.apk
+    adb install -r tls-provider-spike-debug-androidTest.apk
+    adb shell am instrument -w -r "com.sonimesh.tlsproviderspike.test/androidx.test.runner.AndroidJUnitRunner"
+
+This is a runner-install workaround only. It does not turn an APK build into
+AndroidKeyStore evidence or change the required device-side test assertions.
 
 ## Required record
 

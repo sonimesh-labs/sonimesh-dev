@@ -1,4 +1,4 @@
-package com.sonimesh.sender.security
+package com.sonimesh.tlsproviderspike.security
 
 import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
@@ -18,6 +18,8 @@ import java.security.cert.CertificateException
 import java.security.cert.X509Certificate
 import java.util.Date
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import javax.net.ssl.KeyManagerFactory
@@ -87,7 +89,8 @@ class AndroidTlsProviderSpikeTest {
         )
         generator.initialize(
             KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_SIGN or KeyProperties.PURPOSE_VERIFY)
-                .setDigests(KeyProperties.DIGEST_SHA256)
+                // Conscrypt passes the TLS CertificateVerify digest to AndroidKeyStore as NONEwithECDSA.
+                .setDigests(KeyProperties.DIGEST_NONE, KeyProperties.DIGEST_SHA256)
                 .setCertificateSubject(X500Principal("CN=SoniMesh TLS provider spike"))
                 .setCertificateSerialNumber(BigInteger.valueOf(now))
                 .setCertificateNotBefore(Date(now - CERTIFICATE_CLOCK_SKEW_MS))
@@ -128,6 +131,7 @@ class AndroidTlsProviderSpikeTest {
         val serverProtocol = AtomicReference<String?>()
         val acceptedConnection = AtomicBoolean(false)
         val acceptedSocket = AtomicReference<SSLSocket?>()
+        val serverHandshakeComplete = CountDownLatch(1)
         val serverThread = Thread {
             try {
                 (listener.accept() as SSLSocket).use { socket ->
@@ -136,6 +140,7 @@ class AndroidTlsProviderSpikeTest {
                     socket.enabledProtocols = arrayOf(TLS_13)
                     socket.soTimeout = SOCKET_TIMEOUT_MS
                     socket.startHandshake()
+                    serverHandshakeComplete.countDown()
                     serverProtocol.set(socket.session.protocol)
                     serverExporter.set(export(socket))
                 }
@@ -149,6 +154,7 @@ class AndroidTlsProviderSpikeTest {
         var clientExporter: ByteArray? = null
         var clientProtocol: String? = null
         var clientRejectedPin = false
+        var clientFailure: Throwable? = null
         try {
             serverThread.start()
             try {
@@ -161,18 +167,25 @@ class AndroidTlsProviderSpikeTest {
                     socket.startHandshake()
                     clientProtocol = socket.session.protocol
                     clientExporter = export(socket)
+                    assertTrue(
+                        "server TLS handshake did not complete",
+                        serverHandshakeComplete.await(THREAD_JOIN_TIMEOUT_MS, TimeUnit.MILLISECONDS),
+                    )
                 }
             } catch (failure: javax.net.ssl.SSLException) {
                 if (containsPinMismatch(failure)) {
                     clientRejectedPin = true
                 } else {
-                    throw failure
+                    clientFailure = failure
                 }
             }
         } finally {
             listener.close()
-            acceptedSocket.get()?.close()
             serverThread.join(THREAD_JOIN_TIMEOUT_MS)
+            if (serverThread.isAlive) {
+                acceptedSocket.get()?.close()
+                serverThread.join(THREAD_JOIN_TIMEOUT_MS)
+            }
         }
 
         assertFalse("server thread did not finish", serverThread.isAlive)
@@ -187,6 +200,7 @@ class AndroidTlsProviderSpikeTest {
             )
         } else {
             serverFailure.get()?.let { throw AssertionError("loopback TLS server failed", it) }
+            clientFailure?.let { throw it }
             ProbeResult(
                 clientProtocol = requireNotNull(clientProtocol),
                 serverProtocol = requireNotNull(serverProtocol.get()),

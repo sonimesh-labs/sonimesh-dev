@@ -73,4 +73,4 @@ jobs:
           sdkmanager "platform-tools" "platforms;android-36" "build-tools;34.0.0"
       - name: Build Android capture bootstrap
         working-directory: apps/android
-        run: ./gradlew lintDebug testDebugUnitTest assembleDebug --no-daemon
+        run: ./gradlew lintDebug testDebugUnitTest assembleDebug :tls-provider-spike:assembleDebugAndroidTest --no-daemon

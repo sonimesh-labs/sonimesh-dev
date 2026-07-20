@@ -18,3 +18,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "sonimesh-android"
 include(":app")
+include(":tls-provider-spike")
