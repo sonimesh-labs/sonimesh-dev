@@ -9,9 +9,11 @@ This document turns the acceptance conditions in ADR 0009 into reproducible evid
 
 | Check | Observation | Interpretation |
 | --- | --- | --- |
-| Conventional CMake locations | No executable found in Program Files, Program Files (x86), or the per-user Programs directory | Not ready to claim a bundled Windows libopus build path. PATH was not executed by the command host, so this is not proof that CMake is absent everywhere. |
-| Reviewed installed libopus | None recorded | Do not use an ambient library path. |
-| Android SDK NDK directory | No NDK directory observed under the local Android SDK | Android native ABI work is not ready. |
+| Windows build tools | `cmake`, `ninja`, and `cl.exe` were absent from PATH; CMake's conventional locations and VS 2019/2022 BuildTools/Community MSVC directories were also absent | The reference host cannot build bundled libopus or a C/C++ binding until reviewed build tools are installed and their versions are recorded. |
+| Rust Windows host | Rust 1.85.0 `x86_64-pc-windows-msvc` is installed; it is the only installed Rust target | A Windows-native build still also needs the C/C++ toolchain required by libopus. Android cross-targets are not installed. |
+| Reviewed installed libopus | No workspace dependency, Cargo cache entry, Gradle cache entry, or reviewed installed library was found | Do not use an ambient library path or add an unreviewed prebuilt binary. |
+| Candidate binding metadata | `cargo info opus@0.3.1` reports `opus` 0.3.1, MIT/Apache-2.0, repository `SpaceManiac/opus-rs` | Candidate metadata only; it does not establish a libopus source revision, native build path, or libopus license evidence. |
+| Android SDK NDK directory | Android SDK exists at the local SDK root, but contains no `ndk` directory | Android ABI work is blocked until a pinned NDK is installed and its package/path are recorded. |
 | Rust decode boundary | sonimesh-audio FrameDecoder exists with caller-owned Float32 output and PLC/reset operations | Stable boundary is ready; no native implementation is selected. |
 
 ## Native build gate
@@ -20,13 +22,30 @@ All rows must be recorded before enabling any optional codec feature.
 
 | Target | Required evidence | Result |
 | --- | --- | --- |
-| Windows x86_64 MSVC | Pinned Rust crate/version, libopus source/version, CMake invocation, MSVC toolset, linkage decision, artifact hash, and license texts | Not run |
+| Windows x86_64 MSVC | Pinned Rust crate/version, libopus source/version, CMake invocation, MSVC toolset, linkage decision, artifact hash, and license texts | Blocked: CMake, Ninja, and MSVC compiler/toolset unavailable on the reference host |
 | Android arm64-v8a | NDK version, ABI build command, packaged native library inspection, and a device load test | Blocked: NDK not present |
 | Android x86_64 | Same evidence as arm64-v8a for emulator/CI coverage | Blocked: NDK not present |
 | Rust CI | Fresh Windows build plus workspace Clippy/tests with the codec feature enabled | Not run |
 | Cross-platform vectors | Identical 10 ms and 20 ms decode/PLC vectors accepted by Rust and Android implementations | Not run |
 
 A build artifact must not be accepted through an unreviewed system library search path. Record the exact dependency and license evidence before any app or Android packaging integration.
+
+## Unblock sequence
+
+Before retrying the native binding gate on this host, install or provision the
+following reviewed tools and record their exact versions in a new dated build
+record:
+
+1. CMake and a supported generator such as Ninja;
+2. the MSVC C/C++ build tools compatible with the pinned Windows Rust toolchain;
+3. a pinned Android NDK with `arm64-v8a` and `x86_64` ABI toolchains; and
+4. the selected libopus source revision, its license text, the binding's
+   transitive native-build configuration, and the intended static/dynamic
+   linkage decision.
+
+Only then may a dependency-only codec spike attempt a clean Windows build. It
+must not use an ambient libopus discovery path or enable Android packaging until
+the corresponding ABI evidence exists.
 
 ## Fixed decode boundary
 
