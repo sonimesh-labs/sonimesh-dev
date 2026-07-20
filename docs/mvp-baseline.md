@@ -155,15 +155,21 @@ jitter, and output-backend ADRs using measured 10/20 ms and device results.
   authenticated control-session secret;
 - authenticated TLS control transport, discovery, and address migration; the
   untrusted TCP framing reader is not a trusted control session.
-- direct-WASAPI comparison adapter and backend selection evidence;
+- Windows output backend selection, physical device/power lifecycle evidence,
+  and latency qualification. The independent direct-WASAPI prototype and
+  controlled same-host callback comparison exist, but do not settle a backend;
 - Tauri integration, signing, packaging, and firewall integration;
 - a quality-qualified resampler/ASRC, acoustic latency, and soak validation; the
   nominal converter and occupancy controller do not establish timing or quality
   claims.
 
-An optional Windows CPAL adapter and read-only device probe are now available for
-phase 0B measurement. Their presence does not close the direct-WASAPI comparison,
-device lifecycle, callback timing, or physical latency gates in ADR 0003.
+An optional Windows CPAL adapter and a separate direct-WASAPI prototype are now
+available for phase 0B measurement. Their same-host comparison records actual
+callback/render frames and backend-local software timing under matching silent
+smoke configuration in the [Windows output backend comparison
+record](./measurements/2026-07-20-windows-output-backend-comparison.md). This
+does not close the backend-selection, physical device/power lifecycle, or
+physical-latency gates in ADR 0003.
 
 A two-second silent CPAL smoke on the Windows reference host observed callback
 sizes beyond both the requested and device-reported frame sizes. The evidence and
