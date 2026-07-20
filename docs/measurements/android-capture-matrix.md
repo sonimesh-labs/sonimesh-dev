@@ -278,6 +278,33 @@ over 35.4 s, with 3,314 silent reads and no read errors. The prototype displayed
 its non-definitive no-audio wording. This indicates an observed silent capture
 condition only; it does not identify why any particular application was silent.
 
+### Protected/unknown source-category observation, 2026-07-20
+
+The operator selected the `protected_unknown` matrix category, started a fresh
+full-screen projection session, and observed an active foreground service,
+ongoing notification, and `TYPE_SCREEN_CAPTURE` MediaProjection entry. The
+operator did not provide a source name, and none was queried or retained.
+
+| Counter | Observed value |
+| --- | ---: |
+| Capture duration | 226.5 s |
+| Captured frames | 7,000,000 |
+| Silent reads | 10 |
+| Read errors | 0 |
+| Latest completed read | +226.3 s |
+| Displayed signal state | Signal observed |
+
+The device was USB powered at 100% battery. Shell observations during the run
+reported 35.5 C battery temperature and a single 0% process-CPU sample; those
+values are not a power, thermal, or average CPU result. After the operator
+paused the session, Android reported no active SoniMesh `CaptureService`, no
+SoniMesh MediaProjection entry, and no active SoniMesh foreground notification.
+The application UI process remained foreground because it was open.
+
+This is an observed `protected_unknown` category result with a capturable
+signal. It does not establish whether any particular media source was protected,
+policy-limited, or permitted by Android playback-capture policy.
+
 ### Not Yet Measured
 
 - CPU, memory, thermal behavior, and battery impact during an extended
