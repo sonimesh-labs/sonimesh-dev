@@ -10,6 +10,9 @@ local.properties
 build/
 node_modules/
 dist/
+.playwright-cli/
+.playwright-mcp/
+output/
+tools/__pycache__/
 .DS_Store
 Thumbs.db
-
