@@ -1267,6 +1267,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "windows-credential-prototype"
+version = "0.1.0"
+dependencies = [
+ "windows",
+]
+
+[[package]]
 name = "windows-future"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

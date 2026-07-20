@@ -54,6 +54,15 @@ source-rate limits outside any realtime path. A consumed record remains redacted
 audit state while its verified session later streams, reconnects, or recovers
 output; only expiration or revocation retires that trusted session.
 
+Before selecting a production Windows store, a Windows-only credential-store
+spike may create a random, session-persisted Generic Credential containing only
+fixed non-secret test bytes. The spike must write, read, validate, delete, and
+verify absence using a fresh target name, while redacting both the target and
+credential blob. It is an API and failure-path experiment only: it must not
+persist a pairing secret, private key, QR payload, trust record, session ticket,
+or media context; it does not select Credential Manager over DPAPI for the
+production identity format.
+
 ## Security implications
 
 The QR carries a high-entropy secret and public TLS pin, so screen visibility is
@@ -81,6 +90,11 @@ failure closure, user expiry, per-source attempt limits, and fixed source-table
 capacity. Its public lifecycle state cannot establish trust directly; only the
 pairing owner can advance a consumed external proof to `Ready`. It does not
 verify a pairing proof or store a secret, identity, or QR payload.
+
+The Windows credential-store spike must separately record successful cleanup and
+the observed error category after deletion. A successful round trip does not
+replace tests for access denial, profile/store unavailability, revocation, or
+long-term identity migration.
 
 ## Rollback plan
 
