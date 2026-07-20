@@ -96,6 +96,14 @@ explicit lab configuration. Reporting changes neither callback scheduling nor
 the output source. A capacity fault or backend error ends the soak after its
 final control-domain status is recorded.
 
+`tools/check_output_soak_log.py` validates a retained completed CPAL or direct-
+WASAPI soak transcript against the configured duration and report interval. It
+requires every expected periodic status, a final healthy status, monotonically
+increasing callback/render and local-offset observations, and zero reported
+capacity faults or backend errors. It is a control-domain evidence-integrity
+check: it neither observes the audio callback directly nor proves latency,
+device removal, default-role change, sleep/wake recovery, or audio quality.
+
 Separate default-role recovery commands exercise one manual lifecycle sequence:
 start a default-endpoint silent stream, wait for the operator to change the
 Windows default render role, capture the old stream's status, stop it in the

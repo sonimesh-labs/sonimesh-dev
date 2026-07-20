@@ -46,6 +46,17 @@ Set `SONIMESH_OUTPUT_SOAK_SECONDS` to 1 through 28,800 and
 `SONIMESH_OUTPUT_SOAK_REPORT_SECONDS` to a value no larger than that duration
 only when the recorded experiment requires a different configuration. Preserve
 every periodic status line and the final status in the measurement record.
+After a completed run, verify the retained transcript before deriving a
+measurement row:
+
+    python tools/check_output_soak_log.py --backend cpal output/cpal-output-soak.log
+    python tools/check_output_soak_log.py --backend wasapi output/wasapi-output-soak.log
+
+The verifier checks the command's declared duration and interval, the expected
+number of periodic snapshots, monotonic callback/render and local-offset
+observations, zero capacity faults/errors, and one final healthy status. It
+does not inspect the callback, establish physical latency, or substitute for a
+manual device, default-role, or power-transition scenario.
 
 For the repeated start/stop baseline, run:
 

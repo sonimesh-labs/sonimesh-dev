@@ -35,6 +35,7 @@ jobs:
           python tools/check_workspace_boundaries.py
           python tools/check_android_capture_boundary.py --self-test
           python tools/check_android_capture_boundary.py
+          python tools/check_output_soak_log.py --self-test
       - name: Check formatting
         if: runner.os == 'Linux'
         run: cargo fmt --all -- --check
