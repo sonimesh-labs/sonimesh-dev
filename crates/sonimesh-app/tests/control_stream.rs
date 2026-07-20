@@ -607,6 +607,55 @@ fn expiring_active_pairing_returns_the_coordinator_to_idle() {
 }
 
 #[test]
+fn revocation_retires_the_trusted_control_session_and_stream() {
+    let capabilities = [Capability::FrameDuration20Ms];
+    let mut trusted_pairing = PairingInvitationController::<1>::new();
+    let mut trusted_coordinator =
+        ControlStreamCoordinator::new(SessionState::IDLE, &capabilities).unwrap();
+    trusted_coordinator
+        .begin_pairing(&mut trusted_pairing, PairingId::new([10; 16]), 500, 50, 1)
+        .unwrap();
+    assert_eq!(
+        trusted_coordinator.record_pairing_proof(
+            &mut trusted_pairing,
+            501,
+            PairingSource::new([11; 16]),
+            true,
+        ),
+        Ok(PairingAttemptOutcome::Paired)
+    );
+    assert!(matches!(
+        trusted_coordinator.accept(&hello(&capabilities)),
+        Ok(ControlStreamAction::Negotiated(_))
+    ));
+    activate(&mut trusted_coordinator, 0);
+    let ControlStreamAction::Rotate {
+        token: pending_token,
+        previous,
+        next,
+    } = trusted_coordinator.accept(&start(1)).unwrap()
+    else {
+        panic!("expected a pending rotation");
+    };
+
+    assert_eq!(
+        trusted_coordinator.revoke_pairing(&mut trusted_pairing),
+        Ok(PairingRecordState::Revoked)
+    );
+    assert_eq!(trusted_coordinator.state(), SessionState::IDLE);
+    assert_eq!(trusted_coordinator.active(), None);
+    assert_eq!(trusted_coordinator.negotiation(), None);
+    assert!(matches!(
+        trusted_coordinator.complete_rotation(pending_token, previous, next),
+        Err(ControlStreamError::CompletionMismatch)
+    ));
+    assert!(matches!(
+        trusted_coordinator.accept(&hello(&capabilities)),
+        Err(ControlStreamError::HelloRequiresReady(SessionState::IDLE))
+    ));
+}
+
+#[test]
 fn observed_pairing_failure_retires_the_coordinator_and_rejects_control_frames() {
     let capabilities = [Capability::FrameDuration20Ms];
     let mut coordinator = ControlStreamCoordinator::new(SessionState::IDLE, &capabilities).unwrap();

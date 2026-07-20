@@ -31,6 +31,21 @@ fn valid_proof_consumes_the_record_exactly_once() {
 }
 
 #[test]
+fn revocation_is_terminal_and_rejects_replayed_proofs() {
+    let mut record = PairingRecord::<1>::new(id(), 100, 1).unwrap();
+
+    record.revoke();
+    assert_eq!(record.state(), PairingRecordState::Revoked);
+    assert_eq!(record.observe(10), Ok(PairingRecordState::Revoked));
+    assert_eq!(
+        record.record_proof(10, source(1), true),
+        Err(PairingRecordError::Revoked)
+    );
+    record.expire();
+    assert_eq!(record.state(), PairingRecordState::Revoked);
+}
+
+#[test]
 fn failures_are_rate_limited_per_opaque_source() {
     let mut record = PairingRecord::<2>::new(id(), 100, 2).unwrap();
 

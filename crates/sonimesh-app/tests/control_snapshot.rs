@@ -1,8 +1,9 @@
 //! Low-rate control snapshot tests without UI or platform dependencies.
 
 use sonimesh_app::{
-    OutputController, OutputSelection, PairingId, PairingInvitationController,
-    PairingSnapshotState, PairingSource, SessionEvent, SessionPhase, SessionState,
+    OutputController, OutputSelection, PairingAttemptOutcome, PairingId,
+    PairingInvitationController, PairingSnapshotState, PairingSource, SessionEvent, SessionPhase,
+    SessionState,
 };
 use sonimesh_platform::{
     AudioOutput, OutputConfig, OutputDeviceInfo, OutputError, OutputHealth, RenderSource,
@@ -185,4 +186,23 @@ fn consumed_pairing_record_remains_visible_while_the_trusted_stream_runs() {
     assert_eq!(reconnecting.session(), SessionPhase::Reconnecting);
     assert_eq!(reconnecting.pairing(), PairingSnapshotState::Consumed);
     assert_eq!(reconnecting.output(), output.snapshot());
+}
+
+#[test]
+fn revoked_pairing_projects_a_redacted_terminal_state() {
+    let mut pairing = PairingInvitationController::<1>::new();
+    let mut session = SessionState::IDLE;
+    let output = controller();
+    pairing
+        .begin(&mut session, PairingId::new([23; 16]), 100, 50, 1)
+        .unwrap();
+    assert_eq!(
+        pairing.record_proof(&mut session, 101, PairingSource::new([29; 16]), true),
+        Ok(PairingAttemptOutcome::Paired)
+    );
+    pairing.revoke(&mut session).unwrap();
+
+    let snapshot = pairing.snapshot_at(&mut session, 102, &output).unwrap();
+    assert_eq!(snapshot.session(), SessionPhase::Idle);
+    assert_eq!(snapshot.pairing(), PairingSnapshotState::Revoked);
 }

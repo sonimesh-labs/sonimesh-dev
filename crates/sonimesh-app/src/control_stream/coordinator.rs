@@ -159,6 +159,26 @@ impl ControlStreamCoordinator {
         result
     }
 
+    /// Revokes a retained invitation or trusted pairing session through this owner.
+    ///
+    /// The pairing controller marks its in-memory record terminal; this owner
+    /// then retires control negotiation, active media, and pending completion.
+    /// Durable credential and trust-record deletion remains a future platform
+    /// pairing-owner responsibility.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PairingInvitationError`] when no pairing record is retained or
+    /// its lifecycle cannot be synchronized with the control session.
+    pub fn revoke_pairing<const MAX_SOURCES: usize>(
+        &mut self,
+        pairing: &mut PairingInvitationController<MAX_SOURCES>,
+    ) -> Result<crate::PairingRecordState, PairingInvitationError> {
+        let result = pairing.revoke(&mut self.state);
+        self.retire_if_idle();
+        result
+    }
+
     /// Applies a platform acknowledgement that does not create, stop, or expire a session.
     ///
     /// Stream start and stop are committed by their tokenized completion methods;

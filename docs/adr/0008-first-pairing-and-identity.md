@@ -106,6 +106,15 @@ capacity. Its public lifecycle state cannot establish trust directly; only the
 pairing owner can advance a consumed external proof to `Ready`. It does not
 verify a pairing proof or store a secret, identity, or QR payload.
 
+The same controlled-lab core models a local revocation as a terminal redacted
+record state. Revocation must reject every later proof attempt and retire the
+in-memory control session, negotiated capabilities, active stream identity, and
+pending completion before returning to `Idle`. This verifies fail-closed
+lifecycle ownership only; it neither stores nor deletes a production identity,
+pairing record, session ticket, or media context. The future platform pairing
+owner remains responsible for atomically deleting those durable values before
+it reports a successful user-visible revocation.
+
 The Windows credential-store spike must separately record successful cleanup and
 the observed error category after deletion. A successful round trip does not
 replace tests for access denial, profile/store unavailability, revocation, or

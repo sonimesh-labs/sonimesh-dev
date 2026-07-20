@@ -51,6 +51,8 @@ pub enum PairingRecordState {
     Consumed,
     /// Invitation expired before a valid proof completed.
     Expired,
+    /// Invitation or its trusted session was explicitly revoked.
+    Revoked,
 }
 
 /// Result of recording one TLS-layer pairing proof verification.
@@ -78,6 +80,8 @@ pub enum PairingRecordError {
     Expired,
     /// Invitation was consumed by an earlier valid proof.
     Consumed,
+    /// Invitation or trusted session was explicitly revoked.
+    Revoked,
     /// Source has exhausted its bounded proof attempts.
     SourceRateLimited,
     /// Fixed source table cannot admit a new distinct source.
@@ -94,6 +98,7 @@ impl fmt::Display for PairingRecordError {
             Self::TimeRegressed => formatter.write_str("pairing clock moved backward"),
             Self::Expired => formatter.write_str("pairing invitation expired"),
             Self::Consumed => formatter.write_str("pairing invitation was already consumed"),
+            Self::Revoked => formatter.write_str("pairing invitation was revoked"),
             Self::SourceRateLimited => {
                 formatter.write_str("pairing source exceeded its attempt limit")
             }
@@ -177,7 +182,10 @@ impl<const MAX_SOURCES: usize> PairingRecord<MAX_SOURCES> {
     /// Returns [`PairingRecordError::TimeRegressed`] after permanently expiring
     /// an active invitation when `now_ms` is earlier than a prior observation.
     pub fn observe(&mut self, now_ms: u64) -> Result<PairingRecordState, PairingRecordError> {
-        if self.state == PairingRecordState::Consumed {
+        if matches!(
+            self.state,
+            PairingRecordState::Consumed | PairingRecordState::Revoked
+        ) {
             return Ok(self.state);
         }
         if now_ms < self.last_observed_ms {
@@ -202,6 +210,14 @@ impl<const MAX_SOURCES: usize> PairingRecord<MAX_SOURCES> {
         }
     }
 
+    /// Permanently revokes this invitation or the trusted session it established.
+    ///
+    /// This is an in-memory lifecycle marker only. The platform pairing owner
+    /// must separately remove durable trust, credential, and media material.
+    pub fn revoke(&mut self) {
+        self.state = PairingRecordState::Revoked;
+    }
+
     /// Records the result of one externally verified transcript-bound proof.
     ///
     /// # Errors
@@ -215,8 +231,10 @@ impl<const MAX_SOURCES: usize> PairingRecord<MAX_SOURCES> {
         source: PairingSource,
         proof_verified: bool,
     ) -> Result<PairingAttemptOutcome, PairingRecordError> {
-        if self.state == PairingRecordState::Consumed {
-            return Err(PairingRecordError::Consumed);
+        match self.state {
+            PairingRecordState::Consumed => return Err(PairingRecordError::Consumed),
+            PairingRecordState::Revoked => return Err(PairingRecordError::Revoked),
+            PairingRecordState::Active | PairingRecordState::Expired => {}
         }
         if self.observe(now_ms)? == PairingRecordState::Expired {
             return Err(PairingRecordError::Expired);

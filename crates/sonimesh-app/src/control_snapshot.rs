@@ -35,6 +35,8 @@ pub enum PairingSnapshotState {
     Consumed,
     /// Invitation ended without another accepted proof.
     Expired,
+    /// Invitation or its trusted session was explicitly revoked.
+    Revoked,
 }
 
 impl DesktopControlSnapshot {
@@ -120,6 +122,7 @@ impl PairingSnapshotState {
             Some(PairingRecordState::Active) => Self::Active,
             Some(PairingRecordState::Consumed) => Self::Consumed,
             Some(PairingRecordState::Expired) => Self::Expired,
+            Some(PairingRecordState::Revoked) => Self::Revoked,
         }
     }
 }

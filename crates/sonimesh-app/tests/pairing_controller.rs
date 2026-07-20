@@ -97,6 +97,31 @@ fn active_invitation_cannot_be_replaced_or_expired_record_revived() {
 }
 
 #[test]
+fn revocation_retires_a_trusted_session_without_recreating_trust() {
+    let mut controller = PairingInvitationController::<1>::new();
+    let mut session = SessionState::IDLE;
+    controller.begin(&mut session, id(1), 100, 50, 1).unwrap();
+    assert_eq!(
+        controller.record_proof(&mut session, 101, source(1), true),
+        Ok(PairingAttemptOutcome::Paired)
+    );
+    assert_eq!(session.phase(), SessionPhase::Ready);
+
+    assert_eq!(
+        controller.revoke(&mut session),
+        Ok(PairingRecordState::Revoked)
+    );
+    assert_eq!(session.phase(), SessionPhase::Idle);
+    assert_eq!(controller.state(), Some(PairingRecordState::Revoked));
+    assert_eq!(
+        controller.record_proof(&mut session, 102, source(1), true),
+        Err(PairingInvitationError::InvalidSessionState(
+            SessionState::IDLE
+        ))
+    );
+}
+
+#[test]
 fn invalid_creation_leaves_session_and_controller_empty() {
     let mut controller = PairingInvitationController::<1>::new();
     let mut session = SessionState::IDLE;

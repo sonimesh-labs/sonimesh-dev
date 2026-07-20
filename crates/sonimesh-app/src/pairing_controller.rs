@@ -16,7 +16,7 @@ pub struct PairingInvitationController<const MAX_SOURCES: usize> {
     record: Option<PairingRecord<MAX_SOURCES>>,
 }
 
-/// Failure while creating, polling, expiring, or consuming an invitation.
+/// Failure while creating, polling, expiring, revoking, or consuming an invitation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PairingInvitationError {
     /// A pairing-record bound or clock rule rejected the operation.
@@ -25,7 +25,7 @@ pub enum PairingInvitationError {
     Transition(SessionTransitionError),
     /// An active invitation must expire before another can replace it.
     ActiveInvitation,
-    /// There is no retained invitation to poll, expire, or consume.
+    /// There is no retained invitation to poll, expire, revoke, or consume.
     MissingInvitation,
     /// An invitation must have a non-zero lifetime.
     ZeroLifetime,
@@ -238,12 +238,37 @@ impl<const MAX_SOURCES: usize> PairingInvitationController<MAX_SOURCES> {
         Ok(state)
     }
 
+    /// Revokes a retained invitation or its trusted in-memory session.
+    ///
+    /// The record becomes terminal and the shared lifecycle returns to `Idle`.
+    /// This does not persist or delete production trust material.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when no invitation is retained or the shared lifecycle
+    /// cannot be synchronized with the revoked record.
+    pub fn revoke(
+        &mut self,
+        session: &mut SessionState,
+    ) -> Result<PairingRecordState, PairingInvitationError> {
+        let state = {
+            let record = self
+                .record
+                .as_mut()
+                .ok_or(PairingInvitationError::MissingInvitation)?;
+            record.revoke();
+            record.state()
+        };
+        self.synchronize_state(session)?;
+        Ok(state)
+    }
+
     fn synchronize_state(&self, session: &mut SessionState) -> Result<(), PairingInvitationError> {
         match self.state() {
             Some(PairingRecordState::Active) if *session != SessionState::PAIRING => {
                 Err(PairingInvitationError::InvalidSessionState(*session))
             }
-            Some(PairingRecordState::Expired) => session
+            Some(PairingRecordState::Expired | PairingRecordState::Revoked) => session
                 .apply(SessionEvent::SessionExpired)
                 .map_err(PairingInvitationError::Transition),
             // A consumed record is retained audit state. The verified session may
