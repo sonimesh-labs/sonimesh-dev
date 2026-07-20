@@ -169,7 +169,7 @@ and units instead of calculating a source-specific explanation for silence.
 | App version/build and target SDK | — |
 | Projection scope and fresh-consent result | — |
 | Observed source category | Allowed, idle, silent, or protected/unknown only; do not name an application as the cause of silence |
-| AudioRecord source and channel mask, if the platform exposes them | — |
+| AudioRecord metadata | `audioSource` and `channelMask` from the active `CaptureFormat`; record them as reported integers, not a source-policy explanation |
 | Capture format | `sampleRateHz`, `channels`, PCM representation, and `readSamples` from the active `CaptureFormat` |
 | AudioRecord buffers | `bufferSizeBytes` actual and `minimumBufferBytes` from the active `CaptureFormat` |
 | Initial active snapshot | `captureDurationMillis`, `lastReadCompletionOffsetMillis`, `capturedFrames`, `silentReads`, and `readErrors` |
@@ -181,6 +181,9 @@ and units instead of calculating a source-specific explanation for silence.
 For an allowed, idle, silent, or protected/unknown observation, `silentReads`
 and `lastReadCompletionOffsetMillis` describe only completed local reads. A
 nonzero silent count does not identify why a particular source produced silence.
+Likewise, the reported `audioSource` and `channelMask` identify only the
+AudioRecord configuration observed by the device; they do not identify a source
+application or explain a policy-limited capture result.
 Record a negative `AudioRecord.read` result in `readErrors` only when teardown
 was not already admitted; report a suppressed teardown wake-up separately in
 the lifecycle observation.
