@@ -14,6 +14,9 @@ from pathlib import Path
 
 MAXIMUM_SOAK_SECONDS = 28_800
 HEADER_PATTERN = re.compile(r"^(?P<name>soak duration|report interval) \(s\): (?P<value>\d+)$")
+MAXIMUM_FRAMES_PATTERN = re.compile(r"^maximum frames: (?P<value>\d+)$")
+REQUEST_PATTERN = re.compile(r"^requested frames: (?P<value>default|\d+)$")
+FORMAT_PREFIX = "default format: "
 
 
 @dataclass(frozen=True)
@@ -76,6 +79,9 @@ class SoakStatus:
 class SoakReport:
     duration_seconds: int
     report_interval_seconds: int
+    default_format: str
+    requested_frames: str
+    maximum_frames: int
     periodic_statuses: tuple[SoakStatus, ...]
     final_status: SoakStatus
 
@@ -85,6 +91,22 @@ def parse_header(line: str) -> tuple[str, int] | None:
     if match is None:
         return None
     return match.group("name"), int(match.group("value"))
+
+
+def parse_configuration_header(line: str) -> tuple[str, str | int] | None:
+    """Parses retained non-timing startup configuration without interpreting format."""
+    if line.startswith(FORMAT_PREFIX):
+        value = line.removeprefix(FORMAT_PREFIX)
+        if not value:
+            raise ValueError("default format header is empty")
+        return "default format", value
+    request = REQUEST_PATTERN.fullmatch(line)
+    if request is not None:
+        return "requested frames", request.group("value")
+    maximum = MAXIMUM_FRAMES_PATTERN.fullmatch(line)
+    if maximum is not None:
+        return "maximum frames", int(maximum.group("value"))
+    return None
 
 
 def parse_status(line: str, spec: BackendSpec) -> tuple[bool, SoakStatus] | None:
@@ -123,7 +145,7 @@ def parse_status(line: str, spec: BackendSpec) -> tuple[bool, SoakStatus] | None
 
 def validate_report(lines: list[str], backend: str) -> SoakReport:
     spec = BACKENDS[backend]
-    headers: dict[str, int] = {}
+    headers: dict[str, str | int] = {}
     periodic_statuses: list[SoakStatus] = []
     final_status: SoakStatus | None = None
 
@@ -131,6 +153,13 @@ def validate_report(lines: list[str], backend: str) -> SoakReport:
         header = parse_header(line)
         if header is not None:
             name, value = header
+            if name in headers:
+                raise ValueError(f"duplicate {name} header")
+            headers[name] = value
+            continue
+        configuration = parse_configuration_header(line)
+        if configuration is not None:
+            name, value = configuration
             if name in headers:
                 raise ValueError(f"duplicate {name} header")
             headers[name] = value
@@ -150,12 +179,23 @@ def validate_report(lines: list[str], backend: str) -> SoakReport:
 
     duration = headers.get("soak duration")
     interval = headers.get("report interval")
-    if duration is None or interval is None:
+    default_format = headers.get("default format")
+    requested_frames = headers.get("requested frames")
+    maximum_frames = headers.get("maximum frames")
+    if not isinstance(duration, int) or not isinstance(interval, int):
         raise ValueError("missing soak duration or report interval header")
+    if not isinstance(default_format, str) or not isinstance(requested_frames, str):
+        raise ValueError("missing default format or requested frames header")
+    if not isinstance(maximum_frames, int):
+        raise ValueError("missing maximum frames header")
     if not 1 <= duration <= MAXIMUM_SOAK_SECONDS:
         raise ValueError("soak duration is outside the accepted command bound")
     if not 1 <= interval <= duration:
         raise ValueError("report interval is outside the accepted command bound")
+    if maximum_frames <= 0:
+        raise ValueError("maximum frames header must be positive")
+    if requested_frames != "default" and int(requested_frames) <= 0:
+        raise ValueError("requested frames header must be default or positive")
     if final_status is None:
         raise ValueError("missing final status")
 
@@ -176,15 +216,25 @@ def validate_report(lines: list[str], backend: str) -> SoakReport:
             )
 
     for status in periodic_statuses:
-        validate_status(status, spec, previous, duration)
+        validate_status(status, spec, previous, duration, maximum_frames=maximum_frames)
         previous = status
-    validate_status(final_status, spec, previous, duration, final_status=True)
+    validate_status(
+        final_status,
+        spec,
+        previous,
+        duration,
+        final_status=True,
+        maximum_frames=maximum_frames,
+    )
     if final_status.elapsed_seconds < duration:
         raise ValueError("final status completed before the configured soak duration")
 
     return SoakReport(
         duration_seconds=duration,
         report_interval_seconds=interval,
+        default_format=default_format,
+        requested_frames=requested_frames,
+        maximum_frames=maximum_frames,
         periodic_statuses=tuple(periodic_statuses),
         final_status=final_status,
     )
@@ -196,11 +246,14 @@ def validate_status(
     previous: SoakStatus | None,
     duration: int,
     final_status: bool = False,
+    maximum_frames: int = 0,
 ) -> None:
     if status.elapsed_seconds <= 0:
         raise ValueError("status elapsed time must be positive")
     if status.latest_frames <= 0 or status.maximum_frames < status.latest_frames:
         raise ValueError("status frame observations are invalid")
+    if status.maximum_frames > maximum_frames:
+        raise ValueError("observed frame quantum exceeds declared maximum frames")
     if status.count <= 0 or status.offset_nanoseconds <= 0:
         raise ValueError("status callback/render count or offset is invalid")
     if status.maximum_gap_nanoseconds < 0:
@@ -269,6 +322,9 @@ class OutputSoakLogTests(unittest.TestCase):
             [
                 "soak duration (s): 15",
                 "report interval (s): 5",
+                "default format: 48000 Hz, 8 channels, F32",
+                "requested frames: 480",
+                "maximum frames: 8192",
                 cpal_status(5, 500),
                 cpal_status(10, 1_000),
                 cpal_status(15, 1_500, maximum_gap_nanoseconds=18_000_000),
@@ -277,6 +333,8 @@ class OutputSoakLogTests(unittest.TestCase):
             "cpal",
         )
         self.assertEqual(report.duration_seconds, 15)
+        self.assertEqual(report.requested_frames, "480")
+        self.assertEqual(report.maximum_frames, 8_192)
         self.assertEqual(len(report.periodic_statuses), 3)
         self.assertEqual(report.final_status.maximum_frames, 1056)
 
@@ -284,6 +342,9 @@ class OutputSoakLogTests(unittest.TestCase):
         transcript = [
             "soak duration (s): 15",
             "report interval (s): 5",
+            "default format: 48000 Hz, 8 channels, Float32",
+            "requested frames: 480",
+            "maximum frames: 8192",
             wasapi_status(5, 500),
             f"final {wasapi_status(15, 1_500, errors=1, health='Faulted')}",
         ]
@@ -294,6 +355,9 @@ class OutputSoakLogTests(unittest.TestCase):
         transcript = [
             "soak duration (s): 10",
             "report interval (s): 5",
+            "default format: 48000 Hz, 8 channels, F32",
+            "requested frames: 480",
+            "maximum frames: 8192",
             cpal_status(5, 500),
             cpal_status(10, 400),
             f"final {cpal_status(10, 400)}",
@@ -305,6 +369,9 @@ class OutputSoakLogTests(unittest.TestCase):
         transcript = [
             "soak duration (s): 10",
             "report interval (s): 5",
+            "default format: 48000 Hz, 8 channels, F32",
+            "requested frames: 480",
+            "maximum frames: 8192",
             cpal_status(5, 500),
             cpal_status(10, 500),
             f"final {cpal_status(10, 500)}",
@@ -316,12 +383,37 @@ class OutputSoakLogTests(unittest.TestCase):
         transcript = [
             "soak duration (s): 10",
             "report interval (s): 5",
+            "default format: 48000 Hz, 8 channels, F32",
+            "requested frames: 480",
+            "maximum frames: 8192",
             cpal_status(1, 100),
             cpal_status(2, 200),
             f"final {cpal_status(10, 1_000)}",
         ]
         with self.assertRaisesRegex(ValueError, "before its configured report interval"):
             validate_report(transcript, "cpal")
+
+    def test_rejects_missing_configuration_and_capacity_violation(self) -> None:
+        missing_configuration = [
+            "soak duration (s): 5",
+            "report interval (s): 5",
+            cpal_status(5, 500),
+            f"final {cpal_status(5, 500)}",
+        ]
+        with self.assertRaisesRegex(ValueError, "missing default format"):
+            validate_report(missing_configuration, "cpal")
+
+        capacity_violation = [
+            "soak duration (s): 5",
+            "report interval (s): 5",
+            "default format: 48000 Hz, 8 channels, F32",
+            "requested frames: default",
+            "maximum frames: 1000",
+            cpal_status(5, 500),
+            f"final {cpal_status(5, 500)}",
+        ]
+        with self.assertRaisesRegex(ValueError, "exceeds declared maximum"):
+            validate_report(capacity_violation, "cpal")
 
 
 def cpal_status(
