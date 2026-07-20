@@ -99,8 +99,10 @@ final control-domain status is recorded.
 `tools/check_output_soak_log.py` validates a retained completed CPAL or direct-
 WASAPI soak transcript against the configured duration and report interval. It
 requires every expected periodic status, a final healthy status, monotonically
-increasing callback/render and local-offset observations, and zero reported
-capacity faults or backend errors. It is a control-domain evidence-integrity
+nondecreasing maximum observations, and zero reported capacity faults or
+backend errors. Consecutive periodic snapshots must strictly advance elapsed
+time, callback/render count, and local offset; the immediate final snapshot may
+equal the final periodic observation. It is a control-domain evidence-integrity
 check: it neither observes the audio callback directly nor proves latency,
 device removal, default-role change, sleep/wake recovery, or audio quality.
 

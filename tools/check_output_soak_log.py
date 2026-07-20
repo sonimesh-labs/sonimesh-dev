@@ -175,9 +175,10 @@ def validate_report(lines: list[str], backend: str) -> SoakReport:
                 f"expected at least {expected_elapsed} seconds, got {status.elapsed_seconds}"
             )
 
-    for status in [*periodic_statuses, final_status]:
+    for status in periodic_statuses:
         validate_status(status, spec, previous, duration)
         previous = status
+    validate_status(final_status, spec, previous, duration, final_status=True)
     if final_status.elapsed_seconds < duration:
         raise ValueError("final status completed before the configured soak duration")
 
@@ -194,6 +195,7 @@ def validate_status(
     spec: BackendSpec,
     previous: SoakStatus | None,
     duration: int,
+    final_status: bool = False,
 ) -> None:
     if status.elapsed_seconds <= 0:
         raise ValueError("status elapsed time must be positive")
@@ -214,10 +216,18 @@ def validate_status(
         raise ValueError("status elapsed time is not monotonic")
     if previous.elapsed_seconds == duration and status.elapsed_seconds != duration:
         raise ValueError("status exceeds configured duration before final observation")
-    if status.count < previous.count:
-        raise ValueError("callback/render count is not monotonic")
-    if status.offset_nanoseconds < previous.offset_nanoseconds:
-        raise ValueError("local offset is not monotonic")
+    if final_status:
+        if status.count < previous.count:
+            raise ValueError("callback/render count is not monotonic")
+        if status.offset_nanoseconds < previous.offset_nanoseconds:
+            raise ValueError("local offset is not monotonic")
+    else:
+        if status.elapsed_seconds <= previous.elapsed_seconds:
+            raise ValueError("periodic status elapsed time did not advance")
+        if status.count <= previous.count:
+            raise ValueError("periodic callback/render count did not advance")
+        if status.offset_nanoseconds <= previous.offset_nanoseconds:
+            raise ValueError("periodic local offset did not advance")
     if status.maximum_frames < previous.maximum_frames:
         raise ValueError("maximum frame observation is not monotonic")
     if status.maximum_gap_nanoseconds < previous.maximum_gap_nanoseconds:
@@ -288,7 +298,18 @@ class OutputSoakLogTests(unittest.TestCase):
             cpal_status(10, 400),
             f"final {cpal_status(10, 400)}",
         ]
-        with self.assertRaisesRegex(ValueError, "count is not monotonic"):
+        with self.assertRaisesRegex(ValueError, "periodic callback/render count did not advance"):
+            validate_report(transcript, "cpal")
+
+    def test_rejects_periodic_status_without_callback_progress(self) -> None:
+        transcript = [
+            "soak duration (s): 10",
+            "report interval (s): 5",
+            cpal_status(5, 500),
+            cpal_status(10, 500),
+            f"final {cpal_status(10, 500)}",
+        ]
+        with self.assertRaisesRegex(ValueError, "periodic callback/render count did not advance"):
             validate_report(transcript, "cpal")
 
     def test_rejects_periodic_status_before_its_interval(self) -> None:
