@@ -254,7 +254,7 @@ def validate_terminal_lifecycle(lifecycle: dict[str, Any], scenario: str, termin
         raise ValueError(f"{scenario} record has an incompatible terminal state")
     if scenario in {"background", "lock_screen"} and lifecycle["event_duration_ms"] == 0:
         raise ValueError(f"{scenario} record requires a positive event duration")
-    if scenario in {"notification_stop", "projection_revoked", "process_recreation"}:
+    if terminal_state in {"user_requested", "projection_revoked", "service_destroyed", "failed"}:
         validate_absent_lifecycle(lifecycle, scenario)
 
 
@@ -307,13 +307,17 @@ class AndroidCaptureRecordTests(unittest.TestCase):
         record["lifecycle"] = absent_lifecycle()
         validate_record(record)
 
+        record = active_record(terminal_state="user_requested")
+        with self.assertRaisesRegex(ValueError, "requires absent notification"):
+            validate_record(record)
+
         record = active_record()
         record["capture_format"]["read_samples"] = 1_919
         with self.assertRaisesRegex(ValueError, "fixed 20 ms read"):
             validate_record(record)
 
 
-def active_record(scenario: str = "allowed", terminal_state: str = "user_requested") -> dict[str, Any]:
+def active_record(scenario: str = "allowed", terminal_state: str = "active") -> dict[str, Any]:
     return {
         "schema_version": 1,
         "recorded_at": "2026-07-20T20:30:00+08:00",

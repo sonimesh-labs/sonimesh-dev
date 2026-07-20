@@ -97,6 +97,8 @@ snapshots, terminal state, lifecycle presence observations, and device-condition
 fields appropriate to the run. It mirrors the capture format's bounded 20 ms
 read calculation and validates counter/offset monotonicity, but it does not
 derive a sample cadence, capture policy, source identity, or latency result.
+Any recorded terminal teardown state requires absent notification, service, and
+projection observations, matching the service's one teardown path.
 The schema has no fields for PCM, source application names, ADB serials,
 projection tokens, keys, or opaque device identifiers. The tool is an offline
 record-integrity check; it does not connect to ADB, install or launch the app,

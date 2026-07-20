@@ -107,6 +107,12 @@ nondecreasing, and it requires each completion offset to be at most its
 snapshot's local duration. It checks the same 20 ms read-size calculation and
 64 KiB buffer bound as the capture bootstrap.
 
+`terminal_state` is `active` only while a session remains observable. The
+terminal teardown values `user_requested`, `projection_revoked`,
+`service_destroyed`, and `failed` require `notification`, `service`, and
+`projection` to be recorded as `absent`; this records the common teardown
+invariant instead of assuming that an old stream recovered.
+
 `observed_source_category` is limited to `allowed`, `idle`, `silent`, or
 `protected_unknown` for a capture session. It cannot contain an application
 name. `lifecycle` records only `present`, `absent`, or `not_measured` for the
