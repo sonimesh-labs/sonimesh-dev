@@ -15,8 +15,8 @@ Gradle wrapper, Java 21, Android API 36, and Android Build Tools 34.0.0.
 
 ~~~powershell
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace --all-targets
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace --all-targets --all-features
 cargo run -p sonimesh-network-simulator
 python tools/check_workspace_boundaries.py
 python tools/check_android_capture_boundary.py
@@ -25,6 +25,9 @@ python tools/check_output_realtime_boundary.py
 python tools/check_output_lifecycle_log.py --self-test
 python tools/check_output_recovery_log.py --self-test
 python tools/android_capture_preflight.py --self-test
+Push-Location apps/android
+.\gradlew.bat testDebugUnitTest --no-daemon
+Pop-Location
 ~~~
 
 On Windows, the read-only CPAL feasibility probe can enumerate output devices
