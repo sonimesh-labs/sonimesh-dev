@@ -84,6 +84,26 @@ recovery work to either audio callback. A separate uninterrupted eight-hour
 run must retain every periodic line and its final status before the soak cell is
 considered complete.
 
+## Default-recovery command check
+
+The CPAL and direct-WASAPI default-recovery commands were separately checked
+with a two-second wait and two-second recovered stream, with
+`SONIMESH_OUTPUT_REQUIRE_DEFAULT_CHANGE=false`. No default device was changed,
+so this is not a default-role transition observation. It verifies only that each
+command safely captures the active stream status, stops outside the callback,
+re-probes the current default, and starts a fresh bounded stream.
+
+CPAL reported 199 callbacks before stop and 200 after recreation, both healthy
+with zero faults/errors and a 1,056-frame maximum callback. Direct WASAPI
+reported 200 renders before stop and 201 after recreation, both healthy with
+zero faults/errors, a 480-frame maximum render, and 1,056 endpoint/priming
+frames. Both commands printed `default changed: false`, as required by this
+no-change validation mode.
+
+A valid default-role evidence row must leave the change requirement enabled,
+observe `default changed: true`, and retain the two status lines after an
+operator changes the Windows default render endpoint during the wait.
+
 ## Interpretation and remaining work
 
 This comparison shows different observed callback/render quanta under the same
