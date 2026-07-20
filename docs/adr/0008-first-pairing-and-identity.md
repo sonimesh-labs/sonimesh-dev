@@ -96,6 +96,15 @@ the observed error category after deletion. A successful round trip does not
 replace tests for access denial, profile/store unavailability, revocation, or
 long-term identity migration.
 
+Before selecting the Android identity format, an Android instrumentation spike
+may generate a fresh AndroidKeyStore EC signing key under a randomized alias,
+sign and verify fixed non-secret test bytes, confirm that private-key encoding is
+unavailable, delete the alias, and confirm removal. The spike is isolated from
+MediaProjection capture, pairing, QR data, TLS, and network paths. It must not
+log the alias, public key, signature, or test bytes, and it must not create a
+long-lived key or trust record. A device/emulator result is required because a
+host Gradle build cannot execute AndroidKeyStore behavior.
+
 ## Rollback plan
 
 Pairing protocol versions and QR payload versions are explicit. A future
