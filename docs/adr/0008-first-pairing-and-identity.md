@@ -31,10 +31,25 @@ expires_at: monotonic expiry metadata
 
 Android establishes TLS 1.3 to the QR endpoint and pins the desktop SPKI from
 the QR payload for this first connection. Discovery records are never used as a
-certificate authority or trust anchor. The peers prove knowledge of the pairing
-secret using a transcript-bound exporter or an equivalently reviewed TLS channel
-binding, with distinct client/server role labels. The exact proof bytes must be
-published as Rust/Kotlin vectors before implementation.
+certificate authority or trust anchor. A provider used by either peer must export
+exactly 32 bytes after a successful TLS 1.3 handshake with:
+
+~~~text
+label = "EXPORTER-SoniMesh Pairing v1" (ASCII)
+context = pairing_id (the exact 16 QR bytes)
+use_context = true
+length = 32
+~~~
+
+The provider output is an opaque `tls_exporter` value. The peers prove knowledge
+of the pairing secret with the fixed HKDF-SHA256 construction published in
+`docs/protocol/pairing-tls-binding-vectors.md`; client and server proofs have
+distinct role bytes. The media root uses a separate label under the same
+exporter/secret extract. No implementation may replace this mechanism with a
+custom transcript hash, certificate fingerprint, discovery record, or one-sided
+code. A provider that cannot pin the QR SPKI, complete TLS 1.3, or export these
+exact bytes fails pairing closed. The exact proof bytes must be published as
+Rust/Kotlin vectors before implementation.
 
 After successful proof, each peer sends its long-term public identity key inside
 the pinned TLS channel and stores the peer key plus a user-visible trust record.
@@ -78,11 +93,11 @@ require distinct explicit consent and protocol fields.
 ## Validation evidence
 
 Before implementation leaves the lab, provide Rust/Kotlin vectors for QR binary
-encoding, TLS channel-binding inputs, role-separated proof bytes, transcript HKDF
-derivation, and media root-secret handoff. Test expiry, single-use behavior,
-wrong pin, wrong secret, replayed proof, concurrent attempts, revocation,
-Android Keystore failure, and Windows credential-store failure. No test may log
-secret material.
+encoding, the fixed TLS exporter inputs, role-separated proof bytes, transcript
+HKDF derivation, and media root-secret handoff. Test expiry, single-use behavior,
+wrong pin, wrong secret, wrong exporter, wrong role, replayed proof, concurrent
+attempts, revocation, Android Keystore failure, and Windows credential-store
+failure. No test may log secret material.
 
 The controlled-lab Rust core validates the bounded pairing-record lifecycle and
 its control-domain session transitions: expiry, single use, monotonic-time
@@ -104,6 +119,14 @@ MediaProjection capture, pairing, QR data, TLS, and network paths. It must not
 log the alias, public key, signature, or test bytes, and it must not create a
 long-lived key or trust record. A device/emulator result is required because a
 host Gradle build cannot execute AndroidKeyStore behavior.
+
+Before a TLS library is selected for pairing, separate Windows and Android
+provider spikes must demonstrate a fresh pinned TLS 1.3 connection and the exact
+exporter call defined above. They must use fresh lab certificates and fixed
+non-secret test inputs, compare only a success/failure category and the public
+vector result, and clean up all listeners and temporary key material. A host-only
+HKDF vector test does not prove provider exporter support, pin enforcement, or
+TLS interoperability.
 
 ## Rollback plan
 

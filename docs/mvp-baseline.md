@@ -88,6 +88,12 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
 - ChaCha20-Poly1305 packet protection with HKDF-SHA256 per-stream keys, a
   reviewed nonce layout, sender sequence exhaustion, and authentication before
   replay admission; pairing/TLS root-secret creation remains unimplemented.
+- a pure TLS-exporter pairing-binding boundary with fixed Rust/Kotlin test
+  vectors for role-separated proofs and the one-time media root. It accepts only
+  an externally supplied 32-byte exporter result after the future pinned TLS
+  1.3 handshake, performs no TLS, QR, pairing-record consumption, network I/O,
+  certificate validation, or persistent identity storage, and therefore does
+  not establish pairing or root-secret provisioning.
 - a non-blocking fixed-buffer UDP media receiver that rejects datagrams above
   the protocol limit before parser ingress; authentication and address policy
   remain separate boundaries.
@@ -142,9 +148,11 @@ jitter, and output-backend ADRs using measured 10/20 ms and device results.
   power measurements; partial Vivo capture and background evidence is recorded
   in the [Android capture matrix](./measurements/android-capture-matrix.md);
 - Opus encoder/decoder bindings and PLC/FEC evidence;
-- first pairing, TLS, QR bootstrap, identity storage, revocation, or root-secret
-  provisioning; AEAD/HKDF media protection and bounded epoch rotation exist only
-  after a caller supplies an authenticated control-session secret;
+- first pairing, TLS, QR bootstrap, identity storage, revocation, or actual
+  root-secret provisioning; the pure TLS-exporter vector does not prove a TLS
+  provider can pin the QR SPKI or export the required bytes. AEAD/HKDF media
+  protection and bounded epoch rotation exist only after a caller supplies an
+  authenticated control-session secret;
 - authenticated TLS control transport, discovery, and address migration; the
   untrusted TCP framing reader is not a trusted control session.
 - direct-WASAPI comparison adapter and backend selection evidence;

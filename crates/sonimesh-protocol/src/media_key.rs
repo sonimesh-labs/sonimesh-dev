@@ -67,7 +67,7 @@ impl SessionSecret {
         Self(bytes)
     }
 
-    fn as_bytes(&self) -> &[u8; 32] {
+    pub(crate) fn as_bytes(&self) -> &[u8; 32] {
         &self.0
     }
 }

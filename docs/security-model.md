@@ -32,8 +32,8 @@ The preferred pairing flow is QR-based:
 2. The QR payload contains the desktop identity public key, a control address,
    and a one-time high-entropy pairing secret.
 3. Android connects using TLS and pins the public key from the QR payload.
-4. Both sides prove knowledge of the one-time secret inside the authenticated
-   handshake transcript.
+4. Both sides use the fixed TLS 1.3 exporter label/context and role-separated
+   HKDF proofs from the published pairing TLS-binding vector.
 5. The devices store each other's long-term public key and a user-visible trust
    record.
 
@@ -45,6 +45,12 @@ The QR payload, TLS pinning, transcript-binding requirement, identity storage,
 and revocation boundary are specified by
 [ADR 0008](./adr/0008-first-pairing-and-identity.md). The repository does not
 yet implement this flow.
+
+The pairing TLS-binding vector fixes a TLS 1.3 exporter call with QR `pairing_id`
+as context, followed by HKDF-SHA256 role proofs and media-root derivation. A
+provider that cannot satisfy the exact exporter call or QR SPKI pin must fail
+closed. It must not fall back to a locally invented transcript hash, a discovery
+record, or a one-sided code.
 
 Pairing records need an expiry, attempt limit, per-source rate limit, and
 explicit revocation. The desktop should default to allowing only “send audio”;

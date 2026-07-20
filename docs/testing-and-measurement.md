@@ -47,6 +47,9 @@ Cover at least:
 - packet header encoding, decoding, byte order, and size limits;
 - published Rust/Kotlin vectors for media key derivation, nonce construction, and
   AEAD packet authentication;
+- published Rust/Kotlin vectors for the fixed TLS 1.3 exporter inputs,
+  role-separated pairing proofs, and one-time media-root derivation; a vector
+  result does not qualify TLS-provider exporter support or QR SPKI pinning;
 - sequence exhaustion at the epoch boundary, duplicate detection, and replay
   windows;
 - nonce uniqueness across streams, directions, epochs, and reconnects;
