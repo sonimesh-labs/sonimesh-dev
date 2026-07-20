@@ -19,6 +19,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --all-targets
 cargo run -p sonimesh-network-simulator
 python tools/check_workspace_boundaries.py
+python tools/check_android_capture_boundary.py
 ~~~
 
 On Windows, the read-only CPAL feasibility probe can enumerate output devices
@@ -64,6 +65,14 @@ Rust graph. It uses Cargo metadata to enforce the six crate edges above and
 rejects direct Tauri/webview, Vue, Android, JNI, and NDK dependencies in that
 foundation. It intentionally cannot prove source-level execution-domain rules;
 those remain code-review and test requirements.
+
+`tools/check_android_capture_boundary.py` guards only the phase 0A production
+Android source set. It rejects direct networking, TLS/crypto/Keystore, Opus,
+and NDK markers in `apps/android/app/src/main`, plus matching production
+dependencies and `INTERNET` in the main manifest. It deliberately excludes
+`src/androidTest`, where the ADR 0008 loopback TLS and Keystore experiments are
+isolated. The guard does not qualify Android capture, native codec behavior, or
+indirect dependency reachability.
 
 ## Desktop UI checks
 

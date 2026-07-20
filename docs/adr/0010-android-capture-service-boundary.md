@@ -73,6 +73,15 @@ behavior and may report “no capturable audio detected” with possible causes.
 does not claim source-specific capture denial, pair devices, send a production
 audio stream, or make a latency promise.
 
+The production Android source set remains capture-only until a later ADR admits
+the next boundary. CI checks the main manifest, production dependency
+declarations, and production Kotlin imports for direct networking, TLS/crypto,
+Android Keystore, Opus, and NDK integration. The guard deliberately excludes
+`src/androidTest`, where ADR 0008 permits isolated loopback TLS/Keystore spikes.
+It is a direct-boundary check, not proof that the capture implementation cannot
+reach every indirect dependency or that an instrumentation spike proves a
+production capability.
+
 ## Security, privacy, and realtime implications
 
 The consent result, captured PCM, encoded audio, pairing secrets, session keys,

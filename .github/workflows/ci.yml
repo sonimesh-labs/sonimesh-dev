@@ -33,6 +33,8 @@ jobs:
         run: |
           python tools/check_workspace_boundaries.py --self-test
           python tools/check_workspace_boundaries.py
+          python tools/check_android_capture_boundary.py --self-test
+          python tools/check_android_capture_boundary.py
       - name: Check formatting
         if: runner.os == 'Linux'
         run: cargo fmt --all -- --check
