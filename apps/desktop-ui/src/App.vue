@@ -29,11 +29,11 @@ const { busy, createPairing, error, expirePairing, refresh, selectOutput, snapsh
       <header class="topbar">
         <div>
           <p class="eyebrow">Desktop receiver</p>
-          <h1>Listen without the noise.</h1>
-          <p class="topbar-copy">One stream, one output, low-rate control.</p>
+          <h1>Receiver control</h1>
+          <p class="topbar-copy">One stream, one output, low-rate control state.</p>
         </div>
         <div class="topbar-actions">
-          <span v-if="snapshot" class="session-chip" :class="`chip-${snapshot.session}`">
+          <span v-if="snapshot" class="session-chip" :class="`chip-${snapshot.session}`" role="status" aria-live="polite">
             <span class="chip-dot" aria-hidden="true"></span>{{ snapshot.session }}
           </span>
           <button class="icon-action refresh" title="Refresh state" aria-label="Refresh state" :disabled="busy" @click="refresh">
@@ -45,7 +45,7 @@ const { busy, createPairing, error, expirePairing, refresh, selectOutput, snapsh
       <p v-if="error" class="command-error" role="alert">{{ error }}</p>
       <template v-if="snapshot">
         <div id="session" class="control-grid">
-          <SessionPanel :state="snapshot.session" :busy="busy" @start="start" @stop="stop" />
+          <SessionPanel :state="snapshot.session" :preview="snapshot.previewAdapter" :busy="busy" @start="start" @stop="stop" />
           <div class="secondary-stack">
             <OutputPanel :devices="snapshot.outputDevices" :selected-id="snapshot.selectedOutputId" :busy="busy" @select="selectOutput" />
             <PairingPanel :pairing="snapshot.pairing" :busy="busy" @create="createPairing" @expire="expirePairing" />
