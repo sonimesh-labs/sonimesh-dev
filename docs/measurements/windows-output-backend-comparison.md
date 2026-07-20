@@ -32,6 +32,19 @@ explicit long silent run; it changes only the control-domain wait interval:
 The accepted range is 1 through 28,800 seconds. Record the selected duration
 and do not compare runs with different durations as equivalent scheduling data.
 
+For the eight-hour silent soak, use the matching backend-specific commands.
+They default to 28,800 seconds and emit a control-domain status snapshot every
+60 seconds. The interval may be shortened for a command check, but only an
+eight-hour result satisfies the soak cell:
+
+    cargo run -p sonimesh-platform --example output_soak --features cpal-output
+    cargo run -p windows-wasapi-prototype --bin wasapi_output_soak
+
+Set `SONIMESH_OUTPUT_SOAK_SECONDS` to 1 through 28,800 and
+`SONIMESH_OUTPUT_SOAK_REPORT_SECONDS` to a value no larger than that duration
+only when the recorded experiment requires a different configuration. Preserve
+every periodic status line and the final status in the measurement record.
+
 For the repeated start/stop baseline, run:
 
     cargo run -p sonimesh-platform --example output_lifecycle_smoke --features cpal-output
@@ -62,6 +75,7 @@ like-for-like with a fixed-request result.
 | Priming silence frames | n/a | — | Direct-WASAPI initialization detail. |
 | Capacity faults | — | — | Must remain zero for a successful smoke. |
 | Stream errors | — | — | Must remain zero for a successful smoke. |
+| Soak periodic snapshots | — | — | Required for an eight-hour run; control-domain atomic observations only. |
 
 ## Lifecycle extensions
 

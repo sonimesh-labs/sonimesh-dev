@@ -87,6 +87,15 @@ control-domain parameter only; it does not alter the requested callback frames,
 maximum source capacity, endpoint selection, or callback behavior. Results must
 record the actual duration and retain capacity faults and backend errors.
 
+Separate CPAL and direct-WASAPI silent-soak commands default to eight hours.
+They read only each adapter's existing atomic status from the control domain at
+a bounded 60-second interval, then print the accumulated observation. The
+commands accept `SONIMESH_OUTPUT_SOAK_SECONDS` (1 through 28,800) and
+`SONIMESH_OUTPUT_SOAK_REPORT_SECONDS` (1 through the selected duration) for
+explicit lab configuration. Reporting changes neither callback scheduling nor
+the output source. A capacity fault or backend error ends the soak after its
+final control-domain status is recorded.
+
 The direct tool is not a selected backend and must not be linked by the desktop
 app. Its evidence record may compare only like-for-like endpoint, mix format,
 and requested duration configurations.
