@@ -17,14 +17,24 @@ Use a Rust 2024 workspace with six narrow crates matching the architecture:
 - `sonimesh-protocol` owns bounded wire primitives, not sockets or crypto;
 - `sonimesh-network` owns ordered authenticated ingress, not decoding;
 - `sonimesh-audio` owns fixed-capacity audio containers and DSP primitives;
-- `sonimesh-platform` owns adapter contracts, not a selected backend;
+- `sonimesh-platform` owns adapter contracts and an optional measured Windows
+  adapter, not a selected release backend;
 - `sonimesh-diagnostics` owns atomic counters and redaction;
 - `sonimesh-app` owns control-domain lifecycle and later Tauri commands.
 
-The portable foundation uses only the standard library. New dependencies require
-a concrete implementation need and must not cross these dependency boundaries.
-The Android and desktop UI projects remain gated until their platform ADRs have
-enough prototype evidence to select build/runtime dependencies.
+New dependencies require a concrete implementation need and must not cross
+these dependency boundaries. Platform-specific experiments remain confined to
+their adapter or tool boundary. The Android and desktop UI projects remain gated
+until their platform ADRs have enough prototype evidence to select build/runtime
+dependencies.
+
+The repository enforces the current direct Rust dependency graph with
+`tools/check_workspace_boundaries.py`, which reads `cargo metadata --no-deps`.
+It allows only the documented internal edges among the six `sonimesh-*` crates
+and rejects direct Tauri/webview, Vue, and Android/JNI/NDK dependencies in that
+foundation. CI runs the check before formatting, linting, and tests. Any future
+boundary change must update this ADR and the guard in the same change; the guard
+does not establish source-level realtime safety or validate platform behavior.
 
 ## Security implications
 
@@ -47,4 +57,3 @@ latency remain unvalidated and cannot be inferred from these tests.
 Adapters may replace internal algorithms without moving platform/UI dependencies
 into shared crates. If another language is required for a platform boundary, keep
 the wire vectors and ownership rules and replace only the affected adapter.
-

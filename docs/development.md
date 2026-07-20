@@ -18,6 +18,7 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --all-targets
 cargo run -p sonimesh-network-simulator
+python tools/check_workspace_boundaries.py
 ~~~
 
 On Windows, the read-only CPAL feasibility probe can enumerate output devices
@@ -46,7 +47,7 @@ behavior, or physical WLANs.
 sonimesh-app            -> audio, network, platform contracts, protocol, diagnostics
 sonimesh-network        -> protocol primitives
 sonimesh-audio          -> crossbeam-queue behind its realtime queue boundary
-sonimesh-platform       -> standard library only
+sonimesh-platform       -> platform contracts; optional Windows CPAL feasibility adapter
 sonimesh-diagnostics    -> standard library only
 sonimesh-protocol       -> Prost-generated bounded control schemas
 desktop UI              -> Vue/Vite control preview; Tauri bridge remains gated
@@ -57,6 +58,12 @@ Shared crates must not depend on Tauri, Vue, Compose, Android APIs, or a web
 view. The desktop preview uses only low-rate state snapshots through
 `apps/desktop-ui/src/bridge.ts`; it does not carry audio, keys, or realtime
 callbacks. Platform implementations depend inward on these contracts.
+
+`tools/check_workspace_boundaries.py` is the CI guard for the current direct
+Rust graph. It uses Cargo metadata to enforce the six crate edges above and
+rejects direct Tauri/webview, Vue, Android, JNI, and NDK dependencies in that
+foundation. It intentionally cannot prove source-level execution-domain rules;
+those remain code-review and test requirements.
 
 ## Desktop UI checks
 

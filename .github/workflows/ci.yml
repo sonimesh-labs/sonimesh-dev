@@ -21,10 +21,18 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - uses: dtolnay/rust-toolchain@1.85.0
         with:
           components: clippy,rustfmt
       - uses: Swatinem/rust-cache@v2
+      - name: Check workspace architecture boundaries
+        run: |
+          python tools/check_workspace_boundaries.py --self-test
+          python tools/check_workspace_boundaries.py
       - name: Check formatting
         if: runner.os == 'Linux'
         run: cargo fmt --all -- --check
