@@ -103,8 +103,9 @@ nondecreasing maximum observations, and zero reported capacity faults or
 backend errors. Consecutive periodic snapshots must strictly advance elapsed
 time, callback/render count, and local offset; the immediate final snapshot may
 equal the final periodic observation. It also requires the retained default
-format, actual request, and declared maximum-frame headers, and rejects an
-observed quantum above the declared bound. It is a control-domain
+format, actual request, and declared maximum-frame headers, rejects a numeric
+request above that declared bound, and rejects an observed quantum above the
+declared bound. It is a control-domain
 evidence-integrity check: it neither observes the audio callback directly nor
 proves latency, device removal, default-role change, sleep/wake recovery, or
 audio quality.

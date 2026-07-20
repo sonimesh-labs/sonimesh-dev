@@ -56,10 +56,10 @@ The verifier checks the command's declared duration and interval, the expected
 number of periodic snapshots, strictly advancing periodic callback/render and
 local-offset observations, nondecreasing maximum observations, zero capacity
 faults/errors, one final healthy status, and retained format/request/capacity
-headers. It rejects a quantum above the declared maximum-frame bound. The
-immediate final snapshot may equal the last periodic snapshot. It does not
-inspect the callback, establish physical latency, or substitute for a manual
-device, default-role, or power-transition scenario.
+headers. It rejects a numeric request or observed quantum above the declared
+maximum-frame bound. The immediate final snapshot may equal the last periodic
+snapshot. It does not inspect the callback, establish physical latency, or
+substitute for a manual device, default-role, or power-transition scenario.
 
 For the repeated start/stop baseline, run:
 

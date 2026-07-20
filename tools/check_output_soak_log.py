@@ -196,6 +196,8 @@ def validate_report(lines: list[str], backend: str) -> SoakReport:
         raise ValueError("maximum frames header must be positive")
     if requested_frames != "default" and int(requested_frames) <= 0:
         raise ValueError("requested frames header must be default or positive")
+    if requested_frames != "default" and int(requested_frames) > maximum_frames:
+        raise ValueError("requested frames header exceeds declared maximum frames")
     if final_status is None:
         raise ValueError("missing final status")
 
@@ -414,6 +416,18 @@ class OutputSoakLogTests(unittest.TestCase):
         ]
         with self.assertRaisesRegex(ValueError, "exceeds declared maximum"):
             validate_report(capacity_violation, "cpal")
+
+        invalid_request = [
+            "soak duration (s): 5",
+            "report interval (s): 5",
+            "default format: 48000 Hz, 8 channels, F32",
+            "requested frames: 1001",
+            "maximum frames: 1000",
+            cpal_status(5, 500),
+            f"final {cpal_status(5, 500)}",
+        ]
+        with self.assertRaisesRegex(ValueError, "requested frames header exceeds"):
+            validate_report(invalid_request, "cpal")
 
 
 def cpal_status(
