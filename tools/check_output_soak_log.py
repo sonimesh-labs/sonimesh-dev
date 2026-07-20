@@ -73,6 +73,8 @@ class SoakStatus:
     oversized: int
     errors: int
     health: str
+    endpoint_buffer_frames: int | None = None
+    primed_frames: int | None = None
 
 
 @dataclass(frozen=True)
@@ -137,6 +139,12 @@ def parse_status(line: str, spec: BackendSpec) -> tuple[bool, SoakStatus] | None
             oversized=int(values["oversized"]),
             errors=int(values["errors"]),
             health=values["health"],
+            endpoint_buffer_frames=(
+                int(values["endpoint_buffer_frames"])
+                if "endpoint_buffer_frames" in values
+                else None
+            ),
+            primed_frames=int(values["primed_frames"]) if "primed_frames" in values else None,
         )
     except ValueError as error:
         raise ValueError(f"invalid {spec.name} numeric status field") from error
@@ -260,6 +268,13 @@ def validate_status(
         raise ValueError("status callback/render count or offset is invalid")
     if status.maximum_gap_nanoseconds < 0:
         raise ValueError("status maximum gap is invalid")
+    if spec.name == "direct-WASAPI":
+        if status.endpoint_buffer_frames is None or status.primed_frames is None:
+            raise ValueError("direct-WASAPI status is missing endpoint or priming frames")
+        if status.endpoint_buffer_frames <= 0 or status.primed_frames <= 0:
+            raise ValueError("direct-WASAPI endpoint or priming frames are invalid")
+        if status.endpoint_buffer_frames != status.primed_frames:
+            raise ValueError("direct-WASAPI priming frames do not match endpoint buffer frames")
     if status.oversized != 0 or status.errors != 0 or status.health != "Healthy":
         raise ValueError(
             f"{spec.name} soak is unhealthy: oversized={status.oversized}, "
@@ -429,6 +444,19 @@ class OutputSoakLogTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "requested frames header exceeds"):
             validate_report(invalid_request, "cpal")
 
+    def test_rejects_invalid_wasapi_endpoint_priming_observation(self) -> None:
+        transcript = [
+            "soak duration (s): 5",
+            "report interval (s): 5",
+            "default format: 48000 Hz, 8 channels, Float32",
+            "requested frames: 480",
+            "maximum frames: 8192",
+            wasapi_status(5, 500, endpoint_buffer_frames=1056, primed_frames=1000),
+            f"final {wasapi_status(5, 500)}",
+        ]
+        with self.assertRaisesRegex(ValueError, "priming frames do not match"):
+            validate_report(transcript, "wasapi")
+
 
 def cpal_status(
     elapsed_seconds: int,
@@ -448,12 +476,15 @@ def wasapi_status(
     renders: int,
     errors: int = 0,
     health: str = "Healthy",
+    endpoint_buffer_frames: int = 1056,
+    primed_frames: int = 1056,
 ) -> str:
     return (
         f"elapsed_s={elapsed_seconds}, renders={renders}, latest_frames=480, "
         "max_frames=480, "
         f"latest_offset_ns={elapsed_seconds * 1_000_000_000}, "
-        "max_gap_ns=17000000, endpoint_buffer_frames=1056, primed_frames=1056, "
+        "max_gap_ns=17000000, "
+        f"endpoint_buffer_frames={endpoint_buffer_frames}, primed_frames={primed_frames}, "
         f"oversized=0, errors={errors}, health={health}"
     )
 
