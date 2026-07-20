@@ -39,6 +39,54 @@ behavior matches the lifecycle invariant, not that audio is necessarily present.
 | Projection `onStop()` | AudioRecord, projection, and capture thread are retired once | Observed |
 | Process recreation | No consent token or capture session is reused | Observed |
 
+## Physical Run Procedure
+
+Use this procedure for every remaining device/build/scenario row. It produces
+operator-observed evidence only; shell output and the Compose surface are not a
+replacement for a device-side capture result.
+
+1. Record the local time, device/OEM/model, Android release/API/build
+   fingerprint, app version, battery state, and whether thermal, CPU, and
+   memory observations are available. `adb devices -l`, `adb shell getprop
+   ro.build.fingerprint`, and `adb shell dumpsys battery` may assist local lab
+   notes but their output format is not a stable product interface.
+2. Start from `Ready to request playback capture consent`. For every capture
+   attempt, use fresh MediaProjection consent, select only the required source
+   category, and record the displayed `CaptureFormat` fields: sample rate,
+   channels, `audioSource`, channel mask, actual buffer, platform-minimum
+   buffer. Record the configured read block separately as the fixed 20 ms,
+   960-frame / 1,920-sample Phase 0A request; it is not an observed UI field.
+3. Record both an initial active snapshot and a final or terminal snapshot:
+   `captureDurationMillis`, `lastReadCompletionOffsetMillis`, `capturedFrames`,
+   `silentReads`, and `readErrors`. Copy raw displayed values and units rather
+   than inferring sample cadence or audio latency from them.
+4. During a lifecycle scenario, observe the foreground notification and active
+   projection/service state before and after the event. Local `dumpsys` output
+   can supplement the transcript when available, but retain the event that the
+   operator actually performed and do not interpret an unavailable shell view
+   as a platform result.
+5. End by recording the exact non-sensitive terminal text or active state,
+   then restore the prior permission/device state. Do not preserve PCM,
+   consent intents, projection tokens, source names, keys, or opaque device
+   identifiers in an exported record.
+
+Run the following scenarios one at a time. Do not combine a lock, source
+change, or process recreation with another scenario, because the terminal
+observation would no longer identify the relevant lifecycle event.
+
+| Scenario | Operator action | Required record |
+| --- | --- | --- |
+| Permission denied | Revoke `RECORD_AUDIO`, request capture, and deny the system prompt. Restore the prior permission after observing the terminal UI. | Failure text plus absence/presence observations for service and projection; no active capture snapshot is expected. |
+| Cancelled consent | Request capture and dismiss the MediaProjection consent surface. | Cancellation text plus service/projection observation; do not reuse the returned result. |
+| Allowed source | Begin fresh consent while an operator-selected allowed media source is active. | Initial/final snapshots and full observed `CaptureFormat`; source category only. |
+| Idle or silent source | Begin fresh consent with an idle or silent source and wait for the no-audio state. | Initial/final snapshots and the non-definitive no-audio wording. Do not name a source as the cause. |
+| Protected or policy-limited source | Begin fresh consent while the operator treats the source as protected/unknown. | Initial/final snapshots, `protected/unknown` category, and terminal or active state. Silence alone cannot establish the source's policy. |
+| Background | Start capture, send the activity to background, wait a recorded duration, then return. | Before/after snapshots, duration, notification/service/projection visibility, and device condition observations. |
+| Lock screen | Start capture, lock for a recorded duration, unlock, and inspect the same session. | Before/after snapshots, lock duration, notification/service/projection visibility, and battery/thermal/CPU/memory observations or `not measured`. |
+| Notification stop | Start capture, invoke the actual notification action, and wait for teardown. | Final snapshot, `user requested` terminal state, and service/notification/projection absence after teardown. |
+| Projection revocation | Start capture, use the system sharing/recording control to stop projection. | Final snapshot, `projection revoked` terminal state, and teardown observations. Record any suppressed teardown wake-up separately from `readErrors`. |
+| Process recreation | Start capture, force-stop or otherwise destroy the process, then reopen it. | Pre-destruction snapshot, service/projection absence, fresh ready state, and no restored counters or consent session. |
+
 ## Physical Run: Vivo PD2309, 2026-07-19
 
 > Result: capture and background feasibility evidence only. This is not a

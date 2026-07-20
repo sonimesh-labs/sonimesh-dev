@@ -15,9 +15,11 @@ are recorded.
 The first implementation must keep these module boundaries:
 
 - UI: consent explanation and low-rate state presentation only;
-- foreground service: MediaProjection, AudioRecord, encoder, packet protection,
-  UDP, and reconnect ownership;
-- native boundary, if used: bounded direct buffers and no per-frame UI events;
+- foreground service: Phase 0A MediaProjection, AudioRecord, bounded read
+  buffers, and teardown ownership only; encoder, packet protection, UDP, and
+  reconnect work remain excluded until their later evidence gates;
+- native boundary, if introduced after the capture-only gate: bounded direct
+  buffers and no per-frame UI events;
 - platform evidence: actual device format, buffer size, lifecycle, power, and
   silence observations recorded without claiming a source-specific cause.
 
