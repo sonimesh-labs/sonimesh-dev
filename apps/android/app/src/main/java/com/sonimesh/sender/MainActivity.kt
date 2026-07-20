@@ -145,7 +145,7 @@ internal fun CaptureStatus.description(): String = when (this) {
 }
 
 private fun com.sonimesh.sender.capture.CaptureFormat.description(): String =
-    "${sampleRateHz} Hz, ${channels} channels, ${bufferSizeBytes} byte buffer (platform minimum ${minimumBufferBytes})"
+    "${sampleRateHz} Hz, ${channels} channels, source ${audioSource}, channel mask 0x${channelMask.toString(16)}, ${bufferSizeBytes} byte buffer (platform minimum ${minimumBufferBytes})"
 
 internal fun com.sonimesh.sender.capture.CaptureEvidenceSnapshot.description(): String {
     val latestRead = lastReadCompletionOffsetMillis?.let { offset ->

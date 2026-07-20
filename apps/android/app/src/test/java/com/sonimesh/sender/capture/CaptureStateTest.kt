@@ -13,12 +13,16 @@ class CaptureStateTest {
         val format = CaptureFormat.fromObserved(
             sampleRateHz = 48_000,
             channels = 2,
+            audioSource = 8,
+            channelMask = 0xC,
             bufferSizeBytes = 7_680,
             minimumBufferBytes = 3_840,
         )
 
         assertEquals(1_920, format?.readSamples)
         assertEquals(3_840, format?.minimumBufferBytes)
+        assertEquals(8, format?.audioSource)
+        assertEquals(0xC, format?.channelMask)
     }
 
     @Test
@@ -28,7 +32,31 @@ class CaptureStateTest {
             CaptureFormat.fromObserved(
                 sampleRateHz = 48_000,
                 channels = 2,
+                audioSource = 8,
+                channelMask = 0xC,
                 bufferSizeBytes = MAX_CAPTURE_BUFFER_BYTES + 1,
+                minimumBufferBytes = 3_840,
+            ),
+        )
+        assertEquals(
+            null,
+            CaptureFormat.fromObserved(
+                sampleRateHz = 48_000,
+                channels = 2,
+                audioSource = -1,
+                channelMask = 0xC,
+                bufferSizeBytes = 7_680,
+                minimumBufferBytes = 3_840,
+            ),
+        )
+        assertEquals(
+            null,
+            CaptureFormat.fromObserved(
+                sampleRateHz = 48_000,
+                channels = 2,
+                audioSource = 8,
+                channelMask = -1,
+                bufferSizeBytes = 7_680,
                 minimumBufferBytes = 3_840,
             ),
         )
@@ -37,6 +65,8 @@ class CaptureStateTest {
             CaptureFormat.fromObserved(
                 sampleRateHz = MAX_CAPTURE_SAMPLE_RATE_HZ + 1,
                 channels = 2,
+                audioSource = 8,
+                channelMask = 0xC,
                 bufferSizeBytes = MAX_CAPTURE_BUFFER_BYTES,
                 minimumBufferBytes = 3_840,
             ),
@@ -46,6 +76,8 @@ class CaptureStateTest {
             CaptureFormat.fromObserved(
                 sampleRateHz = 48_000,
                 channels = 2,
+                audioSource = 8,
+                channelMask = 0xC,
                 bufferSizeBytes = MAX_CAPTURE_BUFFER_BYTES,
                 minimumBufferBytes = MAX_CAPTURE_BUFFER_BYTES + 1,
             ),
@@ -55,6 +87,8 @@ class CaptureStateTest {
             CaptureFormat.fromObserved(
                 sampleRateHz = 48_000,
                 channels = 2,
+                audioSource = 8,
+                channelMask = 0xC,
                 bufferSizeBytes = 3_840,
                 minimumBufferBytes = 7_680,
             ),

@@ -174,6 +174,8 @@ class CaptureService : Service() {
         return CaptureFormat.fromObserved(
             sampleRateHz = record.sampleRate,
             channels = record.channelCount,
+            audioSource = record.audioSource,
+            channelMask = record.channelConfiguration,
             bufferSizeBytes = bufferBytes,
             minimumBufferBytes = minimumBufferBytes,
         ) ?: throw CaptureSetupException("AudioRecord reported an unsupported format")

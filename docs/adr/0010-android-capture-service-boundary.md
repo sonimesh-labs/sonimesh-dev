@@ -41,7 +41,9 @@ been accepted. It owns:
 
 - MediaProjection creation and a registered `MediaProjection.Callback`;
 - AudioRecord construction, reads, fixed PCM buffers, and observed capture
-  format plus actual/minimum buffer diagnostics;
+  format, reported audio-source/channel-mask values, and actual/minimum buffer
+  diagnostics. Those reported integers are local measurement metadata only and
+  must not be used to infer why a source is silent or policy-limited;
 - bounded non-blocking capture reads so teardown never depends on an unbounded
   platform `READ_BLOCKING` wake-up;
 - the bounded encoder, packet-protection, socket, and reconnect workers;

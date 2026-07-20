@@ -9,6 +9,8 @@ const val MAX_CAPTURE_BUFFER_BYTES = 64 * 1024
 data class CaptureFormat(
     val sampleRateHz: Int,
     val channels: Int,
+    val audioSource: Int,
+    val channelMask: Int,
     val bufferSizeBytes: Int,
     val minimumBufferBytes: Int,
     val readSamples: Int,
@@ -17,11 +19,15 @@ data class CaptureFormat(
         fun fromObserved(
             sampleRateHz: Int,
             channels: Int,
+            audioSource: Int,
+            channelMask: Int,
             bufferSizeBytes: Int,
             minimumBufferBytes: Int,
         ): CaptureFormat? {
             if (sampleRateHz !in MIN_CAPTURE_SAMPLE_RATE_HZ..MAX_CAPTURE_SAMPLE_RATE_HZ
                 || channels !in 1..MAX_CAPTURE_CHANNELS
+                || audioSource < 0
+                || channelMask < 0
                 || bufferSizeBytes !in 1..MAX_CAPTURE_BUFFER_BYTES
                 || minimumBufferBytes !in 1..MAX_CAPTURE_BUFFER_BYTES
                 || minimumBufferBytes > bufferSizeBytes
@@ -40,6 +46,8 @@ data class CaptureFormat(
             return CaptureFormat(
                 sampleRateHz = sampleRateHz,
                 channels = channels,
+                audioSource = audioSource,
+                channelMask = channelMask,
                 bufferSizeBytes = bufferSizeBytes,
                 minimumBufferBytes = minimumBufferBytes,
                 readSamples = samples.toInt(),

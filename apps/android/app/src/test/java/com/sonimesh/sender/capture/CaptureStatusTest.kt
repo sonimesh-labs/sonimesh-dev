@@ -36,6 +36,8 @@ class CaptureStatusTest {
         CaptureFormat.fromObserved(
             sampleRateHz = 48_000,
             channels = 2,
+            audioSource = 8,
+            channelMask = 0xC,
             bufferSizeBytes = 7_680,
             minimumBufferBytes = 3_840,
         ),
