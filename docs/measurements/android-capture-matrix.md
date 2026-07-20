@@ -154,6 +154,37 @@ Each run should record:
 - source category as observed by the test operator: allowed, idle, silent, or protected/unknown;
 - whether teardown was user requested, projection revoked, process destroyed, or an error.
 
+## Per-run record template
+
+Create one filled record for every device/build/scenario execution. Copy the
+fields below into a dated measurement entry; retain the raw app snapshot values
+and units instead of calculating a source-specific explanation for silence.
+
+| Field | Recorded value |
+| --- | --- |
+| Date and local time | — |
+| Scenario | Permission denied, cancelled consent, allowed, idle/silent, protected/unknown, lock/background, notification stop, projection `onStop()`, or process recreation |
+| Device/OEM/model | — |
+| Android release/API/build fingerprint | — |
+| App version/build and target SDK | — |
+| Projection scope and fresh-consent result | — |
+| Observed source category | Allowed, idle, silent, or protected/unknown only; do not name an application as the cause of silence |
+| AudioRecord source and channel mask, if the platform exposes them | — |
+| Capture format | `sampleRateHz`, `channels`, PCM representation, and `readSamples` from the active `CaptureFormat` |
+| AudioRecord buffers | `bufferSizeBytes` actual and `minimumBufferBytes` from the active `CaptureFormat` |
+| Initial active snapshot | `captureDurationMillis`, `lastReadCompletionOffsetMillis`, `capturedFrames`, `silentReads`, and `readErrors` |
+| Final or terminal snapshot | `captureDurationMillis`, `lastReadCompletionOffsetMillis`, `capturedFrames`, `silentReads`, and `readErrors` |
+| Terminal state | Active at observation end, user requested, projection revoked, service destroyed, or exact non-sensitive failure text |
+| Lifecycle observation | Lock/background duration, notification visibility, service/projection presence, or process recreation result |
+| Device condition | Battery, thermal, memory, and CPU observation when the scenario requires it; otherwise `not measured` |
+
+For an allowed, idle, silent, or protected/unknown observation, `silentReads`
+and `lastReadCompletionOffsetMillis` describe only completed local reads. A
+nonzero silent count does not identify why a particular source produced silence.
+Record a negative `AudioRecord.read` result in `readErrors` only when teardown
+was not already admitted; report a suppressed teardown wake-up separately in
+the lifecycle observation.
+
 Do not record PCM, projection tokens, keys, raw device identifiers in diagnostic
 exports, or a claim about why a particular application returned silence. These
 results remain phase 0A evidence and do not validate discovery, pairing, Opus,
