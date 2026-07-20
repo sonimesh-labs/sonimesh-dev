@@ -51,6 +51,21 @@ priming frames. The first-cycle largest software gaps were 17,207,500 ns
 (CPAL) and 17,557,700 ns (direct WASAPI); later cycles ranged from 10,093,000
 to 10,463,600 ns for CPAL and 10,073,900 to 10,401,300 ns for direct WASAPI.
 
+## Sixty-second silent smoke
+
+The same endpoint and fixed request were then run sequentially with
+`SONIMESH_OUTPUT_SMOKE_SECONDS=60`. CPAL reported 5,999 callbacks, latest and
+maximum frames of 480 and 1,056 respectively, a latest status offset of
+60,074,357,200 ns, and a largest gap of 17,408,000 ns. Direct WASAPI reported
+6,000 renders, latest and maximum frames of 480, 1,056 endpoint and priming
+frames, a latest status offset of 60,067,263,000 ns, and a largest gap of
+17,701,600 ns. Both backends reported zero capacity faults and zero stream
+errors.
+
+This is an extended silent smoke, not the required eight-hour soak. It adds no
+claim about callback recovery, latency, sustained thermal behavior, or output
+behavior after a device or power transition.
+
 ## Interpretation and remaining work
 
 This comparison shows different observed callback/render quanta under the same
@@ -61,5 +76,5 @@ removal behavior, or recovery compatibility.
 
 The Windows Phase 0B matrix still requires default-device and pinned-device
 removal, default-role change with explicit recreation, sleep/wake with explicit
-recreation, and a documented long-duration silent run. Physical/acoustic
-latency remains a separate experiment requiring a common reference.
+recreation, and an eight-hour silent soak. Physical/acoustic latency remains a
+separate experiment requiring a common reference.
