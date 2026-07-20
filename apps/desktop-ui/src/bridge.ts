@@ -15,6 +15,8 @@ const previewOutput: OutputDevice[] = [
 ]
 
 class PreviewDesktopBridge implements DesktopBridge {
+  private pairingExpiresAtMillis: number | null = null
+
   private snapshotState: DesktopSnapshot = {
     session: 'ready',
     outputDevices: previewOutput,
@@ -71,18 +73,42 @@ class PreviewDesktopBridge implements DesktopBridge {
   }
 
   async createPairing(): Promise<DesktopSnapshot> {
-    this.snapshotState.pairing = { state: 'active', expiresInSeconds: 300 }
+    this.pairingExpiresAtMillis = Date.now() + PAIRING_INVITATION_LIFETIME_MILLIS
+    this.snapshotState.pairing = { state: 'active', expiresInSeconds: PAIRING_INVITATION_LIFETIME_SECONDS }
     return this.copy()
   }
 
   async expirePairing(): Promise<DesktopSnapshot> {
+    this.pairingExpiresAtMillis = null
     this.snapshotState.pairing = { state: 'expired', expiresInSeconds: 0 }
     return this.copy()
   }
 
   private copy(): DesktopSnapshot {
+    this.expireInvitationWhenDue(Date.now())
     return structuredClone(this.snapshotState)
   }
+
+  private expireInvitationWhenDue(nowMillis: number) {
+    if (this.snapshotState.pairing.state !== 'active' || this.pairingExpiresAtMillis === null) {
+      return
+    }
+
+    const remainingMillis = this.pairingExpiresAtMillis - nowMillis
+    if (remainingMillis <= 0) {
+      this.pairingExpiresAtMillis = null
+      this.snapshotState.pairing = { state: 'expired', expiresInSeconds: 0 }
+      return
+    }
+
+    this.snapshotState.pairing = {
+      state: 'active',
+      expiresInSeconds: Math.ceil(remainingMillis / 1_000),
+    }
+  }
 }
+
+const PAIRING_INVITATION_LIFETIME_SECONDS = 300
+const PAIRING_INVITATION_LIFETIME_MILLIS = PAIRING_INVITATION_LIFETIME_SECONDS * 1_000
 
 export const desktopBridge: DesktopBridge = new PreviewDesktopBridge()
