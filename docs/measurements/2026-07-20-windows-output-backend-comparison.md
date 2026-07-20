@@ -66,6 +66,24 @@ This is an extended silent smoke, not the required eight-hour soak. It adds no
 claim about callback recovery, latency, sustained thermal behavior, or output
 behavior after a device or power transition.
 
+## Soak command check
+
+The new backend-specific soak commands were verified sequentially on the same
+endpoint with `SONIMESH_OUTPUT_SOAK_SECONDS=15` and
+`SONIMESH_OUTPUT_SOAK_REPORT_SECONDS=5`. This is a command check, not a soak
+result. CPAL reported three healthy control-domain snapshots at 5, 10, and 15
+seconds with 499, 999, and 1,499 callbacks; the maximum callback remained
+1,056 frames, the largest gap was 17,826,900 ns, and faults/errors remained
+zero. Direct WASAPI reported 500, 1,000, and 1,500 renders at the same
+intervals; maximum renders remained 480 frames, endpoint/priming frames were
+1,056, the largest gap was 17,541,200 ns, and faults/errors remained zero.
+
+The commands printed each observation after reading existing atomic status from
+the control domain. They do not add logging, allocation, locks, IPC, or
+recovery work to either audio callback. A separate uninterrupted eight-hour
+run must retain every periodic line and its final status before the soak cell is
+considered complete.
+
 ## Interpretation and remaining work
 
 This comparison shows different observed callback/render quanta under the same
