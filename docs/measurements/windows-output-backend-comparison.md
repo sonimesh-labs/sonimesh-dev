@@ -50,6 +50,19 @@ For the repeated start/stop baseline, run:
     cargo run -p sonimesh-platform --example output_lifecycle_smoke --features cpal-output
     cargo run -p windows-wasapi-prototype --bin wasapi_lifecycle_smoke
 
+For a manual default-role-change and explicit recreation experiment, run one
+backend at a time, switch the Windows default render endpoint during the wait,
+then retain both the pre-stop and recovered status lines:
+
+    cargo run -p sonimesh-platform --example output_default_recovery --features cpal-output
+    cargo run -p windows-wasapi-prototype --bin wasapi_default_recovery
+
+The commands require an endpoint change by default. They accept
+`SONIMESH_OUTPUT_DEFAULT_CHANGE_WAIT_SECONDS` from 1 through 600 and
+`SONIMESH_OUTPUT_RECOVERY_SECONDS` from 1 through 60. Setting
+`SONIMESH_OUTPUT_REQUIRE_DEFAULT_CHANGE=false` is only for command validation;
+it must never be recorded as a successful default-role transition.
+
 The CPAL smoke accepts a 480-frame request and falls back explicitly to the
 backend default when that request is rejected. The direct prototype follows the
 same policy. Record which path actually started; a fallback result is not

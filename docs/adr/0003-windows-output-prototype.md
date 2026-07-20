@@ -96,6 +96,15 @@ explicit lab configuration. Reporting changes neither callback scheduling nor
 the output source. A capacity fault or backend error ends the soak after its
 final control-domain status is recorded.
 
+Separate default-role recovery commands exercise one manual lifecycle sequence:
+start a default-endpoint silent stream, wait for the operator to change the
+Windows default render role, capture the old stream's status, stop it in the
+control domain, re-probe the current default, and start a fresh silent stream
+with that new endpoint's bounded configuration. They do not attempt to migrate
+or recreate a stream from the callback. The commands redact endpoint identifiers
+and require an observed endpoint change by default; a local command check may
+explicitly disable that assertion but cannot count as default-role evidence.
+
 The direct tool is not a selected backend and must not be linked by the desktop
 app. Its evidence record may compare only like-for-like endpoint, mix format,
 and requested duration configurations.
