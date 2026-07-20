@@ -1,6 +1,8 @@
 # Windows output backend comparison protocol
 
-> Status: measurement protocol only; no direct-WASAPI observation is recorded yet.
+> Status: measurement protocol with dated local observations in
+> `2026-07-20-windows-output-backend-comparison.md` and
+> `2026-07-20-windows-output-backend-recheck.md`; Phase 0B remains incomplete.
 > Updated: 2026-07-19
 
 ## Purpose
