@@ -213,6 +213,33 @@ silent reads, and zero read errors. The foreground service, application
 notification, and active `MediaProjection` entry remained present. This run did
 not measure CPU, memory, thermal state, or battery impact.
 
+### Locked-screen resource observation, 2026-07-20
+
+With a fresh active `TYPE_SCREEN_CAPTURE` session, the operator locked and then
+unlocked the Vivo device. The service-age observations bracketed approximately
+10 minutes between the pre-lock and post-unlock shell checks; the exact
+screen-off interval was not independently instrumented. The same process PID,
+foreground-service instance, ongoing notification, and active MediaProjection
+entry remained present after unlock.
+
+| Field | Before lock | After unlock |
+| --- | ---: | ---: |
+| Service age at observation | 45.6 s | 11 m 16.5 s |
+| Battery level | 100% | 100% |
+| Battery temperature | 34.6 C | 34.6 C |
+| App total PSS | 115.9 MB | 134.8 MB |
+| App total RSS | 285.2 MB | 303.7 MB |
+| Active MediaProjection | Present | Present |
+| Foreground service and notification | Present | Present |
+
+After unlock, the process remained foreground-service eligible with one active
+foreground service. A one-sample host-side `top` observation reported 5% CPU;
+it is an instantaneous post-unlock observation, not an average or a locked
+screen CPU measurement. The device was connected by USB and Android reported a
+full battery throughout, so this observation cannot establish discharge rate,
+power consumption, thermal stability, or a sustained memory bound. No PCM,
+projection token, source name, or raw ADB serial was retained.
+
 The operator used the `Stop capture` action from the SoniMesh notification. The
 UI reported `Capture stopped: user requested` with 7,613,440 frames over
 158.7 s and zero read errors. The service, notification, and
