@@ -14,8 +14,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -41,12 +42,19 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.sonimesh.sender.capture.CaptureEvidenceSnapshot
 import com.sonimesh.sender.capture.CaptureStatus
 import com.sonimesh.sender.capture.CaptureUiState
 import com.sonimesh.sender.capture.isActive
 import com.sonimesh.sender.capture.isAwaitingAuthorization
 import java.util.Locale
+
+private val CardShape = RoundedCornerShape(22.dp)
+private val TileShape = RoundedCornerShape(15.dp)
+private val StatusSurface = Color(0xFF11171C)
+private val StatusText = Color(0xFFF5F8F7)
+private val StatusMutedText = Color(0xFFB1BCBE)
 
 @Composable
 internal fun CaptureScreen(
@@ -57,7 +65,7 @@ internal fun CaptureScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.surface)
+            .background(MaterialTheme.colorScheme.background)
             .statusBarsPadding()
             .verticalScroll(rememberScrollState())
             .navigationBarsPadding()
@@ -82,23 +90,56 @@ internal fun CaptureScreen(
 
 @Composable
 private fun CaptureHeader() {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            BrandMark()
+            Text(
+                "SoniMesh",
+                color = MaterialTheme.colorScheme.onSurface,
+                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.titleMedium,
+            )
+        }
         Text(
-            "SONIMESH",
-            color = MaterialTheme.colorScheme.primary,
-            fontWeight = FontWeight.Bold,
-            style = MaterialTheme.typography.labelMedium,
-        )
-        Text(
-            "Playback capture",
+            "Capture phone audio",
             color = MaterialTheme.colorScheme.onSurface,
+            fontWeight = FontWeight.SemiBold,
             style = MaterialTheme.typography.headlineMedium,
         )
         Text(
-            "A bounded mobile control surface for capture-only feasibility runs.",
+            "Private, on-device control for bounded playback-capture checks.",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.bodyMedium,
         )
+    }
+}
+
+@Composable
+private fun BrandMark() {
+    Box(
+        modifier = Modifier
+            .size(30.dp)
+            .clip(RoundedCornerShape(9.dp))
+            .background(MaterialTheme.colorScheme.primary),
+        contentAlignment = Alignment.Center,
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(2.5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            listOf(6.dp, 12.dp, 8.dp, 14.dp).forEach { barHeight ->
+                Box(
+                    modifier = Modifier
+                        .width(2.5.dp)
+                        .height(barHeight)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(MaterialTheme.colorScheme.onPrimary),
+                )
+            }
+        }
     }
 }
 
@@ -109,26 +150,19 @@ private fun CaptureStatusCard(status: CaptureStatus) {
         modifier = Modifier
             .fillMaxWidth()
             .semantics { liveRegion = LiveRegionMode.Polite },
-        colors = CardDefaults.cardColors(containerColor = palette.container),
-        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = StatusSurface),
+        shape = CardShape,
     ) {
         Column(
-            modifier = Modifier.padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            modifier = Modifier.padding(22.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    StatusPill(text = status.label(), palette = palette)
-                    Text(
-                        text = status.headline(),
-                        color = MaterialTheme.colorScheme.onSurface,
-                        style = MaterialTheme.typography.titleLarge,
-                    )
-                }
+                StatusPill(text = status.label(), palette = palette)
                 if (status is CaptureStatus.Capturing) {
                     BreathingStatusIndicator(color = palette.indicator)
                 } else {
@@ -136,9 +170,51 @@ private fun CaptureStatusCard(status: CaptureStatus) {
                 }
             }
             Text(
+                text = status.headline(),
+                color = StatusText,
+                fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.headlineSmall,
+            )
+            Text(
                 text = status.description(),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = StatusMutedText,
                 style = MaterialTheme.typography.bodyMedium,
+            )
+            SignalRail(active = status is CaptureStatus.Capturing, color = palette.indicator)
+        }
+    }
+}
+
+@Composable
+private fun SignalRail(active: Boolean, color: Color) {
+    val transition = rememberInfiniteTransition(label = "signal-rail")
+    val pulse = transition.animateFloat(
+        initialValue = 0.45f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 900),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "rail-pulse",
+    ).value
+    val barHeights = listOf(8, 18, 12, 26, 14, 30, 16, 22, 10, 26, 14, 20, 8, 18, 12, 24)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(34.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        barHeights.forEachIndexed { index, height ->
+            val emphasized = index % 5 == 2
+            val barColor = if (emphasized) color else color.copy(alpha = 0.35f)
+            val alpha = if (active) 0.55f + 0.45f * pulse else 0.55f
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(height.dp)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(barColor.copy(alpha = barColor.alpha * alpha)),
             )
         }
     }
@@ -151,8 +227,8 @@ private fun CaptureSummaryCard(
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = CardShape,
     ) {
         Column(
             modifier = Modifier.padding(18.dp),
@@ -160,10 +236,10 @@ private fun CaptureSummaryCard(
         ) {
             SectionHeader(
                 eyebrow = "SESSION",
-                title = "Current run",
-                supporting = "Keep capture status, observed signal, and local evidence in one place.",
+                title = "Session signal",
+                supporting = "A compact readout of the current capture run.",
             )
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 SummaryMetric(
                     modifier = Modifier.weight(1f),
                     label = "State",
@@ -175,7 +251,7 @@ private fun CaptureSummaryCard(
                     value = status.signalLabel(),
                 )
             }
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 SummaryMetric(
                     modifier = Modifier.weight(1f),
                     label = "Duration",
@@ -195,8 +271,8 @@ private fun CaptureSummaryCard(
 private fun CaptureEvidenceCard(evidence: CaptureEvidenceSnapshot) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = CardShape,
     ) {
         Column(
             modifier = Modifier.padding(18.dp),
@@ -204,14 +280,14 @@ private fun CaptureEvidenceCard(evidence: CaptureEvidenceSnapshot) {
         ) {
             SectionHeader(
                 eyebrow = "EVIDENCE",
-                title = "Observed locally",
-                supporting = "These counters stay in the control domain and summarize the active capture session.",
+                title = "Local observations",
+                supporting = "Capture counters stay on this device and summarize the latest run.",
             )
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 EvidenceItem("Frames", formatCount(evidence.capturedFrames), Modifier.weight(1f))
                 EvidenceItem("Silent reads", formatCount(evidence.silentReads), Modifier.weight(1f))
             }
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 EvidenceItem("Read errors", formatCount(evidence.readErrors), Modifier.weight(1f))
                 EvidenceItem(
                     "Latest read",
@@ -232,8 +308,8 @@ private fun CaptureActionCard(
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLowest),
-        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = CardShape,
     ) {
         Column(
             modifier = Modifier.padding(18.dp),
@@ -256,21 +332,30 @@ private fun CaptureActionCard(
                 OutlinedButton(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(min = 48.dp),
+                        .heightIn(min = 50.dp),
                     onClick = onStop,
+                    shape = TileShape,
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
                 ) {
-                    Text("Stop capture")
+                    Text("Stop capture", fontWeight = FontWeight.SemiBold)
                 }
             } else {
                 Button(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(min = 48.dp),
+                        .heightIn(min = 50.dp),
                     enabled = !starting,
                     onClick = onStart,
+                    shape = TileShape,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                    ),
                 ) {
-                    Text(if (starting) "Waiting for system consent" else "Start capture")
+                    Text(
+                        if (starting) "Waiting for system consent" else "Start capture",
+                        fontWeight = FontWeight.SemiBold,
+                    )
                 }
             }
         }
@@ -281,8 +366,8 @@ private fun CaptureActionCard(
 private fun CaptureBoundaryCard() {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
-        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        shape = CardShape,
     ) {
         Column(
             modifier = Modifier.padding(18.dp),
@@ -290,12 +375,13 @@ private fun CaptureBoundaryCard() {
         ) {
             Text(
                 "Capture-only boundary",
-                color = MaterialTheme.colorScheme.onSecondaryContainer,
-                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.titleSmall,
             )
             Text(
                 "Audio samples are discarded locally. This screen reports observations without attributing policy limits to a specific source app.",
-                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 style = MaterialTheme.typography.bodyMedium,
             )
         }
@@ -313,11 +399,13 @@ private fun SectionHeader(
             text = eyebrow,
             color = MaterialTheme.colorScheme.primary,
             fontWeight = FontWeight.Bold,
+            letterSpacing = 1.4.sp,
             style = MaterialTheme.typography.labelSmall,
         )
         Text(
             text = title,
             color = MaterialTheme.colorScheme.onSurface,
+            fontWeight = FontWeight.SemiBold,
             style = MaterialTheme.typography.titleMedium,
         )
         Text(
@@ -336,32 +424,36 @@ private fun SummaryMetric(
 ) {
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(8.dp),
-        color = MaterialTheme.colorScheme.surface,
+        shape = TileShape,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
-            Text(value, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleMedium)
+            Text(value, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium)
         }
     }
 }
 
 @Composable
-private fun EvidenceItem(label: String, value: String, modifier: Modifier) {
+private fun EvidenceItem(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+) {
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(8.dp),
-        color = MaterialTheme.colorScheme.surface,
+        shape = TileShape,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
-            Text(value, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.titleMedium)
+            Text(value, color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium)
         }
     }
 }
@@ -372,14 +464,15 @@ private fun StatusPill(
     palette: StatusPalette,
 ) {
     Surface(
-        color = palette.indicator,
+        color = palette.indicator.copy(alpha = 0.16f),
         shape = RoundedCornerShape(999.dp),
     ) {
         Text(
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
             text = text,
-            color = palette.onIndicator,
+            color = palette.indicator,
             fontWeight = FontWeight.Bold,
+            letterSpacing = 1.2.sp,
             style = MaterialTheme.typography.labelSmall,
         )
     }
@@ -423,9 +516,7 @@ private fun StatusIndicator(color: Color) {
 }
 
 private data class StatusPalette(
-    val container: Color,
     val indicator: Color,
-    val onIndicator: Color,
 )
 
 @Composable
@@ -434,26 +525,10 @@ private fun CaptureStatus.palette(): StatusPalette = when (this) {
     CaptureStatus.AwaitingPermission,
     CaptureStatus.AwaitingNotificationPermission,
     CaptureStatus.AwaitingProjectionConsent,
-    -> StatusPalette(
-        container = MaterialTheme.colorScheme.surfaceContainerHighest,
-        indicator = MaterialTheme.colorScheme.secondary,
-        onIndicator = MaterialTheme.colorScheme.onSecondary,
-    )
-    is CaptureStatus.Capturing -> StatusPalette(
-        container = MaterialTheme.colorScheme.primaryContainer,
-        indicator = MaterialTheme.colorScheme.primary,
-        onIndicator = MaterialTheme.colorScheme.onPrimary,
-    )
-    is CaptureStatus.NoCapturableAudio -> StatusPalette(
-        container = MaterialTheme.colorScheme.tertiaryContainer,
-        indicator = MaterialTheme.colorScheme.tertiary,
-        onIndicator = MaterialTheme.colorScheme.onTertiary,
-    )
-    is CaptureStatus.Stopped, is CaptureStatus.Failed -> StatusPalette(
-        container = MaterialTheme.colorScheme.errorContainer,
-        indicator = MaterialTheme.colorScheme.error,
-        onIndicator = MaterialTheme.colorScheme.onError,
-    )
+    -> StatusPalette(indicator = Color(0xFFA5B1B5))
+    is CaptureStatus.Capturing -> StatusPalette(indicator = Color(0xFF36C8B6))
+    is CaptureStatus.NoCapturableAudio -> StatusPalette(indicator = Color(0xFFE6AE54))
+    is CaptureStatus.Stopped, is CaptureStatus.Failed -> StatusPalette(indicator = Color(0xFFE66F7F))
 }
 
 private fun CaptureStatus.label(): String = when (this) {

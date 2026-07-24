@@ -13,24 +13,43 @@ const { busy, createPairing, error, expirePairing, refresh, selectOutput, snapsh
 <template>
   <main class="app-shell">
     <aside class="sidebar">
-      <div class="brand"><AudioLines :size="23" aria-hidden="true" /><span>SoniMesh</span></div>
+      <div class="brand-block">
+        <span class="brand-mark"><AudioLines :size="20" aria-hidden="true" /></span>
+        <div>
+          <strong>SoniMesh</strong>
+          <span>Local audio bridge</span>
+        </div>
+      </div>
+
       <nav aria-label="Application sections">
-        <a class="nav-item nav-active" href="#session"><SlidersHorizontal :size="18" aria-hidden="true" />Receiver</a>
-        <a class="nav-item" href="#diagnostics"><Activity :size="18" aria-hidden="true" />Diagnostics</a>
+        <p class="nav-label">Workspace</p>
+        <a class="nav-item nav-active" href="#session">
+          <SlidersHorizontal :size="18" aria-hidden="true" />
+          <span>Receiver</span>
+          <span class="nav-index">01</span>
+        </a>
+        <a class="nav-item" href="#diagnostics">
+          <Activity :size="18" aria-hidden="true" />
+          <span>Diagnostics</span>
+          <span class="nav-index">02</span>
+        </a>
       </nav>
+
       <div class="sidebar-footer">
-        <span class="sidebar-dot" aria-hidden="true"></span>
-        <p v-if="snapshot?.previewAdapter">Preview adapter</p>
-        <p v-else>Control bridge</p>
+        <span class="sidebar-signal" aria-hidden="true"><i></i></span>
+        <div>
+          <strong>Control plane online</strong>
+          <span>{{ snapshot?.previewAdapter ? 'Preview adapter' : 'Desktop bridge' }}</span>
+        </div>
       </div>
     </aside>
 
     <div class="content-shell">
       <header class="topbar">
-        <div>
+        <div class="title-block">
           <p class="eyebrow">Desktop receiver</p>
-          <h1>Receiver control</h1>
-          <p class="topbar-copy">One stream, one output, low-rate control state.</p>
+          <h1>Route your phone audio,<br /><span>without the cloud.</span></h1>
+          <p class="topbar-copy">A private, bounded listening session on the output device you choose.</p>
         </div>
         <div class="topbar-actions">
           <span v-if="snapshot" class="session-chip" :class="`chip-${snapshot.session}`" role="status" aria-live="polite">
@@ -53,7 +72,10 @@ const { busy, createPairing, error, expirePairing, refresh, selectOutput, snapsh
         </div>
         <DiagnosticsPanel id="diagnostics" :metrics="snapshot.metrics" />
       </template>
-      <div v-else class="loading-state">Connecting to desktop control service</div>
+      <div v-else class="loading-state">
+        <span class="loading-orbit" aria-hidden="true"></span>
+        <p>Connecting to desktop control service</p>
+      </div>
     </div>
   </main>
 </template>

@@ -28,16 +28,13 @@ function beginCountdown(pairing: PairingStatus) {
   clearCountdown()
   remainingSeconds.value = pairing.state === 'active' ? pairing.expiresInSeconds : null
 
-  if (remainingSeconds.value === null) {
-    return
-  }
+  if (remainingSeconds.value === null) return
 
   countdownTimer = window.setInterval(() => {
     if (remainingSeconds.value === null) {
       clearCountdown()
       return
     }
-
     remainingSeconds.value = Math.max(0, remainingSeconds.value - 1)
     if (remainingSeconds.value === 0) {
       clearCountdown()
@@ -49,13 +46,26 @@ function beginCountdown(pairing: PairingStatus) {
 const pairingMessage = computed(() => {
   switch (props.pairing.state) {
     case 'active':
-      return remainingSeconds.value === null ? 'Invitation active' : remainingSeconds.value + 's remaining'
+      return remainingSeconds.value === null ? 'Invitation is open' : `${remainingSeconds.value}s remaining`
     case 'consumed':
-      return 'Verified invitation consumed'
+      return 'Sender verified'
     case 'expired':
-      return 'Expired'
+      return 'Invitation expired'
     case 'inactive':
-      return 'No active invitation'
+      return 'No open invitation'
+  }
+})
+
+const pairingHint = computed(() => {
+  switch (props.pairing.state) {
+    case 'active':
+      return 'Keep this window open while the sender verifies the invitation.'
+    case 'consumed':
+      return 'The invitation was used once and cannot be replayed.'
+    case 'expired':
+      return 'Create a fresh invitation when the sender is ready.'
+    case 'inactive':
+      return 'Create a short-lived invitation to trust a new sender.'
   }
 })
 
@@ -64,23 +74,30 @@ onUnmounted(clearCountdown)
 </script>
 
 <template>
-  <section class="panel" aria-labelledby="pairing-heading">
-    <div class="panel-heading compact-heading">
+  <section class="panel utility-panel pairing-panel" aria-labelledby="pairing-heading">
+    <div class="panel-heading">
+      <div class="panel-icon"><QrCode :size="19" aria-hidden="true" /></div>
       <div>
-        <p class="eyebrow">Trust</p>
-        <h2 id="pairing-heading">Pairing invitation</h2>
+        <p class="eyebrow">Private pairing</p>
+        <h2 id="pairing-heading">Trust a sender</h2>
       </div>
-      <QrCode :size="21" aria-hidden="true" />
     </div>
-    <p class="pairing-state" :class="`pairing-${pairing.state}`">
-      <Clock3 v-if="pairing.state === 'active'" :size="15" aria-hidden="true" />
-      <span>{{ pairingMessage }}</span>
-    </p>
-    <p class="pairing-hint">Pairing state is control-plane only.</p>
+
+    <div class="pairing-callout" :class="`pairing-${pairing.state}`">
+      <span class="pairing-orb" aria-hidden="true"></span>
+      <div>
+        <strong>{{ pairingMessage }}</strong>
+        <p>{{ pairingHint }}</p>
+      </div>
+      <Clock3 v-if="pairing.state === 'active'" :size="17" aria-hidden="true" />
+    </div>
+
     <div class="inline-actions">
-      <button class="secondary-action" :disabled="busy || pairing.state === 'active'" @click="emit('create')">Create invitation</button>
-      <button v-if="pairing.state === 'active'" class="icon-action" title="Expire invitation" aria-label="Expire invitation" :disabled="busy" @click="emit('expire')">
-        <X :size="17" aria-hidden="true" />
+      <button class="secondary-action" :disabled="busy || pairing.state === 'active'" @click="emit('create')">
+        Create invitation
+      </button>
+      <button v-if="pairing.state === 'active'" class="icon-action subtle" title="Expire invitation" aria-label="Expire invitation" :disabled="busy" @click="emit('expire')">
+        <X :size="18" aria-hidden="true" />
       </button>
     </div>
   </section>

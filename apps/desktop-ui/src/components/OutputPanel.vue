@@ -18,23 +18,30 @@ const selectedDevice = computed(() => props.devices.find((device) => device.id =
 </script>
 
 <template>
-  <section class="panel" aria-labelledby="output-heading">
-    <div class="panel-heading compact-heading">
+  <section class="panel utility-panel" aria-labelledby="output-heading">
+    <div class="panel-heading">
+      <div class="panel-icon"><Headphones :size="19" aria-hidden="true" /></div>
       <div>
-        <p class="eyebrow">Output</p>
-        <h2 id="output-heading">Listening device</h2>
+        <p class="eyebrow">Listening output</p>
+        <h2 id="output-heading">Where sound lands</h2>
       </div>
-      <Headphones :size="21" aria-hidden="true" />
     </div>
-    <label class="field-label" for="output-device">Device</label>
-    <select id="output-device" class="device-select" :value="selectedId ?? ''" :disabled="busy" @change="emit('select', ($event.target as HTMLSelectElement).value)">
-      <option v-for="device in devices" :key="device.id" :value="device.id">
-        {{ device.label }}{{ device.isDefault ? ' (default)' : '' }}
-      </option>
-    </select>
-    <p v-if="selectedDevice" class="hint device-summary">
-      <Check :size="15" aria-hidden="true" />
-      {{ selectedDevice.sampleRateHz.toLocaleString() }} Hz · {{ selectedDevice.channels }} channels
-    </p>
+
+    <div v-if="selectedDevice" class="selected-device">
+      <span class="device-check"><Check :size="16" aria-hidden="true" /></span>
+      <div>
+        <strong>{{ selectedDevice.label }}</strong>
+        <span>{{ selectedDevice.sampleRateHz.toLocaleString() }} Hz · {{ selectedDevice.channels }} channels</span>
+      </div>
+    </div>
+
+    <label class="field-label" for="output-device">Change output device</label>
+    <div class="select-wrap">
+      <select id="output-device" class="device-select" :value="selectedId ?? ''" :disabled="busy" @change="emit('select', ($event.target as HTMLSelectElement).value)">
+        <option v-for="device in devices" :key="device.id" :value="device.id">
+          {{ device.label }}{{ device.isDefault ? ' (default)' : '' }}
+        </option>
+      </select>
+    </div>
   </section>
 </template>

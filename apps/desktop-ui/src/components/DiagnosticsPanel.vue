@@ -13,9 +13,7 @@ function formatRate(sampleRateHz: number) {
 
 function formatRatio() {
   const { nominalInputSampleRateHz, nominalOutputSampleRateHz, driftAdjustmentPpm } = props.metrics
-  if (nominalInputSampleRateHz === 0 || nominalOutputSampleRateHz === 0) {
-    return 'Unavailable'
-  }
+  if (nominalInputSampleRateHz === 0 || nominalOutputSampleRateHz === 0) return 'Unavailable'
   const nominal = nominalInputSampleRateHz / nominalOutputSampleRateHz
   return (nominal * (1 + driftAdjustmentPpm / 1_000_000)).toFixed(6)
 }
@@ -25,45 +23,82 @@ function formatPpm(ppm: number) {
 }
 
 function formatCounter(counter: string) {
-  if (!/^\d+$/.test(counter)) {
-    return 'Unavailable'
-  }
+  if (!/^\d+$/.test(counter)) return 'Unavailable'
   return counter.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
 }
 </script>
 
 <template>
-  <section class="diagnostics" aria-labelledby="diagnostics-heading">
+  <section class="diagnostics panel" aria-labelledby="diagnostics-heading">
     <div class="diagnostics-heading">
       <div>
-        <p class="eyebrow">Diagnostics</p>
-        <h2 id="diagnostics-heading">Live stream health</h2>
+        <p class="eyebrow">Signal observability</p>
+        <h2 id="diagnostics-heading">A calm view of stream health</h2>
+        <p>Transport, recovery, queue and clock data from the current bounded session.</p>
       </div>
-      <Activity :size="21" aria-hidden="true" />
+      <span class="telemetry-mark"><Activity :size="21" aria-hidden="true" /></span>
     </div>
-    <div class="metric-grid">
-      <div class="metric"><ShieldCheck :size="17" aria-hidden="true" /><span>Authenticated</span><strong>{{ formatCounter(metrics.authenticatedPackets) }}</strong></div>
-      <div class="metric"><ShieldCheck :size="17" aria-hidden="true" /><span>Duplicates</span><strong>{{ formatCounter(metrics.duplicatePackets) }}</strong></div>
-      <div class="metric"><ShieldCheck :size="17" aria-hidden="true" /><span>Rejected</span><strong>{{ formatCounter(metrics.rejectedPackets) }}</strong></div>
-      <div class="metric"><Activity :size="17" aria-hidden="true" /><span>Late packets</span><strong>{{ formatCounter(metrics.latePackets) }}</strong></div>
-      <div class="metric"><Activity :size="17" aria-hidden="true" /><span>Reordered</span><strong>{{ formatCounter(metrics.reorderedPackets) }}</strong></div>
-      <div class="metric"><RefreshCcwDot :size="17" aria-hidden="true" /><span>Jitter drops</span><strong>{{ formatCounter(metrics.jitterResyncDroppedFrames) }}</strong></div>
-      <div class="metric"><Waves :size="17" aria-hidden="true" /><span>PLC frames</span><strong>{{ formatCounter(metrics.plcFrames) }}</strong></div>
-      <div class="metric"><Waves :size="17" aria-hidden="true" /><span>Decode errors</span><strong>{{ formatCounter(metrics.decodeErrors) }}</strong></div>
-      <div class="metric"><Waves :size="17" aria-hidden="true" /><span>Underflows</span><strong>{{ formatCounter(metrics.pcmUnderflows) }}</strong></div>
-      <div class="metric"><Waves :size="17" aria-hidden="true" /><span>Overflows</span><strong>{{ formatCounter(metrics.pcmOverflows) }}</strong></div>
-      <div class="metric"><RefreshCcwDot :size="17" aria-hidden="true" /><span>Discontinuities</span><strong>{{ formatCounter(metrics.pcmDiscontinuities) }}</strong></div>
-      <div class="metric"><RefreshCcwDot :size="17" aria-hidden="true" /><span>Hard resyncs</span><strong>{{ formatCounter(metrics.driftHardResyncs) }}</strong></div>
-      <div class="metric"><RefreshCcwDot :size="17" aria-hidden="true" /><span>Stream resets</span><strong>{{ formatCounter(metrics.streamResets) }}</strong></div>
+
+    <div class="health-grid">
+      <article class="health-card health-primary">
+        <span>Jitter buffer</span>
+        <strong>{{ metrics.currentJitterMs }}<small>ms</small></strong>
+        <p>Current network smoothing window</p>
+      </article>
+      <article class="health-card">
+        <span>Playout delay</span>
+        <strong>{{ metrics.playoutDelayMs }}<small>ms</small></strong>
+        <p>Buffered before the output callback</p>
+      </article>
+      <article class="health-card">
+        <span>PCM queue</span>
+        <strong>{{ metrics.queuedPcmBlocks }}<small>/ {{ metrics.queuedPcmHighWaterBlocks }}</small></strong>
+        <p>Blocks queued / observed high water</p>
+      </article>
+      <article class="health-card">
+        <span>Clock drift</span>
+        <strong>{{ formatPpm(metrics.driftAdjustmentPpm) }}</strong>
+        <p>Adaptive resampling correction</p>
+      </article>
     </div>
-    <div class="resampling-row" aria-label="PCM queue and resampling state">
-      <div><Layers :size="17" aria-hidden="true" /><span>PCM queue</span><strong>{{ metrics.queuedPcmBlocks }} / {{ metrics.queuedPcmHighWaterBlocks }} blocks</strong></div>
-      <div><Gauge :size="17" aria-hidden="true" /><span>Resampling</span><strong>{{ formatRate(metrics.nominalInputSampleRateHz) }} to {{ formatRate(metrics.nominalOutputSampleRateHz) }}</strong></div>
-      <div><Gauge :size="17" aria-hidden="true" /><span>Drift</span><strong>{{ formatPpm(metrics.driftAdjustmentPpm) }} · ratio {{ formatRatio() }}</strong></div>
+
+    <div class="diagnostic-groups">
+      <section class="metric-group" aria-labelledby="transport-heading">
+        <div class="group-heading">
+          <span class="group-icon"><ShieldCheck :size="18" aria-hidden="true" /></span>
+          <div><h3 id="transport-heading">Packet integrity</h3><p>Authenticated transport counters</p></div>
+        </div>
+        <dl class="metric-list">
+          <div><dt>Authenticated</dt><dd>{{ formatCounter(metrics.authenticatedPackets) }}</dd></div>
+          <div><dt>Duplicates</dt><dd>{{ formatCounter(metrics.duplicatePackets) }}</dd></div>
+          <div><dt>Rejected</dt><dd>{{ formatCounter(metrics.rejectedPackets) }}</dd></div>
+          <div><dt>Late packets</dt><dd>{{ formatCounter(metrics.latePackets) }}</dd></div>
+          <div><dt>Reordered</dt><dd>{{ formatCounter(metrics.reorderedPackets) }}</dd></div>
+        </dl>
+      </section>
+
+      <section class="metric-group" aria-labelledby="recovery-heading">
+        <div class="group-heading">
+          <span class="group-icon"><Waves :size="18" aria-hidden="true" /></span>
+          <div><h3 id="recovery-heading">Audio recovery</h3><p>Bounded decode and PCM events</p></div>
+        </div>
+        <dl class="metric-list metric-list-wide">
+          <div><dt>Jitter drops</dt><dd>{{ formatCounter(metrics.jitterResyncDroppedFrames) }}</dd></div>
+          <div><dt>PLC frames</dt><dd>{{ formatCounter(metrics.plcFrames) }}</dd></div>
+          <div><dt>Decode errors</dt><dd>{{ formatCounter(metrics.decodeErrors) }}</dd></div>
+          <div><dt>Underflows</dt><dd>{{ formatCounter(metrics.pcmUnderflows) }}</dd></div>
+          <div><dt>Overflows</dt><dd>{{ formatCounter(metrics.pcmOverflows) }}</dd></div>
+          <div><dt>Discontinuities</dt><dd>{{ formatCounter(metrics.pcmDiscontinuities) }}</dd></div>
+          <div><dt>Hard resyncs</dt><dd>{{ formatCounter(metrics.driftHardResyncs) }}</dd></div>
+          <div><dt>Stream resets</dt><dd>{{ formatCounter(metrics.streamResets) }}</dd></div>
+        </dl>
+      </section>
     </div>
-    <div class="latency-row">
-      <span>Jitter buffer <strong>{{ metrics.currentJitterMs }} ms</strong></span>
-      <span>Playout <strong>{{ metrics.playoutDelayMs }} ms</strong></span>
+
+    <div class="resampling-bar" aria-label="Resampling state">
+      <div><Gauge :size="17" aria-hidden="true" /><span>Resampling</span><strong>{{ formatRate(metrics.nominalInputSampleRateHz) }} → {{ formatRate(metrics.nominalOutputSampleRateHz) }}</strong></div>
+      <div><RefreshCcwDot :size="17" aria-hidden="true" /><span>Effective ratio</span><strong>{{ formatRatio() }}</strong></div>
+      <div><Layers :size="17" aria-hidden="true" /><span>Queue policy</span><strong>Bounded</strong></div>
     </div>
   </section>
 </template>
