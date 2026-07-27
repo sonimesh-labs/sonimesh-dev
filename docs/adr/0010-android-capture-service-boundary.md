@@ -99,7 +99,11 @@ evidence counter whether Android reports a negative error code or throws a
 read-call exception. Every positive result is rejected before sample access unless
 it is within the fixed request and exactly channel-aligned; a contract violation
 counts as a read error and ends that capture generation. Pre-read permission
-checks and teardown wake-ups are not read errors.
+checks and teardown wake-ups are not read errors. Capture start, read
+completion, and snapshot timestamps reject negative values as invalid local
+monotonic-clock readings. A nonnegative snapshot that precedes the recorded
+start is still clamped to zero duration so an ordinary clock regression cannot
+publish a negative interval.
 
 The production Android source set remains capture-only until a later ADR admits
 the next boundary. CI checks the main manifest, production dependency

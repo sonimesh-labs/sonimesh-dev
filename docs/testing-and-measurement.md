@@ -161,7 +161,9 @@ Before MVP release:
   teardown races between outcome publication, reader exit, duplicate stops, and
   fresh starts delivered while the old service generation is retiring;
   read-error accounting for negative return codes, thrown read-call exceptions,
-  and invalid positive sizes before sample access; injected ordinary exceptions
+  and invalid positive sizes before sample access; rejection of negative capture
+  evidence timestamps while nonnegative snapshot regressions clamp duration to
+  zero; injected ordinary exceptions
   in each final cleanup step; and
   exact bounded ordinary-failure counts with no exception text; and deferred
   propagation of fatal cleanup errors;

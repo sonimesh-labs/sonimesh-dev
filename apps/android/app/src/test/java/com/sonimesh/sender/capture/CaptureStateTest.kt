@@ -137,6 +137,18 @@ class CaptureStateTest {
     }
 
     @Test
+    fun evidence_rejects_a_negative_snapshot_time() {
+        val evidence = CaptureEvidence()
+
+        try {
+            evidence.snapshot(nowMillis = -1)
+            fail("expected a negative snapshot time to be rejected")
+        } catch (_: IllegalArgumentException) {
+            // Expected: duration calculations require a monotonic timestamp.
+        }
+    }
+
+    @Test
     fun evidence_keeps_the_latest_valid_read_completion_offset() {
         val evidence = CaptureEvidence()
         evidence.begin(captureStartedAtMillis = 1_000)

@@ -52,6 +52,7 @@ class CaptureEvidence {
 
     /** Returns a low-rate summary at the supplied monotonic timestamp. */
     fun snapshot(nowMillis: Long): CaptureEvidenceSnapshot {
+        require(nowMillis >= 0) { "snapshot time must be monotonic" }
         val startedAtMillis = captureStartedAtMillis.get()
         val captureDurationMillis = if (startedAtMillis == NO_CAPTURE_START) {
             0
