@@ -110,8 +110,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   and plaintext clearing. Configured finite CI executions are smoke evidence
   rather than a sustained campaign.
 - a bounded incremental TCP control-frame reader/writer that validates the
-  existing length-prefixed Protobuf envelope; it is explicitly unauthenticated
-  and is not a TLS or pairing implementation.
+  existing length-prefixed Protobuf envelope, plus Rust/Kotlin-JVM host tests for
+  the published Hello and epoch-bearing StartStream wire vectors. The transport
+  is explicitly unauthenticated and is not a TLS or pairing implementation.
 - a capture-only Kotlin/Compose Android phase 0A bootstrap with direct,
   non-persisted MediaProjection consent transfer, a media-projection foreground
   service, a fixed PCM16 AudioRecord read buffer, low-rate state publication,

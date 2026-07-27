@@ -53,7 +53,8 @@ Cover at least:
 - sequence exhaustion at the epoch boundary, duplicate detection, and replay
   windows;
 - nonce uniqueness across streams, directions, epochs, and reconnects;
-- Protobuf size limits, unknown fields, and capability negotiation;
+- Protobuf size limits, unknown fields, capability negotiation, and published
+  Rust/Kotlin control-frame vectors including the exact media key epoch;
 - jitter ordering, late packets, overflow, resynchronization, and bounded memory;
 - PLC/FEC scheduling and frame-duration transitions;
 - drift-controller convergence, limits, anti-windup, and reset;

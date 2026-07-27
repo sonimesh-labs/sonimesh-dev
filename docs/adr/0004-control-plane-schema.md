@@ -91,8 +91,10 @@ Unit tests must cover frame byte order, truncated/oversized frames, malformed
 Protobuf, missing payload, version mismatch, capability limits, and idempotent
 command representation. The published
 [control-frame vector](../protocol/control-frame-vectors.md) fixes the initial
-Rust/Kotlin wire encoding; Kotlin verification remains required once the sender
-is implemented.
+Rust/Kotlin wire encoding. A bounded test-only Kotlin/JVM codec independently
+encodes and decodes the Hello and epoch-bearing StartStream vectors and checks
+length-prefix bounds. It is not evidence for an Android control transport or an
+authenticated TLS session.
 
 ## Rollback plan
 

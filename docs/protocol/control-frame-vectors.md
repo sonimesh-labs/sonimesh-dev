@@ -46,3 +46,14 @@ as a command.
 `media_key_epoch` is a `uint32` on the Protobuf wire but must not exceed
 `65535`. Start and Stop commands bind this exact epoch to the media session and
 stream identity; see [ADR 0006](../adr/0006-media-key-epoch-control.md).
+
+## Cross-language verification
+
+Rust protocol tests and the Android host-JVM `ControlFrameVectorTest` independently
+encode both published frames and decode their semantic fields. The Kotlin test
+also rejects truncated, mismatched, and oversized length prefixes and rejects a
+`media_key_epoch` above `65535`.
+
+This is wire-format and host-test evidence only. The Android production source
+set still contains no control transport, generated Protobuf client, pairing, or
+TLS session.
