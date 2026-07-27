@@ -36,3 +36,16 @@ The first 36 bytes are the header; the final 37 bytes are the 21-byte encrypted
 plaintext followed by the 16-byte Poly1305 tag. Implementations must reject a
 modified byte in either part and must not pass any plaintext to an Opus decoder
 until authentication succeeds.
+
+## Verification status
+
+The Rust `matches_published_cross_language_media_vector` integration test and
+the Kotlin/JVM `MediaCryptoVectorTest` both reproduce the HKDF info layout,
+nonce, fixed header, associated data, ciphertext, and Poly1305 tag above. The
+Kotlin/JVM test also decrypts the published datagram and rejects independently
+tampered header and ciphertext bytes.
+
+The Kotlin test runs as a host JVM unit test with the configured JDK security
+provider. It does not prove Android runtime provider behavior, device support,
+ABI packaging, production key handling, or an authenticated pairing source. The
+Android production source set remains capture-only.

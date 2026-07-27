@@ -78,10 +78,11 @@ direction_key = HKDF-Expand(root, "sonimesh media v1" || direction, ...)
 stream_key = HKDF-Expand(direction_key, stream_id || epoch, ...)
 ~~~
 
-The exact byte encoding must be specified in the protocol document and tested in
-Rust and Kotlin. A nonce must be unique for every packet under a key. The
-implementation should use an explicit 96-bit layout whose fields include the
-key epoch, stream identity (or a per-stream key), direction, and sequence.
+The exact byte encoding is specified in the protocol document and tested in
+Rust and a Kotlin/JVM unit test. The Kotlin test is host-provider evidence only;
+an Android-runtime provider test remains required. A nonce must be unique for
+every packet under a key. The implementation uses an explicit 96-bit layout
+whose fields include the key epoch, stream identity, direction, and sequence.
 
 The controlled-lab Rust implementation records this exact derivation, nonce
 layout, sequence exhaustion behavior, and ChaCha20-Poly1305 choice in

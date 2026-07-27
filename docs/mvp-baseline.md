@@ -86,8 +86,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   does not implement TLS, QR payloads, pairing secrets, or persistent identity
   storage.
 - ChaCha20-Poly1305 packet protection with HKDF-SHA256 per-stream keys, a
-  reviewed nonce layout, sender sequence exhaustion, and authentication before
-  replay admission; pairing/TLS root-secret creation remains unimplemented.
+  reviewed nonce layout, sender sequence exhaustion, authentication before
+  replay admission, and matching Rust/Kotlin-JVM public vectors; Android runtime
+  provider and pairing/TLS root-secret creation remain unimplemented.
 - a pure TLS-exporter pairing-binding boundary with fixed Rust/Kotlin test
   vectors for role-separated proofs and the one-time media root. It accepts only
   an externally supplied 32-byte exporter result after the future pinned TLS

@@ -68,9 +68,12 @@ Tests cover HKDF determinism/domain separation, nonce separation by every field,
 header tampering, ciphertext tampering, context mismatch, output bounds, sequence
 exhaustion, authenticated replay ordering through the network adapter, and the
 published [cross-language media crypto vector](../protocol/media-crypto-vectors.md).
+A Kotlin/JVM unit test independently reproduces that vector, decrypts it, and
+rejects header or ciphertext tampering using the host JDK provider.
 
-Kotlin verification of the vector, key rotation control messages, address
+Android-runtime provider verification, key rotation control messages, address
 migration, and fuzzing remain required before a build leaves the lab network.
+The host JVM result is not Android device or production key-handling evidence.
 
 ## Rollback plan
 
