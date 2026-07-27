@@ -75,7 +75,8 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
 - atomic receiver-pipeline diagnostics for authenticated/rejected/replayed/late
   packets, accepted reordered packets, decoder-side PLC/errors, bounded PCM
   replacement, jitter resynchronization, successful epoch resets, and
-  active-epoch PCM queue level/high water published as one coherent atomic pair;
+  capacity-clamped active-epoch PCM queue level/high water published as one
+  coherent atomic pair;
   output-callback underflow remains owned by the future output adapter.
 - a bounded per-stream PCM occupancy controller that emits slew-limited ppm
   decisions or stream-local hard-resynchronization requests; hard resync clears

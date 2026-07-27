@@ -140,10 +140,11 @@ impl<const SAMPLES_PER_BLOCK: usize> RealtimePcmProducer<SAMPLES_PER_BLOCK> {
     /// Approximate count of blocks from the active stream epoch.
     ///
     /// Unlike [`Self::len`], this excludes retired blocks that the realtime
-    /// consumer has not yet observed after a stream-local reset.
+    /// consumer has not yet observed after a stream-local reset. The published
+    /// approximation never exceeds the configured queue capacity.
     #[must_use]
     pub fn active_len(&self) -> usize {
-        self.state.active_blocks.load(Ordering::Relaxed)
+        active_block_count(&self.state)
     }
 
     /// Returns whether no decoded block is currently queued.
@@ -208,10 +209,11 @@ impl<const SAMPLES_PER_BLOCK: usize> RealtimePcmConsumer<SAMPLES_PER_BLOCK> {
     /// Approximate count of blocks from the active stream epoch.
     ///
     /// Unlike [`Self::len`], this excludes retired blocks that the callback has
-    /// not yet removed after a stream-local reset.
+    /// not yet removed after a stream-local reset. The published approximation
+    /// never exceeds the configured queue capacity.
     #[must_use]
     pub fn active_len(&self) -> usize {
-        self.state.active_blocks.load(Ordering::Relaxed)
+        active_block_count(&self.state)
     }
 
     /// Returns whether the callback would currently underflow.
@@ -267,8 +269,31 @@ pub fn realtime_pcm_queue<const SAMPLES_PER_BLOCK: usize>(
     ))
 }
 
+fn active_block_count<const SAMPLES_PER_BLOCK: usize>(
+    state: &QueueState<SAMPLES_PER_BLOCK>,
+) -> usize {
+    state
+        .active_blocks
+        .load(Ordering::Relaxed)
+        .min(state.queue.capacity())
+}
+
 fn decrement_active_blocks(active_blocks: &AtomicUsize) {
     let _ = active_blocks.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |count| {
         count.checked_sub(1)
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn public_active_length_clamps_transient_internal_overcount() {
+        let (producer, consumer) = realtime_pcm_queue::<1>(2).unwrap();
+        producer.state.active_blocks.store(3, Ordering::Relaxed);
+
+        assert_eq!(producer.active_len(), 2);
+        assert_eq!(consumer.active_len(), 2);
+    }
 }

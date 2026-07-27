@@ -110,6 +110,7 @@ fn concurrent_transfer_preserves_order_and_accounts_for_overwrite() {
     let mut received_count = 0_u64;
     let mut expected = 0_u64;
     loop {
+        assert!(consumer.active_len() <= 32);
         match consumer.pop_into(&mut output) {
             RealtimePcmPopOutcome::Filled {
                 sequence,

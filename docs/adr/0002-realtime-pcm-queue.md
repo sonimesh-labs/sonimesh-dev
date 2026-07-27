@@ -28,7 +28,8 @@ and consumer endpoints in `sonimesh-audio`.
 - `force_push` atomically replaces the oldest block when full;
 - producer publishes an atomic active epoch before emitting new PCM blocks;
   consumer-side epoch and sequence markers let the callback discard stale blocks
-  and detect every remaining gap;
+  and detect every remaining gap; public active-epoch occupancy is always clamped
+  to the configured queue capacity during concurrent oldest replacement;
 - callback reads always initialize their complete output slice, using silence on
   underflow or when only stale blocks were available;
 - the queue-backed render source turns an observed epoch or sequence gap into a
@@ -63,8 +64,9 @@ actual WASAPI devices; lock-free does not by itself prove a latency target.
 ## Validation evidence
 
 Tests cover invalid capacities, oldest replacement, stale epoch discard,
-underflow initialization, queue-discontinuity fade-in, and a 50,000-block
-concurrent producer/consumer stress run. The stress test proves ordering and
+underflow initialization, capacity-clamped public occupancy,
+queue-discontinuity fade-in, and a 50,000-block concurrent producer/consumer
+stress run. The stress test proves ordering and
 accounts every block as consumed or overwritten; it is not a substitute for
 Loom, Miri, or hardware timing evidence.
 
