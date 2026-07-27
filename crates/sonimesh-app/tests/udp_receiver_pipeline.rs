@@ -55,6 +55,24 @@ fn pipeline(counters: Arc<StreamCounters>) -> (Pipeline, sonimesh_audio::Realtim
     (pipeline, consumer)
 }
 
+fn send(sender: &UdpSocket, pipeline: &Pipeline, datagram: &[u8]) {
+    sender
+        .send_to(datagram, pipeline.local_addr().unwrap())
+        .unwrap();
+}
+
+fn poll_until_datagram(
+    pipeline: &mut Pipeline,
+) -> Result<UdpPollOutcome, UdpReceiverError<Infallible>> {
+    for _ in 0..1_000 {
+        match pipeline.poll() {
+            Ok(UdpPollOutcome::Empty) => thread::yield_now(),
+            result => return result,
+        }
+    }
+    panic!("loopback datagram was not delivered");
+}
+
 #[test]
 fn receives_authenticated_udp_media_before_decode() {
     let counters = Arc::new(StreamCounters::default());
@@ -62,31 +80,172 @@ fn receives_authenticated_udp_media_before_decode() {
     let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
     let mut sealer = MediaSealer::new(&SessionSecret::new([0xA5; 32]), context()).unwrap();
     let packet = sealer.seal(0, 0, &[7]).unwrap();
-    sender
-        .send_to(&packet.datagram, pipeline.local_addr().unwrap())
-        .unwrap();
+    assert_eq!(pipeline.pinned_source(), None);
+    send(&sender, &pipeline, &packet.datagram);
 
-    for _ in 0..1_000 {
-        match pipeline.poll().unwrap() {
-            UdpPollOutcome::Empty => thread::yield_now(),
-            UdpPollOutcome::Processed { admission, .. } => {
-                assert_eq!(admission, sonimesh_audio::InsertOutcome::Inserted);
-                assert!(matches!(
-                    pipeline.decode_next().unwrap(),
-                    DecodeStep::Decoded { .. }
-                ));
-                let mut output = [f32::NAN; 4];
-                assert!(matches!(
-                    consumer.pop_into(&mut output),
-                    RealtimePcmPopOutcome::Filled { samples: 1, .. }
-                ));
-                assert!((output[0] - 7.0).abs() < f32::EPSILON);
-                assert_eq!(counters.snapshot().authenticated_packets, 1);
-                return;
-            }
-        }
-    }
-    panic!("loopback media datagram was not processed");
+    let UdpPollOutcome::Processed { source, admission } =
+        poll_until_datagram(&mut pipeline).unwrap()
+    else {
+        panic!("loopback media datagram was not processed");
+    };
+    assert_eq!(source, sender.local_addr().unwrap());
+    assert_eq!(pipeline.pinned_source(), Some(source));
+    assert_eq!(admission, sonimesh_audio::InsertOutcome::Inserted);
+    assert!(matches!(
+        pipeline.decode_next().unwrap(),
+        DecodeStep::Decoded { .. }
+    ));
+    let mut output = [f32::NAN; 4];
+    assert!(matches!(
+        consumer.pop_into(&mut output),
+        RealtimePcmPopOutcome::Filled { samples: 1, .. }
+    ));
+    assert!((output[0] - 7.0).abs() < f32::EPSILON);
+    assert_eq!(counters.snapshot().authenticated_packets, 1);
+}
+
+#[test]
+fn unauthenticated_packet_cannot_pin_the_source_endpoint() {
+    let counters = Arc::new(StreamCounters::default());
+    let (mut pipeline, _consumer) = pipeline(Arc::clone(&counters));
+    let unauthenticated_sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+    send(&unauthenticated_sender, &pipeline, &[0]);
+
+    assert!(matches!(
+        poll_until_datagram(&mut pipeline),
+        Err(UdpReceiverError::Pipeline(_))
+    ));
+    assert_eq!(pipeline.pinned_source(), None);
+
+    let authenticated_sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let mut sealer = MediaSealer::new(&SessionSecret::new([0xA5; 32]), context()).unwrap();
+    let packet = sealer.seal(0, 0, &[7]).unwrap();
+    send(&authenticated_sender, &pipeline, &packet.datagram);
+
+    assert!(matches!(
+        poll_until_datagram(&mut pipeline),
+        Ok(UdpPollOutcome::Processed { .. })
+    ));
+    assert_eq!(
+        pipeline.pinned_source(),
+        Some(authenticated_sender.local_addr().unwrap())
+    );
+    let snapshot = counters.snapshot();
+    assert_eq!(snapshot.authenticated_packets, 1);
+    assert_eq!(snapshot.rejected_packets, 1);
+}
+
+#[test]
+fn changed_source_is_rejected_without_advancing_protected_ingress() {
+    let counters = Arc::new(StreamCounters::default());
+    let (mut pipeline, _consumer) = pipeline(Arc::clone(&counters));
+    let authenticated_sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let changed_sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let mut sealer = MediaSealer::new(&SessionSecret::new([0xA5; 32]), context()).unwrap();
+    let first = sealer.seal(0, 0, &[7]).unwrap();
+    let second = sealer.seal(0, 960, &[8]).unwrap();
+
+    send(&authenticated_sender, &pipeline, &first.datagram);
+    assert!(matches!(
+        poll_until_datagram(&mut pipeline),
+        Ok(UdpPollOutcome::Processed { .. })
+    ));
+
+    send(&changed_sender, &pipeline, &second.datagram);
+    assert!(matches!(
+        poll_until_datagram(&mut pipeline),
+        Err(UdpReceiverError::SourceEndpointChanged)
+    ));
+    assert_eq!(
+        pipeline.pinned_source(),
+        Some(authenticated_sender.local_addr().unwrap())
+    );
+
+    send(&authenticated_sender, &pipeline, &second.datagram);
+    assert!(matches!(
+        poll_until_datagram(&mut pipeline),
+        Ok(UdpPollOutcome::Processed { .. })
+    ));
+    let snapshot = counters.snapshot();
+    assert_eq!(snapshot.authenticated_packets, 2);
+    assert_eq!(snapshot.rejected_packets, 1);
+}
+
+#[test]
+fn key_epoch_rotation_does_not_allow_source_migration() {
+    let counters = Arc::new(StreamCounters::default());
+    let (mut pipeline, _consumer) = pipeline(Arc::clone(&counters));
+    let authenticated_sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let changed_sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let secret = SessionSecret::new([0xA5; 32]);
+    let mut initial_sealer = MediaSealer::new(&secret, context()).unwrap();
+    let first = initial_sealer.seal(0, 0, &[7]).unwrap();
+    send(&authenticated_sender, &pipeline, &first.datagram);
+    assert!(matches!(
+        poll_until_datagram(&mut pipeline),
+        Ok(UdpPollOutcome::Processed { .. })
+    ));
+
+    let previous_context = context();
+    let next_context = MediaKeyContext::new(
+        previous_context.session_id,
+        previous_context.stream_id,
+        previous_context.key_epoch + 1,
+        previous_context.direction,
+    )
+    .unwrap();
+    pipeline.rotate(&secret, next_context, 0).unwrap();
+    let mut rotated_sealer = MediaSealer::new(&secret, next_context).unwrap();
+    let rotated = rotated_sealer.seal(0, 0, &[8]).unwrap();
+
+    send(&changed_sender, &pipeline, &rotated.datagram);
+    assert!(matches!(
+        poll_until_datagram(&mut pipeline),
+        Err(UdpReceiverError::SourceEndpointChanged)
+    ));
+    send(&authenticated_sender, &pipeline, &rotated.datagram);
+    assert!(matches!(
+        poll_until_datagram(&mut pipeline),
+        Ok(UdpPollOutcome::Processed { .. })
+    ));
+}
+
+#[test]
+fn failed_fresh_session_install_preserves_the_source_binding() {
+    let counters = Arc::new(StreamCounters::default());
+    let (mut pipeline, _consumer) = pipeline(counters);
+    let authenticated_sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let changed_sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let secret = SessionSecret::new([0xA5; 32]);
+    let mut sealer = MediaSealer::new(&secret, context()).unwrap();
+    let first = sealer.seal(0, 0, &[7]).unwrap();
+    let second = sealer.seal(0, 960, &[8]).unwrap();
+    send(&authenticated_sender, &pipeline, &first.datagram);
+    assert!(matches!(
+        poll_until_datagram(&mut pipeline),
+        Ok(UdpPollOutcome::Processed { .. })
+    ));
+
+    assert!(
+        pipeline
+            .install_fresh_session(&SessionSecret::new([0x5A; 32]), context(), 0)
+            .is_err()
+    );
+    assert_eq!(
+        pipeline.pinned_source(),
+        Some(authenticated_sender.local_addr().unwrap())
+    );
+
+    send(&changed_sender, &pipeline, &second.datagram);
+    assert!(matches!(
+        poll_until_datagram(&mut pipeline),
+        Err(UdpReceiverError::SourceEndpointChanged)
+    ));
+    send(&authenticated_sender, &pipeline, &second.datagram);
+    assert!(matches!(
+        poll_until_datagram(&mut pipeline),
+        Ok(UdpPollOutcome::Processed { .. })
+    ));
 }
 
 #[test]
@@ -113,11 +272,25 @@ fn oversized_udp_media_is_rejected_and_counted_before_pipeline_ingress() {
 }
 
 #[test]
-fn udp_pipeline_keeps_its_socket_while_installing_a_fresh_media_session() {
+fn fresh_session_keeps_the_socket_and_allows_new_source_rebinding() {
     let counters = Arc::new(StreamCounters::default());
     let (mut pipeline, mut consumer) = pipeline(Arc::clone(&counters));
     let previous_addr = pipeline.local_addr().unwrap();
+    let previous_sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let previous_secret = SessionSecret::new([0xA5; 32]);
     let previous_context = context();
+    let mut previous_sealer = MediaSealer::new(&previous_secret, previous_context).unwrap();
+    let previous_packet = previous_sealer.seal(0, 0, &[7]).unwrap();
+    send(&previous_sender, &pipeline, &previous_packet.datagram);
+    assert!(matches!(
+        poll_until_datagram(&mut pipeline),
+        Ok(UdpPollOutcome::Processed { .. })
+    ));
+    assert_eq!(
+        pipeline.pinned_source(),
+        Some(previous_sender.local_addr().unwrap())
+    );
+
     let fresh_context = MediaKeyContext::new(
         previous_context.session_id + 1,
         previous_context.stream_id,
@@ -130,30 +303,30 @@ fn udp_pipeline_keeps_its_socket_while_installing_a_fresh_media_session() {
         .install_fresh_session(&fresh_secret, fresh_context, 0)
         .unwrap();
     assert_eq!(pipeline.local_addr().unwrap(), previous_addr);
+    assert_eq!(pipeline.pinned_source(), None);
 
-    let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let fresh_sender = UdpSocket::bind("127.0.0.1:0").unwrap();
     let mut sealer = MediaSealer::new(&fresh_secret, fresh_context).unwrap();
     let packet = sealer.seal(0, 0, &[8]).unwrap();
-    sender.send_to(&packet.datagram, previous_addr).unwrap();
+    send(&fresh_sender, &pipeline, &packet.datagram);
 
-    for _ in 0..1_000 {
-        match pipeline.poll().unwrap() {
-            UdpPollOutcome::Empty => thread::yield_now(),
-            UdpPollOutcome::Processed { .. } => {
-                assert!(matches!(
-                    pipeline.decode_next().unwrap(),
-                    DecodeStep::Decoded { .. }
-                ));
-                let mut output = [f32::NAN; 4];
-                assert!(matches!(
-                    consumer.pop_into(&mut output),
-                    RealtimePcmPopOutcome::Filled { .. }
-                ));
-                assert!((output[0] - 8.0).abs() < f32::EPSILON);
-                assert_eq!(counters.snapshot().stream_resets, 1);
-                return;
-            }
-        }
-    }
-    panic!("fresh-session loopback media datagram was not processed");
+    assert!(matches!(
+        poll_until_datagram(&mut pipeline),
+        Ok(UdpPollOutcome::Processed { .. })
+    ));
+    assert_eq!(
+        pipeline.pinned_source(),
+        Some(fresh_sender.local_addr().unwrap())
+    );
+    assert!(matches!(
+        pipeline.decode_next().unwrap(),
+        DecodeStep::Decoded { .. }
+    ));
+    let mut output = [f32::NAN; 4];
+    assert!(matches!(
+        consumer.pop_into(&mut output),
+        RealtimePcmPopOutcome::Filled { .. }
+    ));
+    assert!((output[0] - 8.0).abs() < f32::EPSILON);
+    assert_eq!(counters.snapshot().stream_resets, 1);
 }

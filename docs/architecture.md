@@ -386,6 +386,13 @@ key/nonce design. Replay-window state must advance only after successful AEAD
 authentication. Cheap duplicate filtering may happen earlier, but it must not
 mark unauthenticated input as received.
 
+The receiver pins a UDP source endpoint only after the first packet completes
+authentication, replay admission, and a bounded jitter decision. Later datagrams
+from another endpoint are rejected before parsing and cannot advance replay
+state. Key-epoch rotation preserves the pin; changing the endpoint requires a
+fresh authenticated media session and fresh key material rather than automatic
+address migration.
+
 ## 11. Jitter, loss, and clock drift
 
 Each stream owns a bounded jitter buffer and a monotonic playout schedule.

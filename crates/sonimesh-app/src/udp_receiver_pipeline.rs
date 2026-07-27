@@ -44,6 +44,8 @@ impl std::error::Error for UdpReceiverSetupError {
 pub enum UdpReceiverError<DecoderError> {
     /// The socket could not provide a datagram.
     Socket(UdpReceiveError),
+    /// The datagram came from a different endpoint than the pinned source.
+    SourceEndpointChanged,
     /// The datagram reached the protected receiver but failed its bounded path.
     Pipeline(ReceiverPipelineError<DecoderError>),
 }
@@ -52,6 +54,9 @@ impl<DecoderError: fmt::Display> fmt::Display for UdpReceiverError<DecoderError>
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Socket(error) => write!(formatter, "UDP receiver failed: {error}"),
+            Self::SourceEndpointChanged => formatter.write_str(
+                "UDP media source endpoint changed before a fresh session was installed",
+            ),
             Self::Pipeline(error) => write!(formatter, "UDP media pipeline failed: {error}"),
         }
     }
@@ -69,7 +74,10 @@ pub enum UdpPollOutcome {
     Empty,
     /// One datagram reached the bounded jitter admission boundary.
     Processed {
-        /// Untrusted source endpoint observed by the socket.
+        /// Source endpoint observed for the admitted packet.
+        ///
+        /// This successful outcome establishes the pin when the session was
+        /// previously unbound; the endpoint itself is not part of the AEAD data.
         source: SocketAddr,
         /// Jitter admission result for the authenticated packet.
         admission: InsertOutcome,
@@ -89,6 +97,7 @@ pub struct UdpReceiverPipeline<
 > {
     receiver: UdpMediaReceiver,
     pipeline: ReceiverStreamPipeline<D, JITTER_CAPACITY, MAX_ENCODED_BYTES, PCM_SAMPLES_PER_BLOCK>,
+    pinned_source: Option<SocketAddr>,
     plaintext: [u8; MAX_MEDIA_PLAINTEXT_LEN],
 }
 
@@ -132,6 +141,7 @@ where
         Ok(Self {
             receiver,
             pipeline,
+            pinned_source: None,
             plaintext: [0; MAX_MEDIA_PLAINTEXT_LEN],
         })
     }
@@ -145,10 +155,23 @@ where
         self.receiver.local_addr()
     }
 
+    /// Returns the source endpoint pinned by the first protected packet outcome.
+    ///
+    /// A fresh pipeline or successfully installed fresh session is unbound
+    /// until protected ingress accepts a packet and bounded jitter handling
+    /// returns an outcome.
+    #[must_use]
+    pub const fn pinned_source(&self) -> Option<SocketAddr> {
+        self.pinned_source
+    }
+
     /// Polls one datagram and admits it into the protected jitter boundary.
     ///
-    /// Oversized datagrams are counted as rejected packets before returning the
-    /// socket error. Other socket errors are not packet-level rejections.
+    /// Oversized datagrams and packets from a changed source endpoint are
+    /// counted as rejected packets. Once the first protected packet returns
+    /// an outcome, another source cannot reach parsing or authentication until a
+    /// fresh authenticated session is installed. Other socket errors are not
+    /// packet-level rejections.
     ///
     /// # Errors
     ///
@@ -166,10 +189,19 @@ where
             return Ok(UdpPollOutcome::Empty);
         };
         let source = datagram.source;
+        if self
+            .pinned_source
+            .is_some_and(|expected| expected != source)
+        {
+            self.plaintext.fill(0);
+            self.pipeline.counters().rejected();
+            return Err(UdpReceiverError::SourceEndpointChanged);
+        }
         let admission = self
             .pipeline
             .receive(datagram.payload, &mut self.plaintext)
             .map_err(UdpReceiverError::Pipeline)?;
+        self.pinned_source.get_or_insert(source);
         Ok(UdpPollOutcome::Processed { source, admission })
     }
 
@@ -210,7 +242,10 @@ where
         initial_sequence: u32,
     ) -> Result<(), FreshSessionInstallError> {
         self.pipeline
-            .install_fresh_session(secret, context, initial_sequence)
+            .install_fresh_session(secret, context, initial_sequence)?;
+        self.plaintext.fill(0);
+        self.pinned_source = None;
+        Ok(())
     }
 
     /// Clears this stream's playout state after a drift-controller hard resync.

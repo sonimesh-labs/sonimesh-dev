@@ -50,6 +50,15 @@ decryption. They write plaintext only to caller-owned storage and return no byte
 on authentication failure. Replay admission remains in `sonimesh-network` and
 occurs only after this successful authentication.
 
+The UDP receiver composition starts without a trusted source endpoint. The first
+packet that completes authentication, replay admission, and a bounded jitter
+decision pins its observed source address and port. An unauthenticated or
+otherwise rejected packet cannot pin the endpoint. Once pinned, a changed source
+is rejected before parsing or authentication and cannot mutate replay state.
+Epoch rotation preserves the pin. Only successful installation of a fresh media
+session clears it; the next successfully admitted packet then establishes the
+new endpoint. There is no automatic same-session address migration.
+
 ## Security implications
 
 Nonce uniqueness depends on a fresh authenticated control-session secret when a
@@ -57,10 +66,15 @@ session is recreated and on key epoch rotation before sender sequence reuse. Thi
 API cannot make a caller-provided root secret authentic; callers must only obtain it
 from the future reviewed pairing/TLS transcript.
 
-Packets with wrong context, truncated tags, invalid tags, or insufficient output
-storage are rejected before decoder delivery. Keys use zeroizing storage and are
-not `Debug` or serializable. The implementation does not log plaintext, packet
-payloads, or secrets.
+Packets with wrong context, truncated tags, invalid tags, insufficient output
+storage, or an unexpected source endpoint are rejected before decoder delivery.
+The first-packet pin occurs only after successful admission, preventing an
+unauthenticated datagram from locking out the real sender. A legitimate network
+address or port change intentionally stops media until the authenticated control
+plane installs a fresh session; this fail-closed interruption is preferred over
+silent key-state reuse. Keys use zeroizing storage and are not `Debug` or
+serializable. The implementation does not log plaintext, packet payloads, or
+secrets.
 
 ## Validation evidence
 
@@ -68,12 +82,17 @@ Tests cover HKDF determinism/domain separation, nonce separation by every field,
 header tampering, ciphertext tampering, context mismatch, output bounds, sequence
 exhaustion, authenticated replay ordering through the network adapter, and the
 published [cross-language media crypto vector](../protocol/media-crypto-vectors.md).
-A Kotlin/JVM unit test independently reproduces that vector, decrypts it, and
-rejects header or ciphertext tampering using the host JDK provider.
+Loopback UDP tests show that rejected packets cannot pin the source, a changed
+source cannot advance protected ingress, epoch rotation preserves the pin, and a
+fresh authenticated session permits rebinding while retaining the local socket.
+A Kotlin/JVM unit test independently reproduces the public crypto vector,
+decrypts it, and rejects header or ciphertext tampering using the host JDK
+provider.
 
-Android-runtime provider verification, key rotation control messages, address
-migration, and fuzzing remain required before a build leaves the lab network.
-The host JVM result is not Android device or production key-handling evidence.
+Android-runtime provider verification, authenticated control-plane session
+replacement, key rotation control messages, and fuzzing remain required before a
+build leaves the lab network. The loopback and host JVM results are not physical
+WLAN, Android device, or production key-handling evidence.
 
 ## Rollback plan
 

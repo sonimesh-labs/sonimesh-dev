@@ -112,8 +112,13 @@ hard-resynchronization requests. A separate deterministic case drops a valid
 control envelope while an independent authenticated media path still reaches PCM.
 
 This is evidence for deterministic core behavior only. It does not yet model
-socket buffers, address migration, real ASRC/device clocks, or operating-system
-scheduling, and it is not physical WLAN evidence.
+socket buffers, real ASRC/device clocks, or operating-system scheduling, and it
+is not physical WLAN evidence. Separate loopback UDP tests exercise the
+fail-closed address policy: a source is pinned only after a packet passes
+protected ingress and bounded jitter handling. Epoch rotation does not migrate
+that pin, while fresh-session installation permits a new source to bind. Those
+tests do not prove control-plane reconnection or physical network-interface
+changes.
 
 ## Stability and compatibility matrix
 

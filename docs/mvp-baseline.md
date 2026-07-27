@@ -95,9 +95,12 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   1.3 handshake, performs no TLS, QR, pairing-record consumption, network I/O,
   certificate validation, or persistent identity storage, and therefore does
   not establish pairing or root-secret provisioning.
-- a non-blocking fixed-buffer UDP media receiver that rejects datagrams above
-  the protocol limit before parser ingress; authentication and address policy
-  remain separate boundaries.
+- a non-blocking fixed-buffer UDP media receiver composition that rejects
+  oversized datagrams before parser ingress, pins the source only after complete
+  protected admission, rejects silent endpoint changes without advancing replay
+  state, and permits rebinding only after fresh-session installation. The
+  authenticated control-plane reconnection that supplies that fresh session
+  remains unimplemented.
 - an application-domain UDP receiver pipeline that feeds one socket datagram
   through protected ingress, bounded jitter admission, and non-realtime decode;
   control-session and output lifecycle wiring remain separate.
@@ -155,8 +158,9 @@ jitter, and output-backend ADRs using measured 10/20 ms and device results.
   provider can pin the QR SPKI or export the required bytes. AEAD/HKDF media
   protection and bounded epoch rotation exist only after a caller supplies an
   authenticated control-session secret;
-- authenticated TLS control transport, discovery, and address migration; the
-  untrusted TCP framing reader is not a trusted control session.
+- authenticated TLS control transport, discovery, and control-plane address
+  migration/reconnection. The UDP source pin can be reset by a fresh media
+  session, but the untrusted TCP framing reader cannot authorize or supply one;
 - Windows output backend selection, physical device/power lifecycle evidence,
   and latency qualification. The independent direct-WASAPI prototype and
   controlled same-host callback comparison exist, but do not settle a backend;

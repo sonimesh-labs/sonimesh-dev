@@ -90,23 +90,28 @@ layout, sequence exhaustion behavior, and ChaCha20-Poly1305 choice in
 root secret and does not claim to implement pairing, TLS transcript binding, or
 identity storage.
 
-Packets are accepted only after:
+Before a source endpoint is known, packets are accepted only after:
 
 1. length and minimum-header checks;
 2. bounded header parsing;
 3. session and stream lookup;
 4. AEAD authentication with the complete header as associated data;
 5. replay-window validation and update;
-6. jitter-buffer insertion.
+6. a bounded jitter admission decision;
+7. source-endpoint pinning after the protected pipeline returns an outcome.
 
-Unknown sessions and unauthenticated payloads must never reach Opus. Replay
-window state must not advance for failed authentication attempts.
+Once pinned, a datagram from another endpoint is rejected before parsing or
+cryptographic work and cannot advance replay state. Unknown sessions and
+unauthenticated payloads must never reach Opus or pin the source endpoint.
+Replay window state must not advance for failed authentication attempts.
 
 Key epochs need an explicit rotation and grace-period protocol. The controlled-
 lab Start/Stop epoch identity and no-overlap policy are defined by
-[ADR 0006](./adr/0006-media-key-epoch-control.md). Sequence wrap, session
-resume, address migration, and control-channel expiry must all result in new
-nonce/key material rather than silently reusing old state.
+[ADR 0006](./adr/0006-media-key-epoch-control.md). Sequence wrap, session resume,
+and control-channel expiry must all result in new nonce/key material rather than
+silently reusing old state. Automatic address migration is disabled: epoch
+rotation keeps the pinned endpoint, while a successfully installed fresh media
+session clears it so a newly authenticated source can bind.
 
 ## Abuse controls
 
