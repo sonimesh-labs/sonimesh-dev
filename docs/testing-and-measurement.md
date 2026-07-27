@@ -69,8 +69,9 @@ may be compromised.
 
 The Rust foundation keeps deterministic adversarial-input regressions for bounded
 control/media parsing and invalid AEAD payloads. The independent `fuzz/`
-workspace adds LibFuzzer targets for arbitrary and near-valid control frames,
-media packets, and protected ingress. The ingress target also constructs valid
+workspace adds LibFuzzer targets for arbitrary control frames, mutations of
+all three published Hello/StartStream/StopStream frames, near-valid media
+packets, and protected ingress. The ingress target also constructs valid
 AEAD packets carrying arbitrary bounded payload bytes, retries them as replay,
 uses undersized output storage, mutates one authenticated header/ciphertext/tag
 byte, and requires every rejected path to clear plaintext.

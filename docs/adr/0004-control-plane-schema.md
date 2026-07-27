@@ -93,8 +93,10 @@ command representation. The published
 [control-frame vector](../protocol/control-frame-vectors.md) fixes the initial
 Rust/Kotlin wire encoding. A bounded test-only Kotlin/JVM codec independently
 encodes and decodes the Hello plus epoch-bearing StartStream and StopStream
-vectors and checks length-prefix bounds. It is not evidence for an Android control transport or an
-authenticated TLS session.
+vectors and checks length-prefix bounds. The control-frame LibFuzzer target also
+mutates each published command shape in addition to arbitrary input. These host
+checks are not evidence for an Android control transport or an authenticated TLS
+session.
 
 ## Rollback plan
 

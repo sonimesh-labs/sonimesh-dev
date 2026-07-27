@@ -6,8 +6,9 @@ production workspace so `libfuzzer-sys` never becomes a shipping dependency.
 
 Targets:
 
-- `control_frame` feeds arbitrary and near-valid bytes into the length-prefixed
-  Protobuf control decoder.
+- `control_frame` feeds arbitrary bytes plus mutations of the published Hello,
+  StartStream, and StopStream frames into the length-prefixed Protobuf control
+  decoder.
 - `media_packet` feeds arbitrary and near-valid bytes into the bounded media
   packet parser.
 - `protected_media_ingress` exercises raw input, valid authenticated arbitrary
