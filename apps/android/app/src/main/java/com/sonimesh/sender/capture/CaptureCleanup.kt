@@ -1,8 +1,20 @@
 package com.sonimesh.sender.capture
 
-/** Runs each bounded final-cleanup step even when an earlier platform call fails. */
+/** Runs every bounded cleanup step and rethrows the first deferred fatal failure. */
 internal fun runAllCaptureCleanupSteps(vararg steps: () -> Unit) {
+    var fatalFailure: Throwable? = null
+
     for (step in steps) {
-        runCatching(step)
+        try {
+            step()
+        } catch (_: Exception) {
+            // Ordinary platform cleanup failures must not strand later resources.
+        } catch (failure: Throwable) {
+            if (fatalFailure == null) {
+                fatalFailure = failure
+            }
+        }
     }
+
+    fatalFailure?.let { throw it }
 }

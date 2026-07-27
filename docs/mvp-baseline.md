@@ -128,9 +128,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   and an atomic idempotent teardown gate that transactionally admits reader
   startup, publishes terminal-outcome readiness, rejects a fresh consent result
   delivered to a retiring service generation with an actionable retry state,
-  permits one final cleanup claimant only after reader exit, and continues
-  bounded retirement after an individual cleanup failure; partial Vivo
-  physical-device
+  permits one final cleanup claimant only after reader exit, continues bounded
+  retirement after an ordinary cleanup exception, and rethrows a fatal JVM
+  failure after the bounded attempts finish; partial Vivo physical-device
   capture and background evidence is recorded in the [Android capture matrix](./measurements/android-capture-matrix.md).
   The remaining lifecycle, power, source-policy, and OEM matrix is still open.
 - a buildable Vue/Vite receiver-control preview with a single low-rate bridge

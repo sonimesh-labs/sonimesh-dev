@@ -71,7 +71,9 @@ duplicates remain no-ops, while a retiring generation cannot admit new consent
 or capture resources. Once cleanup is claimed, service references are
 retired before platform callbacks run and each release, terminal publication,
 foreground-removal, and service-stop step is attempted independently. One
-platform cleanup exception cannot prevent the remaining retirement steps.
+ordinary platform cleanup exception cannot prevent the remaining retirement
+steps. A fatal JVM failure is retained while the bounded steps finish and is then
+rethrown rather than silently converted into successful teardown.
 Process recreation, a revoked
 projection, or a stale control session fails closed and requires a fresh consent
 result and fresh session material.
@@ -148,8 +150,9 @@ observable symptom, not evidence about a particular source application.
 Host JVM tests exercise reader-start rollback, rejection of a reader after
 teardown admission, duplicate-reader rejection, concurrent launch/teardown
 ordering, outcome-publication ordering, exactly-once finish claims, fresh-start
-rejection during teardown, read-call exception accounting, and best-effort
-continuation after a cleanup step fails. These tests validate only the pure
+rejection during teardown, read-call exception accounting, continuation after
+an ordinary cleanup exception, and deferred fatal-error propagation. These tests
+validate only the pure
 coordination helpers; they do not establish Android service, AudioRecord, or
 MediaProjection lifecycle behavior on a device.
 

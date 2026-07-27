@@ -33,9 +33,9 @@ outcome and stop requests are published, and permits exactly one final claim
 after the reader exits. A fresh consent result delivered to that same retiring
 service generation is rejected with an actionable retry state instead of being
 silently consumed; active duplicate starts remain no-ops. Final cleanup retires
-service references first and attempts every bounded release step even if an
-earlier platform call fails. Host
-JVM tests also verify these pure coordination helpers and the intentionally
+service references first and attempts every bounded release step despite an
+ordinary platform exception. A fatal JVM failure is rethrown after those
+attempts instead of being swallowed. Host JVM tests also verify these pure coordination helpers and the intentionally
 public pairing-binding, media-crypto, and
 bounded control-frame protocol vectors. Those
 tests do not add networking or crypto to the production capture source set,
