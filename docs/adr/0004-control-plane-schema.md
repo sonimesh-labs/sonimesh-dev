@@ -24,7 +24,9 @@ Use `proto3` source in `proto/control.proto` and generate Rust code into
   is rejected by SoniMesh validation;
 - frame bytes are prefixed with an unsigned big-endian 32-bit length;
 - wire payloads are limited to 64 KiB before Protobuf decoding;
-- validation limits display names, capability count, and error detail length;
+- validation limits display names, capability count, and status/error detail length;
+- stream status requires nonzero media/stream identities and a known, non-unspecified
+  state; structured errors require a known, non-unspecified code;
 - `StopStream` is intentionally represented as a typed idempotent command;
 - capabilities are enums, not unbounded feature-name strings;
 - gain remains local desktop state in the single-source MVP and is absent from the
@@ -44,8 +46,10 @@ boundary before envelopes can affect a trusted session.
 The version-one protocol implementation selects only its exact protocol version
 and constructs a fixed, canonical intersection of known capabilities. Unknown
 numeric capability values remain unselected for additive compatibility; they are
-never treated as a guessed feature. A later schema version must add explicit
-selection rules rather than reinterpreting a version-one hello.
+never treated as a guessed feature. Unknown numeric stream states and error codes
+are rejected under the exact version-one contract because the receiver cannot
+safely interpret them. A later schema version must add explicit selection rules
+rather than reinterpreting version-one semantics.
 
 A version-one `StartStream` is accepted by the receiver control coordinator only
 when its 10 ms or 20 ms duration capability appears in that selected
@@ -83,13 +87,14 @@ The codec does bounded length validation before allocating/decode work. It is no
 transport security layer: every production control frame still requires the
 authenticated TLS/pairing context defined by the future security ADR. Unknown
 Protobuf fields may be skipped for additive compatibility, but a frame with no
-known envelope payload is rejected.
+known envelope payload, an unknown status state, or an unknown error code is
+rejected.
 
 ## Validation evidence
 
 Unit tests must cover frame byte order, truncated/oversized frames, malformed
-Protobuf, missing payload, version mismatch, capability limits, and idempotent
-command representation. The published
+Protobuf, missing payload, version mismatch, capability limits, status/error
+semantics, and idempotent command representation. The published
 [control-frame vector](../protocol/control-frame-vectors.md) fixes the initial
 Rust/Kotlin wire encoding. A bounded test-only Kotlin/JVM codec independently
 encodes and decodes the Hello plus epoch-bearing StartStream and StopStream

@@ -2,7 +2,10 @@ use core::fmt;
 
 use prost::Message;
 
-use crate::{ControlError, Envelope, Hello, StartStream, StopStream, StreamStatus, envelope};
+use crate::{
+    ControlError, Envelope, ErrorCode, Hello, StartStream, StopStream, StreamState, StreamStatus,
+    envelope,
+};
 
 /// Exact protocol version accepted by this controlled-lab implementation.
 pub const CONTROL_PROTOCOL_VERSION: u32 = 1;
@@ -50,6 +53,12 @@ pub enum ControlFrameError {
     DisplayNameTooLong,
     /// Status or error detail exceeded [`MAX_CONTROL_DETAIL_BYTES`].
     DetailTooLong,
+    /// Stream status has a zero media-session or stream identity.
+    InvalidStreamStatusIdentity,
+    /// Stream status state is unspecified or unknown to protocol version one.
+    InvalidStreamState(i32),
+    /// Structured error code is unspecified or unknown to protocol version one.
+    InvalidErrorCode(i32),
     /// Start stream command has an invalid identity or audio parameter.
     InvalidStartStream,
     /// Stop stream command has an invalid identity.
@@ -82,6 +91,15 @@ impl fmt::Display for ControlFrameError {
                 formatter.write_str("control display name exceeds the limit")
             }
             Self::DetailTooLong => formatter.write_str("control detail exceeds the limit"),
+            Self::InvalidStreamStatusIdentity => {
+                formatter.write_str("control stream status identity is invalid")
+            }
+            Self::InvalidStreamState(state) => {
+                write!(formatter, "invalid control stream state {state}")
+            }
+            Self::InvalidErrorCode(code) => {
+                write!(formatter, "invalid control error code {code}")
+            }
             Self::InvalidStartStream => formatter.write_str("control start stream is invalid"),
             Self::InvalidStopStream => formatter.write_str("control stop stream is invalid"),
             Self::InvalidMediaKeyEpoch => {
@@ -176,10 +194,25 @@ pub(crate) fn validate_hello(hello: &Hello) -> Result<(), ControlFrameError> {
 }
 
 fn validate_status(status: &StreamStatus) -> Result<(), ControlFrameError> {
+    if status.media_session_id == 0 || status.stream_id == 0 {
+        return Err(ControlFrameError::InvalidStreamStatusIdentity);
+    }
+    if matches!(
+        StreamState::try_from(status.state),
+        Ok(StreamState::Unspecified) | Err(_)
+    ) {
+        return Err(ControlFrameError::InvalidStreamState(status.state));
+    }
     validate_detail(&status.detail)
 }
 
 fn validate_error(error: &ControlError) -> Result<(), ControlFrameError> {
+    if matches!(
+        ErrorCode::try_from(error.code),
+        Ok(ErrorCode::Unspecified) | Err(_)
+    ) {
+        return Err(ControlFrameError::InvalidErrorCode(error.code));
+    }
     validate_detail(&error.detail)
 }
 

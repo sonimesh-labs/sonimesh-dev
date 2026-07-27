@@ -2,10 +2,10 @@
 
 use prost::Message;
 use sonimesh_protocol::{
-    CONTROL_PROTOCOL_VERSION, Capability, ControlError, ControlFrameError, Envelope, Hello,
-    MAX_CONTROL_CAPABILITIES, MAX_CONTROL_DETAIL_BYTES, MAX_CONTROL_FRAME_BYTES,
-    MAX_CONTROL_MEDIA_KEY_EPOCH, StartStream, StopStream, decode_control_frame,
-    encode_control_frame, envelope,
+    CONTROL_PROTOCOL_VERSION, Capability, ControlError, ControlFrameError, Envelope, ErrorCode,
+    Hello, MAX_CONTROL_CAPABILITIES, MAX_CONTROL_DETAIL_BYTES, MAX_CONTROL_FRAME_BYTES,
+    MAX_CONTROL_MEDIA_KEY_EPOCH, StartStream, StopStream, StreamState, StreamStatus,
+    decode_control_frame, encode_control_frame, envelope,
 };
 
 fn hello_envelope() -> Envelope {
@@ -193,7 +193,7 @@ fn rejects_version_and_field_bound_violations() {
         protocol_version: CONTROL_PROTOCOL_VERSION,
         request_id: 9,
         payload: Some(envelope::Payload::Error(ControlError {
-            code: 0,
+            code: ErrorCode::InvalidRequest as i32,
             retryable: false,
             detail,
         })),
@@ -202,6 +202,100 @@ fn rejects_version_and_field_bound_violations() {
         encode_control_frame(&error),
         Err(ControlFrameError::DetailTooLong)
     ));
+}
+
+#[test]
+fn validates_stream_status_and_control_error_semantics() {
+    let valid_status = Envelope {
+        protocol_version: CONTROL_PROTOCOL_VERSION,
+        request_id: 10,
+        payload: Some(envelope::Payload::StreamStatus(StreamStatus {
+            media_session_id: 5,
+            stream_id: 6,
+            state: StreamState::Streaming as i32,
+            detail: "receiving".to_owned(),
+        })),
+    };
+    assert_eq!(
+        decode_control_frame(&encode_control_frame(&valid_status).unwrap()).unwrap(),
+        valid_status
+    );
+
+    for (media_session_id, stream_id) in [(0, 6), (5, 0)] {
+        let invalid_identity = Envelope {
+            protocol_version: CONTROL_PROTOCOL_VERSION,
+            request_id: 11,
+            payload: Some(envelope::Payload::StreamStatus(StreamStatus {
+                media_session_id,
+                stream_id,
+                state: StreamState::Ready as i32,
+                detail: String::new(),
+            })),
+        };
+        assert!(matches!(
+            encode_control_frame(&invalid_identity),
+            Err(ControlFrameError::InvalidStreamStatusIdentity)
+        ));
+        assert!(matches!(
+            decode_control_frame(&raw_frame(&invalid_identity)),
+            Err(ControlFrameError::InvalidStreamStatusIdentity)
+        ));
+    }
+
+    for state in [StreamState::Unspecified as i32, 99] {
+        let invalid_state = Envelope {
+            protocol_version: CONTROL_PROTOCOL_VERSION,
+            request_id: 12,
+            payload: Some(envelope::Payload::StreamStatus(StreamStatus {
+                media_session_id: 5,
+                stream_id: 6,
+                state,
+                detail: String::new(),
+            })),
+        };
+        assert!(matches!(
+            encode_control_frame(&invalid_state),
+            Err(ControlFrameError::InvalidStreamState(value)) if value == state
+        ));
+        assert!(matches!(
+            decode_control_frame(&raw_frame(&invalid_state)),
+            Err(ControlFrameError::InvalidStreamState(value)) if value == state
+        ));
+    }
+
+    let valid_error = Envelope {
+        protocol_version: CONTROL_PROTOCOL_VERSION,
+        request_id: 13,
+        payload: Some(envelope::Payload::Error(ControlError {
+            code: ErrorCode::RetryLater as i32,
+            retryable: true,
+            detail: "try again".to_owned(),
+        })),
+    };
+    assert_eq!(
+        decode_control_frame(&encode_control_frame(&valid_error).unwrap()).unwrap(),
+        valid_error
+    );
+
+    for code in [ErrorCode::Unspecified as i32, 99] {
+        let invalid_error = Envelope {
+            protocol_version: CONTROL_PROTOCOL_VERSION,
+            request_id: 14,
+            payload: Some(envelope::Payload::Error(ControlError {
+                code,
+                retryable: false,
+                detail: String::new(),
+            })),
+        };
+        assert!(matches!(
+            encode_control_frame(&invalid_error),
+            Err(ControlFrameError::InvalidErrorCode(value)) if value == code
+        ));
+        assert!(matches!(
+            decode_control_frame(&raw_frame(&invalid_error)),
+            Err(ControlFrameError::InvalidErrorCode(value)) if value == code
+        ));
+    }
 }
 
 #[test]

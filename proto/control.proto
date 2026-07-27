@@ -65,6 +65,7 @@ message StopStream {
 }
 
 message StreamStatus {
+  // Version one requires nonzero identities and a known, non-unspecified state.
   uint64 media_session_id = 1;
   uint32 stream_id = 2;
   StreamState state = 3;
@@ -72,6 +73,7 @@ message StreamStatus {
 }
 
 message ControlError {
+  // Version one requires a known, non-unspecified code.
   ErrorCode code = 1;
   bool retryable = 2;
   string detail = 3;
