@@ -27,6 +27,9 @@ a physical latency claim.
   that rejected input cannot pin, a changed endpoint cannot consume replay
   state, epoch rotation preserves the pin, failed session replacement preserves
   it, and successful fresh-session replacement permits rebinding.
+- the control reconnect scenario installs non-reusable local transport tokens,
+  delays a command from the retired session until after fresh hello negotiation,
+  and proves that only the replacement transport can prepare new work.
 
 ## Run
 
@@ -36,5 +39,5 @@ cargo test -p sonimesh-network-simulator
 ~~~
 
 Physical WLAN, socket-buffer behavior, operating-system scheduling, real
-ASRC/device-clock drift, control-plane reconnection, and operating-system/NAT
+ASRC/device-clock drift, TLS/socket reconnection, and operating-system/NAT
 address migration remain separate validation work.

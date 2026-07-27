@@ -1,5 +1,14 @@
 use sonimesh_protocol::{MediaCryptoError, MediaDirection, MediaKeyContext, NegotiatedControl};
 
+/// Opaque identifier for one installed authenticated control transport.
+///
+/// The transport owner must retain this token with the TLS connection that was
+/// authenticated for the current session. A token from a retired connection is
+/// rejected even when its delayed envelope is otherwise valid. Values are
+/// unique across coordinators for the lifetime of the process.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ControlSessionToken(pub(super) u64);
+
 /// Opaque, non-reusable identifier for a pending control-domain operation.
 ///
 /// The coordinator issues this token with a start, rotation, or stop action.

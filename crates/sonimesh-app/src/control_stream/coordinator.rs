@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use sonimesh_protocol::{
     Capability, ControlFrameError, Envelope, MAX_CONTROL_CAPABILITIES, StartStream, StopStream,
     envelope, negotiate_hello, validate_control_envelope,
@@ -10,9 +12,11 @@ use crate::{
 
 use super::error::ControlStreamError;
 use super::types::{
-    ControlOperationToken, ControlStreamAction, MediaStreamIdentity, PendingStreamChange,
-    StreamStartRequest,
+    ControlOperationToken, ControlSessionToken, ControlStreamAction, MediaStreamIdentity,
+    PendingStreamChange, StreamStartRequest,
 };
+
+static NEXT_CONTROL_SESSION_TOKEN: AtomicU64 = AtomicU64::new(0);
 
 /// Control-domain coordinator for one desktop receiver stream.
 ///
@@ -28,6 +32,7 @@ pub struct ControlStreamCoordinator {
     negotiation: Option<sonimesh_protocol::NegotiatedControl>,
     active: Option<MediaStreamIdentity>,
     pending: Option<PendingStreamChange>,
+    control_session: Option<ControlSessionToken>,
     next_operation_token: u64,
 }
 
@@ -57,6 +62,7 @@ impl ControlStreamCoordinator {
             negotiation: None,
             active: None,
             pending: None,
+            control_session: None,
             next_operation_token: 0,
         })
     }
@@ -77,6 +83,34 @@ impl ControlStreamCoordinator {
         self.negotiation = None;
         self.active = None;
         self.pending = None;
+        self.control_session = None;
+    }
+
+    /// Installs one freshly authenticated control transport for the ready session.
+    ///
+    /// The returned opaque token belongs to that transport instance and must be
+    /// supplied with every envelope passed to [`Self::accept`]. Retiring or
+    /// reconnecting the session invalidates the token permanently.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ControlStreamError::ControlSessionRequiresReady`] unless the
+    /// trusted lifecycle is ready, [`ControlStreamError::ControlSessionAlreadyInstalled`]
+    /// when a transport is already active, or
+    /// [`ControlStreamError::ControlSessionTokenExhausted`] if no fresh token can
+    /// be issued.
+    pub fn install_authenticated_control_session(
+        &mut self,
+    ) -> Result<ControlSessionToken, ControlStreamError> {
+        if self.state != SessionState::READY {
+            return Err(ControlStreamError::ControlSessionRequiresReady(self.state));
+        }
+        if self.control_session.is_some() {
+            return Err(ControlStreamError::ControlSessionAlreadyInstalled);
+        }
+        let token = self.issue_control_session_token()?;
+        self.control_session = Some(token);
+        Ok(token)
     }
 
     /// Starts a pairing invitation while keeping lifecycle ownership centralized.
@@ -195,9 +229,19 @@ impl ControlStreamCoordinator {
         event: SessionEvent,
     ) -> Result<(), ControlStreamError> {
         match event {
-            SessionEvent::ConnectionLost | SessionEvent::OutputRestored => self
+            SessionEvent::ConnectionLost => {
+                self.state
+                    .apply(SessionEvent::ConnectionLost)
+                    .map_err(ControlStreamError::Transition)?;
+                // The transport token and in-flight work belong to the lost
+                // authenticated connection and cannot cross the reconnect boundary.
+                self.control_session = None;
+                self.pending = None;
+                Ok(())
+            }
+            SessionEvent::OutputRestored => self
                 .state
-                .apply(event)
+                .apply(SessionEvent::OutputRestored)
                 .map_err(ControlStreamError::Transition),
             SessionEvent::OutputLost => {
                 self.state
@@ -217,6 +261,7 @@ impl ControlStreamCoordinator {
                 self.negotiation = None;
                 self.active = None;
                 self.pending = None;
+                self.control_session = None;
                 Ok(())
             }
             SessionEvent::StartPairing
@@ -244,12 +289,19 @@ impl ControlStreamCoordinator {
     ///
     /// # Errors
     ///
-    /// Returns [`ControlStreamError::Protocol`] for invalid envelopes and a
-    /// lifecycle error for conflicting, stale, or prematurely completed work.
+    /// Returns [`ControlStreamError::StaleControlSession`] before envelope
+    /// validation when `session` is not the currently installed authenticated
+    /// transport token. Otherwise returns [`ControlStreamError::Protocol`] for
+    /// invalid envelopes and a lifecycle error for conflicting, stale, or
+    /// prematurely completed work.
     pub fn accept(
         &mut self,
+        session: ControlSessionToken,
         envelope: &Envelope,
     ) -> Result<ControlStreamAction, ControlStreamError> {
+        if self.control_session != Some(session) {
+            return Err(ControlStreamError::StaleControlSession);
+        }
         validate_control_envelope(envelope).map_err(ControlStreamError::Protocol)?;
         match envelope.payload.as_ref() {
             Some(envelope::Payload::Hello(hello)) => self.accept_hello(hello),
@@ -468,6 +520,18 @@ impl ControlStreamCoordinator {
         Ok(negotiation.supports(capability))
     }
 
+    fn issue_control_session_token(&self) -> Result<ControlSessionToken, ControlStreamError> {
+        let previous = NEXT_CONTROL_SESSION_TOKEN
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+                value.checked_add(1)
+            })
+            .map_err(|_| ControlStreamError::ControlSessionTokenExhausted)?;
+        let token = previous
+            .checked_add(1)
+            .ok_or(ControlStreamError::ControlSessionTokenExhausted)?;
+        Ok(ControlSessionToken(token))
+    }
+
     fn issue_operation_token(&mut self) -> Result<ControlOperationToken, ControlStreamError> {
         self.next_operation_token = self
             .next_operation_token
@@ -481,6 +545,7 @@ impl ControlStreamCoordinator {
             self.negotiation = None;
             self.active = None;
             self.pending = None;
+            self.control_session = None;
         }
     }
 }

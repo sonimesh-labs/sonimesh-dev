@@ -357,8 +357,12 @@ The control channel should use length-prefixed Protobuf envelopes with:
 - application-level required and optional capabilities.
 
 Commands must be idempotent or define duplicate behavior. Repeating StopStream
-must be safe. SetSourceGain does not belong on the wire in the single-source MVP
-when gain is applied locally on the desktop.
+must be safe. Each authenticated control transport also receives an opaque,
+non-reusable local session token. The control owner rejects a token from a lost
+or retired transport before validating its envelope, and a replacement transport
+must install a fresh token and repeat hello negotiation. SetSourceGain does not
+belong on the wire in the single-source MVP when gain is applied locally on the
+desktop.
 
 ## 10. Audio data plane
 
@@ -483,7 +487,7 @@ unnecessary device identifiers.
 | --- | --- |
 | Projection revoked | Stop capture, close AudioRecord, destroy media credentials, notify desktop |
 | Short Wi-Fi loss | Keep a bounded reconnect window, exponential backoff, no unbounded PCM cache |
-| Control channel loss | Enter a short grace state; destroy session keys after expiry |
+| Control channel loss | Retire transport token/pending work; enter grace state; destroy keys after expiry |
 | UDP loss | PLC/fade; never repeat old audio indefinitely |
 | Output device removal | Fade out and recreate on a non-realtime thread |
 | One-stream decode error | Reset only that stream; preserve other sources |

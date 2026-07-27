@@ -1,9 +1,9 @@
 //! Deterministic control-session reconnect regression scenario.
 
 use sonimesh_app::{
-    ControlStreamAction, ControlStreamCoordinator, PairingAttemptOutcome, PairingId,
-    PairingInvitationController, PairingProofVerification, PairingSource, SessionEvent,
-    SessionState,
+    ControlSessionToken, ControlStreamAction, ControlStreamCoordinator, ControlStreamError,
+    PairingAttemptOutcome, PairingId, PairingInvitationController, PairingProofVerification,
+    PairingSource, SessionEvent, SessionState,
 };
 use sonimesh_protocol::{
     CONTROL_PROTOCOL_VERSION, Capability, Envelope, Hello, StartStream, encode_control_frame,
@@ -12,15 +12,31 @@ use sonimesh_protocol::{
 
 use crate::{NetworkProfile, VirtualNetwork};
 
+/// Rejections observed for work owned by the retired control transport.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RetiredControlSessionReport {
+    /// The delayed start completion was rejected after reconnection.
+    pub completion_rejected: bool,
+    /// A reordered old start arriving after fresh negotiation was rejected.
+    pub command_rejected: bool,
+}
+
+/// Admission behavior observed for the freshly installed control transport.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FreshControlSessionReport {
+    /// The receiver required a fresh hello before accepting a replacement start.
+    pub hello_required: bool,
+    /// The same command from the freshly installed transport was accepted.
+    pub command_accepted: bool,
+}
+
 /// Observable result of one reconnect lifecycle simulation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ControlSimulationReport {
-    /// The delayed start completion was rejected after reconnection.
-    pub stale_completion_rejected: bool,
-    /// The receiver required a fresh hello before accepting a replacement start.
-    pub fresh_hello_required: bool,
-    /// A reordered old start arriving after reconnect was rejected.
-    pub delayed_command_rejected: bool,
+    /// Outcomes for delayed work owned by the retired transport.
+    pub retired: RetiredControlSessionReport,
+    /// Outcomes for work delivered through the replacement transport.
+    pub fresh: FreshControlSessionReport,
 }
 
 /// Failure while building the fixed deterministic control simulation.
@@ -43,32 +59,26 @@ pub fn simulate_control_reconnect() -> Result<ControlSimulationReport, ControlSc
     let mut pairing = PairingInvitationController::<1>::new();
     let mut coordinator = ControlStreamCoordinator::new(SessionState::IDLE, &capabilities)
         .map_err(|_| ControlScenarioError::Control)?;
-    pair(&mut coordinator, &mut pairing, 1)?;
+    let retired_session = pair(&mut coordinator, &mut pairing, 1)?;
     let mut profile = NetworkProfile::stable(0xC011_2026);
     profile.base_delay_ms = 15;
     profile.jitter_ms = 0;
     let mut network = VirtualNetwork::new(profile).map_err(|_| ControlScenarioError::Control)?;
     let hello = deliver(&mut network, hello_frame(&capabilities))?;
     if !matches!(
-        coordinator.accept(&hello),
+        coordinator.accept(retired_session, &hello),
         Ok(ControlStreamAction::Negotiated(_))
     ) {
         return Err(ControlScenarioError::Control);
     }
     let start_frame = deliver(&mut network, start())?;
     let ControlStreamAction::Start { token, request } = coordinator
-        .accept(&start_frame)
+        .accept(retired_session, &start_frame)
         .map_err(|_| ControlScenarioError::Control)?
     else {
         return Err(ControlScenarioError::Control);
     };
-    coordinator
-        .acknowledge_platform_event(SessionEvent::ConnectionLost)
-        .map_err(|_| ControlScenarioError::Control)?;
-    coordinator
-        .acknowledge_platform_event(SessionEvent::Reconnected)
-        .map_err(|_| ControlScenarioError::Control)?;
-    let stale_completion_rejected = coordinator.complete_start(token, request).is_err();
+
     let mut delayed_profile = NetworkProfile::stable(0xC011_2027);
     delayed_profile.base_delay_ms = 15;
     delayed_profile.jitter_ms = 0;
@@ -77,16 +87,50 @@ pub fn simulate_control_reconnect() -> Result<ControlSimulationReport, ControlSc
     let mut delayed_network =
         VirtualNetwork::new(delayed_profile).map_err(|_| ControlScenarioError::Control)?;
     submit(&mut delayed_network, start())?;
-    let delayed = delayed_network.drain_ready(45);
-    let delayed_command_rejected = delayed
-        .first()
-        .is_some_and(|delivery| coordinator.accept(&delivery.payload).is_err());
+
+    coordinator
+        .acknowledge_platform_event(SessionEvent::ConnectionLost)
+        .map_err(|_| ControlScenarioError::Control)?;
+    coordinator
+        .acknowledge_platform_event(SessionEvent::Reconnected)
+        .map_err(|_| ControlScenarioError::Control)?;
+    let stale_completion_rejected = coordinator.complete_start(token, request).is_err();
+    let fresh_session = coordinator
+        .install_authenticated_control_session()
+        .map_err(|_| ControlScenarioError::Control)?;
     let restarted_start = deliver(&mut network, start())?;
-    let fresh_hello_required = coordinator.accept(&restarted_start).is_err();
+    let fresh_hello_required = matches!(
+        coordinator.accept(fresh_session, &restarted_start),
+        Err(ControlStreamError::MissingNegotiation)
+    );
+    let fresh_hello = deliver(&mut network, hello_frame(&capabilities))?;
+    if !matches!(
+        coordinator.accept(fresh_session, &fresh_hello),
+        Ok(ControlStreamAction::Negotiated(_))
+    ) {
+        return Err(ControlScenarioError::Control);
+    }
+
+    let delayed = delayed_network.drain_ready(45);
+    let stale_session_command_rejected = delayed.first().is_some_and(|delivery| {
+        matches!(
+            coordinator.accept(retired_session, &delivery.payload),
+            Err(ControlStreamError::StaleControlSession)
+        )
+    });
+    let fresh_command_accepted = matches!(
+        coordinator.accept(fresh_session, &restarted_start),
+        Ok(ControlStreamAction::Start { .. })
+    );
     Ok(ControlSimulationReport {
-        stale_completion_rejected,
-        fresh_hello_required,
-        delayed_command_rejected,
+        retired: RetiredControlSessionReport {
+            completion_rejected: stale_completion_rejected,
+            command_rejected: stale_session_command_rejected,
+        },
+        fresh: FreshControlSessionReport {
+            hello_required: fresh_hello_required,
+            command_accepted: fresh_command_accepted,
+        },
     })
 }
 
@@ -94,7 +138,7 @@ fn pair(
     c: &mut ControlStreamCoordinator,
     p: &mut PairingInvitationController<1>,
     n: u8,
-) -> Result<(), ControlScenarioError> {
+) -> Result<ControlSessionToken, ControlScenarioError> {
     c.begin_pairing(p, PairingId::new([n; 16]), 0, 10, 1)
         .map_err(|_| ControlScenarioError::Pairing)?;
     match c
@@ -103,7 +147,9 @@ fn pair(
         })
         .map_err(|_| ControlScenarioError::Pairing)?
     {
-        PairingAttemptOutcome::Paired => Ok(()),
+        PairingAttemptOutcome::Paired => c
+            .install_authenticated_control_session()
+            .map_err(|_| ControlScenarioError::Control),
         PairingAttemptOutcome::Rejected { .. } => Err(ControlScenarioError::Pairing),
     }
 }
@@ -168,9 +214,10 @@ mod tests {
     fn reconnect_retires_old_control_work() {
         let report = simulate_control_reconnect().unwrap();
         assert!(
-            report.stale_completion_rejected
-                && report.fresh_hello_required
-                && report.delayed_command_rejected
+            report.retired.completion_rejected
+                && report.retired.command_rejected
+                && report.fresh.hello_required
+                && report.fresh.command_accepted
         );
     }
 }

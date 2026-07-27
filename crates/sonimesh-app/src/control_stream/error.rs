@@ -44,6 +44,14 @@ pub enum ControlStreamError {
     Transition(SessionTransitionError),
     /// This event is owned by a dedicated coordinator operation.
     UnsupportedLifecycleEvent(SessionEvent),
+    /// An authenticated control transport can only be installed in `Ready`.
+    ControlSessionRequiresReady(SessionState),
+    /// The current authenticated control transport must be retired before replacement.
+    ControlSessionAlreadyInstalled,
+    /// Envelope belongs to a retired or unknown authenticated control transport.
+    StaleControlSession,
+    /// The coordinator cannot issue another non-reusable control-session token.
+    ControlSessionTokenExhausted,
     /// The coordinator cannot issue another non-reusable operation token.
     OperationTokenExhausted,
 }
@@ -105,6 +113,21 @@ impl fmt::Display for ControlStreamError {
                     formatter,
                     "session event {event:?} is not a platform acknowledgement"
                 )
+            }
+            Self::ControlSessionRequiresReady(state) => {
+                write!(
+                    formatter,
+                    "authenticated control session requires Ready state, found {state:?}"
+                )
+            }
+            Self::ControlSessionAlreadyInstalled => {
+                formatter.write_str("an authenticated control session is already installed")
+            }
+            Self::StaleControlSession => {
+                formatter.write_str("control envelope belongs to a retired session")
+            }
+            Self::ControlSessionTokenExhausted => {
+                formatter.write_str("control session token sequence is exhausted")
             }
             Self::OperationTokenExhausted => {
                 formatter.write_str("control operation token sequence is exhausted")

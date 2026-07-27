@@ -5,9 +5,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use sonimesh_app::{
-    ControlStreamAction, ControlStreamCoordinator, PairingAttemptOutcome, PairingId,
-    PairingInvitationController, PairingProofVerification, PairingSource, ReceiverStreamPipeline,
-    SessionState,
+    ControlSessionToken, ControlStreamAction, ControlStreamCoordinator, PairingAttemptOutcome,
+    PairingId, PairingInvitationController, PairingProofVerification, PairingSource,
+    ReceiverStreamPipeline, SessionState,
 };
 use sonimesh_audio::{
     DecodeStep, DecodeWorkerError, FrameDecoder, InsertOutcome, RealtimePcmPopOutcome,
@@ -114,7 +114,8 @@ fn trusted_session() -> SessionState {
     session
 }
 
-fn negotiate(coordinator: &mut ControlStreamCoordinator) {
+fn negotiate(coordinator: &mut ControlStreamCoordinator) -> ControlSessionToken {
+    let session = coordinator.install_authenticated_control_session().unwrap();
     let hello = Envelope {
         protocol_version: CONTROL_PROTOCOL_VERSION,
         request_id: 1,
@@ -125,9 +126,10 @@ fn negotiate(coordinator: &mut ControlStreamCoordinator) {
         })),
     };
     assert!(matches!(
-        coordinator.accept(&hello),
+        coordinator.accept(session, &hello),
         Ok(ControlStreamAction::Negotiated(_))
     ));
+    session
 }
 
 #[test]
@@ -241,11 +243,11 @@ fn control_epoch_rotation_commits_only_after_pipeline_context_rotates() {
     .unwrap();
     let mut coordinator =
         ControlStreamCoordinator::new(trusted_session(), &[Capability::FrameDuration20Ms]).unwrap();
-    negotiate(&mut coordinator);
+    let session = negotiate(&mut coordinator);
     let ControlStreamAction::Start {
         token: initial_token,
         request: initial_request,
-    } = coordinator.accept(&start_command(2)).unwrap()
+    } = coordinator.accept(session, &start_command(2)).unwrap()
     else {
         panic!("expected initial start action");
     };
@@ -257,7 +259,7 @@ fn control_epoch_rotation_commits_only_after_pipeline_context_rotates() {
         token,
         previous,
         next,
-    } = coordinator.accept(&start_command(3)).unwrap()
+    } = coordinator.accept(session, &start_command(3)).unwrap()
     else {
         panic!("expected rotate action");
     };

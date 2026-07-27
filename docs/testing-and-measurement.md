@@ -56,8 +56,9 @@ Cover at least:
   windows;
 - nonce uniqueness across streams, directions, epochs, and reconnects;
 - Protobuf size limits, unknown fields, capability negotiation, typed status/error
-  semantics, and published Rust/Kotlin control-frame vectors including the exact
-  media key epoch;
+  semantics, non-reusable authenticated control-transport tokens across reconnect,
+  and published Rust/Kotlin control-frame vectors including the exact media key
+  epoch;
 - jitter ordering, late packets, overflow, resynchronization, and bounded memory;
 - PLC/FEC scheduling and frame-duration transitions;
 - drift-controller convergence, limits, anti-windup, and reset;
@@ -134,10 +135,15 @@ replay state, epoch rotation preserves the binding, failed session replacement
 preserves it, and successful fresh-session replacement permits rebinding.
 Separate loopback UDP tests exercise the same policy through real host sockets.
 
+A deterministic control reconnect scenario now delays a command from the old
+transport until after the replacement transport installs a fresh local token and
+completes hello negotiation. The old token and stale completion are rejected,
+while the same command through the fresh token is admitted.
+
 This is evidence for deterministic core behavior and host loopback composition
-only. It does not yet model socket buffers, real ASRC/device clocks,
-operating-system scheduling, control-plane reconnection, NAT rebinding, or
-physical network-interface changes, and it is not physical WLAN evidence.
+only. It does not yet model socket buffers, real TLS/socket reconnection, real
+ASRC/device clocks, operating-system scheduling, NAT rebinding, or physical
+network-interface changes, and it is not physical WLAN evidence.
 
 ## Stability and compatibility matrix
 

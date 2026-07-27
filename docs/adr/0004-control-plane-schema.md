@@ -64,24 +64,38 @@ second successful hello is rejected rather than silently changing active
 capability policy.
 
 When the authenticated control session expires, the receiver retires its
-negotiation, active stream identity, and pending operation together. A later
-paired session must complete a fresh hello; it cannot inherit a retired peer's
-capabilities.
+negotiation, active stream identity, pending operation, and local transport token
+together. A later paired session must install a fresh authenticated transport and
+complete a fresh hello; it cannot inherit a retired peer's capabilities.
 
-A successful reconnect also uses fresh control-session material. The receiver
-returns to `Ready` while retiring the prior negotiation, active media identity,
-and pending completion; the reconnected peer must send a new hello before it
-can issue another stream command.
+Every installed authenticated transport receives an opaque, non-reusable local
+session token from a process-wide monotonic sequence. The transport owner
+supplies that token with each decoded envelope. A token from another coordinator,
+a retired connection, or an unknown session is rejected before envelope
+validation, so a delayed task from an old TLS connection cannot submit work into
+a replacement session even when its envelope is otherwise valid. Sequence
+exhaustion fails closed rather than reusing a token.
+
+Connection loss retires the transport token and any pending platform/media work
+immediately. A successful reconnect uses fresh control-session material, returns
+to `Ready`, retires the prior negotiation and active media identity, then requires
+a newly installed token and hello before another stream command is accepted.
 
 Each prepared start, key rotation, and stop carries a receiver-issued opaque
-operation token. The platform owner must return that token with its completion
-or failure acknowledgement. Tokens are never reused during the coordinator's
-lifetime, including after control-session expiry, so a delayed completion cannot
-commit an identical command in a later paired session. Lifecycle state is owned
+operation token distinct from the transport token. The platform owner must return
+that operation token with its completion or failure acknowledgement. Neither
+kind of token is reused during the coordinator's lifetime, including after
+control-session expiry, so delayed transport input or completion cannot commit
+an identical command in a later paired session. Lifecycle state is owned
 by the coordinator: start and stop transitions occur only with matching
 completion tokens, and session expiry uses the dedicated retirement operation.
 
 ## Security implications
+
+The local transport token is neither a secret nor a wire-level authentication
+credential. It only prevents an in-process owner of a retired connection from
+submitting work through the current coordinator; the TLS/pairing owner must keep
+the fresh token scoped to its matching authenticated connection.
 
 The codec does bounded length validation before allocating/decode work. It is not a
 transport security layer: every production control frame still requires the
@@ -94,7 +108,8 @@ rejected.
 
 Unit tests must cover frame byte order, truncated/oversized frames, malformed
 Protobuf, missing payload, version mismatch, capability limits, status/error
-semantics, and idempotent command representation. The published
+semantics, process-unique authenticated transport tokens, cross-coordinator and
+stale transport rejection, and idempotent command representation. The published
 [control-frame vectors](../protocol/control-frame-vectors.md) fix the initial
 Rust/Kotlin wire encoding. A bounded test-only Kotlin/JVM codec independently
 encodes and decodes all five Hello, StartStream, StopStream, StreamStatus, and

@@ -10,7 +10,8 @@ mod scenario;
 
 pub use clock::{ClockError, VirtualClock};
 pub use control_scenario::{
-    ControlScenarioError, ControlSimulationReport, simulate_control_reconnect,
+    ControlScenarioError, ControlSimulationReport, FreshControlSessionReport,
+    RetiredControlSessionReport, simulate_control_reconnect,
 };
 pub use drift_scenario::{
     DriftScenarioConfig, DriftScenarioError, DriftSimulationReport, simulate_drift,

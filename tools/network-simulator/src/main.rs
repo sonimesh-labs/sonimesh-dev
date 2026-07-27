@@ -3,7 +3,8 @@
 use sonimesh_audio::DriftConfig;
 use sonimesh_network_simulator::{
     DriftScenarioConfig, NetworkProfile, ScenarioConfig, opus_experiment_cases, simulate,
-    simulate_drift, simulate_opus_experiment, simulate_opus_worker_experiment,
+    simulate_control_reconnect, simulate_drift, simulate_opus_experiment,
+    simulate_opus_worker_experiment,
 };
 
 fn main() {
@@ -87,5 +88,15 @@ fn main() {
     println!(
         "drift source=100ppm final_occupancy={} final_adjustment={}ppm resyncs={}",
         drift.final_occupancy_blocks, drift.final_adjustment_ppm, drift.hard_resynchronizations
+    );
+
+    let control =
+        simulate_control_reconnect().expect("built-in control reconnect scenario is valid");
+    println!(
+        "control_reconnect stale_completion_rejected={} fresh_hello_required={} stale_session_command_rejected={} fresh_session_command_accepted={}",
+        control.retired.completion_rejected,
+        control.fresh.hello_required,
+        control.retired.command_rejected,
+        control.fresh.command_accepted,
     );
 }

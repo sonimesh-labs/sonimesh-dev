@@ -19,8 +19,8 @@ mod udp_receiver_pipeline;
 pub use channel_mapped_render_source::{ChannelMappedRenderSource, ChannelMappedRenderSourceError};
 pub use control_snapshot::{DesktopControlSnapshot, OutputSnapshot, PairingSnapshotState};
 pub use control_stream::{
-    ControlOperationToken, ControlStreamAction, ControlStreamCoordinator, ControlStreamError,
-    MediaStreamIdentity, StreamStartRequest,
+    ControlOperationToken, ControlSessionToken, ControlStreamAction, ControlStreamCoordinator,
+    ControlStreamError, MediaStreamIdentity, StreamStartRequest,
 };
 pub use format_adapted_render_source_factory::{
     FormatAdaptedRenderSourceFactory, SourcePcmFormat, SourcePcmFormatError,

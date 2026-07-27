@@ -1,14 +1,60 @@
 //! Low-rate control lifecycle tests independent of output and network adapters.
 
+use core::ops::{Deref, DerefMut};
+
 use sonimesh_app::{
-    ControlStreamAction, ControlStreamCoordinator, ControlStreamError, PairingAttemptOutcome,
-    PairingId, PairingInvitationController, PairingInvitationError, PairingProofVerification,
-    PairingRecordError, PairingRecordState, PairingSource, SessionEvent, SessionState,
+    ControlSessionToken, ControlStreamAction, ControlStreamCoordinator, ControlStreamError,
+    PairingAttemptOutcome, PairingId, PairingInvitationController, PairingInvitationError,
+    PairingProofVerification, PairingRecordError, PairingRecordState, PairingSource, SessionEvent,
+    SessionState,
 };
 use sonimesh_protocol::{
     CONTROL_PROTOCOL_VERSION, Capability, ControlFrameError, Envelope, Hello,
     MAX_CONTROL_CAPABILITIES, MediaDirection, StartStream, StopStream, envelope,
 };
+
+struct AuthenticatedCoordinator {
+    inner: ControlStreamCoordinator,
+    session: ControlSessionToken,
+}
+
+impl AuthenticatedCoordinator {
+    fn from_ready(
+        state: SessionState,
+        capabilities: &[Capability],
+    ) -> Result<Self, ControlStreamError> {
+        Self::install(ControlStreamCoordinator::new(state, capabilities)?)
+    }
+
+    fn install(mut inner: ControlStreamCoordinator) -> Result<Self, ControlStreamError> {
+        let session = inner.install_authenticated_control_session()?;
+        Ok(Self { inner, session })
+    }
+
+    fn install_session(&mut self) -> Result<ControlSessionToken, ControlStreamError> {
+        let session = self.inner.install_authenticated_control_session()?;
+        self.session = session;
+        Ok(session)
+    }
+
+    fn accept(&mut self, envelope: &Envelope) -> Result<ControlStreamAction, ControlStreamError> {
+        self.inner.accept(self.session, envelope)
+    }
+}
+
+impl Deref for AuthenticatedCoordinator {
+    type Target = ControlStreamCoordinator;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
+impl DerefMut for AuthenticatedCoordinator {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
+    }
+}
 
 fn start(epoch: u32) -> Envelope {
     start_with_duration(epoch, 20)
@@ -71,8 +117,9 @@ fn hello(capabilities: &[Capability]) -> Envelope {
     }
 }
 
-fn coordinator(capabilities: &[Capability]) -> ControlStreamCoordinator {
-    let mut coordinator = ControlStreamCoordinator::new(trusted_session(), capabilities).unwrap();
+fn coordinator(capabilities: &[Capability]) -> AuthenticatedCoordinator {
+    let mut coordinator =
+        AuthenticatedCoordinator::from_ready(trusted_session(), capabilities).unwrap();
     assert!(matches!(
         coordinator.accept(&hello(capabilities)),
         Ok(ControlStreamAction::Negotiated(_))
@@ -81,7 +128,7 @@ fn coordinator(capabilities: &[Capability]) -> ControlStreamCoordinator {
 }
 
 fn pair_and_negotiate(
-    coordinator: &mut ControlStreamCoordinator,
+    coordinator: &mut AuthenticatedCoordinator,
     capabilities: &[Capability],
     id_byte: u8,
 ) {
@@ -104,13 +151,14 @@ fn pair_and_negotiate(
         ),
         Ok(PairingAttemptOutcome::Paired)
     );
+    coordinator.install_session().unwrap();
     assert!(matches!(
         coordinator.accept(&hello(capabilities)),
         Ok(ControlStreamAction::Negotiated(_))
     ));
 }
 
-fn activate(coordinator: &mut ControlStreamCoordinator, epoch: u32) {
+fn activate(coordinator: &mut AuthenticatedCoordinator, epoch: u32) {
     let ControlStreamAction::Start { token, request } = coordinator.accept(&start(epoch)).unwrap()
     else {
         panic!("expected a stream start action");
@@ -281,7 +329,8 @@ fn accepts_selected_10_ms_start_and_rotation() {
 #[test]
 fn start_requires_hello_and_coordinator_rejects_renegotiation() {
     let capabilities = [Capability::FrameDuration20Ms];
-    let mut coordinator = ControlStreamCoordinator::new(trusted_session(), &capabilities).unwrap();
+    let mut coordinator =
+        AuthenticatedCoordinator::from_ready(trusted_session(), &capabilities).unwrap();
 
     assert!(matches!(
         coordinator.accept(&start(0)),
@@ -302,15 +351,88 @@ fn start_requires_hello_and_coordinator_rejects_renegotiation() {
 }
 
 #[test]
-fn hello_requires_trusted_ready_session() {
+fn authenticated_control_session_requires_trusted_ready_state() {
     let capabilities = [Capability::FrameDuration20Ms];
     let mut coordinator = ControlStreamCoordinator::new(SessionState::IDLE, &capabilities).unwrap();
 
     assert!(matches!(
-        coordinator.accept(&hello(&capabilities)),
-        Err(ControlStreamError::HelloRequiresReady(SessionState::IDLE))
+        coordinator.install_authenticated_control_session(),
+        Err(ControlStreamError::ControlSessionRequiresReady(
+            SessionState::IDLE
+        ))
     ));
     assert_eq!(coordinator.negotiation(), None);
+}
+
+#[test]
+fn authenticated_transport_tokens_do_not_cross_coordinators() {
+    let capabilities = [Capability::FrameDuration20Ms];
+    let mut first = ControlStreamCoordinator::new(trusted_session(), &capabilities).unwrap();
+    let mut second = ControlStreamCoordinator::new(trusted_session(), &capabilities).unwrap();
+    let first_session = first.install_authenticated_control_session().unwrap();
+    let second_session = second.install_authenticated_control_session().unwrap();
+
+    assert_ne!(first_session, second_session);
+    assert!(matches!(
+        second.accept(first_session, &hello(&capabilities)),
+        Err(ControlStreamError::StaleControlSession)
+    ));
+    assert!(matches!(
+        second.accept(second_session, &hello(&capabilities)),
+        Ok(ControlStreamAction::Negotiated(_))
+    ));
+}
+
+#[test]
+fn connection_loss_retires_the_transport_token_and_pending_work() {
+    let capabilities = [Capability::FrameDuration20Ms];
+    let mut coordinator = ControlStreamCoordinator::new(trusted_session(), &capabilities).unwrap();
+    let retired_session = coordinator.install_authenticated_control_session().unwrap();
+
+    assert!(matches!(
+        coordinator.install_authenticated_control_session(),
+        Err(ControlStreamError::ControlSessionAlreadyInstalled)
+    ));
+    assert!(matches!(
+        coordinator.accept(retired_session, &hello(&capabilities)),
+        Ok(ControlStreamAction::Negotiated(_))
+    ));
+    let ControlStreamAction::Start { token, request } =
+        coordinator.accept(retired_session, &start(0)).unwrap()
+    else {
+        panic!("expected pending start action");
+    };
+
+    coordinator
+        .acknowledge_platform_event(SessionEvent::ConnectionLost)
+        .unwrap();
+    assert!(matches!(
+        coordinator.complete_start(token, request),
+        Err(ControlStreamError::CompletionMismatch)
+    ));
+    let malformed = Envelope {
+        protocol_version: CONTROL_PROTOCOL_VERSION + 1,
+        request_id: 99,
+        payload: None,
+    };
+    assert!(matches!(
+        coordinator.accept(retired_session, &malformed),
+        Err(ControlStreamError::StaleControlSession)
+    ));
+
+    coordinator
+        .acknowledge_platform_event(SessionEvent::Reconnected)
+        .unwrap();
+    let fresh_session = coordinator.install_authenticated_control_session().unwrap();
+    assert_ne!(retired_session, fresh_session);
+    assert!(matches!(
+        coordinator.accept(retired_session, &hello(&capabilities)),
+        Err(ControlStreamError::StaleControlSession)
+    ));
+    assert!(matches!(
+        coordinator.accept(fresh_session, &hello(&capabilities)),
+        Ok(ControlStreamAction::Negotiated(_))
+    ));
 }
 
 #[test]
@@ -325,7 +447,8 @@ fn rejects_oversized_local_capability_policy() {
 #[test]
 fn failed_hello_keeps_start_blocked_until_a_valid_intersection_is_selected() {
     let capabilities = [Capability::FrameDuration10Ms, Capability::FrameDuration20Ms];
-    let mut coordinator = ControlStreamCoordinator::new(trusted_session(), &capabilities).unwrap();
+    let mut coordinator =
+        AuthenticatedCoordinator::from_ready(trusted_session(), &capabilities).unwrap();
     let incompatible = Envelope {
         protocol_version: CONTROL_PROTOCOL_VERSION,
         request_id: 1,
@@ -381,6 +504,7 @@ fn expiring_control_session_retires_stream_and_allows_fresh_hello() {
         },),
         Ok(PairingAttemptOutcome::Paired)
     );
+    coordinator.install_session().unwrap();
     assert!(matches!(
         coordinator.accept(&hello(&capabilities)),
         Ok(ControlStreamAction::Negotiated(_))
@@ -410,6 +534,7 @@ fn stale_start_completion_cannot_commit_an_identical_fresh_session_request() {
         }),
         Ok(PairingAttemptOutcome::Paired)
     );
+    coordinator.install_session().unwrap();
     assert!(matches!(
         coordinator.accept(&hello(&capabilities)),
         Ok(ControlStreamAction::Negotiated(_))
@@ -588,6 +713,11 @@ fn reconnect_with_fresh_material_invalidates_pending_start_and_negotiation() {
     ));
     assert!(matches!(
         coordinator.accept(&start(0)),
+        Err(ControlStreamError::StaleControlSession)
+    ));
+    coordinator.install_session().unwrap();
+    assert!(matches!(
+        coordinator.accept(&start(0)),
         Err(ControlStreamError::MissingNegotiation)
     ));
     assert!(matches!(
@@ -630,6 +760,7 @@ fn revocation_retires_the_trusted_control_session_and_stream() {
         ),
         Ok(PairingAttemptOutcome::Paired)
     );
+    let mut trusted_coordinator = AuthenticatedCoordinator::install(trusted_coordinator).unwrap();
     assert!(matches!(
         trusted_coordinator.accept(&hello(&capabilities)),
         Ok(ControlStreamAction::Negotiated(_))
@@ -657,7 +788,7 @@ fn revocation_retires_the_trusted_control_session_and_stream() {
     ));
     assert!(matches!(
         trusted_coordinator.accept(&hello(&capabilities)),
-        Err(ControlStreamError::HelloRequiresReady(SessionState::IDLE))
+        Err(ControlStreamError::StaleControlSession)
     ));
 }
 
@@ -681,8 +812,10 @@ fn observed_pairing_failure_retires_the_coordinator_and_rejects_control_frames()
     assert_eq!(coordinator.active(), None);
     assert_eq!(coordinator.negotiation(), None);
     assert!(matches!(
-        coordinator.accept(&hello(&capabilities)),
-        Err(ControlStreamError::HelloRequiresReady(SessionState::IDLE))
+        coordinator.install_authenticated_control_session(),
+        Err(ControlStreamError::ControlSessionRequiresReady(
+            SessionState::IDLE
+        ))
     ));
 
     coordinator
