@@ -2,8 +2,8 @@
 
 use sonimesh_app::{
     ControlStreamAction, ControlStreamCoordinator, ControlStreamError, PairingAttemptOutcome,
-    PairingId, PairingInvitationController, PairingInvitationError, PairingRecordError,
-    PairingRecordState, PairingSource, SessionEvent, SessionState,
+    PairingId, PairingInvitationController, PairingInvitationError, PairingProofVerification,
+    PairingRecordError, PairingRecordState, PairingSource, SessionEvent, SessionState,
 };
 use sonimesh_protocol::{
     CONTROL_PROTOCOL_VERSION, Capability, ControlFrameError, Envelope, Hello,
@@ -48,7 +48,9 @@ fn trusted_session() -> SessionState {
         .begin(&mut session, PairingId::new([1; 16]), 100, 50, 1)
         .unwrap();
     assert_eq!(
-        pairing.record_proof(&mut session, 101, PairingSource::new([2; 16]), true),
+        pairing.verify_proof(&mut session, 101, PairingSource::new([2; 16]), || {
+            PairingProofVerification::Verified
+        }),
         Ok(PairingAttemptOutcome::Paired)
     );
     session
@@ -94,11 +96,11 @@ fn pair_and_negotiate(
         )
         .unwrap();
     assert_eq!(
-        coordinator.record_pairing_proof(
+        coordinator.verify_pairing_proof(
             &mut pairing,
             u64::from(id_byte) * 100 + 1,
             PairingSource::new([id_byte.wrapping_add(1); 16]),
-            true,
+            || PairingProofVerification::Verified,
         ),
         Ok(PairingAttemptOutcome::Paired)
     );
@@ -374,7 +376,9 @@ fn expiring_control_session_retires_stream_and_allows_fresh_hello() {
         .begin_pairing(&mut pairing, PairingId::new([3; 16]), 200, 50, 1)
         .unwrap();
     assert_eq!(
-        coordinator.record_pairing_proof(&mut pairing, 201, PairingSource::new([4; 16]), true,),
+        coordinator.verify_pairing_proof(&mut pairing, 201, PairingSource::new([4; 16]), || {
+            PairingProofVerification::Verified
+        },),
         Ok(PairingAttemptOutcome::Paired)
     );
     assert!(matches!(
@@ -401,7 +405,9 @@ fn stale_start_completion_cannot_commit_an_identical_fresh_session_request() {
         .begin_pairing(&mut pairing, PairingId::new([8; 16]), 300, 50, 1)
         .unwrap();
     assert_eq!(
-        coordinator.record_pairing_proof(&mut pairing, 301, PairingSource::new([9; 16]), true),
+        coordinator.verify_pairing_proof(&mut pairing, 301, PairingSource::new([9; 16]), || {
+            PairingProofVerification::Verified
+        }),
         Ok(PairingAttemptOutcome::Paired)
     );
     assert!(matches!(
@@ -616,11 +622,11 @@ fn revocation_retires_the_trusted_control_session_and_stream() {
         .begin_pairing(&mut trusted_pairing, PairingId::new([10; 16]), 500, 50, 1)
         .unwrap();
     assert_eq!(
-        trusted_coordinator.record_pairing_proof(
+        trusted_coordinator.verify_pairing_proof(
             &mut trusted_pairing,
             501,
             PairingSource::new([11; 16]),
-            true,
+            || PairingProofVerification::Verified,
         ),
         Ok(PairingAttemptOutcome::Paired)
     );

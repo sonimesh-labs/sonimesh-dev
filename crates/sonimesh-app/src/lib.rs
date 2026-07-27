@@ -28,8 +28,8 @@ pub use format_adapted_render_source_factory::{
 pub use output_controller::{OutputController, OutputLifecycleError, OutputSelection};
 pub use pairing_controller::{PairingInvitationController, PairingInvitationError};
 pub use pairing_record::{
-    MAX_PAIRING_ATTEMPTS_PER_SOURCE, PairingAttemptOutcome, PairingId, PairingRecord,
-    PairingRecordError, PairingRecordState, PairingSource,
+    MAX_PAIRING_ATTEMPTS_PER_SOURCE, PairingAttemptOutcome, PairingId, PairingProofVerification,
+    PairingRecord, PairingRecordError, PairingRecordState, PairingSource,
 };
 pub use pcm_render_source::PcmRenderSource;
 pub use receiver_output_controller::{

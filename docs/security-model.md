@@ -116,7 +116,8 @@ session clears it so a newly authenticated source can bind.
 ## Abuse controls
 
 - Bound every control message, packet, queue, stream count, and pairing attempt.
-- Rate-limit new TCP/TLS connections and pairing failures per source.
+- Rate-limit new TCP/TLS connections and admit pairing proof verification only
+  after bounded per-source checks have charged the attempt.
 - Drop stale UDP packets before expensive work when possible, without advancing
   authenticated replay state.
 - Fuzz the packet parser and the authenticated Opus boundary. Authentication does

@@ -55,7 +55,18 @@ pub enum PairingRecordState {
     Revoked,
 }
 
-/// Result of recording one TLS-layer pairing proof verification.
+/// Result supplied by one caller-owned transcript-bound proof verifier.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PairingProofVerification {
+    /// The proof matches the expected role and transcript binding.
+    Verified,
+    /// The proof was well-formed but did not verify.
+    Rejected,
+    /// The verifier could not produce a trustworthy verification result.
+    Failed,
+}
+
+/// Result of one admitted TLS-layer pairing proof verification.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PairingAttemptOutcome {
     /// Proof was accepted and the invitation is now permanently consumed.
@@ -86,6 +97,8 @@ pub enum PairingRecordError {
     SourceRateLimited,
     /// Fixed source table cannot admit a new distinct source.
     SourceTableFull,
+    /// Caller-owned proof verifier could not produce a trustworthy result.
+    VerificationFailed,
 }
 
 impl fmt::Display for PairingRecordError {
@@ -103,6 +116,7 @@ impl fmt::Display for PairingRecordError {
                 formatter.write_str("pairing source exceeded its attempt limit")
             }
             Self::SourceTableFull => formatter.write_str("pairing source table is full"),
+            Self::VerificationFailed => formatter.write_str("pairing proof verification failed"),
         }
     }
 }
@@ -118,8 +132,9 @@ struct SourceAttempts {
 /// Bounded single-use pairing record owned by the desktop control domain.
 ///
 /// This type is intentionally independent from QR serialization, TLS, secrets,
-/// and OS credential stores. Those platform owners call [`Self::record_proof`]
-/// only after a transcript-bound proof has been verified.
+/// and OS credential stores. A platform owner supplies [`Self::verify_proof`]
+/// with a verifier that borrows any transcript-bound inputs without storing them
+/// here.
 pub struct PairingRecord<const MAX_SOURCES: usize> {
     id: PairingId,
     expires_at_ms: u64,
@@ -218,18 +233,24 @@ impl<const MAX_SOURCES: usize> PairingRecord<MAX_SOURCES> {
         self.state = PairingRecordState::Revoked;
     }
 
-    /// Records the result of one externally verified transcript-bound proof.
+    /// Admits and verifies one transcript-bound proof attempt.
+    ///
+    /// Lifecycle, expiry, source-capacity, and attempt-limit checks run before
+    /// `verify` is invoked. An admitted attempt is charged first, then `verify`
+    /// is called exactly once while this record remains exclusively borrowed.
     ///
     /// # Errors
     ///
-    /// Returns a fail-closed error when the clock regresses, invitation expired
-    /// or was consumed, the source rate limit was reached, or the fixed source
-    /// table cannot admit another source.
-    pub fn record_proof(
+    /// Returns a fail-closed error without invoking `verify` when the clock
+    /// regresses, the invitation expired, was consumed, or was revoked, the
+    /// source rate limit was reached, or the fixed source table cannot admit
+    /// another source. Returns [`PairingRecordError::VerificationFailed`] after
+    /// charging the attempt when the invoked verifier reports failure.
+    pub fn verify_proof(
         &mut self,
         now_ms: u64,
         source: PairingSource,
-        proof_verified: bool,
+        verify: impl FnOnce() -> PairingProofVerification,
     ) -> Result<PairingAttemptOutcome, PairingRecordError> {
         match self.state {
             PairingRecordState::Consumed => return Err(PairingRecordError::Consumed),
@@ -249,14 +270,16 @@ impl<const MAX_SOURCES: usize> PairingRecord<MAX_SOURCES> {
             return Err(PairingRecordError::SourceRateLimited);
         }
         entry.attempts += 1;
-        if proof_verified {
-            self.state = PairingRecordState::Consumed;
-            return Ok(PairingAttemptOutcome::Paired);
+        match verify() {
+            PairingProofVerification::Verified => {
+                self.state = PairingRecordState::Consumed;
+                Ok(PairingAttemptOutcome::Paired)
+            }
+            PairingProofVerification::Rejected => Ok(PairingAttemptOutcome::Rejected {
+                attempts_remaining: max_attempts - entry.attempts,
+            }),
+            PairingProofVerification::Failed => Err(PairingRecordError::VerificationFailed),
         }
-
-        Ok(PairingAttemptOutcome::Rejected {
-            attempts_remaining: max_attempts - entry.attempts,
-        })
     }
 
     fn source_index(&mut self, source: PairingSource) -> Result<usize, PairingRecordError> {

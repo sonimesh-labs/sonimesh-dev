@@ -65,9 +65,17 @@ Desktop long-term private keys and pairing records use DPAPI or Credential
 Manager. Android private keys use Android Keystore. Revocation removes the peer
 identity, session resumption material, pairing record, and any cached media
 context. Pairing records expire, allow one success, and enforce attempt and
-source-rate limits outside any realtime path. A consumed record remains redacted
-audit state while its verified session later streams, reconnects, or recovers
-output; only expiration or revocation retires that trusted session.
+source-rate limits outside any realtime path. The record must apply lifecycle,
+monotonic-expiry, source-capacity, and per-source attempt checks before invoking
+a caller-supplied proof verifier. An admitted attempt is charged before that
+verifier runs, and a rejected admission must not invoke it. The verifier reports
+verified, rejected, or failed; failure remains distinguishable from an invalid
+proof, consumes the admitted attempt, and cannot establish trust. The verifier
+may borrow opaque TLS/proof inputs for the duration of the call, but the record
+never stores those inputs or their result independently of the lifecycle
+transition. A consumed record remains redacted audit state while its verified
+session later streams, reconnects, or recovers output; only expiration or
+revocation retires that trusted session.
 
 Before selecting a production Windows store, a Windows-only credential-store
 spike may create a random, session-persisted Generic Credential containing only
@@ -102,9 +110,11 @@ failure. No test may log secret material.
 The controlled-lab Rust core validates the bounded pairing-record lifecycle and
 its control-domain session transitions: expiry, single use, monotonic-time
 failure closure, user expiry, per-source attempt limits, and fixed source-table
-capacity. Its public lifecycle state cannot establish trust directly; only the
-pairing owner can advance a consumed external proof to `Ready`. It does not
-verify a pairing proof or store a secret, identity, or QR payload.
+capacity. Tests also prove that rejected admission never invokes the supplied
+verifier and that an admitted failure consumes one attempt. Its public lifecycle
+state cannot establish trust directly; only the pairing owner can advance a
+consumed proof to `Ready`. The core schedules but does not implement the proof
+algorithm, and it stores no proof bytes, secret, identity, or QR payload.
 
 The same controlled-lab core models a local revocation as a terminal redacted
 record state. Revocation must reject every later proof attempt and retire the

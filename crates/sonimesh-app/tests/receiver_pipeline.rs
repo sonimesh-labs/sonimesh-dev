@@ -6,7 +6,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use sonimesh_app::{
     ControlStreamAction, ControlStreamCoordinator, PairingAttemptOutcome, PairingId,
-    PairingInvitationController, PairingSource, ReceiverStreamPipeline, SessionState,
+    PairingInvitationController, PairingProofVerification, PairingSource, ReceiverStreamPipeline,
+    SessionState,
 };
 use sonimesh_audio::{
     DecodeStep, DecodeWorkerError, FrameDecoder, InsertOutcome, RealtimePcmPopOutcome,
@@ -105,7 +106,9 @@ fn trusted_session() -> SessionState {
         .begin(&mut session, PairingId::new([1; 16]), 100, 50, 1)
         .unwrap();
     assert_eq!(
-        pairing.record_proof(&mut session, 101, PairingSource::new([2; 16]), true),
+        pairing.verify_proof(&mut session, 101, PairingSource::new([2; 16]), || {
+            PairingProofVerification::Verified
+        }),
         Ok(PairingAttemptOutcome::Paired)
     );
     session

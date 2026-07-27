@@ -2,8 +2,8 @@
 
 use sonimesh_app::{
     OutputController, OutputSelection, PairingAttemptOutcome, PairingId,
-    PairingInvitationController, PairingSnapshotState, PairingSource, SessionEvent, SessionPhase,
-    SessionState,
+    PairingInvitationController, PairingProofVerification, PairingSnapshotState, PairingSource,
+    SessionEvent, SessionPhase, SessionState,
 };
 use sonimesh_platform::{
     AudioOutput, OutputConfig, OutputDeviceInfo, OutputError, OutputHealth, RenderSource,
@@ -114,7 +114,9 @@ fn accepted_pairing_projects_the_ready_receiver_phase() {
         .begin(&mut session, PairingId::new([7; 16]), 100, 50, 1)
         .unwrap();
     pairing
-        .record_proof(&mut session, 101, PairingSource::new([9; 16]), true)
+        .verify_proof(&mut session, 101, PairingSource::new([9; 16]), || {
+            PairingProofVerification::Verified
+        })
         .unwrap();
 
     let snapshot = pairing.snapshot_at(&mut session, 102, &output).unwrap();
@@ -169,7 +171,9 @@ fn consumed_pairing_record_remains_visible_while_the_trusted_stream_runs() {
         .begin(&mut session, PairingId::new([17; 16]), 100, 50, 1)
         .unwrap();
     pairing
-        .record_proof(&mut session, 101, PairingSource::new([19; 16]), true)
+        .verify_proof(&mut session, 101, PairingSource::new([19; 16]), || {
+            PairingProofVerification::Verified
+        })
         .unwrap();
     output.start(selection()).unwrap();
     session.apply(SessionEvent::StartStream).unwrap();
@@ -197,7 +201,9 @@ fn revoked_pairing_projects_a_redacted_terminal_state() {
         .begin(&mut session, PairingId::new([23; 16]), 100, 50, 1)
         .unwrap();
     assert_eq!(
-        pairing.record_proof(&mut session, 101, PairingSource::new([29; 16]), true),
+        pairing.verify_proof(&mut session, 101, PairingSource::new([29; 16]), || {
+            PairingProofVerification::Verified
+        }),
         Ok(PairingAttemptOutcome::Paired)
     );
     pairing.revoke(&mut session).unwrap();

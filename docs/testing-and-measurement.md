@@ -50,6 +50,8 @@ Cover at least:
 - published Rust/Kotlin vectors for the fixed TLS 1.3 exporter inputs,
   role-separated pairing proofs, and one-time media-root derivation; a vector
   result does not qualify TLS-provider exporter support or QR SPKI pinning;
+- pairing expiry, single use, bounded source/attempt admission, and proof-verifier
+  gating before a session can become trusted;
 - sequence exhaustion at the epoch boundary, duplicate detection, and replay
   windows;
 - nonce uniqueness across streams, directions, epochs, and reconnects;

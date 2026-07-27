@@ -2,7 +2,8 @@
 
 use sonimesh_app::{
     ControlStreamAction, ControlStreamCoordinator, PairingAttemptOutcome, PairingId,
-    PairingInvitationController, PairingSource, SessionEvent, SessionState,
+    PairingInvitationController, PairingProofVerification, PairingSource, SessionEvent,
+    SessionState,
 };
 use sonimesh_protocol::{
     CONTROL_PROTOCOL_VERSION, Capability, Envelope, Hello, StartStream, encode_control_frame,
@@ -97,7 +98,9 @@ fn pair(
     c.begin_pairing(p, PairingId::new([n; 16]), 0, 10, 1)
         .map_err(|_| ControlScenarioError::Pairing)?;
     match c
-        .record_pairing_proof(p, 1, PairingSource::new([n; 16]), true)
+        .verify_pairing_proof(p, 1, PairingSource::new([n; 16]), || {
+            PairingProofVerification::Verified
+        })
         .map_err(|_| ControlScenarioError::Pairing)?
     {
         PairingAttemptOutcome::Paired => Ok(()),

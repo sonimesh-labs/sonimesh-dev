@@ -5,7 +5,7 @@ use sonimesh_protocol::{
 
 use crate::{
     PairingAttemptOutcome, PairingId, PairingInvitationController, PairingInvitationError,
-    PairingSource, SessionEvent, SessionState,
+    PairingProofVerification, PairingSource, SessionEvent, SessionState,
 };
 
 use super::error::ControlStreamError;
@@ -102,20 +102,20 @@ impl ControlStreamCoordinator {
         )
     }
 
-    /// Records a TLS-owner verified pairing proof through this session owner.
+    /// Admits a pairing source before invoking its TLS-owner proof verifier.
     ///
     /// # Errors
     ///
-    /// Returns [`PairingInvitationError`] when the retained invitation or proof
-    /// attempt cannot advance the current pairing state.
-    pub fn record_pairing_proof<const MAX_SOURCES: usize>(
+    /// Returns [`PairingInvitationError`] without invoking `verify` when the
+    /// retained invitation or attempt cannot advance the current pairing state.
+    pub fn verify_pairing_proof<const MAX_SOURCES: usize>(
         &mut self,
         pairing: &mut PairingInvitationController<MAX_SOURCES>,
         now_ms: u64,
         source: PairingSource,
-        proof_verified: bool,
+        verify: impl FnOnce() -> PairingProofVerification,
     ) -> Result<PairingAttemptOutcome, PairingInvitationError> {
-        let result = pairing.record_proof(&mut self.state, now_ms, source, proof_verified);
+        let result = pairing.verify_proof(&mut self.state, now_ms, source, verify);
         self.retire_if_idle();
         result
     }

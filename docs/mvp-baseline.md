@@ -81,10 +81,11 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   normal ppm changes to the source handle, and performs the matching
   stream-local hard resynchronization without touching ingress or output state.
 - a pairing-invitation control owner that synchronizes bounded record expiry,
-  monotonic-clock failure, user expiry, and externally verified proof outcomes
-  with the desktop session state; only a consumed proof can establish trust. It
-  does not implement TLS, QR payloads, pairing secrets, or persistent identity
-  storage.
+  monotonic-clock failure, user expiry, and proof outcomes with the desktop
+  session state. It invokes a caller-supplied verifier only after bounded
+  per-source admission and charges the attempt first; only a consumed proof can
+  establish trust. It does not implement TLS, QR payloads, pairing secrets, or
+  persistent identity storage.
 - ChaCha20-Poly1305 packet protection with HKDF-SHA256 per-stream keys, a
   reviewed nonce layout, sender sequence exhaustion, authentication before
   replay admission, and matching Rust/Kotlin-JVM public vectors; Android runtime

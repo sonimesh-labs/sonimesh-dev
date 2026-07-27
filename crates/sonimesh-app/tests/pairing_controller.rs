@@ -1,8 +1,11 @@
 //! Pairing invitation orchestration tests without a TLS or secret implementation.
 
+use core::cell::Cell;
+
 use sonimesh_app::{
     PairingAttemptOutcome, PairingId, PairingInvitationController, PairingInvitationError,
-    PairingRecordError, PairingRecordState, PairingSource, SessionPhase, SessionState,
+    PairingProofVerification, PairingRecordError, PairingRecordState, PairingSource, SessionPhase,
+    SessionState,
 };
 
 fn id(value: u8) -> PairingId {
@@ -21,7 +24,9 @@ fn accepted_proof_is_the_only_path_from_pairing_to_ready() {
 
     assert_eq!(session.phase(), SessionPhase::Pairing);
     assert_eq!(
-        controller.record_proof(&mut session, 110, source(1), false),
+        controller.verify_proof(&mut session, 110, source(1), || {
+            PairingProofVerification::Rejected
+        }),
         Ok(PairingAttemptOutcome::Rejected {
             attempts_remaining: 1
         })
@@ -29,11 +34,49 @@ fn accepted_proof_is_the_only_path_from_pairing_to_ready() {
     assert_eq!(session.phase(), SessionPhase::Pairing);
 
     assert_eq!(
-        controller.record_proof(&mut session, 111, source(1), true),
+        controller.verify_proof(&mut session, 111, source(1), || {
+            PairingProofVerification::Verified
+        }),
         Ok(PairingAttemptOutcome::Paired)
     );
     assert_eq!(session.phase(), SessionPhase::Ready);
     assert_eq!(controller.state(), Some(PairingRecordState::Consumed));
+}
+
+#[test]
+fn verifier_failure_does_not_establish_trust() {
+    let mut controller = PairingInvitationController::<1>::new();
+    let mut session = SessionState::IDLE;
+    controller.begin(&mut session, id(1), 100, 50, 2).unwrap();
+
+    assert_eq!(
+        controller.verify_proof(&mut session, 110, source(1), || {
+            PairingProofVerification::Failed
+        }),
+        Err(PairingInvitationError::Record(
+            PairingRecordError::VerificationFailed
+        ))
+    );
+    assert_eq!(session.phase(), SessionPhase::Pairing);
+    assert_eq!(controller.state(), Some(PairingRecordState::Active));
+}
+
+#[test]
+fn invalid_session_rejects_before_invoking_the_proof_verifier() {
+    let mut controller = PairingInvitationController::<1>::new();
+    let mut session = SessionState::IDLE;
+    let verifier_calls = Cell::new(0);
+
+    assert_eq!(
+        controller.verify_proof(&mut session, 100, source(1), || {
+            verifier_calls.set(verifier_calls.get() + 1);
+            PairingProofVerification::Verified
+        }),
+        Err(PairingInvitationError::InvalidSessionState(
+            SessionState::IDLE
+        ))
+    );
+    assert_eq!(verifier_calls.get(), 0);
 }
 
 #[test]
@@ -43,7 +86,9 @@ fn expiration_and_clock_regression_return_session_to_idle() {
     controller.begin(&mut session, id(1), 100, 20, 1).unwrap();
 
     assert_eq!(
-        controller.record_proof(&mut session, 99, source(1), true),
+        controller.verify_proof(&mut session, 99, source(1), || {
+            PairingProofVerification::Verified
+        }),
         Err(PairingInvitationError::Record(
             PairingRecordError::TimeRegressed
         ))
@@ -64,7 +109,9 @@ fn expiration_and_clock_regression_return_session_to_idle() {
         Ok(PairingRecordState::Active)
     );
     assert_eq!(
-        controller.record_proof(&mut session, 209, source(1), true),
+        controller.verify_proof(&mut session, 209, source(1), || {
+            PairingProofVerification::Verified
+        }),
         Err(PairingInvitationError::Record(
             PairingRecordError::TimeRegressed
         ))
@@ -89,7 +136,9 @@ fn active_invitation_cannot_be_replaced_or_expired_record_revived() {
     );
     assert_eq!(session.phase(), SessionPhase::Idle);
     assert_eq!(
-        controller.record_proof(&mut session, 102, source(1), true),
+        controller.verify_proof(&mut session, 102, source(1), || {
+            PairingProofVerification::Verified
+        }),
         Err(PairingInvitationError::InvalidSessionState(
             SessionState::IDLE
         ))
@@ -102,7 +151,9 @@ fn revocation_retires_a_trusted_session_without_recreating_trust() {
     let mut session = SessionState::IDLE;
     controller.begin(&mut session, id(1), 100, 50, 1).unwrap();
     assert_eq!(
-        controller.record_proof(&mut session, 101, source(1), true),
+        controller.verify_proof(&mut session, 101, source(1), || {
+            PairingProofVerification::Verified
+        }),
         Ok(PairingAttemptOutcome::Paired)
     );
     assert_eq!(session.phase(), SessionPhase::Ready);
@@ -114,7 +165,9 @@ fn revocation_retires_a_trusted_session_without_recreating_trust() {
     assert_eq!(session.phase(), SessionPhase::Idle);
     assert_eq!(controller.state(), Some(PairingRecordState::Revoked));
     assert_eq!(
-        controller.record_proof(&mut session, 102, source(1), true),
+        controller.verify_proof(&mut session, 102, source(1), || {
+            PairingProofVerification::Verified
+        }),
         Err(PairingInvitationError::InvalidSessionState(
             SessionState::IDLE
         ))

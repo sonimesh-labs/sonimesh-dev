@@ -1,9 +1,9 @@
 use core::fmt;
 
 use crate::{
-    DesktopControlSnapshot, OutputController, PairingAttemptOutcome, PairingId, PairingRecord,
-    PairingRecordError, PairingRecordState, PairingSource, SessionEvent, SessionState,
-    SessionTransitionError,
+    DesktopControlSnapshot, OutputController, PairingAttemptOutcome, PairingId,
+    PairingProofVerification, PairingRecord, PairingRecordError, PairingRecordState, PairingSource,
+    SessionEvent, SessionState, SessionTransitionError,
 };
 use sonimesh_platform::{AudioOutput, RenderSourceFactory};
 
@@ -176,21 +176,23 @@ impl<const MAX_SOURCES: usize> PairingInvitationController<MAX_SOURCES> {
         observed.map_err(PairingInvitationError::Record)
     }
 
-    /// Records the outcome of one transcript-bound proof verified by the TLS owner.
+    /// Admits one source before invoking its transcript-bound proof verifier.
     ///
     /// The desktop enters `Ready` only after [`PairingAttemptOutcome::Paired`].
-    /// Rejected proofs keep the invitation and session in the pairing state.
+    /// Rejected proofs keep the invitation and session in the pairing state. The
+    /// verifier is not invoked when the session or pairing record rejects the
+    /// attempt.
     ///
     /// # Errors
     ///
     /// Returns a record error after synchronizing an expired invitation with
     /// the session lifecycle where possible.
-    pub fn record_proof(
+    pub fn verify_proof(
         &mut self,
         session: &mut SessionState,
         now_ms: u64,
         source: PairingSource,
-        proof_verified: bool,
+        verify: impl FnOnce() -> PairingProofVerification,
     ) -> Result<PairingAttemptOutcome, PairingInvitationError> {
         if *session != SessionState::PAIRING {
             return Err(PairingInvitationError::InvalidSessionState(*session));
@@ -199,7 +201,7 @@ impl<const MAX_SOURCES: usize> PairingInvitationController<MAX_SOURCES> {
             .record
             .as_mut()
             .ok_or(PairingInvitationError::MissingInvitation)?;
-        let outcome = record.record_proof(now_ms, source, proof_verified);
+        let outcome = record.verify_proof(now_ms, source, verify);
 
         match outcome {
             Ok(PairingAttemptOutcome::Paired) => {
