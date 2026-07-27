@@ -55,9 +55,10 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   field limits for controlled-lab command exchange.
 - bounded version-one hello negotiation that selects the exact supported
   protocol version and a canonical fixed intersection of known capabilities;
-  receiver start commands require this one-time negotiation and reject
-  unnegotiated frame durations before media work; each authenticated transport
-  has a non-reusable local token rejected after loss or retirement;
+  receiver start and stop commands require this one-time negotiation, and
+  starts reject unnegotiated frame durations before media work; each
+  authenticated transport has a non-reusable local token rejected after loss or
+  retirement;
   control-session expiry retires the token, selected capabilities, and stream
   lifecycle state together; process-unique start/rotation/stop operation tokens
   reject stale or cross-coordinator asynchronous completions; reconnection with

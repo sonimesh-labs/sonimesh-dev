@@ -51,10 +51,12 @@ are rejected under the exact version-one contract because the receiver cannot
 safely interpret them. A later schema version must add explicit selection rules
 rather than reinterpreting version-one semantics.
 
-A version-one `StartStream` is accepted by the receiver control coordinator only
-when its 10 ms or 20 ms duration capability appears in that selected
-intersection. A semantically valid but unnegotiated command does not prepare
-output or media work.
+Version-one `StartStream` and `StopStream` commands are accepted by the receiver
+control coordinator only after a successful hello fixes the control version and
+capability set. A start additionally requires its 10 ms or 20 ms duration
+capability in that selected intersection. A semantically valid but unnegotiated
+stream command does not prepare output or media work and is not reported as a
+successful no-op.
 
 The receiver retains exactly one successful authenticated hello per trusted,
 ready control session. A hello received before pairing establishes that state is
@@ -116,7 +118,8 @@ rejected.
 Unit tests must cover frame byte order, truncated/oversized frames, malformed
 Protobuf, missing payload, version mismatch, capability limits, status/error
 semantics, process-unique transport and operation tokens, cross-coordinator and
-stale-owner rejection, and exact-payload duplicate command handling. The published
+stale-owner rejection, pre-hello start/stop rejection, and exact-payload duplicate
+command handling. The published
 [control-frame vectors](../protocol/control-frame-vectors.md) fix the initial
 Rust/Kotlin wire encoding. A bounded test-only Kotlin/JVM codec independently
 encodes and decodes all five Hello, StartStream, StopStream, StreamStatus, and

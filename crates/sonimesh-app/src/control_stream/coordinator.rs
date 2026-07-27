@@ -483,6 +483,7 @@ impl ControlStreamCoordinator {
         &mut self,
         stop: &StopStream,
     ) -> Result<ControlStreamAction, ControlStreamError> {
+        self.require_negotiation()?;
         let identity = identity_from_stop(stop)?;
         if let Some(pending) = self.pending {
             return if matches!(pending, PendingStreamChange::Stop { identity: pending_identity, .. } if pending_identity == identity)
@@ -521,15 +522,20 @@ impl ControlStreamCoordinator {
     }
 
     fn supports_frame_duration(&self, duration_ms: u32) -> Result<bool, ControlStreamError> {
-        let negotiation = self
-            .negotiation
-            .ok_or(ControlStreamError::MissingNegotiation)?;
+        let negotiation = self.require_negotiation()?;
         let capability = match duration_ms {
             10 => Capability::FrameDuration10Ms,
             20 => Capability::FrameDuration20Ms,
             _ => return Ok(false),
         };
         Ok(negotiation.supports(capability))
+    }
+
+    fn require_negotiation(
+        &self,
+    ) -> Result<sonimesh_protocol::NegotiatedControl, ControlStreamError> {
+        self.negotiation
+            .ok_or(ControlStreamError::MissingNegotiation)
     }
 
     fn issue_control_session_token() -> Result<ControlSessionToken, ControlStreamError> {

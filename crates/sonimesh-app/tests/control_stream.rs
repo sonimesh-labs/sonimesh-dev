@@ -386,13 +386,17 @@ fn accepts_selected_10_ms_start_and_rotation() {
 }
 
 #[test]
-fn start_requires_hello_and_coordinator_rejects_renegotiation() {
+fn stream_commands_require_hello_and_coordinator_rejects_renegotiation() {
     let capabilities = [Capability::FrameDuration20Ms];
     let mut coordinator =
         AuthenticatedCoordinator::from_ready(trusted_session(), &capabilities).unwrap();
 
     assert!(matches!(
         coordinator.accept(&start(0)),
+        Err(ControlStreamError::MissingNegotiation)
+    ));
+    assert!(matches!(
+        coordinator.accept(&stop(0)),
         Err(ControlStreamError::MissingNegotiation)
     ));
     assert!(matches!(
@@ -534,7 +538,7 @@ fn rejects_oversized_local_capability_policy() {
 }
 
 #[test]
-fn failed_hello_keeps_start_blocked_until_a_valid_intersection_is_selected() {
+fn failed_hello_keeps_stream_commands_blocked_until_negotiated() {
     let capabilities = [Capability::FrameDuration10Ms, Capability::FrameDuration20Ms];
     let mut coordinator =
         AuthenticatedCoordinator::from_ready(trusted_session(), &capabilities).unwrap();
@@ -555,6 +559,10 @@ fn failed_hello_keeps_start_blocked_until_a_valid_intersection_is_selected() {
     assert_eq!(coordinator.negotiation(), None);
     assert!(matches!(
         coordinator.accept(&start(0)),
+        Err(ControlStreamError::MissingNegotiation)
+    ));
+    assert!(matches!(
+        coordinator.accept(&stop(0)),
         Err(ControlStreamError::MissingNegotiation)
     ));
     assert!(matches!(
@@ -807,6 +815,10 @@ fn reconnect_with_fresh_material_invalidates_pending_start_and_negotiation() {
     coordinator.install_session().unwrap();
     assert!(matches!(
         coordinator.accept(&start(0)),
+        Err(ControlStreamError::MissingNegotiation)
+    ));
+    assert!(matches!(
+        coordinator.accept(&stop(0)),
         Err(ControlStreamError::MissingNegotiation)
     ));
     assert!(matches!(

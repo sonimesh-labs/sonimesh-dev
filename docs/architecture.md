@@ -360,7 +360,8 @@ Commands must be idempotent or define duplicate behavior. Repeating StopStream
 must be safe. Each authenticated control transport also receives an opaque,
 non-reusable local session token. The control owner rejects a token from a lost
 or retired transport before validating its envelope, and a replacement transport
-must install a fresh token and repeat hello negotiation. Prepared stream actions
+must install a fresh token and repeat hello negotiation. Both start and stop
+commands fail closed until that negotiation succeeds. Prepared stream actions
 carry a separate process-unique operation token so a completion routed from
 another coordinator cannot match identical pending work. A retry is a no-op only
 when the command kind and complete validated payload match; the receiver rejects
