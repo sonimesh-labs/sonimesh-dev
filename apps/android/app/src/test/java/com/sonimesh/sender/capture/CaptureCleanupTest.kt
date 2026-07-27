@@ -21,10 +21,23 @@ class CaptureCleanupTest {
                 }
             }
 
-            runAllCaptureCleanupSteps(*steps)
+            val failedSteps = runAllCaptureCleanupSteps(*steps)
 
+            assertEquals(1, failedSteps)
             assertEquals((0 until stepCount).toList(), observed)
         }
+    }
+
+
+    @Test
+    fun ordinary_failure_count_is_exact() {
+        val failedSteps = runAllCaptureCleanupSteps(
+            { throw IllegalStateException("first") },
+            {},
+            { throw SecurityException("second") },
+        )
+
+        assertEquals(2, failedSteps)
     }
 
     @Test

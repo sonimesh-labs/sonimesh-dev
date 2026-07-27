@@ -73,7 +73,9 @@ retired before platform callbacks run and each release, terminal publication,
 foreground-removal, and service-stop step is attempted independently. One
 ordinary platform cleanup exception cannot prevent the remaining retirement
 steps. A fatal JVM failure is retained while the bounded steps finish and is then
-rethrown rather than silently converted into successful teardown.
+rethrown rather than silently converted into successful teardown. When only
+ordinary exceptions occur, the service emits one fixed diagnostic containing
+only the bounded failed-step count; it never logs exception text or capture data.
 Process recreation, a revoked
 projection, or a stale control session fails closed and requires a fresh consent
 result and fresh session material.

@@ -161,7 +161,8 @@ Before MVP release:
   fresh starts delivered while the old service generation is retiring;
   read-error accounting for negative return codes and thrown read-call
   exceptions; injected ordinary exceptions in each final cleanup step; and
-  deferred propagation of fatal cleanup errors;
+  exact bounded ordinary-failure counts with no exception text; and deferred
+  propagation of fatal cleanup errors;
 - representative Android OEMs across the supported baseline;
 - Windows shared-mode sample rates and USB/Bluetooth output devices;
 - private/public network profiles and firewall approval/denial.

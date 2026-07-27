@@ -19,6 +19,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.SystemClock
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
@@ -393,7 +394,7 @@ class CaptureService : Service() {
         projectionCallback = null
         pendingOutcome = null
 
-        runAllCaptureCleanupSteps(
+        val failedCleanupSteps = runAllCaptureCleanupSteps(
             { record?.release() },
             {
                 if (projection != null && callback != null) {
@@ -410,6 +411,9 @@ class CaptureService : Service() {
             { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) },
             { stopSelf() },
         )
+        if (failedCleanupSteps > 0) {
+            Log.e(LOG_TAG, "Capture cleanup completed with $failedCleanupSteps failed steps")
+        }
     }
 
     private sealed interface TerminalOutcome {
@@ -438,6 +442,7 @@ class CaptureService : Service() {
         const val EXTRA_RESULT_CODE = "com.sonimesh.sender.extra.RESULT_CODE"
         const val EXTRA_RESULT_DATA = "com.sonimesh.sender.extra.RESULT_DATA"
 
+        private const val LOG_TAG = "SoniMeshCapture"
         private const val NOTIFICATION_CHANNEL_ID = "sonimesh-capture"
         private const val NOTIFICATION_ID = 1001
         private const val STOP_REQUEST_CODE = 1002
