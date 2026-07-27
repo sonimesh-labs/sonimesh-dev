@@ -55,12 +55,14 @@ been accepted. It owns:
 same idempotent teardown path. That path stops capture admission, releases
 AudioRecord and projection resources, retires PCM/encoded buffers, destroys
 session credentials, closes transport resources, and publishes a terminal
-state. Reader launch, teardown admission, reader exit, and final completion use
-one atomic bit-state: a reader cannot launch after teardown begins, a failed
-`Thread.start()` rolls back the running-reader bit, and exactly one completion
-claimant waits for a successfully launched reader to exit before releasing
-resources. Duplicate stop/error notifications may retry the completion check but
-cannot retire the same capture resources twice. Process recreation, a revoked
+state. Reader launch, teardown admission, terminal-outcome readiness, reader
+exit, and final completion use one atomic bit-state: a reader cannot launch after
+teardown begins, a failed `Thread.start()` rolls back the running-reader bit, and
+no completion claimant can win before the selected terminal outcome and the
+reader stop/interrupt requests are published. Exactly one claimant then waits for
+a successfully launched reader to exit before releasing resources. Duplicate
+stop/error notifications may retry the completion check but cannot retire the
+same capture resources twice. Process recreation, a revoked
 projection, or a stale control session fails closed and requires a fresh consent
 result and fresh session material.
 
@@ -131,9 +133,9 @@ observable symptom, not evidence about a particular source application.
 
 Host JVM tests exercise reader-start rollback, rejection of a reader after
 teardown admission, duplicate-reader rejection, concurrent launch/teardown
-ordering, and exactly-once finish claims. These tests validate only the pure
-coordination state machine; they do not establish Android service, AudioRecord,
-or MediaProjection lifecycle behavior on a device.
+ordering, outcome-publication ordering, and exactly-once finish claims. These
+tests validate only the pure coordination state machine; they do not establish
+Android service, AudioRecord, or MediaProjection lifecycle behavior on a device.
 
 - capture-only runs on the reference Android 12-17 matrix, recording actual
   AudioRecord format, channels, buffer sizes, read errors, and silent periods;

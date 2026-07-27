@@ -125,7 +125,8 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   bounded evidence counters including silent frames and local read-completion
   offsets, a frame-duration-based no-signal transition stable across partial reads,
   and an atomic idempotent teardown gate that transactionally admits reader
-  startup and permits one final cleanup claimant; partial Vivo physical-device
+  startup, publishes terminal-outcome readiness, and permits one final cleanup
+  claimant only after reader exit; partial Vivo physical-device
   capture and background evidence is recorded in the [Android capture matrix](./measurements/android-capture-matrix.md).
   The remaining lifecycle, power, source-policy, and OEM matrix is still open.
 - a buildable Vue/Vite receiver-control preview with a single low-rate bridge

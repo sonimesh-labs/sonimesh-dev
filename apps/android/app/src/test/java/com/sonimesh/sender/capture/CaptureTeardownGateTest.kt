@@ -20,6 +20,8 @@ class CaptureTeardownGateTest {
         assertTrue(gate.launchReader {})
         assertTrue(gate.beginTeardown())
         assertFalse(gate.claimFinish())
+        gate.markOutcomeReady()
+        assertFalse(gate.claimFinish())
 
         gate.markReaderExited()
         assertTrue(gate.claimFinish())
@@ -31,6 +33,7 @@ class CaptureTeardownGateTest {
 
         assertTrue(gate.beginTeardown())
         assertFalse(gate.beginTeardown())
+        gate.markOutcomeReady()
         assertTrue(gate.claimFinish())
         assertFalse(gate.claimFinish())
     }
@@ -44,6 +47,7 @@ class CaptureTeardownGateTest {
         }
 
         assertTrue(gate.beginTeardown())
+        gate.markOutcomeReady()
         assertTrue(gate.claimFinish())
     }
 
@@ -59,6 +63,7 @@ class CaptureTeardownGateTest {
             },
         )
         assertFalse(startCalled)
+        gate.markOutcomeReady()
         assertTrue(gate.claimFinish())
     }
 
@@ -71,6 +76,7 @@ class CaptureTeardownGateTest {
             gate.launchReader {}
         }
         assertTrue(gate.beginTeardown())
+        gate.markOutcomeReady()
         assertFalse(gate.claimFinish())
 
         gate.markReaderExited()
@@ -94,6 +100,7 @@ class CaptureTeardownGateTest {
             Thread {
                 start.await()
                 gate.beginTeardown()
+                gate.markOutcomeReady()
                 finishClaimed.set(gate.claimFinish())
                 completed.countDown()
             }.start()
@@ -111,6 +118,60 @@ class CaptureTeardownGateTest {
     }
 
     @Test
+    fun outcome_publication_requires_teardown_admission() {
+        val gate = CaptureTeardownGate()
+
+        assertThrows(IllegalStateException::class.java) {
+            gate.markOutcomeReady()
+        }
+        assertFalse(gate.claimFinish())
+    }
+
+    @Test
+    fun completion_cannot_be_claimed_before_outcome_publication() {
+        val gate = CaptureTeardownGate()
+
+        assertTrue(gate.beginTeardown())
+        assertFalse(gate.claimFinish())
+        gate.markOutcomeReady()
+        assertTrue(gate.claimFinish())
+    }
+
+    @Test
+    fun concurrent_outcome_publication_and_finish_preserve_one_cleanup_claim() {
+        repeat(100) {
+            val gate = CaptureTeardownGate()
+            val start = CountDownLatch(1)
+            val completed = CountDownLatch(2)
+            val winners = AtomicInteger()
+
+            assertTrue(gate.beginTeardown())
+            Thread {
+                start.await()
+                gate.markOutcomeReady()
+                if (gate.claimFinish()) {
+                    winners.incrementAndGet()
+                }
+                completed.countDown()
+            }.start()
+            Thread {
+                start.await()
+                if (gate.claimFinish()) {
+                    winners.incrementAndGet()
+                }
+                completed.countDown()
+            }.start()
+            start.countDown()
+
+            assertTrue(completed.await(2, TimeUnit.SECONDS))
+            if (gate.claimFinish()) {
+                winners.incrementAndGet()
+            }
+            assertEquals(1, winners.get())
+        }
+    }
+
+    @Test
     fun concurrent_finish_claims_have_exactly_one_winner() {
         val gate = CaptureTeardownGate()
         val contenders = 8
@@ -119,6 +180,7 @@ class CaptureTeardownGateTest {
         val winners = AtomicInteger()
 
         assertTrue(gate.beginTeardown())
+        gate.markOutcomeReady()
         repeat(contenders) {
             Thread {
                 start.await()

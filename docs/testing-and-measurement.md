@@ -156,7 +156,8 @@ Before MVP release:
 - at least 500 connect/disconnect cycles;
 - output-device unplug/replug;
 - sleep/wake and user-session changes;
-- Android lock, backgrounding, service recreation, and projection revocation;
+- Android lock, backgrounding, service recreation, projection revocation, and
+  teardown races between outcome publication, reader exit, and duplicate stops;
 - representative Android OEMs across the supported baseline;
 - Windows shared-mode sample rates and USB/Bluetooth output devices;
 - private/public network profiles and firewall approval/denial.

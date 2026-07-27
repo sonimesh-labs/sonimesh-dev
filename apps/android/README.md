@@ -27,8 +27,9 @@ The first implementation must keep these module boundaries:
 The prototype deliberately keeps the consent `Intent` in memory and routes both
 the notification stop action and `MediaProjection.Callback.onStop()` through
 one idempotent teardown path. Its atomic reader gate refuses launch after
-teardown, rolls back a failed thread start, and permits exactly one final cleanup
-claim after the reader exits. Host JVM tests also verify this pure coordination
+teardown, rolls back a failed thread start, blocks cleanup until the terminal
+outcome and stop requests are published, and permits exactly one final claim
+after the reader exits. Host JVM tests also verify this pure coordination
 state machine and the intentionally public pairing-binding, media-crypto, and
 bounded control-frame protocol vectors. Those
 tests do not add networking or crypto to the production capture source set,

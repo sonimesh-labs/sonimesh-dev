@@ -357,18 +357,18 @@ class CaptureService : Service() {
     private fun teardown(outcome: TerminalOutcome) {
         if (teardownGate.beginTeardown()) {
             pendingOutcome = outcome
-            captureThread?.interrupt()
+            runCatching { captureThread?.interrupt() }
             audioRecord?.let { record -> runCatching { record.stop() } }
+            teardownGate.markOutcomeReady()
         }
         finishTeardownIfReady()
     }
 
     private fun finishTeardownIfReady() {
+        val outcome = pendingOutcome ?: return
         if (!teardownGate.claimFinish()) {
             return
         }
-
-        val outcome = pendingOutcome ?: return
         captureThread = null
 
         audioRecord?.let { record -> record.release() }

@@ -41,11 +41,31 @@ class CaptureTeardownGate {
         clearFlag(READER_RUNNING)
     }
 
-    /** Returns true to exactly one caller after teardown starts and the reader exits. */
+    /** Marks the selected outcome and pre-release stop requests as published. */
+    fun markOutcomeReady() {
+        while (true) {
+            val current = state.get()
+            check(current and TEARDOWN_STARTED != 0) {
+                "capture teardown must start before its outcome is ready"
+            }
+            check(current and TEARDOWN_FINISHED == 0) {
+                "capture teardown already finished"
+            }
+            if (current and OUTCOME_READY != 0) {
+                return
+            }
+            if (state.compareAndSet(current, current or OUTCOME_READY)) {
+                return
+            }
+        }
+    }
+
+    /** Returns true to exactly one caller after outcome publication and reader exit. */
     fun claimFinish(): Boolean {
         while (true) {
             val current = state.get()
             if (current and TEARDOWN_STARTED == 0 ||
+                current and OUTCOME_READY == 0 ||
                 current and READER_RUNNING != 0 ||
                 current and TEARDOWN_FINISHED != 0
             ) {
@@ -84,6 +104,7 @@ class CaptureTeardownGate {
     private companion object {
         const val TEARDOWN_STARTED = 1 shl 0
         const val READER_RUNNING = 1 shl 1
-        const val TEARDOWN_FINISHED = 1 shl 2
+        const val OUTCOME_READY = 1 shl 2
+        const val TEARDOWN_FINISHED = 1 shl 3
     }
 }
