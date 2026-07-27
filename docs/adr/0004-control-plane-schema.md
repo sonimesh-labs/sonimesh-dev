@@ -39,9 +39,11 @@ pairing code, IP address, audio data, or device fingerprint.
 The repository also provides an untrusted, non-blocking TCP reader/writer that
 incrementally collects the four-byte length prefix and bounded payload before
 calling the same frame validator, and queues at most one bounded outgoing frame.
-A framing or semantic error terminates that connection. This is a transport-
-framing adapter only; it must remain behind the authenticated TLS/pairing
-boundary before envelopes can affect a trusted session.
+A framing, semantic, or non-transient socket error returns its structured error
+once and then permanently closes both directions of that adapter so partial
+read/write state cannot be reused. This is a transport-framing adapter only; it
+must remain behind the authenticated TLS/pairing boundary before envelopes can
+affect a trusted session.
 
 The version-one protocol implementation selects only its exact protocol version
 and constructs a fixed, canonical intersection of known capabilities. Unknown
@@ -116,7 +118,8 @@ rejected.
 ## Validation evidence
 
 Unit tests must cover frame byte order, truncated/oversized frames, malformed
-Protobuf, missing payload, version mismatch, capability limits, status/error
+Protobuf, partial peer closure, permanent socket-error retirement, missing
+payload, version mismatch, capability limits, status/error
 semantics, process-unique transport and operation tokens, cross-coordinator and
 stale-owner rejection, pre-hello start/stop rejection, and exact-payload duplicate
 command handling. The published

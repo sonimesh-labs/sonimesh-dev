@@ -115,7 +115,8 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   and plaintext clearing. Configured finite CI executions are smoke evidence
   rather than a sustained campaign.
 - a bounded incremental TCP control-frame reader/writer that validates the
-  existing length-prefixed Protobuf envelope, plus Rust/Kotlin-JVM host tests for
+  existing length-prefixed Protobuf envelope and retires partial state after a
+  permanent socket error, plus Rust/Kotlin-JVM host tests for
   all five published Hello, StartStream, StopStream, StreamStatus, and
   ControlError wire vectors and their semantic bounds. The transport is
   explicitly unauthenticated and is not a TLS or pairing implementation.

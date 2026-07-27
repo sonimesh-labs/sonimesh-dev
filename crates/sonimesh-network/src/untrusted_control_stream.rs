@@ -150,7 +150,8 @@ impl UntrustedControlStream {
     ///
     /// # Errors
     ///
-    /// Returns [`UntrustedControlError::Io`] when the socket write fails.
+    /// Returns [`UntrustedControlError::Io`] and retires the stream when a
+    /// non-transient socket write fails.
     pub fn flush_write(&mut self) -> Result<UntrustedControlWrite, UntrustedControlError> {
         if self.terminated {
             return Ok(UntrustedControlWrite::Closed);
@@ -183,7 +184,7 @@ impl UntrustedControlStream {
             Err(error) if error.kind() == io::ErrorKind::Interrupted => {
                 Ok(UntrustedControlWrite::Pending)
             }
-            Err(error) => Err(UntrustedControlError::Io(error)),
+            Err(error) => self.io_failure(error),
         }
     }
 
@@ -208,7 +209,7 @@ impl UntrustedControlStream {
                     self.terminated = true;
                     return Ok(UntrustedControlPoll::Closed);
                 }
-                Err(ReadState::Io(error)) => return Err(UntrustedControlError::Io(error)),
+                Err(ReadState::Io(error)) => return self.io_failure(error),
             }
             if self.length_filled < CONTROL_LENGTH_BYTES {
                 return Ok(UntrustedControlPoll::Empty);
@@ -237,7 +238,7 @@ impl UntrustedControlStream {
                     self.terminated = true;
                     return Ok(UntrustedControlPoll::Closed);
                 }
-                Err(ReadState::Io(error)) => return Err(UntrustedControlError::Io(error)),
+                Err(ReadState::Io(error)) => return self.io_failure(error),
             }
         }
         if self.frame_filled < CONTROL_LENGTH_BYTES + payload_len {
@@ -280,6 +281,11 @@ impl UntrustedControlStream {
         self.length_filled = 0;
         self.frame_len = None;
         self.frame_filled = 0;
+    }
+
+    fn io_failure<T>(&mut self, error: io::Error) -> Result<T, UntrustedControlError> {
+        self.terminated = true;
+        Err(UntrustedControlError::Io(error))
     }
 
     fn protocol_failure(

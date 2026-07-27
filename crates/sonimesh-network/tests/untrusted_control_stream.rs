@@ -1,7 +1,7 @@
 //! Bounded incremental control framing tests without transport authentication.
 
 use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::{Shutdown, TcpListener, TcpStream};
 use std::thread;
 
 use sonimesh_network::{
@@ -102,6 +102,27 @@ fn writer_rejects_a_second_frame_while_the_first_is_pending() {
         writer.send(&hello_envelope()),
         Err(UntrustedControlError::WritePending)
     ));
+}
+
+#[test]
+fn permanent_write_error_retires_the_entire_stream() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let socket = TcpStream::connect(address).unwrap();
+    let (_peer, _) = listener.accept().unwrap();
+    socket.shutdown(Shutdown::Write).unwrap();
+    let mut stream = UntrustedControlStream::from_stream(socket).unwrap();
+
+    assert!(matches!(
+        stream.send(&hello_envelope()),
+        Err(UntrustedControlError::Io(_))
+    ));
+    assert_eq!(
+        stream.send(&hello_envelope()).unwrap(),
+        UntrustedControlWrite::Closed
+    );
+    assert_eq!(stream.flush_write().unwrap(), UntrustedControlWrite::Closed);
+    assert_eq!(stream.poll().unwrap(), UntrustedControlPoll::Closed);
 }
 
 #[test]

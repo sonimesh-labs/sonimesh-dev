@@ -56,7 +56,8 @@ Cover at least:
   windows;
 - nonce uniqueness across streams, directions, epochs, and reconnects;
 - Protobuf size limits, unknown fields, capability negotiation, typed status/error
-  semantics, process-unique control-transport and asynchronous-operation tokens
+  semantics, bounded TCP framing under partial closure and permanent I/O failure,
+  process-unique control-transport and asynchronous-operation tokens
   across coordinators and reconnects, pre-hello start/stop rejection,
   exact-payload duplicate command handling,
   and published Rust/Kotlin control-frame vectors including the exact media key
