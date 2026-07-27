@@ -53,6 +53,8 @@ const pairingMessage = computed(() => {
       return 'Invitation expired'
     case 'inactive':
       return 'No open invitation'
+    case 'revoked':
+      return 'Sender trust revoked'
   }
 })
 
@@ -66,6 +68,8 @@ const pairingHint = computed(() => {
       return 'Create a fresh invitation when the sender is ready.'
     case 'inactive':
       return 'Create a short-lived invitation to trust a new sender.'
+    case 'revoked':
+      return 'Create a fresh invitation before trusting this sender again.'
   }
 })
 
@@ -93,7 +97,7 @@ onUnmounted(clearCountdown)
     </div>
 
     <div class="inline-actions">
-      <button class="secondary-action" :disabled="busy || pairing.state === 'active'" @click="emit('create')">
+      <button class="secondary-action" :disabled="busy || pairing.state === 'active' || pairing.state === 'consumed'" @click="emit('create')">
         Create invitation
       </button>
       <button v-if="pairing.state === 'active'" class="icon-action subtle" title="Expire invitation" aria-label="Expire invitation" :disabled="busy" @click="emit('expire')">

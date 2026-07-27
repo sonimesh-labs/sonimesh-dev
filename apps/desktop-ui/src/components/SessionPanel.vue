@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { ArrowUpRight, Radio, ShieldCheck, Square } from '@lucide/vue'
 
-import type { SessionState } from '../types'
+import type { PairingState, SessionState } from '../types'
 
 const props = defineProps<{
   state: SessionState
+  pairingState: PairingState
   preview: boolean
   busy: boolean
 }>()
@@ -31,6 +32,14 @@ const summaries: Record<SessionState, string> = {
   reconnecting: 'Keeping the session while the output path recovers.',
   outputUnavailable: 'Choose or reconnect an output device to continue.',
 }
+
+const controlLabels: Record<PairingState, string> = {
+  inactive: 'Not authenticated',
+  active: 'Verification pending',
+  consumed: 'Authenticated',
+  expired: 'Not authenticated',
+  revoked: 'Revoked',
+}
 </script>
 
 <template>
@@ -56,7 +65,7 @@ const summaries: Record<SessionState, string> = {
       <div>
         <ShieldCheck :size="17" aria-hidden="true" />
         <dt>Control</dt>
-        <dd>Authenticated</dd>
+        <dd>{{ controlLabels[pairingState] }}</dd>
       </div>
       <div>
         <Radio :size="17" aria-hidden="true" />
@@ -71,7 +80,7 @@ const summaries: Record<SessionState, string> = {
     </dl>
 
     <div class="session-actions">
-      <button v-if="state !== 'streaming'" class="primary-action" :disabled="busy || state !== 'ready'" @click="emit('start')">
+      <button v-if="state !== 'streaming'" class="primary-action" :disabled="busy || state !== 'ready' || pairingState !== 'consumed'" @click="emit('start')">
         <Radio :size="17" aria-hidden="true" />
         <span>{{ preview ? 'Start listening preview' : 'Start listening' }}</span>
         <ArrowUpRight :size="17" aria-hidden="true" />

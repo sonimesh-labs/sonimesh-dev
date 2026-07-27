@@ -64,7 +64,14 @@ const { busy, createPairing, error, expirePairing, refresh, selectOutput, snapsh
       <p v-if="error" class="command-error" role="alert">{{ error }}</p>
       <template v-if="snapshot">
         <div id="session" class="control-grid">
-          <SessionPanel :state="snapshot.session" :preview="snapshot.previewAdapter" :busy="busy" @start="start" @stop="stop" />
+          <SessionPanel
+            :state="snapshot.session"
+            :pairing-state="snapshot.pairing.state"
+            :preview="snapshot.previewAdapter"
+            :busy="busy"
+            @start="start"
+            @stop="stop"
+          />
           <div class="secondary-stack">
             <OutputPanel :devices="snapshot.outputDevices" :selected-id="snapshot.selectedOutputId" :busy="busy" @select="selectOutput" />
             <PairingPanel :pairing="snapshot.pairing" :busy="busy" @create="createPairing" @expire="expirePairing" />

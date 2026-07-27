@@ -5,7 +5,10 @@ only frontend integration point: it currently provides a preview adapter and is
 intended to be replaced by low-rate Tauri commands after the desktop shell is
 introduced. The preview state is explicitly labelled in the UI and must not be
 read as an active receiver, a transport measurement, or a hardware capability.
-It must never receive PCM, Opus frames, keys, or realtime callbacks.
+Its initial ready state includes a synthetic consumed pairing record so the
+session controls can be exercised without falsely presenting an inactive
+invitation as authenticated. It must never receive PCM, Opus frames, keys, or
+realtime callbacks.
 
 The future bridge should project the Rust `DesktopControlSnapshot` after the
 pairing owner's low-rate `snapshot_at(session, now_ms, &output_controller)` call. That

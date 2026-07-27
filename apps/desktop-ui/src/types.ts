@@ -8,8 +8,10 @@ export interface OutputDevice {
   isDefault: boolean
 }
 
+export type PairingState = 'inactive' | 'active' | 'consumed' | 'expired' | 'revoked'
+
 export interface PairingStatus {
-  state: 'inactive' | 'active' | 'consumed' | 'expired'
+  state: PairingState
   expiresInSeconds: number | null
 }
 

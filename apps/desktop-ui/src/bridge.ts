@@ -21,7 +21,7 @@ class PreviewDesktopBridge implements DesktopBridge {
     session: 'ready',
     outputDevices: previewOutput,
     selectedOutputId: 'default',
-    pairing: { state: 'inactive', expiresInSeconds: null },
+    pairing: { state: 'consumed', expiresInSeconds: null },
     metrics: {
       authenticatedPackets: '12844',
       duplicatePackets: '6',
@@ -52,7 +52,7 @@ class PreviewDesktopBridge implements DesktopBridge {
   }
 
   async startStream(): Promise<DesktopSnapshot> {
-    if (this.snapshotState.session === 'ready') {
+    if (this.snapshotState.session === 'ready' && this.snapshotState.pairing.state === 'consumed') {
       this.snapshotState.session = 'streaming'
     }
     return this.copy()
@@ -73,14 +73,20 @@ class PreviewDesktopBridge implements DesktopBridge {
   }
 
   async createPairing(): Promise<DesktopSnapshot> {
-    this.pairingExpiresAtMillis = Date.now() + PAIRING_INVITATION_LIFETIME_MILLIS
-    this.snapshotState.pairing = { state: 'active', expiresInSeconds: PAIRING_INVITATION_LIFETIME_SECONDS }
+    if (['inactive', 'expired', 'revoked'].includes(this.snapshotState.pairing.state)) {
+      this.pairingExpiresAtMillis = Date.now() + PAIRING_INVITATION_LIFETIME_MILLIS
+      this.snapshotState.pairing = { state: 'active', expiresInSeconds: PAIRING_INVITATION_LIFETIME_SECONDS }
+      this.snapshotState.session = 'pairing'
+    }
     return this.copy()
   }
 
   async expirePairing(): Promise<DesktopSnapshot> {
-    this.pairingExpiresAtMillis = null
-    this.snapshotState.pairing = { state: 'expired', expiresInSeconds: 0 }
+    if (this.snapshotState.pairing.state === 'active') {
+      this.pairingExpiresAtMillis = null
+      this.snapshotState.pairing = { state: 'expired', expiresInSeconds: 0 }
+      this.snapshotState.session = 'idle'
+    }
     return this.copy()
   }
 
@@ -98,6 +104,7 @@ class PreviewDesktopBridge implements DesktopBridge {
     if (remainingMillis <= 0) {
       this.pairingExpiresAtMillis = null
       this.snapshotState.pairing = { state: 'expired', expiresInSeconds: 0 }
+      this.snapshotState.session = 'idle'
       return
     }
 
