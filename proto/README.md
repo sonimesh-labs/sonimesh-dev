@@ -13,5 +13,5 @@ Start and Stop commands identify media by session ID, stream ID, and an explicit
 16-bit-compatible `media_key_epoch`; their rotation and stale-command semantics
 are defined by [ADR 0006](../docs/adr/0006-media-key-epoch-control.md).
 
-The version-one length prefix and `Hello` encoding are fixed by the
-[control frame test vector](../docs/protocol/control-frame-vectors.md).
+The version-one length prefix and all five payload encodings are fixed by the
+[control frame test vectors](../docs/protocol/control-frame-vectors.md).

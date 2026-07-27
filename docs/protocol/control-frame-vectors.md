@@ -1,6 +1,6 @@
-# Control Frame Test Vector
+# Control Frame Test Vectors
 
-This vector fixes the version-one control frame length prefix and Protobuf field
+These vectors fix the version-one control frame length prefix and Protobuf field
 encoding for a Kotlin client. It is a wire-format contract only; control frames
 must still arrive through the future authenticated control channel.
 
@@ -64,13 +64,48 @@ stream identity; see [ADR 0006](../adr/0006-media-key-epoch-control.md).
 `0000000d` declares the 13-byte Protobuf payload. The exact session, stream, and
 epoch tuple prevents a delayed stop from targeting a newer stream generation.
 
+## StreamStatus
+
+| Field | Value |
+| --- | --- |
+| Protocol version | `1` |
+| Request ID | `10` |
+| Media session ID | `7` |
+| Stream ID | `9` |
+| State | `STREAM_STATE_STREAMING` (`2`) |
+| Detail UTF-8 | `receiving` |
+
+```text
+000000170801100a6a110807100918022209726563656976696e67
+```
+
+`00000017` declares the 23-byte Protobuf payload. Version one requires nonzero
+media/stream identities and a known, non-unspecified state.
+
+## ControlError
+
+| Field | Value |
+| --- | --- |
+| Protocol version | `1` |
+| Request ID | `11` |
+| Code | `ERROR_CODE_RETRY_LATER` (`5`) |
+| Retryable | `true` |
+| Detail UTF-8 | `try again` |
+
+```text
+000000150801100b720f080510011a0974727920616761696e
+```
+
+`00000015` declares the 21-byte Protobuf payload. Version one requires a known,
+non-unspecified structured error code.
+
 ## Cross-language verification
 
 Rust protocol tests and the Android host-JVM `ControlFrameVectorTest`
-independently encode all three published frames and decode their semantic fields.
-The Kotlin test
-also rejects truncated, mismatched, and oversized length prefixes and rejects a
-`media_key_epoch` above `65535`.
+independently encode all five published payload shapes and decode their semantic
+fields. The Kotlin test also rejects truncated, mismatched, and oversized length
+prefixes, a `media_key_epoch` above `65535`, zero status identities, and
+unspecified or unknown status/error enums.
 
 This is wire-format and host-test evidence only. The Android production source
 set still contains no control transport, generated Protobuf client, pairing, or

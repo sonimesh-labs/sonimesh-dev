@@ -95,6 +95,49 @@ fn matches_published_epoch_bearing_stop_vector() {
 }
 
 #[test]
+fn matches_published_stream_status_vector() {
+    let envelope = Envelope {
+        protocol_version: CONTROL_PROTOCOL_VERSION,
+        request_id: 10,
+        payload: Some(envelope::Payload::StreamStatus(StreamStatus {
+            media_session_id: 7,
+            stream_id: 9,
+            state: StreamState::Streaming as i32,
+            detail: "receiving".to_owned(),
+        })),
+    };
+
+    assert_eq!(
+        encode_control_frame(&envelope).unwrap(),
+        [
+            0x00, 0x00, 0x00, 0x17, 0x08, 0x01, 0x10, 0x0A, 0x6A, 0x11, 0x08, 0x07, 0x10, 0x09,
+            0x18, 0x02, 0x22, 0x09, 0x72, 0x65, 0x63, 0x65, 0x69, 0x76, 0x69, 0x6E, 0x67,
+        ]
+    );
+}
+
+#[test]
+fn matches_published_control_error_vector() {
+    let envelope = Envelope {
+        protocol_version: CONTROL_PROTOCOL_VERSION,
+        request_id: 11,
+        payload: Some(envelope::Payload::Error(ControlError {
+            code: ErrorCode::RetryLater as i32,
+            retryable: true,
+            detail: "try again".to_owned(),
+        })),
+    };
+
+    assert_eq!(
+        encode_control_frame(&envelope).unwrap(),
+        [
+            0x00, 0x00, 0x00, 0x15, 0x08, 0x01, 0x10, 0x0B, 0x72, 0x0F, 0x08, 0x05, 0x10, 0x01,
+            0x1A, 0x09, 0x74, 0x72, 0x79, 0x20, 0x61, 0x67, 0x61, 0x69, 0x6E,
+        ]
+    );
+}
+
+#[test]
 fn round_trips_stream_commands_with_the_exact_key_epoch() {
     let start = Envelope {
         protocol_version: CONTROL_PROTOCOL_VERSION,

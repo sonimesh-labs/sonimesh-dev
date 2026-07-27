@@ -80,7 +80,48 @@ class ControlFrameVectorTest {
     }
 
     @Test
-    fun decoderRejectsInvalidFrameAndEpochBounds() {
+    fun streamStatusMatchesPublishedFrameAndDecodesSemanticFields() {
+        val encoded = statusFrame(
+            mediaSessionId = 7u,
+            streamId = 9u,
+            state = STREAM_STATE_STREAMING,
+        )
+
+        assertArrayEquals(EXPECTED_STATUS_FRAME, encoded)
+
+        val envelope = decodeMessage(decodeFrame(EXPECTED_STATUS_FRAME))
+        assertEquals(CONTROL_PROTOCOL_VERSION, envelope.requiredVarint(ENVELOPE_PROTOCOL_VERSION_FIELD))
+        assertEquals(10uL, envelope.requiredVarint(ENVELOPE_REQUEST_ID_FIELD))
+        val status = decodeMessage(envelope.requiredBytes(ENVELOPE_STREAM_STATUS_FIELD))
+        assertEquals(7uL, status.requiredVarint(STATUS_MEDIA_SESSION_ID_FIELD))
+        assertEquals(9uL, status.requiredVarint(STATUS_STREAM_ID_FIELD))
+        assertEquals(STREAM_STATE_STREAMING, validatedStreamState(status))
+        assertEquals(
+            "receiving",
+            status.requiredBytes(STATUS_DETAIL_FIELD).decodeToString(),
+        )
+    }
+
+    @Test
+    fun controlErrorMatchesPublishedFrameAndDecodesSemanticFields() {
+        val encoded = errorFrame(ERROR_CODE_RETRY_LATER)
+
+        assertArrayEquals(EXPECTED_ERROR_FRAME, encoded)
+
+        val envelope = decodeMessage(decodeFrame(EXPECTED_ERROR_FRAME))
+        assertEquals(CONTROL_PROTOCOL_VERSION, envelope.requiredVarint(ENVELOPE_PROTOCOL_VERSION_FIELD))
+        assertEquals(11uL, envelope.requiredVarint(ENVELOPE_REQUEST_ID_FIELD))
+        val error = decodeMessage(envelope.requiredBytes(ENVELOPE_ERROR_FIELD))
+        assertEquals(ERROR_CODE_RETRY_LATER, validatedErrorCode(error))
+        assertEquals(1uL, error.requiredVarint(ERROR_RETRYABLE_FIELD))
+        assertEquals(
+            "try again",
+            error.requiredBytes(ERROR_DETAIL_FIELD).decodeToString(),
+        )
+    }
+
+    @Test
+    fun decoderRejectsInvalidFrameAndSemanticBounds() {
         assertThrows(IllegalArgumentException::class.java) {
             decodeFrame(byteArrayOf(0, 0, 0))
         }
@@ -114,6 +155,30 @@ class ControlFrameVectorTest {
         )
         assertThrows(IllegalArgumentException::class.java) {
             validatedMediaKeyEpoch(oversizedStopEpoch, STOP_MEDIA_KEY_EPOCH_FIELD)
+        }
+
+        val invalidStatuses = listOf(
+            statusFrame(0u, 9u, STREAM_STATE_STREAMING),
+            statusFrame(7u, 0u, STREAM_STATE_STREAMING),
+            statusFrame(7u, 9u, STREAM_STATE_UNSPECIFIED),
+            statusFrame(7u, 9u, UNKNOWN_ENUM_VALUE),
+        )
+        invalidStatuses.forEach { frame ->
+            val status = decodeMessage(
+                decodeMessage(decodeFrame(frame)).requiredBytes(ENVELOPE_STREAM_STATUS_FIELD),
+            )
+            assertThrows(IllegalArgumentException::class.java) {
+                validatedStreamState(status)
+            }
+        }
+
+        for (code in listOf(ERROR_CODE_UNSPECIFIED, UNKNOWN_ENUM_VALUE)) {
+            val error = decodeMessage(
+                decodeMessage(decodeFrame(errorFrame(code))).requiredBytes(ENVELOPE_ERROR_FIELD),
+            )
+            assertThrows(IllegalArgumentException::class.java) {
+                validatedErrorCode(error)
+            }
         }
     }
 
@@ -149,6 +214,63 @@ class ControlFrameVectorTest {
             ),
         ),
     )
+
+    private fun statusFrame(
+        mediaSessionId: ULong,
+        streamId: ULong,
+        state: ULong,
+    ): ByteArray = frame(
+        message(
+            varintField(ENVELOPE_PROTOCOL_VERSION_FIELD, CONTROL_PROTOCOL_VERSION),
+            varintField(ENVELOPE_REQUEST_ID_FIELD, 10u),
+            bytesField(
+                ENVELOPE_STREAM_STATUS_FIELD,
+                message(
+                    varintField(STATUS_MEDIA_SESSION_ID_FIELD, mediaSessionId),
+                    varintField(STATUS_STREAM_ID_FIELD, streamId),
+                    varintField(STATUS_STATE_FIELD, state),
+                    bytesField(STATUS_DETAIL_FIELD, "receiving".encodeToByteArray()),
+                ),
+            ),
+        ),
+    )
+
+    private fun errorFrame(code: ULong): ByteArray = frame(
+        message(
+            varintField(ENVELOPE_PROTOCOL_VERSION_FIELD, CONTROL_PROTOCOL_VERSION),
+            varintField(ENVELOPE_REQUEST_ID_FIELD, 11u),
+            bytesField(
+                ENVELOPE_ERROR_FIELD,
+                message(
+                    varintField(ERROR_CODE_FIELD, code),
+                    varintField(ERROR_RETRYABLE_FIELD, 1u),
+                    bytesField(ERROR_DETAIL_FIELD, "try again".encodeToByteArray()),
+                ),
+            ),
+        ),
+    )
+
+    private fun validatedStreamState(message: DecodedMessage): ULong {
+        require(message.requiredVarint(STATUS_MEDIA_SESSION_ID_FIELD) != 0uL) {
+            "stream status media session ID must be non-zero"
+        }
+        require(message.requiredVarint(STATUS_STREAM_ID_FIELD) != 0uL) {
+            "stream status stream ID must be non-zero"
+        }
+        val state = message.requiredVarint(STATUS_STATE_FIELD)
+        require(state in STREAM_STATE_READY..STREAM_STATE_FAILED) {
+            "stream status state is unspecified or unknown"
+        }
+        return state
+    }
+
+    private fun validatedErrorCode(message: DecodedMessage): ULong {
+        val code = message.requiredVarint(ERROR_CODE_FIELD)
+        require(code in ERROR_CODE_INCOMPATIBLE_VERSION..ERROR_CODE_RETRY_LATER) {
+            "control error code is unspecified or unknown"
+        }
+        return code
+    }
 
     private fun validatedMediaKeyEpoch(
         message: DecodedMessage,
@@ -340,6 +462,8 @@ class ControlFrameVectorTest {
         const val ENVELOPE_HELLO_FIELD = 10
         const val ENVELOPE_START_STREAM_FIELD = 11
         const val ENVELOPE_STOP_STREAM_FIELD = 12
+        const val ENVELOPE_STREAM_STATUS_FIELD = 13
+        const val ENVELOPE_ERROR_FIELD = 14
 
         const val HELLO_SUPPORTED_VERSIONS_FIELD = 1
         const val HELLO_CAPABILITIES_FIELD = 2
@@ -356,8 +480,25 @@ class ControlFrameVectorTest {
         const val STOP_STREAM_ID_FIELD = 2
         const val STOP_MEDIA_KEY_EPOCH_FIELD = 3
 
+        const val STATUS_MEDIA_SESSION_ID_FIELD = 1
+        const val STATUS_STREAM_ID_FIELD = 2
+        const val STATUS_STATE_FIELD = 3
+        const val STATUS_DETAIL_FIELD = 4
+
+        const val ERROR_CODE_FIELD = 1
+        const val ERROR_RETRYABLE_FIELD = 2
+        const val ERROR_DETAIL_FIELD = 3
+
         val CONTROL_PROTOCOL_VERSION = 1uL
         val FRAME_DURATION_20_MS = 2uL
+        val STREAM_STATE_UNSPECIFIED = 0uL
+        val STREAM_STATE_READY = 1uL
+        val STREAM_STATE_STREAMING = 2uL
+        val STREAM_STATE_FAILED = 5uL
+        val ERROR_CODE_UNSPECIFIED = 0uL
+        val ERROR_CODE_INCOMPATIBLE_VERSION = 1uL
+        val ERROR_CODE_RETRY_LATER = 5uL
+        val UNKNOWN_ENUM_VALUE = 99uL
         val MEDIA_KEY_EPOCH = 0x2345uL
         val MAX_MEDIA_KEY_EPOCH = 0xFFFFuL
 
@@ -369,6 +510,12 @@ class ControlFrameVectorTest {
         )
         val EXPECTED_STOP_FRAME = hex(
             "0000000d0801100962070807100918c546",
+        )
+        val EXPECTED_STATUS_FRAME = hex(
+            "000000170801100a6a110807100918022209726563656976696e67",
+        )
+        val EXPECTED_ERROR_FRAME = hex(
+            "000000150801100b720f080510011a0974727920616761696e",
         )
     }
 }

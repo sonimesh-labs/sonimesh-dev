@@ -95,11 +95,12 @@ rejected.
 Unit tests must cover frame byte order, truncated/oversized frames, malformed
 Protobuf, missing payload, version mismatch, capability limits, status/error
 semantics, and idempotent command representation. The published
-[control-frame vector](../protocol/control-frame-vectors.md) fixes the initial
+[control-frame vectors](../protocol/control-frame-vectors.md) fix the initial
 Rust/Kotlin wire encoding. A bounded test-only Kotlin/JVM codec independently
-encodes and decodes the Hello plus epoch-bearing StartStream and StopStream
-vectors and checks length-prefix bounds. The control-frame LibFuzzer target also
-mutates each published command shape in addition to arbitrary input. These host
+encodes and decodes all five Hello, StartStream, StopStream, StreamStatus, and
+ControlError vectors and checks length-prefix and semantic bounds. The
+control-frame LibFuzzer target also mutates every published payload shape in
+addition to arbitrary input. These host
 checks are not evidence for an Android control transport or an authenticated TLS
 session.
 
