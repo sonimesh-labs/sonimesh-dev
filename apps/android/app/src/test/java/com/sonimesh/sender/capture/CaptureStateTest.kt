@@ -276,6 +276,29 @@ class CaptureStateTest {
     }
 
     @Test
+    fun evidence_publish_throttle_rebases_after_a_nonnegative_clock_regression() {
+        val throttle = CaptureEvidencePublishThrottle(minimumIntervalMillis = 500)
+
+        assertTrue(throttle.shouldPublish(nowMillis = 1_000))
+        assertFalse(throttle.shouldPublish(nowMillis = 1_200))
+        assertTrue(throttle.shouldPublish(nowMillis = 999))
+        assertFalse(throttle.shouldPublish(nowMillis = 1_498))
+        assertTrue(throttle.shouldPublish(nowMillis = 1_499))
+    }
+
+    @Test
+    fun evidence_publish_throttle_rejects_a_negative_timestamp() {
+        val throttle = CaptureEvidencePublishThrottle(minimumIntervalMillis = 500)
+
+        try {
+            throttle.shouldPublish(nowMillis = -1)
+            fail("expected a negative evidence publication time to be rejected")
+        } catch (_: IllegalArgumentException) {
+            // Expected: evidence publication uses the local monotonic clock only.
+        }
+    }
+
+    @Test
     fun evidence_publish_throttle_rejects_a_non_positive_interval() {
         try {
             CaptureEvidencePublishThrottle(minimumIntervalMillis = 0)

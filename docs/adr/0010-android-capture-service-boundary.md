@@ -103,7 +103,10 @@ checks and teardown wake-ups are not read errors. Capture start, read
 completion, and snapshot timestamps reject negative values as invalid local
 monotonic-clock readings. A nonnegative snapshot that precedes the recorded
 start is still clamped to zero duration so an ordinary clock regression cannot
-publish a negative interval.
+publish a negative interval. The low-rate evidence publication throttle applies
+the same negative-time rejection; after a nonnegative regression it permits one
+snapshot and rebases its cadence instead of suppressing updates until the old
+timestamp is reached again.
 
 The production Android source set remains capture-only until a later ADR admits
 the next boundary. CI checks the main manifest, production dependency

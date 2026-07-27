@@ -12,10 +12,16 @@ class CaptureEvidencePublishThrottle(
 
     /** Returns whether one evidence snapshot may be published at this monotonic time. */
     fun shouldPublish(nowMillis: Long): Boolean {
+        require(nowMillis >= 0) { "evidence publication time must be monotonic" }
         val previous = lastPublishedAtMillis
-        if (previous != null && nowMillis - previous < minimumIntervalMillis) {
+        if (previous != null
+            && nowMillis >= previous
+            && nowMillis - previous < minimumIntervalMillis
+        ) {
             return false
         }
+        // Rebase after a nonnegative clock regression instead of suppressing
+        // every publication until the previous timestamp is reached again.
         lastPublishedAtMillis = nowMillis
         return true
     }
