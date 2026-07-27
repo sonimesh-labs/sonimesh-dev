@@ -348,9 +348,12 @@ and units instead of calculating a source-specific explanation for silence.
 | Device condition | Battery, thermal, memory, and CPU observation when the scenario requires it; otherwise `not measured` |
 
 For an allowed, idle, silent, or protected/unknown observation, `silentReads`
-and `lastReadCompletionOffsetMillis` describe only completed local reads. A
-nonzero silent count does not identify why a particular source produced silence.
-Likewise, the reported `audioSource` and `channelMask` identify only the
+and `lastReadCompletionOffsetMillis` describe only completed local reads. The UI
+changes to “no capturable audio detected” only after two seconds worth of
+completed silent frames at the observed sample rate; partial non-blocking reads
+do not shorten that frame-duration threshold. A nonzero silent count does not
+identify why a particular source produced silence. Likewise, the reported
+`audioSource` and `channelMask` identify only the
 AudioRecord configuration observed by the device; they do not identify a source
 application or explain a policy-limited capture result.
 Record a negative `AudioRecord.read` result in `readErrors` only when teardown

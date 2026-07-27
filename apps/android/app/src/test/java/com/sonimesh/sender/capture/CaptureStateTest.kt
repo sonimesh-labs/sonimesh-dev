@@ -160,6 +160,20 @@ class CaptureStateTest {
     }
 
     @Test
+    fun evidence_rejects_a_non_positive_completed_frame_count() {
+        val evidence = CaptureEvidence()
+
+        for (frames in listOf(0, -1)) {
+            try {
+                evidence.recordRead(frames = frames, silent = true, completedAtMillis = 1_000)
+                fail("expected a non-positive completed frame count to be rejected")
+            } catch (_: IllegalArgumentException) {
+                // Expected: empty or invalid reads are not capture evidence.
+            }
+        }
+    }
+
+    @Test
     fun evidence_rejects_a_negative_capture_start_time() {
         val evidence = CaptureEvidence()
 
@@ -172,34 +186,68 @@ class CaptureStateTest {
     }
 
     @Test
-    fun signal_monitor_reports_only_one_transition_after_the_silence_limit() {
-        val monitor = CaptureSignalMonitor(silentReadLimit = 3)
+    fun signal_monitor_reports_only_one_transition_after_the_silent_frame_threshold() {
+        val monitor = CaptureSignalMonitor(silentFrameThreshold = 1_440)
 
-        assertNull(monitor.observe(silent = true))
-        assertNull(monitor.observe(silent = true))
-        assertEquals(CaptureSignalTransition.NoCapturableAudio, monitor.observe(silent = true))
-        assertNull(monitor.observe(silent = true))
+        assertNull(monitor.observe(silent = true, frames = 480))
+        assertNull(monitor.observe(silent = true, frames = 240))
+        assertEquals(
+            CaptureSignalTransition.NoCapturableAudio,
+            monitor.observe(silent = true, frames = 800),
+        )
+        assertNull(monitor.observe(silent = true, frames = 960))
+    }
+
+    @Test
+    fun partial_reads_cannot_trigger_no_signal_before_the_frame_threshold() {
+        val monitor = CaptureSignalMonitor(silentFrameThreshold = 960)
+
+        repeat(95) {
+            assertNull(monitor.observe(silent = true, frames = 10))
+        }
+        assertNull(monitor.observe(silent = true, frames = 9))
+        assertEquals(
+            CaptureSignalTransition.NoCapturableAudio,
+            monitor.observe(silent = true, frames = 1),
+        )
     }
 
     @Test
     fun signal_monitor_reports_recovery_once_after_non_silent_audio_returns() {
-        val monitor = CaptureSignalMonitor(silentReadLimit = 2)
+        val monitor = CaptureSignalMonitor(silentFrameThreshold = 960)
 
-        monitor.observe(silent = true)
-        assertEquals(CaptureSignalTransition.NoCapturableAudio, monitor.observe(silent = true))
-        assertEquals(CaptureSignalTransition.SignalDetected, monitor.observe(silent = false))
-        assertNull(monitor.observe(silent = false))
-        assertNull(monitor.observe(silent = true))
-        assertEquals(CaptureSignalTransition.NoCapturableAudio, monitor.observe(silent = true))
+        monitor.observe(silent = true, frames = 480)
+        assertEquals(
+            CaptureSignalTransition.NoCapturableAudio,
+            monitor.observe(silent = true, frames = 480),
+        )
+        assertEquals(
+            CaptureSignalTransition.SignalDetected,
+            monitor.observe(silent = false, frames = 120),
+        )
+        assertNull(monitor.observe(silent = false, frames = 480))
+        assertNull(monitor.observe(silent = true, frames = 959))
+        assertEquals(
+            CaptureSignalTransition.NoCapturableAudio,
+            monitor.observe(silent = true, frames = 1),
+        )
     }
 
     @Test
-    fun signal_monitor_rejects_a_non_positive_silence_threshold() {
+    fun signal_monitor_rejects_invalid_thresholds_and_empty_reads() {
         try {
-            CaptureSignalMonitor(silentReadLimit = 0)
+            CaptureSignalMonitor(silentFrameThreshold = 0)
             fail("expected an invalid silence threshold to be rejected")
         } catch (_: IllegalArgumentException) {
-            // Expected: a zero threshold would publish a state without a read.
+            // Expected: a zero threshold would publish a state without a frame.
+        }
+
+        val monitor = CaptureSignalMonitor(silentFrameThreshold = 960)
+        try {
+            monitor.observe(silent = true, frames = 0)
+            fail("expected an empty completed read to be rejected")
+        } catch (_: IllegalArgumentException) {
+            // Expected: zero-length non-blocking reads are filtered by the service.
         }
     }
 

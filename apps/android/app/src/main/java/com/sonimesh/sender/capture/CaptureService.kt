@@ -190,7 +190,9 @@ class CaptureService : Service() {
 
     private fun readCaptureLoop(record: AudioRecord, format: CaptureFormat) {
         val buffer = ShortArray(MAX_READ_SAMPLES)
-        val signalMonitor = CaptureSignalMonitor(SILENT_READ_LIMIT)
+        val signalMonitor = CaptureSignalMonitor(
+            silentFrameThreshold = format.sampleRateHz.toLong() * NO_SIGNAL_DURATION_MS / 1_000,
+        )
         val evidenceThrottle = CaptureEvidencePublishThrottle(
             CAPTURE_EVIDENCE_PUBLISH_INTERVAL_MS,
         )
@@ -271,8 +273,12 @@ class CaptureService : Service() {
                     }
                     index++
                 }
+                val framesRead = read / format.channels
+                if (framesRead == 0) {
+                    continue
+                }
                 CaptureStateStore.evidence.recordRead(
-                    frames = read / format.channels,
+                    frames = framesRead,
                     silent = silent,
                     completedAtMillis = readCompletedAtMillis,
                 )
@@ -283,7 +289,7 @@ class CaptureService : Service() {
                         }
                     }
                 }
-                when (signalMonitor.observe(silent)) {
+                when (signalMonitor.observe(silent, framesRead)) {
                     CaptureSignalTransition.NoCapturableAudio -> {
                         mainHandler.post {
                             if (!teardownGate.isTeardownStarted()) {
@@ -416,7 +422,7 @@ class CaptureService : Service() {
         private const val NOTIFICATION_CHANNEL_ID = "sonimesh-capture"
         private const val NOTIFICATION_ID = 1001
         private const val STOP_REQUEST_CODE = 1002
-        private const val SILENT_READ_LIMIT = 100
+        private const val NO_SIGNAL_DURATION_MS = 2_000L
         private const val CAPTURE_POLL_INTERVAL_MS = 5L
         private const val CAPTURE_EVIDENCE_PUBLISH_INTERVAL_MS = 500L
         private const val REQUESTED_SAMPLE_RATE_HZ = 48_000

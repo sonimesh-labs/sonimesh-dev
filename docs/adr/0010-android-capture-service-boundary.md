@@ -71,7 +71,10 @@ only bounded result/error codes.
 The first Android implementation is capture-only: it records actual platform
 behavior and may report “no capturable audio detected” with possible causes. It
 does not claim source-specific capture denial, pair devices, send a production
-audio stream, or make a latency promise.
+audio stream, or make a latency promise. The no-audio transition requires two
+seconds worth of completed silent PCM frames at the observed sample rate. It is
+not based on read-call count because non-blocking `AudioRecord` reads may be
+partial; any completed non-silent read resets the silent-frame interval.
 
 The production Android source set remains capture-only until a later ADR admits
 the next boundary. CI checks the main manifest, production dependency

@@ -15,6 +15,7 @@ class CaptureEvidence {
 
     /** Records one successful read and its local monotonic completion time. */
     fun recordRead(frames: Int, silent: Boolean, completedAtMillis: Long) {
+        require(frames > 0) { "completed read must contain at least one frame" }
         require(completedAtMillis >= 0) { "read completion time must be monotonic" }
         capturedFrames.addAndGet(frames.toLong())
         if (silent) silentReads.incrementAndGet()
