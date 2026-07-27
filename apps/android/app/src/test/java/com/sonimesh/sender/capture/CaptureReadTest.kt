@@ -35,6 +35,24 @@ class CaptureReadTest {
     }
 
     @Test
+    fun completed_frames_require_bounded_channel_aligned_samples() {
+        assertEquals(480, completedCaptureFrames(960, 1_920, 2))
+        assertEquals(960, completedCaptureFrames(1_920, 1_920, 2))
+
+        for ((samplesRead, requestedSamples, channels) in listOf(
+            Triple(-1, 1_920, 2),
+            Triple(0, 1_920, 2),
+            Triple(1, 1_920, 2),
+            Triple(1_921, 1_920, 2),
+            Triple(960, 0, 2),
+            Triple(960, 1_919, 2),
+            Triple(960, 1_920, 0),
+        )) {
+            assertEquals(null, completedCaptureFrames(samplesRead, requestedSamples, channels))
+        }
+    }
+
+    @Test
     fun teardown_wakeup_is_rethrown_without_counting_a_read_error() {
         val evidence = CaptureEvidence()
         val failure = IllegalStateException("record stopped for teardown")

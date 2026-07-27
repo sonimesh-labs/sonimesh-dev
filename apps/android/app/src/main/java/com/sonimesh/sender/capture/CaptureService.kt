@@ -281,6 +281,21 @@ class CaptureService : Service() {
                     return
                 }
 
+                val framesRead = completedCaptureFrames(
+                    samplesRead = read,
+                    requestedSamples = format.readSamples,
+                    channels = format.channels,
+                )
+                if (framesRead == null) {
+                    CaptureStateStore.evidence.recordReadError()
+                    mainHandler.post {
+                        if (!teardownGate.isTeardownStarted()) {
+                            teardown(TerminalOutcome.Failed("AudioRecord returned an invalid read size"))
+                        }
+                    }
+                    return
+                }
+
                 var silent = true
                 var index = 0
                 while (index < read) {
@@ -289,10 +304,6 @@ class CaptureService : Service() {
                         break
                     }
                     index++
-                }
-                val framesRead = read / format.channels
-                if (framesRead == 0) {
-                    continue
                 }
                 CaptureStateStore.evidence.recordRead(
                     frames = framesRead,

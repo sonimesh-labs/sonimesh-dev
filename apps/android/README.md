@@ -5,7 +5,8 @@ phase 0A. It is a feasibility prototype, not a sender release: it requests
 MediaProjection consent, starts a media-projection foreground service, creates a
 bounded `AudioRecord`, and discards PCM after recording low-rate total-frame,
 silent-frame, read-error, and timing evidence counters. Non-teardown negative
-read results and exceptions thrown by the read call are both counted. It does not
+read results, thrown read exceptions, and invalid positive read sizes are
+counted before any out-of-request sample access. It does not
 encode, pair, protect, transmit, or persist audio.
 
 The service and native ownership boundary is recorded in [ADR 0010](../../docs/adr/0010-android-capture-service-boundary.md).

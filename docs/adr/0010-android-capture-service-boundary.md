@@ -96,8 +96,10 @@ not based on read-call count because non-blocking `AudioRecord` reads may be
 partial; any completed non-silent read resets the silent-frame interval. Every
 non-teardown `AudioRecord.read` failure increments the bounded `readErrors`
 evidence counter whether Android reports a negative error code or throws a
-read-call exception. Pre-read permission checks and teardown wake-ups are not
-read errors.
+read-call exception. Every positive result is rejected before sample access unless
+it is within the fixed request and exactly channel-aligned; a contract violation
+counts as a read error and ends that capture generation. Pre-read permission
+checks and teardown wake-ups are not read errors.
 
 The production Android source set remains capture-only until a later ADR admits
 the next boundary. CI checks the main manifest, production dependency

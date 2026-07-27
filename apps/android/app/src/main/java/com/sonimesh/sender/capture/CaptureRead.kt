@@ -15,3 +15,18 @@ internal inline fun readCaptureSamples(
         throw error
     }
 }
+
+/** Returns completed frames only for one bounded, channel-aligned positive read. */
+internal fun completedCaptureFrames(
+    samplesRead: Int,
+    requestedSamples: Int,
+    channels: Int,
+): Int? {
+    if (requestedSamples <= 0 || channels <= 0 || requestedSamples % channels != 0) {
+        return null
+    }
+    if (samplesRead !in 1..requestedSamples || samplesRead % channels != 0) {
+        return null
+    }
+    return samplesRead / channels
+}
