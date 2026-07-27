@@ -29,6 +29,7 @@ class CaptureEvidence {
         }
     }
 
+    /** Records one non-teardown AudioRecord read failure. */
     fun recordReadError() {
         readErrors.incrementAndGet()
     }

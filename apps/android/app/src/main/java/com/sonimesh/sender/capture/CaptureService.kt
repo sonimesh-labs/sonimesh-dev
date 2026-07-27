@@ -213,21 +213,26 @@ class CaptureService : Service() {
 
                 val read = try {
                     // Non-blocking reads keep teardown independent of platform read wake-up behavior.
-                    record.read(buffer, 0, format.readSamples, AudioRecord.READ_NON_BLOCKING)
-                } catch (error: IllegalStateException) {
-                    if (!teardownGate.isTeardownStarted()) {
-                        mainHandler.post {
-                            if (!teardownGate.isTeardownStarted()) {
-                                teardown(TerminalOutcome.Failed("AudioRecord read failed"))
-                            }
-                        }
+                    readCaptureSamples(
+                        evidence = CaptureStateStore.evidence,
+                        shouldRecordFailure = { !teardownGate.isTeardownStarted() },
+                    ) {
+                        record.read(buffer, 0, format.readSamples, AudioRecord.READ_NON_BLOCKING)
                     }
-                    return
                 } catch (error: SecurityException) {
                     if (!teardownGate.isTeardownStarted()) {
                         mainHandler.post {
                             if (!teardownGate.isTeardownStarted()) {
                                 teardown(TerminalOutcome.Failed("Microphone permission was revoked"))
+                            }
+                        }
+                    }
+                    return
+                } catch (error: RuntimeException) {
+                    if (!teardownGate.isTeardownStarted()) {
+                        mainHandler.post {
+                            if (!teardownGate.isTeardownStarted()) {
+                                teardown(TerminalOutcome.Failed("AudioRecord read failed"))
                             }
                         }
                     }

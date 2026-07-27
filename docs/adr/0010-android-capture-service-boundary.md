@@ -83,7 +83,11 @@ does not claim source-specific capture denial, pair devices, send a production
 audio stream, or make a latency promise. The no-audio transition requires two
 seconds worth of completed silent PCM frames at the observed sample rate. It is
 not based on read-call count because non-blocking `AudioRecord` reads may be
-partial; any completed non-silent read resets the silent-frame interval.
+partial; any completed non-silent read resets the silent-frame interval. Every
+non-teardown `AudioRecord.read` failure increments the bounded `readErrors`
+evidence counter whether Android reports a negative error code or throws a
+read-call exception. Pre-read permission checks and teardown wake-ups are not
+read errors.
 
 The production Android source set remains capture-only until a later ADR admits
 the next boundary. CI checks the main manifest, production dependency
@@ -137,9 +141,10 @@ observable symptom, not evidence about a particular source application.
 
 Host JVM tests exercise reader-start rollback, rejection of a reader after
 teardown admission, duplicate-reader rejection, concurrent launch/teardown
-ordering, outcome-publication ordering, exactly-once finish claims, and
-best-effort continuation after a cleanup step fails. These tests validate only
-the pure coordination helpers; they do not establish
+ordering, outcome-publication ordering, exactly-once finish claims,
+read-call exception accounting, and best-effort continuation after a cleanup
+step fails. These tests validate only the pure coordination helpers; they do not
+establish
 Android service, AudioRecord, or MediaProjection lifecycle behavior on a device.
 
 - capture-only runs on the reference Android 12-17 matrix, recording actual

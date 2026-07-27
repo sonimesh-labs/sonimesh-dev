@@ -122,8 +122,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
 - a capture-only Kotlin/Compose Android phase 0A bootstrap with direct,
   non-persisted MediaProjection consent transfer, a media-projection foreground
   service, a fixed PCM16 AudioRecord read buffer, low-rate state publication,
-  bounded evidence counters including silent frames and local read-completion
-  offsets, a frame-duration-based no-signal transition stable across partial reads,
+  bounded evidence counters for silent frames, local read-completion offsets,
+  and every non-teardown negative or thrown AudioRecord read failure; a
+  frame-duration-based no-signal transition stable across partial reads;
   and an atomic idempotent teardown gate that transactionally admits reader
   startup, publishes terminal-outcome readiness, permits one final cleanup
   claimant only after reader exit, and continues bounded retirement after an
