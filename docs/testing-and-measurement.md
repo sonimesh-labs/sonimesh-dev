@@ -163,7 +163,8 @@ Before MVP release:
   read-error accounting for negative return codes, thrown read-call exceptions,
   and invalid positive sizes before sample access; rejection of negative capture
   evidence timestamps while nonnegative snapshot regressions clamp duration to
-  zero and rebase the low-rate publication cadence; injected ordinary exceptions
+  zero and rebase the low-rate publication cadence; sequential and concurrent
+  evidence-counter saturation without signed wraparound; injected ordinary exceptions
   in each final cleanup step; and
   exact bounded ordinary-failure counts with no exception text; and deferred
   propagation of fatal cleanup errors;

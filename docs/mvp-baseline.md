@@ -123,7 +123,7 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   non-persisted MediaProjection consent transfer, a media-projection foreground
   service, a fixed PCM16 AudioRecord read buffer, low-rate state publication
   that rebases after a nonnegative clock regression, bounded evidence counters
-  for silent frames, validated local monotonic
+  that saturate at the signed 64-bit maximum, validated local monotonic
   timestamps and read-completion offsets, every non-teardown negative or thrown
   AudioRecord read failure, and fail-closed
   validation of positive read bounds and channel alignment; a

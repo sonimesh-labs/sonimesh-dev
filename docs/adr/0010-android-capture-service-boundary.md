@@ -106,7 +106,9 @@ start is still clamped to zero duration so an ordinary clock regression cannot
 publish a negative interval. The low-rate evidence publication throttle applies
 the same negative-time rejection; after a nonnegative regression it permits one
 snapshot and rebases its cadence instead of suppressing updates until the old
-timestamp is reached again.
+timestamp is reached again. Cumulative frame, silent-read, and read-error
+counters use nonnegative atomic 64-bit storage and saturate at `Long.MAX_VALUE`
+instead of wrapping negative.
 
 The production Android source set remains capture-only until a later ADR admits
 the next boundary. CI checks the main manifest, production dependency
@@ -134,7 +136,8 @@ fields appropriate to the run. It mirrors the capture format's bounded 20 ms
 read calculation and validates counter/offset monotonicity. Schema version 2
 also records completed silent frames separately from silent read calls and
 checks that silent frames never exceed total captured frames; version 1 remains
-accepted for older operator records. The validator does not derive a sample
+accepted for older operator records. All snapshot integers must also fit the
+Android signed 64-bit representation. The validator does not derive a sample
 cadence, capture policy, source identity, or latency result.
 Any recorded terminal teardown state requires absent notification, service, and
 projection observations, matching the service's one teardown path.

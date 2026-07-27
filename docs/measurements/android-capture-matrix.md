@@ -357,7 +357,8 @@ and units instead of calculating a source-specific explanation for silence.
 
 For an allowed, idle, silent, or protected/unknown observation,
 `silentFrames`, `silentReads`, and `lastReadCompletionOffsetMillis` describe only
-completed local reads. The UI
+completed local reads. Snapshot integers must fit Android signed 64-bit storage;
+cumulative counters saturate at that maximum instead of wrapping negative. The UI
 changes to “no capturable audio detected” only after two seconds worth of
 completed silent frames at the observed sample rate; partial non-blocking reads
 do not shorten that frame-duration threshold. A nonzero silent count does not

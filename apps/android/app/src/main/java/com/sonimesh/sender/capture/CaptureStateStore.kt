@@ -9,19 +9,19 @@ import kotlinx.coroutines.flow.asStateFlow
 class CaptureEvidence {
     private val captureStartedAtMillis = AtomicLong(NO_CAPTURE_START)
     private val lastReadCompletedAtMillis = AtomicLong(NO_READ_COMPLETION)
-    private val capturedFrames = AtomicLong()
-    private val silentFrames = AtomicLong()
-    private val silentReads = AtomicLong()
-    private val readErrors = AtomicLong()
+    private val capturedFrames = SaturatingAtomicCounter()
+    private val silentFrames = SaturatingAtomicCounter()
+    private val silentReads = SaturatingAtomicCounter()
+    private val readErrors = SaturatingAtomicCounter()
 
     /** Records one successful read and its local monotonic completion time. */
     fun recordRead(frames: Int, silent: Boolean, completedAtMillis: Long) {
         require(frames > 0) { "completed read must contain at least one frame" }
         require(completedAtMillis >= 0) { "read completion time must be monotonic" }
-        capturedFrames.addAndGet(frames.toLong())
+        capturedFrames.add(frames)
         if (silent) {
-            silentFrames.addAndGet(frames.toLong())
-            silentReads.incrementAndGet()
+            silentFrames.add(frames)
+            silentReads.increment()
         }
         val startedAtMillis = captureStartedAtMillis.get()
         if (startedAtMillis != NO_CAPTURE_START && completedAtMillis >= startedAtMillis) {
@@ -31,7 +31,7 @@ class CaptureEvidence {
 
     /** Records one non-teardown AudioRecord read failure. */
     fun recordReadError() {
-        readErrors.incrementAndGet()
+        readErrors.increment()
     }
 
     /** Starts a fresh evidence interval at the supplied monotonic timestamp. */
@@ -44,10 +44,10 @@ class CaptureEvidence {
     fun reset() {
         captureStartedAtMillis.set(NO_CAPTURE_START)
         lastReadCompletedAtMillis.set(NO_READ_COMPLETION)
-        capturedFrames.set(0)
-        silentFrames.set(0)
-        silentReads.set(0)
-        readErrors.set(0)
+        capturedFrames.reset()
+        silentFrames.reset()
+        silentReads.reset()
+        readErrors.reset()
     }
 
     /** Returns a low-rate summary at the supplied monotonic timestamp. */

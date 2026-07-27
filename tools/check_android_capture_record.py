@@ -45,6 +45,7 @@ MAX_CAPTURE_BUFFER_BYTES = 64 * 1024
 CAPTURE_READ_DURATION_MS = 20
 CURRENT_SCHEMA_VERSION = 2
 SUPPORTED_SCHEMA_VERSIONS = frozenset({1, CURRENT_SCHEMA_VERSION})
+MAX_SIGNED_64 = (1 << 63) - 1
 
 
 def require_object(value: Any, label: str, keys: set[str]) -> dict[str, Any]:
@@ -65,6 +66,13 @@ def require_nonnegative_int(value: Any, label: str) -> int:
     return value
 
 
+def require_nonnegative_long(value: Any, label: str) -> int:
+    value = require_nonnegative_int(value, label)
+    if value > MAX_SIGNED_64:
+        raise ValueError(f"{label} must fit a signed 64-bit integer")
+    return value
+
+
 def validate_snapshot(
     value: Any, label: str, schema_version: int
 ) -> dict[str, int | None]:
@@ -78,14 +86,14 @@ def validate_snapshot(
     if schema_version >= 2:
         keys.add("silent_frames")
     snapshot = require_object(value, label, keys)
-    capture_duration_ms = require_nonnegative_int(
+    capture_duration_ms = require_nonnegative_long(
         snapshot["capture_duration_ms"], f"{label}.capture_duration_ms"
     )
-    captured_frames = require_nonnegative_int(
+    captured_frames = require_nonnegative_long(
         snapshot["captured_frames"], f"{label}.captured_frames"
     )
-    silent_reads = require_nonnegative_int(snapshot["silent_reads"], f"{label}.silent_reads")
-    read_errors = require_nonnegative_int(snapshot["read_errors"], f"{label}.read_errors")
+    silent_reads = require_nonnegative_long(snapshot["silent_reads"], f"{label}.silent_reads")
+    read_errors = require_nonnegative_long(snapshot["read_errors"], f"{label}.read_errors")
     validated: dict[str, int | None] = {
         "capture_duration_ms": capture_duration_ms,
         "captured_frames": captured_frames,
@@ -94,7 +102,7 @@ def validate_snapshot(
         "read_errors": read_errors,
     }
     if schema_version >= 2:
-        silent_frames = require_nonnegative_int(
+        silent_frames = require_nonnegative_long(
             snapshot["silent_frames"], f"{label}.silent_frames"
         )
         if silent_frames > captured_frames:
@@ -105,7 +113,7 @@ def validate_snapshot(
 
     offset = snapshot["last_read_completion_offset_ms"]
     if offset is not None:
-        offset = require_nonnegative_int(offset, f"{label}.last_read_completion_offset_ms")
+        offset = require_nonnegative_long(offset, f"{label}.last_read_completion_offset_ms")
         if offset > capture_duration_ms:
             raise ValueError(f"{label} read completion offset exceeds capture duration")
     elif captured_frames != 0:
@@ -338,6 +346,17 @@ class AndroidCaptureRecordTests(unittest.TestCase):
         record["final_snapshot"]["silent_frames"] = 100
         with self.assertRaisesRegex(ValueError, "silent_frames regressed"):
             validate_record(record)
+
+    def test_rejects_snapshot_values_larger_than_android_long(self) -> None:
+        record = active_record()
+        record["final_snapshot"]["captured_frames"] = MAX_SIGNED_64 + 1
+        with self.assertRaisesRegex(ValueError, "must fit a signed 64-bit integer"):
+            validate_record(record)
+
+        record = active_record()
+        record["final_snapshot"]["capture_duration_ms"] = MAX_SIGNED_64
+        record["final_snapshot"]["last_read_completion_offset_ms"] = MAX_SIGNED_64
+        validate_record(record)
 
     def test_rejects_counter_regression_and_unredacted_schema_extension(self) -> None:
         record = active_record()
