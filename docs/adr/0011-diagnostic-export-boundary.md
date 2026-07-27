@@ -16,7 +16,8 @@ stable identifiers.
 Exports are explicit user actions owned by the desktop control domain. Before
 writing a bounded, versioned bundle, that owner snapshots only approved
 low-rate values: software version, redacted endpoint family/port, platform
-format, selected buffer policy, session phase, and stream counter snapshots.
+format, selected buffer policy, session phase, and stream counter snapshots,
+including distinct underflow and callback refill-budget exhaustion counts.
 
 Each cumulative `u64` counter uses relaxed lock-free updates and saturates at
 `u64::MAX` instead of wrapping to a smaller value. When stream snapshots cross

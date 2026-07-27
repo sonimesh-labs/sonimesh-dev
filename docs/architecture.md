@@ -481,7 +481,8 @@ Per-stream diagnostics should include:
 - current/target/min/max jitter and PCM ring levels;
 - PLC/FEC use and decode errors;
 - resampling ratio/ppm;
-- underflow, overflow, reset, jitter-resync discarded-frame, and reconnection counts;
+- underflow, callback refill-limit, overflow, reset, jitter-resync discarded-frame,
+  and reconnection counts;
 - playout-delay estimate and its component breakdown.
 
 Realtime code updates counters only. Structured logs are emitted by non-realtime

@@ -49,6 +49,7 @@ impl<const SAMPLES_PER_BLOCK: usize> RenderSource for PcmRenderSource<SAMPLES_PE
         while written < output.len() {
             if self.scratch_offset == self.scratch_len {
                 if refills == MAX_PCM_QUEUE_BLOCKS {
+                    self.counters.pcm_refill_limit_hit();
                     break;
                 }
                 refills += 1;

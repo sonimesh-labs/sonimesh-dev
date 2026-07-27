@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use sonimesh_app::PcmRenderSource;
-use sonimesh_audio::realtime_pcm_queue;
+use sonimesh_audio::{MAX_PCM_QUEUE_BLOCKS, realtime_pcm_queue};
 use sonimesh_diagnostics::StreamCounters;
 use sonimesh_platform::RenderSource;
 
@@ -50,6 +50,29 @@ fn empty_blocks_cannot_make_the_callback_loop_unbounded() {
 
     assert!(output.iter().all(|sample| sample.abs() < f32::EPSILON));
     assert_eq!(counters.snapshot().pcm_underflows, 1);
+}
+
+#[test]
+fn refill_limit_emits_silence_and_records_a_distinct_callback_event() {
+    let (mut producer, consumer) = realtime_pcm_queue::<1>(MAX_PCM_QUEUE_BLOCKS).unwrap();
+    for _ in 0..MAX_PCM_QUEUE_BLOCKS {
+        producer.push(&[1.0]);
+    }
+    let counters = Arc::new(StreamCounters::default());
+    let mut source = PcmRenderSource::new(consumer, Arc::clone(&counters));
+    let mut output = [f32::NAN; MAX_PCM_QUEUE_BLOCKS + 1];
+
+    source.render(&mut output);
+
+    assert!(
+        output[..MAX_PCM_QUEUE_BLOCKS]
+            .iter()
+            .all(|sample| (*sample - 1.0).abs() < f32::EPSILON)
+    );
+    assert!(output[MAX_PCM_QUEUE_BLOCKS].abs() < f32::EPSILON);
+    let snapshot = counters.snapshot();
+    assert_eq!(snapshot.pcm_refill_limit_hits, 1);
+    assert_eq!(snapshot.pcm_underflows, 0);
 }
 
 #[test]

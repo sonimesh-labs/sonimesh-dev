@@ -12,6 +12,7 @@ pub struct StreamCounters {
     plc_frames: AtomicU64,
     decode_errors: AtomicU64,
     pcm_underflows: AtomicU64,
+    pcm_refill_limit_hits: AtomicU64,
     pcm_overflows: AtomicU64,
     pcm_discontinuities: AtomicU64,
     queued_pcm_state: AtomicU32,
@@ -66,6 +67,11 @@ impl StreamCounters {
     /// Records output silence caused by an empty PCM ring.
     pub fn pcm_underflow(&self) {
         saturating_increment(&self.pcm_underflows);
+    }
+
+    /// Records one callback that exhausted its bounded PCM refill budget.
+    pub fn pcm_refill_limit_hit(&self) {
+        saturating_increment(&self.pcm_refill_limit_hits);
     }
 
     /// Records a bounded oldest-region drop in the PCM ring.
@@ -142,6 +148,7 @@ impl StreamCounters {
             plc_frames: self.plc_frames.load(Ordering::Relaxed),
             decode_errors: self.decode_errors.load(Ordering::Relaxed),
             pcm_underflows: self.pcm_underflows.load(Ordering::Relaxed),
+            pcm_refill_limit_hits: self.pcm_refill_limit_hits.load(Ordering::Relaxed),
             pcm_overflows: self.pcm_overflows.load(Ordering::Relaxed),
             pcm_discontinuities: self.pcm_discontinuities.load(Ordering::Relaxed),
             queued_pcm_blocks,
@@ -176,6 +183,8 @@ pub struct StreamMetricsSnapshot {
     pub decode_errors: u64,
     /// Output callbacks that emitted bounded silence.
     pub pcm_underflows: u64,
+    /// Output callbacks that exhausted the bounded PCM refill budget.
+    pub pcm_refill_limit_hits: u64,
     /// Bounded oldest-region PCM drops.
     pub pcm_overflows: u64,
     /// Sequence or epoch gaps observed by the PCM render source.
@@ -279,6 +288,7 @@ mod tests {
         counters.plc_frame();
         counters.decode_error();
         counters.pcm_underflow();
+        counters.pcm_refill_limit_hit();
         counters.pcm_discontinuity();
         counters.set_queued_pcm_blocks(4);
         counters.set_queued_pcm_blocks(2);
@@ -293,6 +303,7 @@ mod tests {
         assert_eq!(snapshot.plc_frames, 1);
         assert_eq!(snapshot.decode_errors, 1);
         assert_eq!(snapshot.pcm_underflows, 1);
+        assert_eq!(snapshot.pcm_refill_limit_hits, 1);
         assert_eq!(snapshot.pcm_discontinuities, 1);
         assert_eq!(snapshot.queued_pcm_blocks, 2);
         assert_eq!(snapshot.queued_pcm_high_water_blocks, 4);
@@ -329,6 +340,7 @@ mod tests {
             &counters.plc_frames,
             &counters.decode_errors,
             &counters.pcm_underflows,
+            &counters.pcm_refill_limit_hits,
             &counters.pcm_overflows,
             &counters.pcm_discontinuities,
             &counters.stream_resets,
@@ -354,6 +366,8 @@ mod tests {
         counters.decode_error();
         counters.pcm_underflow();
         counters.pcm_underflow();
+        counters.pcm_refill_limit_hit();
+        counters.pcm_refill_limit_hit();
         counters.pcm_overflow();
         counters.pcm_overflow();
         counters.pcm_discontinuity();
@@ -375,6 +389,7 @@ mod tests {
                 plc_frames: u64::MAX,
                 decode_errors: u64::MAX,
                 pcm_underflows: u64::MAX,
+                pcm_refill_limit_hits: u64::MAX,
                 pcm_overflows: u64::MAX,
                 pcm_discontinuities: u64::MAX,
                 stream_resets: u64::MAX,

@@ -28,8 +28,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
 - a control-domain atomic ppm handle for bounded drift adjustments; hard
   resynchronization remains owned by the stream lifecycle controller;
 - a bounded queue-backed realtime render source that preserves partial PCM
-  blocks, initializes callback underflow to silence, caps refill attempts, and
-  fades in after queue discontinuities;
+  blocks, initializes callback underflow to silence, records refill-budget
+  exhaustion separately, caps refill attempts, and fades in after queue
+  discontinuities;
 - an app-domain receiver PCM endpoint factory that creates a fresh bounded queue
   pair and format-adapted render source together for output recovery; the
   receiver pipeline can install the paired producer without resetting ingress.
@@ -160,7 +161,7 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
 | Encoded frame | Compile-time capacity per stream | Reject oversized frame copy |
 | Local PCM ring | Compile-time blocks and samples | Drop oldest block; output silence when empty |
 | Cross-thread PCM queue | 1–128 inline blocks | Atomically replace oldest; report sequence gap |
-| Realtime render refills | 128 block pops per callback | Stop refilling and emit silence after the bound |
+| Realtime render refills | 128 block pops per callback | Stop refilling, emit silence, and count one limit hit |
 | Output sample rate | 8–192 kHz | Reject outside platform-neutral bound |
 | Output channels | 1–8 | Reject zero or excessive layouts |
 | Requested callback | default or 16–8192 frames | Fixed request may be unsupported |
