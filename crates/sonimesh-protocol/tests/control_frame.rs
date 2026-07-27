@@ -74,6 +74,27 @@ fn matches_published_epoch_bearing_start_vector() {
 }
 
 #[test]
+fn matches_published_epoch_bearing_stop_vector() {
+    let envelope = Envelope {
+        protocol_version: CONTROL_PROTOCOL_VERSION,
+        request_id: 9,
+        payload: Some(envelope::Payload::StopStream(StopStream {
+            media_session_id: 7,
+            stream_id: 9,
+            media_key_epoch: 0x2345,
+        })),
+    };
+
+    assert_eq!(
+        encode_control_frame(&envelope).unwrap(),
+        [
+            0x00, 0x00, 0x00, 0x0D, 0x08, 0x01, 0x10, 0x09, 0x62, 0x07, 0x08, 0x07, 0x10, 0x09,
+            0x18, 0xC5, 0x46,
+        ]
+    );
+}
+
+#[test]
 fn round_trips_stream_commands_with_the_exact_key_epoch() {
     let start = Envelope {
         protocol_version: CONTROL_PROTOCOL_VERSION,

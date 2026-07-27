@@ -47,10 +47,28 @@ as a command.
 `65535`. Start and Stop commands bind this exact epoch to the media session and
 stream identity; see [ADR 0006](../adr/0006-media-key-epoch-control.md).
 
+## Epoch-bearing StopStream
+
+| Field | Value |
+| --- | --- |
+| Protocol version | `1` |
+| Request ID | `9` |
+| Media session ID | `7` |
+| Stream ID | `9` |
+| Media key epoch | `0x2345` (`9029`) |
+
+```text
+0000000d0801100962070807100918c546
+```
+
+`0000000d` declares the 13-byte Protobuf payload. The exact session, stream, and
+epoch tuple prevents a delayed stop from targeting a newer stream generation.
+
 ## Cross-language verification
 
-Rust protocol tests and the Android host-JVM `ControlFrameVectorTest` independently
-encode both published frames and decode their semantic fields. The Kotlin test
+Rust protocol tests and the Android host-JVM `ControlFrameVectorTest`
+independently encode all three published frames and decode their semantic fields.
+The Kotlin test
 also rejects truncated, mismatched, and oversized length prefixes and rejects a
 `media_key_epoch` above `65535`.
 

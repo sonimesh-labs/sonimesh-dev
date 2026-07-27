@@ -65,6 +65,21 @@ class ControlFrameVectorTest {
     }
 
     @Test
+    fun epochBearingStopMatchesPublishedFrameAndDecodesExactIdentity() {
+        val encoded = stopFrame(MEDIA_KEY_EPOCH)
+
+        assertArrayEquals(EXPECTED_STOP_FRAME, encoded)
+
+        val envelope = decodeMessage(decodeFrame(EXPECTED_STOP_FRAME))
+        assertEquals(CONTROL_PROTOCOL_VERSION, envelope.requiredVarint(ENVELOPE_PROTOCOL_VERSION_FIELD))
+        assertEquals(9uL, envelope.requiredVarint(ENVELOPE_REQUEST_ID_FIELD))
+        val stop = decodeMessage(envelope.requiredBytes(ENVELOPE_STOP_STREAM_FIELD))
+        assertEquals(7uL, stop.requiredVarint(STOP_MEDIA_SESSION_ID_FIELD))
+        assertEquals(9uL, stop.requiredVarint(STOP_STREAM_ID_FIELD))
+        assertEquals(MEDIA_KEY_EPOCH, validatedMediaKeyEpoch(stop, STOP_MEDIA_KEY_EPOCH_FIELD))
+    }
+
+    @Test
     fun decoderRejectsInvalidFrameAndEpochBounds() {
         assertThrows(IllegalArgumentException::class.java) {
             decodeFrame(byteArrayOf(0, 0, 0))
@@ -92,6 +107,14 @@ class ControlFrameVectorTest {
         assertThrows(IllegalArgumentException::class.java) {
             validatedMediaKeyEpoch(oversizedEpoch)
         }
+
+        val oversizedStopEpoch = decodeMessage(
+            decodeMessage(decodeFrame(stopFrame(MAX_MEDIA_KEY_EPOCH + 1u)))
+                .requiredBytes(ENVELOPE_STOP_STREAM_FIELD),
+        )
+        assertThrows(IllegalArgumentException::class.java) {
+            validatedMediaKeyEpoch(oversizedStopEpoch, STOP_MEDIA_KEY_EPOCH_FIELD)
+        }
     }
 
     private fun startFrame(epoch: ULong): ByteArray = frame(
@@ -112,8 +135,26 @@ class ControlFrameVectorTest {
         ),
     )
 
-    private fun validatedMediaKeyEpoch(start: DecodedMessage): ULong {
-        val epoch = start.requiredVarint(START_MEDIA_KEY_EPOCH_FIELD)
+    private fun stopFrame(epoch: ULong): ByteArray = frame(
+        message(
+            varintField(ENVELOPE_PROTOCOL_VERSION_FIELD, CONTROL_PROTOCOL_VERSION),
+            varintField(ENVELOPE_REQUEST_ID_FIELD, 9u),
+            bytesField(
+                ENVELOPE_STOP_STREAM_FIELD,
+                message(
+                    varintField(STOP_MEDIA_SESSION_ID_FIELD, 7u),
+                    varintField(STOP_STREAM_ID_FIELD, 9u),
+                    varintField(STOP_MEDIA_KEY_EPOCH_FIELD, epoch),
+                ),
+            ),
+        ),
+    )
+
+    private fun validatedMediaKeyEpoch(
+        message: DecodedMessage,
+        fieldNumber: Int = START_MEDIA_KEY_EPOCH_FIELD,
+    ): ULong {
+        val epoch = message.requiredVarint(fieldNumber)
         require(epoch <= MAX_MEDIA_KEY_EPOCH) { "media key epoch exceeds uint16" }
         return epoch
     }
@@ -298,6 +339,7 @@ class ControlFrameVectorTest {
         const val ENVELOPE_REQUEST_ID_FIELD = 2
         const val ENVELOPE_HELLO_FIELD = 10
         const val ENVELOPE_START_STREAM_FIELD = 11
+        const val ENVELOPE_STOP_STREAM_FIELD = 12
 
         const val HELLO_SUPPORTED_VERSIONS_FIELD = 1
         const val HELLO_CAPABILITIES_FIELD = 2
@@ -310,6 +352,10 @@ class ControlFrameVectorTest {
         const val START_FRAME_DURATION_FIELD = 5
         const val START_MEDIA_KEY_EPOCH_FIELD = 6
 
+        const val STOP_MEDIA_SESSION_ID_FIELD = 1
+        const val STOP_STREAM_ID_FIELD = 2
+        const val STOP_MEDIA_KEY_EPOCH_FIELD = 3
+
         val CONTROL_PROTOCOL_VERSION = 1uL
         val FRAME_DURATION_20_MS = 2uL
         val MEDIA_KEY_EPOCH = 0x2345uL
@@ -320,6 +366,9 @@ class ControlFrameVectorTest {
         )
         val EXPECTED_START_FRAME = hex(
             "00000015080110085a0f080710091880f7022002281430c546",
+        )
+        val EXPECTED_STOP_FRAME = hex(
+            "0000000d0801100962070807100918c546",
         )
     }
 }

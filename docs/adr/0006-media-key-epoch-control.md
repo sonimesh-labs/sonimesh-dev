@@ -68,8 +68,9 @@ stale stop, and monotonic rotation. Network tests verify a rotation installs a
 fresh AEAD opener/replay window and rejects packets from the retired epoch.
 Audio tests verify that a matching decode epoch drops retired jitter and PCM
 before current audio reaches the output consumer.
-Rust and Kotlin/JVM host tests now reproduce the epoch-bearing StartStream
-vector and reject an epoch above `65535`. This cross-language wire evidence does
+Rust and Kotlin/JVM host tests now reproduce epoch-bearing StartStream and
+StopStream vectors and reject an epoch above `65535` for both commands. This
+cross-language wire evidence does
 not implement Android control transport or authenticated secret provisioning.
 
 ## Rollback plan
