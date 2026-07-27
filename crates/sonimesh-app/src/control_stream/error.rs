@@ -13,6 +13,8 @@ pub enum ControlStreamError {
     InvalidEpoch,
     /// A new stream was requested while another session/stream is active.
     ActiveStreamConflict,
+    /// A media identity was reused with different validated audio parameters.
+    StreamConfigurationConflict,
     /// A pending platform or media change must finish before another one begins.
     PendingChange,
     /// A start command arrived in a state that cannot prepare output.
@@ -64,6 +66,8 @@ impl fmt::Display for ControlStreamError {
             Self::ActiveStreamConflict => {
                 formatter.write_str("a different media stream is already active")
             }
+            Self::StreamConfigurationConflict => formatter
+                .write_str("media stream identity conflicts with existing audio parameters"),
             Self::PendingChange => formatter.write_str("a stream lifecycle change is pending"),
             Self::StartRequiresReady(state) => {
                 write!(

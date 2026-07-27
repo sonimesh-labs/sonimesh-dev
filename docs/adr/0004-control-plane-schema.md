@@ -87,9 +87,15 @@ owner must return that operation token with its completion or failure
 acknowledgement. Neither local token kind is reused during the process lifetime,
 so delayed transport input or a cross-coordinator completion cannot commit
 identical work in another or later paired session. Sequence exhaustion fails
-closed. Lifecycle state is owned
-by the coordinator: start and stop transitions occur only with matching
-completion tokens, and session expiry uses the dedicated retirement operation.
+closed. Lifecycle state is owned by the coordinator: start and stop transitions
+occur only with matching completion tokens, and session expiry uses the dedicated
+retirement operation.
+
+A repeated stream command is idempotent only when its command kind and complete
+validated payload match pending or completed work. Reusing a media identity with
+different sample rate, channel count, or frame duration is rejected rather than
+reported as a successful no-op. A start command also cannot alias an in-flight
+stop merely because both name the same media identity.
 
 ## Security implications
 
@@ -110,7 +116,7 @@ rejected.
 Unit tests must cover frame byte order, truncated/oversized frames, malformed
 Protobuf, missing payload, version mismatch, capability limits, status/error
 semantics, process-unique transport and operation tokens, cross-coordinator and
-stale-owner rejection, and idempotent command representation. The published
+stale-owner rejection, and exact-payload duplicate command handling. The published
 [control-frame vectors](../protocol/control-frame-vectors.md) fix the initial
 Rust/Kotlin wire encoding. A bounded test-only Kotlin/JVM codec independently
 encodes and decodes all five Hello, StartStream, StopStream, StreamStatus, and

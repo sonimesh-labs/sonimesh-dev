@@ -112,11 +112,11 @@ pub(super) enum PendingStreamChange {
 }
 
 impl PendingStreamChange {
-    pub(super) const fn identity(self) -> MediaStreamIdentity {
+    pub(super) const fn start_request(self) -> Option<StreamStartRequest> {
         match self {
-            Self::Start { request, .. } => request.identity,
-            Self::Rotate { next, .. } => next.identity,
-            Self::Stop { identity, .. } => identity,
+            Self::Start { request, .. } => Some(request),
+            Self::Rotate { next, .. } => Some(next),
+            Self::Stop { .. } => None,
         }
     }
 

@@ -362,9 +362,11 @@ non-reusable local session token. The control owner rejects a token from a lost
 or retired transport before validating its envelope, and a replacement transport
 must install a fresh token and repeat hello negotiation. Prepared stream actions
 carry a separate process-unique operation token so a completion routed from
-another coordinator cannot match identical pending work. SetSourceGain does not
-belong on the wire in the single-source MVP when gain is applied locally on the
-desktop.
+another coordinator cannot match identical pending work. A retry is a no-op only
+when the command kind and complete validated payload match; the receiver rejects
+identity reuse with conflicting audio parameters and never aliases a start with a
+pending stop. SetSourceGain does not belong on the wire in the single-source MVP
+when gain is applied locally on the desktop.
 
 ## 10. Audio data plane
 

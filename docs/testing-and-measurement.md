@@ -57,8 +57,9 @@ Cover at least:
 - nonce uniqueness across streams, directions, epochs, and reconnects;
 - Protobuf size limits, unknown fields, capability negotiation, typed status/error
   semantics, process-unique control-transport and asynchronous-operation tokens
-  across coordinators and reconnects, and published Rust/Kotlin control-frame
-  vectors including the exact media key epoch;
+  across coordinators and reconnects, exact-payload duplicate command handling,
+  and published Rust/Kotlin control-frame vectors including the exact media key
+  epoch;
 - jitter ordering, late packets, overflow, resynchronization, and bounded memory;
 - PLC/FEC scheduling and frame-duration transitions;
 - drift-controller convergence, limits, anti-windup, and reset;

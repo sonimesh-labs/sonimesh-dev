@@ -31,7 +31,7 @@ pub struct ControlStreamCoordinator {
     local_capabilities: [Capability; MAX_CONTROL_CAPABILITIES],
     local_capability_count: usize,
     negotiation: Option<sonimesh_protocol::NegotiatedControl>,
-    active: Option<MediaStreamIdentity>,
+    active: Option<StreamStartRequest>,
     pending: Option<PendingStreamChange>,
     control_session: Option<ControlSessionToken>,
 }
@@ -275,7 +275,10 @@ impl ControlStreamCoordinator {
     /// Returns the exact currently active media identity, if any.
     #[must_use]
     pub const fn active(&self) -> Option<MediaStreamIdentity> {
-        self.active
+        match self.active {
+            Some(request) => Some(request.identity),
+            None => None,
+        }
     }
 
     /// Returns the one-time negotiated control capability set, if available.
@@ -333,7 +336,7 @@ impl ControlStreamCoordinator {
         self.state
             .apply(SessionEvent::StartStream)
             .map_err(ControlStreamError::Transition)?;
-        self.active = Some(request.identity);
+        self.active = Some(request);
         self.pending = None;
         Ok(())
     }
@@ -356,12 +359,12 @@ impl ControlStreamCoordinator {
                 previous,
                 next,
             })
-            || self.active != Some(previous)
+            || self.active() != Some(previous)
             || self.state != SessionState::STREAMING
         {
             return Err(ControlStreamError::CompletionMismatch);
         }
-        self.active = Some(next.identity);
+        self.active = Some(next);
         self.pending = None;
         Ok(())
     }
@@ -379,7 +382,7 @@ impl ControlStreamCoordinator {
         identity: MediaStreamIdentity,
     ) -> Result<(), ControlStreamError> {
         if self.pending != Some(PendingStreamChange::Stop { token, identity })
-            || self.active != Some(identity)
+            || self.active() != Some(identity)
         {
             return Err(ControlStreamError::CompletionMismatch);
         }
@@ -419,14 +422,19 @@ impl ControlStreamCoordinator {
             ));
         }
         if let Some(pending) = self.pending {
-            return if pending.identity() == request.identity {
+            let Some(pending_request) = pending.start_request() else {
+                return Err(ControlStreamError::PendingChange);
+            };
+            return if pending_request == request {
                 Ok(ControlStreamAction::Noop)
+            } else if pending_request.identity == request.identity {
+                Err(ControlStreamError::StreamConfigurationConflict)
             } else {
                 Err(ControlStreamError::PendingChange)
             };
         }
 
-        let Some(active) = self.active else {
+        let Some(active_request) = self.active else {
             if self.state != SessionState::READY {
                 return Err(ControlStreamError::StartRequiresReady(self.state));
             }
@@ -435,13 +443,18 @@ impl ControlStreamCoordinator {
             return Ok(ControlStreamAction::Start { token, request });
         };
 
+        let active = active_request.identity;
         if active.session_id != request.identity.session_id
             || active.stream_id != request.identity.stream_id
         {
             return Err(ControlStreamError::ActiveStreamConflict);
         }
         if request.identity.key_epoch == active.key_epoch {
-            return Ok(ControlStreamAction::Noop);
+            return if request == active_request {
+                Ok(ControlStreamAction::Noop)
+            } else {
+                Err(ControlStreamError::StreamConfigurationConflict)
+            };
         }
         if request.identity.key_epoch < active.key_epoch {
             return Err(ControlStreamError::StaleEpoch {
@@ -479,7 +492,7 @@ impl ControlStreamCoordinator {
                 Err(ControlStreamError::PendingChange)
             };
         }
-        if self.active == Some(identity) {
+        if self.active() == Some(identity) {
             let token = Self::issue_operation_token()?;
             self.pending = Some(PendingStreamChange::Stop { token, identity });
             Ok(ControlStreamAction::Stop { token, identity })

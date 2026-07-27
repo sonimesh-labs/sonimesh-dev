@@ -61,14 +61,23 @@ fn start(epoch: u32) -> Envelope {
 }
 
 fn start_with_duration(epoch: u32, frame_duration_ms: u32) -> Envelope {
+    start_with_configuration(epoch, 48_000, 2, frame_duration_ms)
+}
+
+fn start_with_configuration(
+    epoch: u32,
+    sample_rate_hz: u32,
+    channels: u32,
+    frame_duration_ms: u32,
+) -> Envelope {
     Envelope {
         protocol_version: CONTROL_PROTOCOL_VERSION,
         request_id: u64::from(epoch) + 1,
         payload: Some(envelope::Payload::StartStream(StartStream {
             media_session_id: 7,
             stream_id: 9,
-            sample_rate_hz: 48_000,
-            channels: 2,
+            sample_rate_hz,
+            channels,
             frame_duration_ms,
             media_key_epoch: epoch,
         })),
@@ -202,6 +211,56 @@ fn start_completion_advances_lifecycle_only_after_platform_success() {
             .key_epoch,
         0
     );
+}
+
+#[test]
+fn start_retries_require_matching_operation_and_audio_configuration() {
+    let mut coordinator =
+        coordinator(&[Capability::FrameDuration10Ms, Capability::FrameDuration20Ms]);
+    let mut retry = start(0);
+    retry.request_id = 99;
+    let conflicting = [
+        start_with_configuration(0, 44_100, 2, 20),
+        start_with_configuration(0, 48_000, 1, 20),
+        start_with_configuration(0, 48_000, 2, 10),
+    ];
+
+    let ControlStreamAction::Start { token, request } = coordinator.accept(&start(0)).unwrap()
+    else {
+        panic!("expected a stream start action");
+    };
+    assert_eq!(
+        coordinator.accept(&retry).unwrap(),
+        ControlStreamAction::Noop
+    );
+    for command in &conflicting {
+        assert!(matches!(
+            coordinator.accept(command),
+            Err(ControlStreamError::StreamConfigurationConflict)
+        ));
+    }
+
+    coordinator.complete_start(token, request).unwrap();
+    assert_eq!(
+        coordinator.accept(&retry).unwrap(),
+        ControlStreamAction::Noop
+    );
+    for command in &conflicting {
+        assert!(matches!(
+            coordinator.accept(command),
+            Err(ControlStreamError::StreamConfigurationConflict)
+        ));
+    }
+
+    let ControlStreamAction::Stop { token, identity } = coordinator.accept(&stop(0)).unwrap()
+    else {
+        panic!("expected a stream stop action");
+    };
+    assert!(matches!(
+        coordinator.accept(&retry),
+        Err(ControlStreamError::PendingChange)
+    ));
+    coordinator.complete_stop(token, identity).unwrap();
 }
 
 #[test]
