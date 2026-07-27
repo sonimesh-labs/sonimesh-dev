@@ -118,8 +118,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   service, a fixed PCM16 AudioRecord read buffer, low-rate state publication,
   bounded evidence counters including silent frames and local read-completion
   offsets, a frame-duration-based no-signal transition stable across partial reads,
-  and one idempotent teardown path; partial Vivo physical-device capture and
-  background evidence is recorded in the [Android capture matrix](./measurements/android-capture-matrix.md).
+  and an atomic idempotent teardown gate that transactionally admits reader
+  startup and permits one final cleanup claimant; partial Vivo physical-device
+  capture and background evidence is recorded in the [Android capture matrix](./measurements/android-capture-matrix.md).
   The remaining lifecycle, power, source-policy, and OEM matrix is still open.
 - a buildable Vue/Vite receiver-control preview with a single low-rate bridge
   boundary, session controls, output selection, pairing-invitation state, and

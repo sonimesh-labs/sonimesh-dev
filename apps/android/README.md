@@ -26,8 +26,11 @@ The first implementation must keep these module boundaries:
 
 The prototype deliberately keeps the consent `Intent` in memory and routes both
 the notification stop action and `MediaProjection.Callback.onStop()` through
-one idempotent teardown path. Host JVM tests also verify the intentionally public
-pairing-binding, media-crypto, and bounded control-frame protocol vectors. Those
+one idempotent teardown path. Its atomic reader gate refuses launch after
+teardown, rolls back a failed thread start, and permits exactly one final cleanup
+claim after the reader exits. Host JVM tests also verify this pure coordination
+state machine and the intentionally public pairing-binding, media-crypto, and
+bounded control-frame protocol vectors. Those
 tests do not add networking or crypto to the production capture source set,
 implement an authenticated control channel, or prove Android runtime provider
 behavior. See [the MVP baseline](../../docs/mvp-baseline.md) for the remaining

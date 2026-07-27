@@ -182,10 +182,11 @@ class CaptureService : Service() {
     }
 
     private fun startCaptureThread(record: AudioRecord, format: CaptureFormat) {
-        teardownGate.markReaderRunning()
         val thread = Thread({ readCaptureLoop(record, format) }, "sonimesh-capture")
         captureThread = thread
-        thread.start()
+        if (!teardownGate.launchReader(thread::start)) {
+            captureThread = null
+        }
     }
 
     private fun readCaptureLoop(record: AudioRecord, format: CaptureFormat) {
@@ -354,13 +355,11 @@ class CaptureService : Service() {
     }
 
     private fun teardown(outcome: TerminalOutcome) {
-        if (!teardownGate.beginTeardown()) {
-            return
+        if (teardownGate.beginTeardown()) {
+            pendingOutcome = outcome
+            captureThread?.interrupt()
+            audioRecord?.let { record -> runCatching { record.stop() } }
         }
-        pendingOutcome = outcome
-
-        captureThread?.interrupt()
-        audioRecord?.let { record -> runCatching { record.stop() } }
         finishTeardownIfReady()
     }
 
