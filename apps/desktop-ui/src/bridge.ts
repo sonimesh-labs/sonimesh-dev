@@ -32,6 +32,7 @@ class PreviewDesktopBridge implements DesktopBridge {
       plcFrames: '7',
       decodeErrors: '1',
       pcmUnderflows: '0',
+      pcmRefillLimitHits: '1',
       pcmOverflows: '2',
       pcmDiscontinuities: '2',
       queuedPcmBlocks: 3,

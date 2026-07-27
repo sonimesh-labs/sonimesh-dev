@@ -28,6 +28,7 @@ export interface StreamMetrics {
   plcFrames: MetricCounter
   decodeErrors: MetricCounter
   pcmUnderflows: MetricCounter
+  pcmRefillLimitHits: MetricCounter
   pcmOverflows: MetricCounter
   pcmDiscontinuities: MetricCounter
   queuedPcmBlocks: number

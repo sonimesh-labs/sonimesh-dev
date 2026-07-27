@@ -16,7 +16,9 @@ entry point observes the invitation clock before projection and reads output
 state from its lifecycle owner, then returns only
 session phase, a redacted invitation lifecycle, and redacted output lifecycle.
 Metrics remain separate `StreamCounters` snapshots, and device lists stay on
-their own low-rate API.
+their own low-rate API. Cumulative counters cross this preview contract as
+unsigned decimal strings, including distinct PCM underflow and callback
+refill-budget exhaustion counts.
 
 ```powershell
 npm install

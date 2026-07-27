@@ -87,6 +87,7 @@ function formatCounter(counter: string) {
           <div><dt>PLC frames</dt><dd>{{ formatCounter(metrics.plcFrames) }}</dd></div>
           <div><dt>Decode errors</dt><dd>{{ formatCounter(metrics.decodeErrors) }}</dd></div>
           <div><dt>Underflows</dt><dd>{{ formatCounter(metrics.pcmUnderflows) }}</dd></div>
+          <div><dt>Refill limit hits</dt><dd>{{ formatCounter(metrics.pcmRefillLimitHits) }}</dd></div>
           <div><dt>Overflows</dt><dd>{{ formatCounter(metrics.pcmOverflows) }}</dd></div>
           <div><dt>Discontinuities</dt><dd>{{ formatCounter(metrics.pcmDiscontinuities) }}</dd></div>
           <div><dt>Hard resyncs</dt><dd>{{ formatCounter(metrics.driftHardResyncs) }}</dd></div>
