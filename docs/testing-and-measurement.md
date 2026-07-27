@@ -157,7 +157,8 @@ Before MVP release:
 - output-device unplug/replug;
 - sleep/wake and user-session changes;
 - Android lock, backgrounding, service recreation, projection revocation, and
-  teardown races between outcome publication, reader exit, and duplicate stops;
+  teardown races between outcome publication, reader exit, and duplicate stops,
+  plus injected failures in each final cleanup step;
 - representative Android OEMs across the supported baseline;
 - Windows shared-mode sample rates and USB/Bluetooth output devices;
 - private/public network profiles and firewall approval/denial.

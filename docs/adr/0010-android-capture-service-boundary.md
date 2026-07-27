@@ -62,7 +62,11 @@ no completion claimant can win before the selected terminal outcome and the
 reader stop/interrupt requests are published. Exactly one claimant then waits for
 a successfully launched reader to exit before releasing resources. Duplicate
 stop/error notifications may retry the completion check but cannot retire the
-same capture resources twice. Process recreation, a revoked
+same capture resources twice. Once cleanup is claimed, service references are
+retired before platform callbacks run and each release, terminal publication,
+foreground-removal, and service-stop step is attempted independently. One
+platform cleanup exception cannot prevent the remaining retirement steps.
+Process recreation, a revoked
 projection, or a stale control session fails closed and requires a fresh consent
 result and fresh session material.
 
@@ -133,8 +137,9 @@ observable symptom, not evidence about a particular source application.
 
 Host JVM tests exercise reader-start rollback, rejection of a reader after
 teardown admission, duplicate-reader rejection, concurrent launch/teardown
-ordering, outcome-publication ordering, and exactly-once finish claims. These
-tests validate only the pure coordination state machine; they do not establish
+ordering, outcome-publication ordering, exactly-once finish claims, and
+best-effort continuation after a cleanup step fails. These tests validate only
+the pure coordination helpers; they do not establish
 Android service, AudioRecord, or MediaProjection lifecycle behavior on a device.
 
 - capture-only runs on the reference Android 12-17 matrix, recording actual

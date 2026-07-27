@@ -29,8 +29,10 @@ the notification stop action and `MediaProjection.Callback.onStop()` through
 one idempotent teardown path. Its atomic reader gate refuses launch after
 teardown, rolls back a failed thread start, blocks cleanup until the terminal
 outcome and stop requests are published, and permits exactly one final claim
-after the reader exits. Host JVM tests also verify this pure coordination
-state machine and the intentionally public pairing-binding, media-crypto, and
+after the reader exits. Final cleanup retires service references first and
+attempts every bounded release step even if an earlier platform call fails. Host
+JVM tests also verify these pure coordination helpers and the intentionally
+public pairing-binding, media-crypto, and
 bounded control-frame protocol vectors. Those
 tests do not add networking or crypto to the production capture source set,
 implement an authenticated control channel, or prove Android runtime provider

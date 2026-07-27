@@ -369,27 +369,32 @@ class CaptureService : Service() {
         if (!teardownGate.claimFinish()) {
             return
         }
+        val record = audioRecord
+        val projection = mediaProjection
+        val callback = projectionCallback
         captureThread = null
-
-        audioRecord?.let { record -> record.release() }
         audioRecord = null
-
-        mediaProjection?.let { projection ->
-            projectionCallback?.let { callback ->
-                runCatching { projection.unregisterCallback(callback) }
-            }
-            runCatching { projection.stop() }
-        }
         mediaProjection = null
         projectionCallback = null
         pendingOutcome = null
 
-        when (outcome) {
-            is TerminalOutcome.Stopped -> CaptureStateStore.publishStopped(outcome.reason)
-            is TerminalOutcome.Failed -> CaptureStateStore.publishFailure(outcome.message)
-        }
-        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
-        stopSelf()
+        runAllCaptureCleanupSteps(
+            { record?.release() },
+            {
+                if (projection != null && callback != null) {
+                    projection.unregisterCallback(callback)
+                }
+            },
+            { projection?.stop() },
+            {
+                when (outcome) {
+                    is TerminalOutcome.Stopped -> CaptureStateStore.publishStopped(outcome.reason)
+                    is TerminalOutcome.Failed -> CaptureStateStore.publishFailure(outcome.message)
+                }
+            },
+            { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) },
+            { stopSelf() },
+        )
     }
 
     private sealed interface TerminalOutcome {
