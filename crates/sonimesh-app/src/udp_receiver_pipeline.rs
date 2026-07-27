@@ -65,9 +65,17 @@ impl<DecoderError: fmt::Display> fmt::Display for UdpReceiverError<DecoderError>
     }
 }
 
-impl<DecoderError> std::error::Error for UdpReceiverError<DecoderError> where
-    DecoderError: std::error::Error + 'static
+impl<DecoderError> std::error::Error for UdpReceiverError<DecoderError>
+where
+    DecoderError: std::error::Error + 'static,
 {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Socket(error) => Some(error),
+            Self::SourceEndpointChanged => None,
+            Self::Pipeline(error) => Some(error),
+        }
+    }
 }
 
 /// Result of one non-blocking UDP media poll.
@@ -270,5 +278,103 @@ where
     #[must_use]
     pub fn counters(&self) -> &StreamCounters {
         self.pipeline.counters()
+    }
+}
+
+#[cfg(test)]
+mod error_source_tests {
+    use std::error::Error;
+    use std::io;
+
+    use sonimesh_audio::{DecodeWorkerError, FrameError};
+    use sonimesh_network::{IngressError, ProtectedIngressError, UdpReceiveError};
+    use sonimesh_protocol::{MediaCryptoError, PacketParseError};
+
+    use super::UdpReceiverError;
+    use crate::ReceiverPipelineError;
+
+    fn source<'a>(error: &'a (dyn Error + 'static)) -> &'a (dyn Error + 'static) {
+        error
+            .source()
+            .expect("composite error must retain its cause")
+    }
+
+    #[test]
+    fn socket_errors_retain_the_operating_system_cause() {
+        let error: UdpReceiverError<MediaCryptoError> =
+            UdpReceiverError::Socket(UdpReceiveError::Io(io::Error::new(
+                io::ErrorKind::ConnectionReset,
+                "test receive failure",
+            )));
+
+        let receive = source(&error);
+        assert!(receive.downcast_ref::<UdpReceiveError>().is_some());
+        let operating_system = source(receive);
+        assert!(operating_system.downcast_ref::<io::Error>().is_some());
+        assert!(operating_system.source().is_none());
+    }
+
+    #[test]
+    fn ingress_errors_retain_parse_and_authentication_causes() {
+        let parse: UdpReceiverError<MediaCryptoError> = UdpReceiverError::Pipeline(
+            ReceiverPipelineError::Ingress(IngressError::Parse(PacketParseError::Truncated)),
+        );
+        let receiver = source(&parse);
+        assert!(
+            receiver
+                .downcast_ref::<ReceiverPipelineError<MediaCryptoError>>()
+                .is_some()
+        );
+        let ingress = source(receiver);
+        assert!(
+            ingress
+                .downcast_ref::<IngressError<MediaCryptoError>>()
+                .is_some()
+        );
+        let packet = source(ingress);
+        assert!(packet.downcast_ref::<PacketParseError>().is_some());
+        assert!(packet.source().is_none());
+
+        let authentication: UdpReceiverError<MediaCryptoError> =
+            UdpReceiverError::Pipeline(ReceiverPipelineError::Ingress(
+                IngressError::Authentication(MediaCryptoError::AuthenticationFailed),
+            ));
+        let crypto = source(source(source(&authentication)));
+        assert!(crypto.downcast_ref::<MediaCryptoError>().is_some());
+        assert!(crypto.source().is_none());
+    }
+
+    #[test]
+    fn decode_errors_retain_frame_and_decoder_causes() {
+        let frame: UdpReceiverError<MediaCryptoError> = UdpReceiverError::Pipeline(
+            ReceiverPipelineError::Decode(DecodeWorkerError::Frame(FrameError::PayloadTooLarge)),
+        );
+        let frame_error = source(source(source(&frame)));
+        assert!(frame_error.downcast_ref::<FrameError>().is_some());
+        assert!(frame_error.source().is_none());
+
+        let decoder: UdpReceiverError<MediaCryptoError> =
+            UdpReceiverError::Pipeline(ReceiverPipelineError::Decode(DecodeWorkerError::Decoder(
+                MediaCryptoError::PayloadTooLarge,
+            )));
+        let decoder_error = source(source(source(&decoder)));
+        assert!(decoder_error.downcast_ref::<MediaCryptoError>().is_some());
+        assert!(decoder_error.source().is_none());
+    }
+
+    #[test]
+    fn rotation_errors_retain_crypto_causes_without_synthetic_policy_causes() {
+        let error: UdpReceiverError<MediaCryptoError> =
+            UdpReceiverError::Pipeline(ReceiverPipelineError::Rotation(
+                ProtectedIngressError::Crypto(MediaCryptoError::InvalidContext),
+            ));
+
+        let crypto = source(source(source(&error)));
+        assert!(crypto.downcast_ref::<MediaCryptoError>().is_some());
+        assert!(crypto.source().is_none());
+        assert!(Error::source(&ProtectedIngressError::NonIncreasingEpoch).is_none());
+        assert!(
+            Error::source(&UdpReceiverError::<MediaCryptoError>::SourceEndpointChanged).is_none()
+        );
     }
 }

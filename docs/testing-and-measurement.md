@@ -56,7 +56,8 @@ Cover at least:
   windows;
 - nonce uniqueness across streams, directions, epochs, and reconnects;
 - Protobuf size limits, unknown fields, capability negotiation, typed status/error
-  semantics, bounded TCP framing under partial closure and permanent I/O failure,
+  semantics, preserved media receiver error-source chains, bounded TCP framing
+  under partial closure and permanent I/O failure,
   process-unique control-transport and asynchronous-operation tokens
   across coordinators and reconnects, pre-hello start/stop rejection,
   exact-payload duplicate command handling,

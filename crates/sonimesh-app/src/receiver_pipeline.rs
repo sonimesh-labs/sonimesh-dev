@@ -77,9 +77,17 @@ impl<DecoderError: fmt::Display> fmt::Display for ReceiverPipelineError<DecoderE
     }
 }
 
-impl<DecoderError> std::error::Error for ReceiverPipelineError<DecoderError> where
-    DecoderError: std::error::Error + 'static
+impl<DecoderError> std::error::Error for ReceiverPipelineError<DecoderError>
+where
+    DecoderError: std::error::Error + 'static,
 {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Ingress(error) => Some(error),
+            Self::Decode(error) => Some(error),
+            Self::Rotation(error) => Some(error),
+        }
+    }
 }
 
 impl<

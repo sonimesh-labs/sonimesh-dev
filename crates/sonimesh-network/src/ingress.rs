@@ -81,9 +81,17 @@ impl<AuthenticationError: fmt::Display> fmt::Display for IngressError<Authentica
     }
 }
 
-impl<AuthenticationError> std::error::Error for IngressError<AuthenticationError> where
-    AuthenticationError: std::error::Error + 'static
+impl<AuthenticationError> std::error::Error for IngressError<AuthenticationError>
+where
+    AuthenticationError: std::error::Error + 'static,
 {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Parse(error) => Some(error),
+            Self::Authentication(error) => Some(error),
+            Self::UnknownStream | Self::InvalidPlaintextLength | Self::Replay(_) => None,
+        }
+    }
 }
 
 /// Ordered media ingress for one session, stream, and key epoch.

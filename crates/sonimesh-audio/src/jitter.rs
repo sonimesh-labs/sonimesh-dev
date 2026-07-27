@@ -1,9 +1,23 @@
+use core::fmt;
+
 /// Failure while constructing a bounded encoded frame.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FrameError {
     /// Payload exceeds the configured per-frame capacity.
     PayloadTooLarge,
 }
+
+impl fmt::Display for FrameError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::PayloadTooLarge => {
+                formatter.write_str("encoded frame payload exceeds inline capacity")
+            }
+        }
+    }
+}
+
+impl std::error::Error for FrameError {}
 
 /// One encoded frame stored inline in a bounded jitter buffer.
 #[derive(Clone, Debug, Eq, PartialEq)]

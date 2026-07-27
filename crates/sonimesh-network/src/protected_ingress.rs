@@ -29,7 +29,14 @@ impl fmt::Display for ProtectedIngressError {
     }
 }
 
-impl std::error::Error for ProtectedIngressError {}
+impl std::error::Error for ProtectedIngressError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Crypto(error) => Some(error),
+            Self::RotationContextMismatch | Self::NonIncreasingEpoch => None,
+        }
+    }
+}
 
 /// Network-domain owner for one AEAD opener and its matching replay window.
 ///

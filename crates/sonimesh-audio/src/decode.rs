@@ -76,7 +76,7 @@ pub enum DecodeWorkerError<DecoderError> {
 impl<DecoderError: fmt::Display> fmt::Display for DecodeWorkerError<DecoderError> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Frame(error) => write!(formatter, "encoded frame rejected: {error:?}"),
+            Self::Frame(error) => write!(formatter, "encoded frame rejected: {error}"),
             Self::InvalidOutputLength => {
                 formatter.write_str("decoder reported PCM outside the bounded output block")
             }
@@ -85,9 +85,17 @@ impl<DecoderError: fmt::Display> fmt::Display for DecodeWorkerError<DecoderError
     }
 }
 
-impl<DecoderError> std::error::Error for DecodeWorkerError<DecoderError> where
-    DecoderError: std::error::Error + 'static
+impl<DecoderError> std::error::Error for DecodeWorkerError<DecoderError>
+where
+    DecoderError: std::error::Error + 'static,
 {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Frame(error) => Some(error),
+            Self::InvalidOutputLength => None,
+            Self::Decoder(error) => Some(error),
+        }
+    }
 }
 
 /// Per-stream non-realtime pipeline from authenticated frames to PCM blocks.
