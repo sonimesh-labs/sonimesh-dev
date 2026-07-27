@@ -360,7 +360,9 @@ Commands must be idempotent or define duplicate behavior. Repeating StopStream
 must be safe. Each authenticated control transport also receives an opaque,
 non-reusable local session token. The control owner rejects a token from a lost
 or retired transport before validating its envelope, and a replacement transport
-must install a fresh token and repeat hello negotiation. SetSourceGain does not
+must install a fresh token and repeat hello negotiation. Prepared stream actions
+carry a separate process-unique operation token so a completion routed from
+another coordinator cannot match identical pending work. SetSourceGain does not
 belong on the wire in the single-source MVP when gain is applied locally on the
 desktop.
 

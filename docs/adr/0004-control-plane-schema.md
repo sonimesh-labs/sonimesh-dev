@@ -82,20 +82,21 @@ to `Ready`, retires the prior negotiation and active media identity, then requir
 a newly installed token and hello before another stream command is accepted.
 
 Each prepared start, key rotation, and stop carries a receiver-issued opaque
-operation token distinct from the transport token. The platform owner must return
-that operation token with its completion or failure acknowledgement. Neither
-kind of token is reused during the coordinator's lifetime, including after
-control-session expiry, so delayed transport input or completion cannot commit
-an identical command in a later paired session. Lifecycle state is owned
+operation token from a separate process-wide monotonic sequence. The platform
+owner must return that operation token with its completion or failure
+acknowledgement. Neither local token kind is reused during the process lifetime,
+so delayed transport input or a cross-coordinator completion cannot commit
+identical work in another or later paired session. Sequence exhaustion fails
+closed. Lifecycle state is owned
 by the coordinator: start and stop transitions occur only with matching
 completion tokens, and session expiry uses the dedicated retirement operation.
 
 ## Security implications
 
-The local transport token is neither a secret nor a wire-level authentication
-credential. It only prevents an in-process owner of a retired connection from
-submitting work through the current coordinator; the TLS/pairing owner must keep
-the fresh token scoped to its matching authenticated connection.
+The local transport and operation tokens are neither secrets nor wire-level
+authentication credentials. They only isolate in-process transport and
+asynchronous-operation ownership; the TLS/pairing owner must keep each fresh
+token scoped to its matching connection or platform task.
 
 The codec does bounded length validation before allocating/decode work. It is not a
 transport security layer: every production control frame still requires the
@@ -108,8 +109,8 @@ rejected.
 
 Unit tests must cover frame byte order, truncated/oversized frames, malformed
 Protobuf, missing payload, version mismatch, capability limits, status/error
-semantics, process-unique authenticated transport tokens, cross-coordinator and
-stale transport rejection, and idempotent command representation. The published
+semantics, process-unique transport and operation tokens, cross-coordinator and
+stale-owner rejection, and idempotent command representation. The published
 [control-frame vectors](../protocol/control-frame-vectors.md) fix the initial
 Rust/Kotlin wire encoding. A bounded test-only Kotlin/JVM codec independently
 encodes and decodes all five Hello, StartStream, StopStream, StreamStatus, and

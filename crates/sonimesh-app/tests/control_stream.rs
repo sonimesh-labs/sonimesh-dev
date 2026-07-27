@@ -384,6 +384,36 @@ fn authenticated_transport_tokens_do_not_cross_coordinators() {
 }
 
 #[test]
+fn operation_tokens_do_not_cross_coordinators_with_identical_pending_work() {
+    let capabilities = [Capability::FrameDuration20Ms];
+    let mut first = coordinator(&capabilities);
+    let mut second = coordinator(&capabilities);
+    let ControlStreamAction::Start {
+        token: first_token,
+        request: first_request,
+    } = first.accept(&start(0)).unwrap()
+    else {
+        panic!("expected first pending start");
+    };
+    let ControlStreamAction::Start {
+        token: second_token,
+        request: second_request,
+    } = second.accept(&start(0)).unwrap()
+    else {
+        panic!("expected second pending start");
+    };
+
+    assert_eq!(first_request, second_request);
+    assert_ne!(first_token, second_token);
+    assert!(matches!(
+        first.complete_start(second_token, second_request),
+        Err(ControlStreamError::CompletionMismatch)
+    ));
+    first.complete_start(first_token, first_request).unwrap();
+    second.complete_start(second_token, second_request).unwrap();
+}
+
+#[test]
 fn connection_loss_retires_the_transport_token_and_pending_work() {
     let capabilities = [Capability::FrameDuration20Ms];
     let mut coordinator = ControlStreamCoordinator::new(trusted_session(), &capabilities).unwrap();

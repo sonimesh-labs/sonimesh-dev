@@ -17,6 +17,7 @@ use super::types::{
 };
 
 static NEXT_CONTROL_SESSION_TOKEN: AtomicU64 = AtomicU64::new(0);
+static NEXT_CONTROL_OPERATION_TOKEN: AtomicU64 = AtomicU64::new(0);
 
 /// Control-domain coordinator for one desktop receiver stream.
 ///
@@ -33,7 +34,6 @@ pub struct ControlStreamCoordinator {
     active: Option<MediaStreamIdentity>,
     pending: Option<PendingStreamChange>,
     control_session: Option<ControlSessionToken>,
-    next_operation_token: u64,
 }
 
 impl ControlStreamCoordinator {
@@ -63,7 +63,6 @@ impl ControlStreamCoordinator {
             active: None,
             pending: None,
             control_session: None,
-            next_operation_token: 0,
         })
     }
 
@@ -108,7 +107,7 @@ impl ControlStreamCoordinator {
         if self.control_session.is_some() {
             return Err(ControlStreamError::ControlSessionAlreadyInstalled);
         }
-        let token = self.issue_control_session_token()?;
+        let token = Self::issue_control_session_token()?;
         self.control_session = Some(token);
         Ok(token)
     }
@@ -431,7 +430,7 @@ impl ControlStreamCoordinator {
             if self.state != SessionState::READY {
                 return Err(ControlStreamError::StartRequiresReady(self.state));
             }
-            let token = self.issue_operation_token()?;
+            let token = Self::issue_operation_token()?;
             self.pending = Some(PendingStreamChange::Start { token, request });
             return Ok(ControlStreamAction::Start { token, request });
         };
@@ -454,7 +453,7 @@ impl ControlStreamCoordinator {
             return Err(ControlStreamError::RotationRequiresStreaming(self.state));
         }
 
-        let token = self.issue_operation_token()?;
+        let token = Self::issue_operation_token()?;
         self.pending = Some(PendingStreamChange::Rotate {
             token,
             previous: active,
@@ -481,7 +480,7 @@ impl ControlStreamCoordinator {
             };
         }
         if self.active == Some(identity) {
-            let token = self.issue_operation_token()?;
+            let token = Self::issue_operation_token()?;
             self.pending = Some(PendingStreamChange::Stop { token, identity });
             Ok(ControlStreamAction::Stop { token, identity })
         } else {
@@ -520,24 +519,20 @@ impl ControlStreamCoordinator {
         Ok(negotiation.supports(capability))
     }
 
-    fn issue_control_session_token(&self) -> Result<ControlSessionToken, ControlStreamError> {
-        let previous = NEXT_CONTROL_SESSION_TOKEN
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
-                value.checked_add(1)
-            })
-            .map_err(|_| ControlStreamError::ControlSessionTokenExhausted)?;
-        let token = previous
-            .checked_add(1)
-            .ok_or(ControlStreamError::ControlSessionTokenExhausted)?;
-        Ok(ControlSessionToken(token))
+    fn issue_control_session_token() -> Result<ControlSessionToken, ControlStreamError> {
+        issue_process_unique_token(
+            &NEXT_CONTROL_SESSION_TOKEN,
+            ControlStreamError::ControlSessionTokenExhausted,
+        )
+        .map(ControlSessionToken)
     }
 
-    fn issue_operation_token(&mut self) -> Result<ControlOperationToken, ControlStreamError> {
-        self.next_operation_token = self
-            .next_operation_token
-            .checked_add(1)
-            .ok_or(ControlStreamError::OperationTokenExhausted)?;
-        Ok(ControlOperationToken(self.next_operation_token))
+    fn issue_operation_token() -> Result<ControlOperationToken, ControlStreamError> {
+        issue_process_unique_token(
+            &NEXT_CONTROL_OPERATION_TOKEN,
+            ControlStreamError::OperationTokenExhausted,
+        )
+        .map(ControlOperationToken)
     }
 
     fn retire_if_idle(&mut self) {
@@ -548,6 +543,18 @@ impl ControlStreamCoordinator {
             self.control_session = None;
         }
     }
+}
+
+fn issue_process_unique_token(
+    counter: &AtomicU64,
+    exhausted: ControlStreamError,
+) -> Result<u64, ControlStreamError> {
+    counter
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+            value.checked_add(1)
+        })
+        .map(|previous| previous + 1)
+        .map_err(|_| exhausted)
 }
 
 fn request_from_start(start: &StartStream) -> Result<StreamStartRequest, ControlStreamError> {

@@ -56,9 +56,9 @@ Cover at least:
   windows;
 - nonce uniqueness across streams, directions, epochs, and reconnects;
 - Protobuf size limits, unknown fields, capability negotiation, typed status/error
-  semantics, non-reusable authenticated control-transport tokens across reconnect,
-  and published Rust/Kotlin control-frame vectors including the exact media key
-  epoch;
+  semantics, process-unique control-transport and asynchronous-operation tokens
+  across coordinators and reconnects, and published Rust/Kotlin control-frame
+  vectors including the exact media key epoch;
 - jitter ordering, late packets, overflow, resynchronization, and bounded memory;
 - PLC/FEC scheduling and frame-duration transitions;
 - drift-controller convergence, limits, anti-windup, and reset;

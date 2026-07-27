@@ -59,8 +59,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   unnegotiated frame durations before media work; each authenticated transport
   has a non-reusable local token rejected after loss or retirement;
   control-session expiry retires the token, selected capabilities, and stream
-  lifecycle state together; tokenized start/rotation/stop acknowledgements reject
-  stale asynchronous completions; reconnection with fresh session material
+  lifecycle state together; process-unique start/rotation/stop operation tokens
+  reject stale or cross-coordinator asynchronous completions; reconnection with
+  fresh session material
   requires a newly installed transport token and hello.
 - a per-stream, non-realtime decode-worker boundary that schedules ordinary
   decode and PLC from authenticated jitter decisions, then writes bounded PCM

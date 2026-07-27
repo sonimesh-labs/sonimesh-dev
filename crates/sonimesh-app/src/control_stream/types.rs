@@ -11,9 +11,10 @@ pub struct ControlSessionToken(pub(super) u64);
 
 /// Opaque, non-reusable identifier for a pending control-domain operation.
 ///
-/// The coordinator issues this token with a start, rotation, or stop action.
-/// The platform owner must return the same token when acknowledging completion
-/// or failure, so a late result cannot affect a newer control session.
+/// The coordinator issues this process-unique token with a start, rotation, or
+/// stop action. The platform owner must return the same token when acknowledging
+/// completion or failure, so a late or cross-coordinator result cannot affect
+/// different pending work.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ControlOperationToken(pub(super) u64);
 
