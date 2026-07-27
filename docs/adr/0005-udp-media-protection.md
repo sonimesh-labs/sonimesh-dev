@@ -87,12 +87,17 @@ source cannot advance protected ingress, epoch rotation preserves the pin, and a
 fresh authenticated session permits rebinding while retaining the local socket.
 A Kotlin/JVM unit test independently reproduces the public crypto vector,
 decrypts it, and rejects header or ciphertext tampering using the host JDK
-provider.
+provider. A LibFuzzer protected-ingress target exercises arbitrary datagrams,
+valid authenticated bounded payloads, duplicate replay, undersized output,
+and one-byte header/ciphertext/tag mutations while asserting that rejection
+clears plaintext. Linux CI is configured for a finite AddressSanitizer smoke
+run.
 
 Android-runtime provider verification, authenticated control-plane session
-replacement, key rotation control messages, and fuzzing remain required before a
-build leaves the lab network. The loopback and host JVM results are not physical
-WLAN, Android device, or production key-handling evidence.
+replacement, key rotation control messages, sustained fuzzing, and future native
+Opus-decoder fuzzing remain required before a build leaves the lab network. The
+loopback, finite fuzz, and host JVM results are not physical WLAN, Android device,
+or production key-handling evidence.
 
 ## Rollback plan
 

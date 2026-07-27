@@ -104,6 +104,11 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
 - an application-domain UDP receiver pipeline that feeds one socket datagram
   through protected ingress, bounded jitter admission, and non-realtime decode;
   control-session and output lifecycle wiring remain separate.
+- an independent LibFuzzer workspace for bounded control decoding, media packet
+  parsing, and protected ingress. The ingress target covers arbitrary bytes,
+  valid authenticated arbitrary payloads, replay, output bounds, tampering,
+  and plaintext clearing. Configured finite CI executions are smoke evidence
+  rather than a sustained campaign.
 - a bounded incremental TCP control-frame reader/writer that validates the
   existing length-prefixed Protobuf envelope; it is explicitly unauthenticated
   and is not a TLS or pairing implementation.
@@ -152,7 +157,8 @@ jitter, and output-backend ADRs using measured 10/20 ms and device results.
 - complete Android capture hardware/OEM evidence, lifecycle matrix results, and
   power measurements; partial Vivo capture and background evidence is recorded
   in the [Android capture matrix](./measurements/android-capture-matrix.md);
-- Opus encoder/decoder bindings and PLC/FEC evidence;
+- Opus encoder/decoder bindings, PLC/FEC evidence, and authenticated malformed
+  payload fuzzing against the eventual native decoder;
 - first pairing, TLS, QR bootstrap, identity storage, revocation, or actual
   root-secret provisioning; the pure TLS-exporter vector does not prove a TLS
   provider can pin the QR SPKI or export the required bytes. AEAD/HKDF media

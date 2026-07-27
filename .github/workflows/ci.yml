@@ -53,6 +53,31 @@ jobs:
         if: runner.os == 'Windows'
         run: cargo run -p windows-tls-provider-prototype
 
+  fuzz:
+    name: Rust fuzz smoke (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-07-18
+          components: rust-src,rustfmt
+      - name: Install cargo-fuzz
+        run: cargo +nightly-2026-07-18 install cargo-fuzz --version 0.13.2 --locked
+      - name: Check fuzz target formatting
+        run: cargo +nightly-2026-07-18 fmt --manifest-path fuzz/Cargo.toml --all -- --check
+      - name: Lint fuzz targets
+        run: cargo +nightly-2026-07-18 clippy --manifest-path fuzz/Cargo.toml --bins -- -D warnings
+      - name: Type-check fuzz targets
+        working-directory: fuzz
+        run: cargo +nightly-2026-07-18 fuzz check
+      - name: Run finite fuzz smoke
+        working-directory: fuzz
+        run: |
+          cargo +nightly-2026-07-18 fuzz run control_frame -- -runs=512 -max_len=66052 -timeout=5
+          cargo +nightly-2026-07-18 fuzz run media_packet -- -runs=512 -max_len=1264 -timeout=5
+          cargo +nightly-2026-07-18 fuzz run protected_media_ingress -- -runs=512 -max_len=1264 -timeout=5
+
   android:
     name: Android capture bootstrap
     runs-on: ubuntu-latest

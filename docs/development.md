@@ -3,6 +3,8 @@
 ## Prerequisites
 
 - Rust 1.85.0 with `rustfmt` and Clippy;
+- on Linux or WSL, nightly 2026-07-18 with `rust-src` plus `cargo-fuzz`
+  0.13.2 for the optional local LibFuzzer targets;
 - Java 21 and an Android SDK when phase 0A starts;
 - Node.js 22 or newer when the desktop control UI starts;
 - Windows 11 and documented audio hardware for output validation.
@@ -31,6 +33,26 @@ Push-Location apps/android
 .\gradlew.bat :tls-provider-spike:assembleDebugAndroidTest --no-daemon
 Pop-Location
 ~~~
+
+## Fuzz checks
+
+The shipping workspace does not depend on `libfuzzer-sys`; fuzz targets live in
+the independent `fuzz/` workspace. From that directory:
+
+~~~bash
+rustup toolchain install nightly-2026-07-18 --component rust-src
+cargo +nightly-2026-07-18 install cargo-fuzz --version 0.13.2 --locked
+cargo +nightly-2026-07-18 fuzz check
+cargo +nightly-2026-07-18 fuzz run control_frame -- -max_len=66052
+cargo +nightly-2026-07-18 fuzz run media_packet -- -max_len=1264
+cargo +nightly-2026-07-18 fuzz run protected_media_ingress -- -max_len=1264
+~~~
+
+`cargo-fuzz` supports LibFuzzer execution on x86-64 Unix-like systems rather
+than Windows MSVC, so Windows contributors should run these commands through
+WSL or another Linux environment. The Linux CI job is configured for 512
+executions per target; that finite run is a smoke gate, not long-duration
+fuzzing or native Opus-decoder evidence.
 
 On Windows, the read-only CPAL feasibility probe can enumerate output devices
 without starting a stream:

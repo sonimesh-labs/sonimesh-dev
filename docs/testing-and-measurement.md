@@ -66,9 +66,20 @@ unbounded memory, or reach the decoder before authentication and length checks.
 Authenticated malformed Opus payloads must also be tested because a paired peer
 may be compromised.
 
-The current Rust workspace includes deterministic adversarial-input regressions
-for bounded control/media parsing and invalid AEAD payloads. LibFuzzer targets
-remain a required follow-up once the `cargo-fuzz` toolchain is available.
+The Rust foundation keeps deterministic adversarial-input regressions for bounded
+control/media parsing and invalid AEAD payloads. The independent `fuzz/`
+workspace adds LibFuzzer targets for arbitrary and near-valid control frames,
+media packets, and protected ingress. The ingress target also constructs valid
+AEAD packets carrying arbitrary bounded payload bytes, retries them as replay,
+uses undersized output storage, mutates one authenticated header/ciphertext/tag
+byte, and requires every rejected path to clear plaintext.
+
+Linux CI is configured to compile these targets with AddressSanitizer and
+perform 512 executions per target as a finite smoke gate. A successful job shows
+that the harnesses remain buildable under the pinned toolchain and catches
+immediate regressions; it is not a sustained fuzz campaign, coverage acceptance
+result, physical-network test, or malformed-input qualification of a future
+native Opus decoder.
 
 Deterministic audio tests also cover the provisional bounded channel mapper and
 its callback source adapter. They do not qualify physical speaker positions or
