@@ -54,7 +54,7 @@ impl WasapiStatus {
         let previous_offset_ns = self
             .last_render_offset_ns
             .swap(offset_ns, Ordering::Relaxed);
-        self.render_count.fetch_add(1, Ordering::Relaxed);
+        saturating_increment(&self.render_count);
         self.last_render_frames
             .store(u64::from(frames), Ordering::Relaxed);
         self.maximum_render_frames
@@ -68,11 +68,11 @@ impl WasapiStatus {
     }
 
     pub(crate) fn oversized(&self) {
-        self.oversized_renders.fetch_add(1, Ordering::Relaxed);
+        saturating_increment(&self.oversized_renders);
     }
 
     pub(crate) fn stream_error(&self) {
-        self.stream_errors.fetch_add(1, Ordering::Relaxed);
+        saturating_increment(&self.stream_errors);
     }
 
     pub(crate) fn snapshot(&self) -> WasapiOutputStatus {
@@ -106,6 +106,12 @@ impl WasapiStatus {
     }
 }
 
+fn saturating_increment(counter: &AtomicU64) {
+    let _ = counter.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+        value.checked_add(1)
+    });
+}
+
 fn narrow_frames(frames: u64) -> u32 {
     u32::try_from(frames).unwrap_or(u32::MAX)
 }
@@ -130,6 +136,27 @@ impl Default for WasapiStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cumulative_status_counters_saturate_instead_of_wrapping() {
+        let status = WasapiStatus::default();
+        status.render_count.store(u64::MAX - 1, Ordering::Relaxed);
+        status
+            .oversized_renders
+            .store(u64::MAX - 1, Ordering::Relaxed);
+        status.stream_errors.store(u64::MAX - 1, Ordering::Relaxed);
+
+        for _ in 0..2 {
+            status.render(1);
+            status.oversized();
+            status.stream_error();
+        }
+
+        let snapshot = status.snapshot();
+        assert_eq!(snapshot.render_count, u64::MAX);
+        assert_eq!(snapshot.oversized_renders, u64::MAX);
+        assert_eq!(snapshot.stream_errors, u64::MAX);
+    }
 
     #[test]
     fn snapshot_preserves_render_frame_bounds() {

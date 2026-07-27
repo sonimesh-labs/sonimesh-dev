@@ -44,7 +44,7 @@ impl CallbackStatus {
         let previous_offset_ns = self
             .last_callback_offset_ns
             .swap(offset_ns, Ordering::Relaxed);
-        self.callback_count.fetch_add(1, Ordering::Relaxed);
+        saturating_increment(&self.callback_count);
         self.last_callback_samples.store(samples, Ordering::Relaxed);
         self.maximum_callback_samples
             .fetch_max(samples, Ordering::Relaxed);
@@ -61,11 +61,11 @@ impl CallbackStatus {
     }
 
     pub(crate) fn oversized(&self) {
-        self.oversized_callbacks.fetch_add(1, Ordering::Relaxed);
+        saturating_increment(&self.oversized_callbacks);
     }
 
     pub(crate) fn stream_error(&self) {
-        self.stream_errors.fetch_add(1, Ordering::Relaxed);
+        saturating_increment(&self.stream_errors);
     }
 
     pub(crate) fn snapshot(&self) -> CpalOutputStatus {
@@ -95,6 +95,12 @@ impl CallbackStatus {
     }
 }
 
+fn saturating_increment(counter: &AtomicU64) {
+    let _ = counter.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+        value.checked_add(1)
+    });
+}
+
 fn narrow_frames(frames: u64) -> u32 {
     u32::try_from(frames).unwrap_or(u32::MAX)
 }
@@ -119,6 +125,27 @@ impl Default for CallbackStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cumulative_status_counters_saturate_instead_of_wrapping() {
+        let status = CallbackStatus::default();
+        status.callback_count.store(u64::MAX - 1, Ordering::Relaxed);
+        status
+            .oversized_callbacks
+            .store(u64::MAX - 1, Ordering::Relaxed);
+        status.stream_errors.store(u64::MAX - 1, Ordering::Relaxed);
+
+        for _ in 0..2 {
+            status.callback(1, 1);
+            status.oversized();
+            status.stream_error();
+        }
+
+        let snapshot = status.snapshot();
+        assert_eq!(snapshot.callback_count, u64::MAX);
+        assert_eq!(snapshot.oversized_callbacks, u64::MAX);
+        assert_eq!(snapshot.stream_errors, u64::MAX);
+    }
 
     #[test]
     fn snapshot_preserves_frame_counts_and_callback_gap() {

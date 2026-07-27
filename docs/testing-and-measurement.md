@@ -172,7 +172,9 @@ Before MVP release:
   exact bounded ordinary-failure counts with no exception text; and deferred
   propagation of fatal cleanup errors;
 - representative Android OEMs across the supported baseline;
-- Windows shared-mode sample rates and USB/Bluetooth output devices;
+- Windows shared-mode sample rates and USB/Bluetooth output devices, including
+  saturation tests for cumulative callback/render, capacity-fault, and
+  stream-error status counters;
 - private/public network profiles and firewall approval/denial.
 
 ## CI versus hardware-in-the-loop
