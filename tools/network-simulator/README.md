@@ -22,6 +22,11 @@ a physical latency claim.
   reported at the producer boundary. The A-F `mock_worker` runner uses the same
   profile cadence with a fixed-capacity mock decoder; it is not a native Opus or
   quality experiment.
+- the source-endpoint integration test applies the network-domain source pin
+  around the protected receiver pipeline with virtual endpoints. It verifies
+  that rejected input cannot pin, a changed endpoint cannot consume replay
+  state, epoch rotation preserves the pin, failed session replacement preserves
+  it, and successful fresh-session replacement permits rebinding.
 
 ## Run
 
@@ -31,4 +36,5 @@ cargo test -p sonimesh-network-simulator
 ~~~
 
 Physical WLAN, socket-buffer behavior, operating-system scheduling, real
-ASRC/device-clock drift, and address migration remain separate validation work.
+ASRC/device-clock drift, control-plane reconnection, and operating-system/NAT
+address migration remain separate validation work.

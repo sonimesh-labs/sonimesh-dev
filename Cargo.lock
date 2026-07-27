@@ -1268,6 +1268,7 @@ version = "0.1.0"
 dependencies = [
  "sonimesh-app",
  "sonimesh-audio",
+ "sonimesh-diagnostics",
  "sonimesh-network",
  "sonimesh-protocol",
 ]

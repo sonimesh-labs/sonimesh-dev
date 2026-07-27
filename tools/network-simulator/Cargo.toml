@@ -13,5 +13,8 @@ sonimesh-audio = { path = "../../crates/sonimesh-audio" }
 sonimesh-network = { path = "../../crates/sonimesh-network" }
 sonimesh-protocol = { path = "../../crates/sonimesh-protocol" }
 
+[dev-dependencies]
+sonimesh-diagnostics = { path = "../../crates/sonimesh-diagnostics" }
+
 [lints]
 workspace = true

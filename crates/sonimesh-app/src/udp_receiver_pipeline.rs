@@ -7,7 +7,10 @@ use sonimesh_audio::{
     DecodeStep, DecodeWorkerError, FrameDecoder, InsertOutcome, RealtimePcmProducer,
 };
 use sonimesh_diagnostics::StreamCounters;
-use sonimesh_network::{ProtectedIngressError, UdpMediaReceiver, UdpReceiveError};
+use sonimesh_network::{
+    ProtectedIngressError, SourceEndpointAdmissionError, SourceEndpointPin, UdpMediaReceiver,
+    UdpReceiveError,
+};
 use sonimesh_protocol::{MAX_MEDIA_PLAINTEXT_LEN, MediaKeyContext, SessionSecret};
 
 use crate::{FreshSessionInstallError, ReceiverPipelineError, ReceiverStreamPipeline};
@@ -97,7 +100,7 @@ pub struct UdpReceiverPipeline<
 > {
     receiver: UdpMediaReceiver,
     pipeline: ReceiverStreamPipeline<D, JITTER_CAPACITY, MAX_ENCODED_BYTES, PCM_SAMPLES_PER_BLOCK>,
-    pinned_source: Option<SocketAddr>,
+    source_pin: SourceEndpointPin,
     plaintext: [u8; MAX_MEDIA_PLAINTEXT_LEN],
 }
 
@@ -141,7 +144,7 @@ where
         Ok(Self {
             receiver,
             pipeline,
-            pinned_source: None,
+            source_pin: SourceEndpointPin::new(),
             plaintext: [0; MAX_MEDIA_PLAINTEXT_LEN],
         })
     }
@@ -162,7 +165,7 @@ where
     /// returns an outcome.
     #[must_use]
     pub const fn pinned_source(&self) -> Option<SocketAddr> {
-        self.pinned_source
+        self.source_pin.pinned()
     }
 
     /// Polls one datagram and admits it into the protected jitter boundary.
@@ -189,19 +192,24 @@ where
             return Ok(UdpPollOutcome::Empty);
         };
         let source = datagram.source;
-        if self
-            .pinned_source
-            .is_some_and(|expected| expected != source)
-        {
-            self.plaintext.fill(0);
-            self.pipeline.counters().rejected();
-            return Err(UdpReceiverError::SourceEndpointChanged);
-        }
-        let admission = self
-            .pipeline
-            .receive(datagram.payload, &mut self.plaintext)
-            .map_err(UdpReceiverError::Pipeline)?;
-        self.pinned_source.get_or_insert(source);
+        let Self {
+            source_pin,
+            pipeline,
+            plaintext,
+            ..
+        } = self;
+        let admission =
+            match source_pin.process(source, || pipeline.receive(datagram.payload, plaintext)) {
+                Ok(admission) => admission,
+                Err(SourceEndpointAdmissionError::SourceEndpointChanged) => {
+                    plaintext.fill(0);
+                    pipeline.counters().rejected();
+                    return Err(UdpReceiverError::SourceEndpointChanged);
+                }
+                Err(SourceEndpointAdmissionError::Processing(error)) => {
+                    return Err(UdpReceiverError::Pipeline(error));
+                }
+            };
         Ok(UdpPollOutcome::Processed { source, admission })
     }
 
@@ -244,7 +252,7 @@ where
         self.pipeline
             .install_fresh_session(secret, context, initial_sequence)?;
         self.plaintext.fill(0);
-        self.pinned_source = None;
+        self.source_pin.clear_for_fresh_session();
         Ok(())
     }
 

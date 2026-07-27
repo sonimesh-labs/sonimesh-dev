@@ -122,14 +122,17 @@ occupancy model exercises bounded drift controller decisions and stream-local
 hard-resynchronization requests. A separate deterministic case drops a valid
 control envelope while an independent authenticated media path still reaches PCM.
 
-This is evidence for deterministic core behavior only. It does not yet model
-socket buffers, real ASRC/device clocks, or operating-system scheduling, and it
-is not physical WLAN evidence. Separate loopback UDP tests exercise the
-fail-closed address policy: a source is pinned only after a packet passes
-protected ingress and bounded jitter handling. Epoch rotation does not migrate
-that pin, while fresh-session installation permits a new source to bind. Those
-tests do not prove control-plane reconnection or physical network-interface
-changes.
+A deterministic virtual-endpoint test now applies the shared network-domain
+source-pin policy around the protected receiver pipeline. It verifies that
+rejected input cannot pin, a changed endpoint is rejected before consuming
+replay state, epoch rotation preserves the binding, failed session replacement
+preserves it, and successful fresh-session replacement permits rebinding.
+Separate loopback UDP tests exercise the same policy through real host sockets.
+
+This is evidence for deterministic core behavior and host loopback composition
+only. It does not yet model socket buffers, real ASRC/device clocks,
+operating-system scheduling, control-plane reconnection, NAT rebinding, or
+physical network-interface changes, and it is not physical WLAN evidence.
 
 ## Stability and compatibility matrix
 

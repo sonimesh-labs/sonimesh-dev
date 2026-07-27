@@ -82,9 +82,12 @@ Tests cover HKDF determinism/domain separation, nonce separation by every field,
 header tampering, ciphertext tampering, context mismatch, output bounds, sequence
 exhaustion, authenticated replay ordering through the network adapter, and the
 published [cross-language media crypto vector](../protocol/media-crypto-vectors.md).
-Loopback UDP tests show that rejected packets cannot pin the source, a changed
-source cannot advance protected ingress, epoch rotation preserves the pin, and a
-fresh authenticated session permits rebinding while retaining the local socket.
+The source-pin state machine has deterministic unit coverage, and a virtual-
+endpoint integration test applies it around the protected receiver pipeline to
+show that rejected packets cannot pin, a changed source cannot advance replay
+state, epoch rotation preserves the pin, failed fresh-session installation
+preserves it, and successful fresh-session installation permits rebinding.
+Loopback UDP tests exercise the same behavior through a retained host socket.
 A Kotlin/JVM unit test independently reproduces the public crypto vector,
 decrypts it, and rejects header or ciphertext tampering using the host JDK
 provider. A LibFuzzer protected-ingress target exercises arbitrary datagrams,
