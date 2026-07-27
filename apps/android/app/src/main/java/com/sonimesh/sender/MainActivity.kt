@@ -151,11 +151,14 @@ internal fun com.sonimesh.sender.capture.CaptureEvidenceSnapshot.description(): 
     val latestRead = lastReadCompletionOffsetMillis?.let { offset ->
         " Last successful read at +${formatDuration(offset)}."
     }.orEmpty()
-    return "Observed ${capturedFrames} frames over ${formatDuration(captureDurationMillis)}, ${silentReads} silent reads, ${readErrors} read errors.$latestRead"
+    return "Observed ${capturedFrames} frames over ${formatDuration(captureDurationMillis)}, " +
+        "${silentFrames} silent frames across ${silentReads} reads, " +
+        "${readErrors} read errors.$latestRead"
 }
 
 internal fun com.sonimesh.sender.capture.CaptureEvidenceSnapshot.hasObservations(): Boolean =
-    captureDurationMillis != 0L || capturedFrames != 0L || silentReads != 0L || readErrors != 0L
+    captureDurationMillis != 0L || capturedFrames != 0L || silentFrames != 0L ||
+        silentReads != 0L || readErrors != 0L
 
 internal fun formatDuration(durationMillis: Long): String =
     "${durationMillis / 1_000}.${(durationMillis % 1_000) / 100} s"

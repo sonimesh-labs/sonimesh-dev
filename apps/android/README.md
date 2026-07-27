@@ -3,8 +3,9 @@
 This directory contains the capture-only Kotlin/Compose bootstrap for roadmap
 phase 0A. It is a feasibility prototype, not a sender release: it requests
 MediaProjection consent, starts a media-projection foreground service, creates a
-bounded `AudioRecord`, and discards PCM after recording low-rate evidence
-counters. It does not encode, pair, protect, transmit, or persist audio.
+bounded `AudioRecord`, and discards PCM after recording low-rate total-frame,
+silent-frame, read, and timing evidence counters. It does not encode, pair,
+protect, transmit, or persist audio.
 
 The service and native ownership boundary is recorded in [ADR 0010](../../docs/adr/0010-android-capture-service-boundary.md).
 The project builds against the checked-in Gradle wrapper, but no physical device

@@ -106,8 +106,8 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
 - a capture-only Kotlin/Compose Android phase 0A bootstrap with direct,
   non-persisted MediaProjection consent transfer, a media-projection foreground
   service, a fixed PCM16 AudioRecord read buffer, low-rate state publication,
-  bounded evidence counters including local read-completion offsets, a
-  frame-duration-based no-signal transition that is stable across partial reads,
+  bounded evidence counters including silent frames and local read-completion
+  offsets, a frame-duration-based no-signal transition stable across partial reads,
   and one idempotent teardown path; partial Vivo physical-device capture and
   background evidence is recorded in the [Android capture matrix](./measurements/android-capture-matrix.md).
   The remaining lifecycle, power, source-policy, and OEM matrix is still open.

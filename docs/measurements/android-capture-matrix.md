@@ -67,8 +67,8 @@ replacement for a device-side capture result.
    960-frame / 1,920-sample Phase 0A request; it is not an observed UI field.
 3. Record both an initial active snapshot and a final or terminal snapshot:
    `captureDurationMillis`, `lastReadCompletionOffsetMillis`, `capturedFrames`,
-   `silentReads`, and `readErrors`. Copy raw displayed values and units rather
-   than inferring sample cadence or audio latency from them.
+   `silentFrames`, `silentReads`, and `readErrors`. Copy raw displayed values
+   and units rather than inferring sample cadence or audio latency from them.
 4. During a lifecycle scenario, observe the foreground notification and active
    projection/service state before and after the event. Local `dumpsys` output
    can supplement the transcript when available, but retain the event that the
@@ -87,7 +87,10 @@ its evidence fields locally:
 
     python tools/check_android_capture_record.py path/to/android-capture-record.json
 
-The record has these required top-level fields:
+The current record format is schema version 2. The validator continues to
+accept legacy version 1 records, but new records must use version 2 so completed
+silent-frame duration can be checked independently from non-blocking read count.
+Both versions have these required top-level fields:
 
 ```text
 schema_version, recorded_at, scenario, device, app, observed_source_category,
@@ -100,12 +103,15 @@ the permission-denied and cancelled-consent scenarios, where no capture session
 may start. For a real capture scenario, `capture_format` retains
 `sample_rate_hz`, `channels`, `audio_source`, `channel_mask`,
 `pcm_format`, `buffer_size_bytes`, `minimum_buffer_bytes`, and `read_samples`.
-Each snapshot retains `capture_duration_ms`,
-`last_read_completion_offset_ms`, `captured_frames`, `silent_reads`, and
-`read_errors`. The validator requires final counters and local offsets to be
-nondecreasing, and it requires each completion offset to be at most its
-snapshot's local duration. It checks the same 20 ms read-size calculation and
-64 KiB buffer bound as the capture bootstrap.
+Each schema-version-2 snapshot retains `capture_duration_ms`,
+`last_read_completion_offset_ms`, `captured_frames`, `silent_frames`,
+`silent_reads`, and `read_errors`. Version 1 omits `silent_frames` only for
+backward compatibility. The validator requires final counters and local offsets
+to be nondecreasing, requires `silent_frames` not to exceed `captured_frames`,
+requires `silent_reads` not to exceed `silent_frames`, and requires each
+completion offset to be at most its snapshot's local duration. It checks the
+same 20 ms read-size calculation and 64 KiB buffer bound
+as the capture bootstrap.
 
 `terminal_state` is `active` only while a session remains observable. The
 terminal teardown values `user_requested`, `projection_revoked`,
@@ -123,9 +129,10 @@ The closed schema deliberately excludes free-form source identifiers, PCM,
 consent data, ADB serials, keys, and opaque device IDs.
 
 The validator proves only the internal consistency and redaction boundary of a
-record supplied by an operator. It neither runs the device scenario nor turns a
-silent-read count into a source-policy explanation, support claim, or latency
-measurement. Its synthetic self-test is not physical-device evidence:
+record supplied by an operator. It neither runs the device scenario nor turns
+silent-frame or silent-read counts into a source-policy explanation, support
+claim, or latency measurement. Its synthetic self-test is not physical-device
+evidence:
 
     python tools/check_android_capture_record.py --self-test
 
@@ -318,7 +325,8 @@ Each run should record:
 
 - device model, OEM, Android release/API level, build fingerprint, and app version;
 - capture format, channel mask, actual AudioRecord buffer, and minimum buffer;
-- capture duration, captured frames, silent reads, read errors, and terminal state;
+- capture duration, captured frames, silent frames, silent reads, read errors,
+  and terminal state;
 - screen/lock state, notification visibility, CPU, memory, thermal state, and battery impact;
 - source category as observed by the test operator: allowed, idle, silent, or protected/unknown;
 - whether teardown was user requested, projection revoked, process destroyed, or an error.
@@ -341,14 +349,15 @@ and units instead of calculating a source-specific explanation for silence.
 | AudioRecord metadata | `audioSource` and `channelMask` from the active `CaptureFormat`; record them as reported integers, not a source-policy explanation |
 | Capture format | `sampleRateHz`, `channels`, PCM representation, and `readSamples` from the active `CaptureFormat` |
 | AudioRecord buffers | `bufferSizeBytes` actual and `minimumBufferBytes` from the active `CaptureFormat` |
-| Initial active snapshot | `captureDurationMillis`, `lastReadCompletionOffsetMillis`, `capturedFrames`, `silentReads`, and `readErrors` |
-| Final or terminal snapshot | `captureDurationMillis`, `lastReadCompletionOffsetMillis`, `capturedFrames`, `silentReads`, and `readErrors` |
+| Initial active snapshot | `captureDurationMillis`, `lastReadCompletionOffsetMillis`, `capturedFrames`, `silentFrames`, `silentReads`, and `readErrors` |
+| Final or terminal snapshot | `captureDurationMillis`, `lastReadCompletionOffsetMillis`, `capturedFrames`, `silentFrames`, `silentReads`, and `readErrors` |
 | Terminal state | Active at observation end, user requested, projection revoked, service destroyed, or exact non-sensitive failure text |
 | Lifecycle observation | Lock/background duration, notification visibility, service/projection presence, or process recreation result |
 | Device condition | Battery, thermal, memory, and CPU observation when the scenario requires it; otherwise `not measured` |
 
-For an allowed, idle, silent, or protected/unknown observation, `silentReads`
-and `lastReadCompletionOffsetMillis` describe only completed local reads. The UI
+For an allowed, idle, silent, or protected/unknown observation,
+`silentFrames`, `silentReads`, and `lastReadCompletionOffsetMillis` describe only
+completed local reads. The UI
 changes to “no capturable audio detected” only after two seconds worth of
 completed silent frames at the observed sample rate; partial non-blocking reads
 do not shorten that frame-duration threshold. A nonzero silent count does not

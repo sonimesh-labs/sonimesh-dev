@@ -43,6 +43,8 @@ CAPTURE_SAMPLE_RATE_RANGE = range(8_000, 192_001)
 MAX_CAPTURE_CHANNELS = 8
 MAX_CAPTURE_BUFFER_BYTES = 64 * 1024
 CAPTURE_READ_DURATION_MS = 20
+CURRENT_SCHEMA_VERSION = 2
+SUPPORTED_SCHEMA_VERSIONS = frozenset({1, CURRENT_SCHEMA_VERSION})
 
 
 def require_object(value: Any, label: str, keys: set[str]) -> dict[str, Any]:
@@ -63,34 +65,50 @@ def require_nonnegative_int(value: Any, label: str) -> int:
     return value
 
 
-def validate_snapshot(value: Any, label: str) -> dict[str, int | None]:
-    snapshot = require_object(
-        value,
-        label,
-        {
-            "capture_duration_ms",
-            "last_read_completion_offset_ms",
-            "captured_frames",
-            "silent_reads",
-            "read_errors",
-        },
-    )
-    validated = {
-        "capture_duration_ms": require_nonnegative_int(
-            snapshot["capture_duration_ms"], f"{label}.capture_duration_ms"
-        ),
-        "captured_frames": require_nonnegative_int(
-            snapshot["captured_frames"], f"{label}.captured_frames"
-        ),
-        "silent_reads": require_nonnegative_int(snapshot["silent_reads"], f"{label}.silent_reads"),
-        "read_errors": require_nonnegative_int(snapshot["read_errors"], f"{label}.read_errors"),
+def validate_snapshot(
+    value: Any, label: str, schema_version: int
+) -> dict[str, int | None]:
+    keys = {
+        "capture_duration_ms",
+        "last_read_completion_offset_ms",
+        "captured_frames",
+        "silent_reads",
+        "read_errors",
     }
+    if schema_version >= 2:
+        keys.add("silent_frames")
+    snapshot = require_object(value, label, keys)
+    capture_duration_ms = require_nonnegative_int(
+        snapshot["capture_duration_ms"], f"{label}.capture_duration_ms"
+    )
+    captured_frames = require_nonnegative_int(
+        snapshot["captured_frames"], f"{label}.captured_frames"
+    )
+    silent_reads = require_nonnegative_int(snapshot["silent_reads"], f"{label}.silent_reads")
+    read_errors = require_nonnegative_int(snapshot["read_errors"], f"{label}.read_errors")
+    validated: dict[str, int | None] = {
+        "capture_duration_ms": capture_duration_ms,
+        "captured_frames": captured_frames,
+        "silent_frames": None,
+        "silent_reads": silent_reads,
+        "read_errors": read_errors,
+    }
+    if schema_version >= 2:
+        silent_frames = require_nonnegative_int(
+            snapshot["silent_frames"], f"{label}.silent_frames"
+        )
+        if silent_frames > captured_frames:
+            raise ValueError(f"{label}.silent_frames exceeds captured_frames")
+        if silent_reads > silent_frames:
+            raise ValueError(f"{label}.silent_reads exceeds silent_frames")
+        validated["silent_frames"] = silent_frames
+
     offset = snapshot["last_read_completion_offset_ms"]
     if offset is not None:
         offset = require_nonnegative_int(offset, f"{label}.last_read_completion_offset_ms")
-        if offset > validated["capture_duration_ms"]:
+        if offset > capture_duration_ms:
             raise ValueError(f"{label} read completion offset exceeds capture duration")
-    elif validated["captured_frames"] != 0:
+    elif captured_frames != 0:
         raise ValueError(f"{label} has captured frames without a read completion offset")
     return {**validated, "last_read_completion_offset_ms": offset}
 
@@ -148,8 +166,9 @@ def validate_record(record: Any) -> None:
             "device_conditions",
         },
     )
-    if root["schema_version"] != 1:
-        raise ValueError("record schema_version must be 1")
+    schema_version = require_nonnegative_int(root["schema_version"], "schema_version")
+    if schema_version not in SUPPORTED_SCHEMA_VERSIONS:
+        raise ValueError("record schema_version must be 1 or 2")
     require_nonempty_string(root["recorded_at"], "recorded_at")
     scenario = root["scenario"]
     if scenario not in SCENARIOS:
@@ -178,8 +197,8 @@ def validate_record(record: Any) -> None:
     if root["capture_format"] is None or root["initial_snapshot"] is None or root["final_snapshot"] is None:
         raise ValueError("capture scenario requires format plus initial and final snapshots")
     validate_capture_format(root["capture_format"])
-    initial = validate_snapshot(root["initial_snapshot"], "initial_snapshot")
-    final = validate_snapshot(root["final_snapshot"], "final_snapshot")
+    initial = validate_snapshot(root["initial_snapshot"], "initial_snapshot", schema_version)
+    final = validate_snapshot(root["final_snapshot"], "final_snapshot", schema_version)
     validate_snapshot_progress(initial, final)
     validate_terminal_lifecycle(root["lifecycle"], scenario, terminal_state)
 
@@ -238,6 +257,12 @@ def validate_snapshot_progress(initial: dict[str, int | None], final: dict[str, 
     for field in ("capture_duration_ms", "captured_frames", "silent_reads", "read_errors"):
         if final[field] < initial[field]:
             raise ValueError(f"final_snapshot.{field} regressed")
+    initial_silent_frames = initial["silent_frames"]
+    final_silent_frames = final["silent_frames"]
+    if initial_silent_frames is not None and (
+        final_silent_frames is None or final_silent_frames < initial_silent_frames
+    ):
+        raise ValueError("final_snapshot.silent_frames regressed")
     initial_offset = initial["last_read_completion_offset_ms"]
     final_offset = final["last_read_completion_offset_ms"]
     if initial_offset is not None and (final_offset is None or final_offset < initial_offset):
@@ -284,9 +309,39 @@ class AndroidCaptureRecordTests(unittest.TestCase):
     def test_accepts_redacted_active_capture_record(self) -> None:
         validate_record(active_record())
 
+    def test_accepts_legacy_v1_records_without_silent_frames(self) -> None:
+        validate_record(active_record(schema_version=1))
+
+    def test_rejects_unknown_schema_and_inconsistent_silent_frame_counters(self) -> None:
+        record = active_record()
+        record["schema_version"] = 3
+        with self.assertRaisesRegex(ValueError, "schema_version must be 1 or 2"):
+            validate_record(record)
+
+        record = active_record()
+        record["initial_snapshot"].pop("silent_frames")
+        with self.assertRaisesRegex(ValueError, "closed record schema"):
+            validate_record(record)
+
+        record = active_record()
+        record["initial_snapshot"]["silent_frames"] = 1_500_000
+        with self.assertRaisesRegex(ValueError, "silent_frames exceeds captured_frames"):
+            validate_record(record)
+
+        record = active_record()
+        record["initial_snapshot"]["silent_frames"] = 1
+        record["initial_snapshot"]["silent_reads"] = 2
+        with self.assertRaisesRegex(ValueError, "silent_reads exceeds silent_frames"):
+            validate_record(record)
+
+        record = active_record()
+        record["final_snapshot"]["silent_frames"] = 100
+        with self.assertRaisesRegex(ValueError, "silent_frames regressed"):
+            validate_record(record)
+
     def test_rejects_counter_regression_and_unredacted_schema_extension(self) -> None:
         record = active_record()
-        record["final_snapshot"]["captured_frames"] = 1
+        record["final_snapshot"]["captured_frames"] = 1_000_000
         with self.assertRaisesRegex(ValueError, "captured_frames regressed"):
             validate_record(record)
 
@@ -317,9 +372,13 @@ class AndroidCaptureRecordTests(unittest.TestCase):
             validate_record(record)
 
 
-def active_record(scenario: str = "allowed", terminal_state: str = "active") -> dict[str, Any]:
-    return {
-        "schema_version": 1,
+def active_record(
+    scenario: str = "allowed",
+    terminal_state: str = "active",
+    schema_version: int = CURRENT_SCHEMA_VERSION,
+) -> dict[str, Any]:
+    record = {
+        "schema_version": schema_version,
         "recorded_at": "2026-07-20T20:30:00+08:00",
         "scenario": scenario,
         "device": {
@@ -345,6 +404,7 @@ def active_record(scenario: str = "allowed", terminal_state: str = "active") -> 
             "capture_duration_ms": 30_200,
             "last_read_completion_offset_ms": 30_180,
             "captured_frames": 1_449_984,
+            "silent_frames": 960,
             "silent_reads": 2,
             "read_errors": 0,
         },
@@ -352,6 +412,7 @@ def active_record(scenario: str = "allowed", terminal_state: str = "active") -> 
             "capture_duration_ms": 69_700,
             "last_read_completion_offset_ms": 69_680,
             "captured_frames": 3_342_272,
+            "silent_frames": 2_880,
             "silent_reads": 6,
             "read_errors": 0,
         },
@@ -370,6 +431,10 @@ def active_record(scenario: str = "allowed", terminal_state: str = "active") -> 
             "memory": "not_measured",
         },
     }
+    if schema_version == 1:
+        record["initial_snapshot"].pop("silent_frames")
+        record["final_snapshot"].pop("silent_frames")
+    return record
 
 
 def absent_lifecycle() -> dict[str, Any]:

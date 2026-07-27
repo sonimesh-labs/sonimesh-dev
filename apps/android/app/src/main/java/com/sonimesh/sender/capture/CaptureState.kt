@@ -86,6 +86,8 @@ data class CaptureEvidenceSnapshot(
     /** Latest successful AudioRecord read completion relative to capture start. */
     val lastReadCompletionOffsetMillis: Long? = null,
     val capturedFrames: Long = 0,
+    /** Cumulative completed silent frames; this does not identify why they were silent. */
+    val silentFrames: Long = 0,
     val silentReads: Long = 0,
     val readErrors: Long = 0,
 )

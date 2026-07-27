@@ -109,6 +109,7 @@ class CaptureStateTest {
                 captureDurationMillis = 750,
                 lastReadCompletionOffsetMillis = 30,
                 capturedFrames = 720,
+                silentFrames = 480,
                 silentReads = 1,
                 readErrors = 1,
             ),

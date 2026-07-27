@@ -285,16 +285,17 @@ private fun CaptureEvidenceCard(evidence: CaptureEvidenceSnapshot) {
             )
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 EvidenceItem("Frames", formatCount(evidence.capturedFrames), Modifier.weight(1f))
-                EvidenceItem("Silent reads", formatCount(evidence.silentReads), Modifier.weight(1f))
+                EvidenceItem("Silent frames", formatCount(evidence.silentFrames), Modifier.weight(1f))
             }
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                EvidenceItem("Silent reads", formatCount(evidence.silentReads), Modifier.weight(1f))
                 EvidenceItem("Read errors", formatCount(evidence.readErrors), Modifier.weight(1f))
-                EvidenceItem(
-                    "Latest read",
-                    evidence.lastReadCompletionOffsetMillis?.let { "+${formatDuration(it)}" } ?: "Unavailable",
-                    Modifier.weight(1f),
-                )
             }
+            EvidenceItem(
+                "Latest read",
+                evidence.lastReadCompletionOffsetMillis?.let { "+${formatDuration(it)}" } ?: "Unavailable",
+                Modifier.fillMaxWidth(),
+            )
         }
     }
 }

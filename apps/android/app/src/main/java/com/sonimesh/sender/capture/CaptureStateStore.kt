@@ -10,6 +10,7 @@ class CaptureEvidence {
     private val captureStartedAtMillis = AtomicLong(NO_CAPTURE_START)
     private val lastReadCompletedAtMillis = AtomicLong(NO_READ_COMPLETION)
     private val capturedFrames = AtomicLong()
+    private val silentFrames = AtomicLong()
     private val silentReads = AtomicLong()
     private val readErrors = AtomicLong()
 
@@ -18,7 +19,10 @@ class CaptureEvidence {
         require(frames > 0) { "completed read must contain at least one frame" }
         require(completedAtMillis >= 0) { "read completion time must be monotonic" }
         capturedFrames.addAndGet(frames.toLong())
-        if (silent) silentReads.incrementAndGet()
+        if (silent) {
+            silentFrames.addAndGet(frames.toLong())
+            silentReads.incrementAndGet()
+        }
         val startedAtMillis = captureStartedAtMillis.get()
         if (startedAtMillis != NO_CAPTURE_START && completedAtMillis >= startedAtMillis) {
             recordLatestReadCompletion(completedAtMillis)
@@ -40,6 +44,7 @@ class CaptureEvidence {
         captureStartedAtMillis.set(NO_CAPTURE_START)
         lastReadCompletedAtMillis.set(NO_READ_COMPLETION)
         capturedFrames.set(0)
+        silentFrames.set(0)
         silentReads.set(0)
         readErrors.set(0)
     }
@@ -57,11 +62,18 @@ class CaptureEvidence {
                 startedAtMillis != NO_CAPTURE_START && completedAtMillis >= startedAtMillis
             }
             ?.minus(startedAtMillis)
+        // Read dependent monotonic counters in reverse write order so a concurrent
+        // completed read cannot expose more silent reads than frames or more silent
+        // frames than total frames in one low-rate snapshot.
+        val observedSilentReads = silentReads.get()
+        val observedSilentFrames = silentFrames.get()
+        val observedCapturedFrames = capturedFrames.get()
         return CaptureEvidenceSnapshot(
             captureDurationMillis = captureDurationMillis,
             lastReadCompletionOffsetMillis = lastReadCompletionOffsetMillis,
-            capturedFrames = capturedFrames.get(),
-            silentReads = silentReads.get(),
+            capturedFrames = observedCapturedFrames,
+            silentFrames = observedSilentFrames,
+            silentReads = observedSilentReads,
             readErrors = readErrors.get(),
         )
     }

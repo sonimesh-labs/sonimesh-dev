@@ -99,8 +99,11 @@ machine-readable Phase 0A record after a run. Its closed schema requires the
 device/build, observed capture format and buffers, initial/final local evidence
 snapshots, terminal state, lifecycle presence observations, and device-condition
 fields appropriate to the run. It mirrors the capture format's bounded 20 ms
-read calculation and validates counter/offset monotonicity, but it does not
-derive a sample cadence, capture policy, source identity, or latency result.
+read calculation and validates counter/offset monotonicity. Schema version 2
+also records completed silent frames separately from silent read calls and
+checks that silent frames never exceed total captured frames; version 1 remains
+accepted for older operator records. The validator does not derive a sample
+cadence, capture policy, source identity, or latency result.
 Any recorded terminal teardown state requires absent notification, service, and
 projection observations, matching the service's one teardown path.
 The schema has no fields for PCM, source application names, ADB serials,
