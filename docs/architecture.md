@@ -330,7 +330,9 @@ defined before implementation:
 - stream reset: discard only the affected stream's buffers.
 
 The initial implementation should publish fixed capacities in a configuration
-document and expose the resulting high-water marks in diagnostics.
+document and expose the resulting high-water marks in diagnostics. A queue
+occupancy snapshot must publish its current level and high-water mark as one
+coherent pair, so the reported high-water mark is never below the current level.
 
 ## 9. Discovery and control plane
 

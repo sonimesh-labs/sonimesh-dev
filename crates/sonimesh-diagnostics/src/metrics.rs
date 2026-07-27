@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicI32, AtomicU16, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicU32, AtomicU64, Ordering};
 
 /// Lock-free counters writable from realtime or network domains.
 #[derive(Debug, Default)]
@@ -14,8 +14,7 @@ pub struct StreamCounters {
     pcm_underflows: AtomicU64,
     pcm_overflows: AtomicU64,
     pcm_discontinuities: AtomicU64,
-    queued_pcm_blocks: AtomicU16,
-    queued_pcm_high_water_blocks: AtomicU16,
+    queued_pcm_state: AtomicU32,
     stream_resets: AtomicU64,
     nominal_sample_rates: AtomicU64,
     drift_adjustment_ppm: AtomicI32,
@@ -82,9 +81,12 @@ impl StreamCounters {
 
     /// Publishes the current count of PCM blocks in the active stream epoch.
     pub fn set_queued_pcm_blocks(&self, blocks: u16) {
-        self.queued_pcm_blocks.store(blocks, Ordering::Relaxed);
-        self.queued_pcm_high_water_blocks
-            .fetch_max(blocks, Ordering::Relaxed);
+        let _ = self
+            .queued_pcm_state
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |state| {
+                let (_, high_water) = unpack_queued_pcm_state(state);
+                Some(pack_queued_pcm_state(blocks, high_water.max(blocks)))
+            });
     }
 
     /// Starts a fresh PCM queue diagnostic epoch after stream-local retirement.
@@ -92,9 +94,7 @@ impl StreamCounters {
     /// The current occupancy and high-water mark both become zero. Stream-wide
     /// counters intentionally remain cumulative.
     pub fn reset_queued_pcm_epoch(&self) {
-        self.queued_pcm_blocks.store(0, Ordering::Relaxed);
-        self.queued_pcm_high_water_blocks
-            .store(0, Ordering::Relaxed);
+        self.queued_pcm_state.store(0, Ordering::Relaxed);
     }
 
     /// Records a stream-local reset.
@@ -128,6 +128,8 @@ impl StreamCounters {
     /// synchronization. A concurrent event may appear in the next snapshot.
     #[must_use]
     pub fn snapshot(&self) -> StreamMetricsSnapshot {
+        let (queued_pcm_blocks, queued_pcm_high_water_blocks) =
+            unpack_queued_pcm_state(self.queued_pcm_state.load(Ordering::Relaxed));
         let (nominal_input_sample_rate_hz, nominal_output_sample_rate_hz) =
             unpack_sample_rates(self.nominal_sample_rates.load(Ordering::Relaxed));
 
@@ -143,8 +145,8 @@ impl StreamCounters {
             pcm_underflows: self.pcm_underflows.load(Ordering::Relaxed),
             pcm_overflows: self.pcm_overflows.load(Ordering::Relaxed),
             pcm_discontinuities: self.pcm_discontinuities.load(Ordering::Relaxed),
-            queued_pcm_blocks: self.queued_pcm_blocks.load(Ordering::Relaxed),
-            queued_pcm_high_water_blocks: self.queued_pcm_high_water_blocks.load(Ordering::Relaxed),
+            queued_pcm_blocks,
+            queued_pcm_high_water_blocks,
             stream_resets: self.stream_resets.load(Ordering::Relaxed),
             nominal_input_sample_rate_hz,
             nominal_output_sample_rate_hz,
@@ -224,6 +226,18 @@ fn ratio_from_rates(input_sample_rate_hz: u32, output_sample_rate_hz: u32) -> Op
         .then(|| f64::from(input_sample_rate_hz) / f64::from(output_sample_rate_hz))
 }
 
+const fn pack_queued_pcm_state(blocks: u16, high_water_blocks: u16) -> u32 {
+    (blocks as u32) | ((high_water_blocks as u32) << u16::BITS)
+}
+
+fn unpack_queued_pcm_state(state: u32) -> (u16, u16) {
+    let blocks =
+        u16::try_from(state & u32::from(u16::MAX)).expect("masked PCM queue level fits in u16");
+    let high_water_blocks =
+        u16::try_from(state >> u16::BITS).expect("shifted PCM queue high-water fits in u16");
+    (blocks, high_water_blocks)
+}
+
 const fn pack_sample_rates(input_sample_rate_hz: u32, output_sample_rate_hz: u32) -> u64 {
     ((input_sample_rate_hz as u64) << u32::BITS) | output_sample_rate_hz as u64
 }
@@ -292,6 +306,35 @@ mod tests {
 
         assert_eq!(snapshot.nominal_resampling_ratio(), None);
         assert_eq!(snapshot.effective_resampling_ratio(), None);
+    }
+
+    #[test]
+    fn queued_pcm_level_and_high_water_are_published_as_one_valid_pair() {
+        let counters = StreamCounters::default();
+
+        for blocks in [4, 2, 9, 1, u16::MAX] {
+            counters.set_queued_pcm_blocks(blocks);
+            let snapshot = counters.snapshot();
+            assert_eq!(snapshot.queued_pcm_blocks, blocks);
+            assert!(snapshot.queued_pcm_high_water_blocks >= snapshot.queued_pcm_blocks);
+        }
+    }
+
+    #[test]
+    fn concurrent_queue_publication_never_exposes_an_invalid_pair() {
+        let counters = std::sync::Arc::new(StreamCounters::default());
+        let writer = std::sync::Arc::clone(&counters);
+
+        let writer = std::thread::spawn(move || {
+            for blocks in (0..=u16::MAX).cycle().take(100_000) {
+                writer.set_queued_pcm_blocks(blocks);
+            }
+        });
+        for _ in 0..100_000 {
+            let snapshot = counters.snapshot();
+            assert!(snapshot.queued_pcm_high_water_blocks >= snapshot.queued_pcm_blocks);
+        }
+        writer.join().expect("queue metric writer must finish");
     }
 
     #[test]
