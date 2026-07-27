@@ -18,9 +18,11 @@ writing a bounded, versioned bundle, that owner snapshots only approved
 low-rate values: software version, redacted endpoint family/port, platform
 format, selected buffer policy, session phase, and stream counter snapshots.
 
-When stream snapshots cross a JSON or TypeScript control/UI boundary, each
-cumulative `u64` counter is represented as an unsigned decimal string. This
-avoids JavaScript number precision loss during long-running sessions; bounded
+Each cumulative `u64` counter uses relaxed lock-free updates and saturates at
+`u64::MAX` instead of wrapping to a smaller value. When stream snapshots cross
+a JSON or TypeScript control/UI boundary, those counters are represented as
+unsigned decimal strings. This avoids JavaScript number precision loss during
+long-running sessions; bounded
 format, queue, and timing fields remain numeric where their documented ranges
 fit exactly.
 

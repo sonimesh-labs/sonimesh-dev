@@ -24,59 +24,58 @@ pub struct StreamCounters {
 impl StreamCounters {
     /// Records an authenticated packet.
     pub fn authenticated(&self) {
-        self.authenticated_packets.fetch_add(1, Ordering::Relaxed);
+        saturating_increment(&self.authenticated_packets);
     }
 
     /// Records an authenticated duplicate.
     pub fn duplicate(&self) {
-        self.duplicate_packets.fetch_add(1, Ordering::Relaxed);
+        saturating_increment(&self.duplicate_packets);
     }
 
     /// Records a packet rejected before it can reach decoder work.
     pub fn rejected(&self) {
-        self.rejected_packets.fetch_add(1, Ordering::Relaxed);
+        saturating_increment(&self.rejected_packets);
     }
 
     /// Records a packet arriving after its deadline.
     pub fn late(&self) {
-        self.late_packets.fetch_add(1, Ordering::Relaxed);
+        saturating_increment(&self.late_packets);
     }
 
     /// Records an accepted reordered packet.
     pub fn reordered(&self) {
-        self.reordered_packets.fetch_add(1, Ordering::Relaxed);
+        saturating_increment(&self.reordered_packets);
     }
 
     /// Records encoded frames discarded by one controlled jitter resynchronization.
     pub fn jitter_resync_dropped_frames(&self, frames: usize) {
         let frames = u64::try_from(frames).unwrap_or(u64::MAX);
-        self.jitter_resync_dropped_frames
-            .fetch_add(frames, Ordering::Relaxed);
+        saturating_add(&self.jitter_resync_dropped_frames, frames);
     }
 
     /// Records one decoder-side packet-loss-concealment frame.
     pub fn plc_frame(&self) {
-        self.plc_frames.fetch_add(1, Ordering::Relaxed);
+        saturating_increment(&self.plc_frames);
     }
 
     /// Records one stream-local decoder or bounded decoder-output failure.
     pub fn decode_error(&self) {
-        self.decode_errors.fetch_add(1, Ordering::Relaxed);
+        saturating_increment(&self.decode_errors);
     }
 
     /// Records output silence caused by an empty PCM ring.
     pub fn pcm_underflow(&self) {
-        self.pcm_underflows.fetch_add(1, Ordering::Relaxed);
+        saturating_increment(&self.pcm_underflows);
     }
 
     /// Records a bounded oldest-region drop in the PCM ring.
     pub fn pcm_overflow(&self) {
-        self.pcm_overflows.fetch_add(1, Ordering::Relaxed);
+        saturating_increment(&self.pcm_overflows);
     }
 
     /// Records a sequence or epoch gap observed by the PCM render source.
     pub fn pcm_discontinuity(&self) {
-        self.pcm_discontinuities.fetch_add(1, Ordering::Relaxed);
+        saturating_increment(&self.pcm_discontinuities);
     }
 
     /// Publishes the current count of PCM blocks in the active stream epoch.
@@ -99,7 +98,7 @@ impl StreamCounters {
 
     /// Records a stream-local reset.
     pub fn stream_reset(&self) {
-        self.stream_resets.fetch_add(1, Ordering::Relaxed);
+        saturating_increment(&self.stream_resets);
     }
 
     /// Publishes the validated nominal input/output sample rates.
@@ -119,7 +118,7 @@ impl StreamCounters {
 
     /// Records a stream-owner hard resynchronization request.
     pub fn drift_hard_resync(&self) {
-        self.drift_hard_resyncs.fetch_add(1, Ordering::Relaxed);
+        saturating_increment(&self.drift_hard_resyncs);
     }
 
     /// Reads a non-transactional diagnostic snapshot.
@@ -221,6 +220,23 @@ impl StreamMetricsSnapshot {
     }
 }
 
+fn saturating_increment(counter: &AtomicU64) {
+    saturating_add(counter, 1);
+}
+
+fn saturating_add(counter: &AtomicU64, amount: u64) {
+    if amount == 0 {
+        return;
+    }
+    let _ = counter.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+        if value == u64::MAX {
+            None
+        } else {
+            Some(value.saturating_add(amount))
+        }
+    });
+}
+
 fn ratio_from_rates(input_sample_rate_hz: u32, output_sample_rate_hz: u32) -> Option<f64> {
     (input_sample_rate_hz != 0 && output_sample_rate_hz != 0)
         .then(|| f64::from(input_sample_rate_hz) / f64::from(output_sample_rate_hz))
@@ -298,6 +314,97 @@ mod tests {
         assert_eq!(reset_snapshot.queued_pcm_blocks, 0);
         assert_eq!(reset_snapshot.queued_pcm_high_water_blocks, 0);
         assert_eq!(reset_snapshot.authenticated_packets, 1);
+    }
+
+    #[test]
+    fn cumulative_counters_saturate_instead_of_wrapping() {
+        let counters = StreamCounters::default();
+        for counter in [
+            &counters.authenticated_packets,
+            &counters.duplicate_packets,
+            &counters.rejected_packets,
+            &counters.late_packets,
+            &counters.reordered_packets,
+            &counters.jitter_resync_dropped_frames,
+            &counters.plc_frames,
+            &counters.decode_errors,
+            &counters.pcm_underflows,
+            &counters.pcm_overflows,
+            &counters.pcm_discontinuities,
+            &counters.stream_resets,
+            &counters.drift_hard_resyncs,
+        ] {
+            counter.store(u64::MAX - 1, Ordering::Relaxed);
+        }
+
+        counters.authenticated();
+        counters.authenticated();
+        counters.duplicate();
+        counters.duplicate();
+        counters.rejected();
+        counters.rejected();
+        counters.late();
+        counters.late();
+        counters.reordered();
+        counters.reordered();
+        counters.jitter_resync_dropped_frames(2);
+        counters.plc_frame();
+        counters.plc_frame();
+        counters.decode_error();
+        counters.decode_error();
+        counters.pcm_underflow();
+        counters.pcm_underflow();
+        counters.pcm_overflow();
+        counters.pcm_overflow();
+        counters.pcm_discontinuity();
+        counters.pcm_discontinuity();
+        counters.stream_reset();
+        counters.stream_reset();
+        counters.drift_hard_resync();
+        counters.drift_hard_resync();
+
+        assert_eq!(
+            counters.snapshot(),
+            StreamMetricsSnapshot {
+                authenticated_packets: u64::MAX,
+                duplicate_packets: u64::MAX,
+                rejected_packets: u64::MAX,
+                late_packets: u64::MAX,
+                reordered_packets: u64::MAX,
+                jitter_resync_dropped_frames: u64::MAX,
+                plc_frames: u64::MAX,
+                decode_errors: u64::MAX,
+                pcm_underflows: u64::MAX,
+                pcm_overflows: u64::MAX,
+                pcm_discontinuities: u64::MAX,
+                stream_resets: u64::MAX,
+                drift_hard_resyncs: u64::MAX,
+                ..StreamMetricsSnapshot::default()
+            }
+        );
+    }
+
+    #[test]
+    fn concurrent_counter_updates_remain_saturated() {
+        let counters = std::sync::Arc::new(StreamCounters::default());
+        counters
+            .authenticated_packets
+            .store(u64::MAX - 100, Ordering::Relaxed);
+        let workers = (0..4)
+            .map(|_| {
+                let counters = std::sync::Arc::clone(&counters);
+                std::thread::spawn(move || {
+                    for _ in 0..10_000 {
+                        counters.authenticated();
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+
+        for worker in workers {
+            worker.join().expect("counter writer must finish");
+        }
+        assert_eq!(counters.snapshot().authenticated_packets, u64::MAX);
     }
 
     #[test]

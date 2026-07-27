@@ -66,7 +66,8 @@ Cover at least:
 - PLC/FEC scheduling and frame-duration transitions;
 - drift-controller convergence, limits, anti-windup, and reset;
 - channel mapping, gain ramps, fades, clipping protection, and limiter behavior;
-- coherent PCM queue level/high-water snapshots under concurrent publication;
+- coherent PCM queue level/high-water snapshots and saturating cumulative
+  diagnostics counters under concurrent publication;
 - all lifecycle-state transitions, including invalid transitions;
 - output-device fallback and stream-recreation behavior.
 
