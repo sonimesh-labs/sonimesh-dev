@@ -110,3 +110,14 @@ internal fun CaptureStatus.isAwaitingAuthorization(): Boolean = when (this) {
 
 /** True when a fresh capture request may begin from the current UI state. */
 internal fun CaptureStatus.canStart(): Boolean = !isActive() && !isAwaitingAuthorization()
+
+/** Returns an actionable failure only for the consent result a retiring service rejected. */
+internal fun CaptureStatus.retiringServiceStartFailure(): CaptureStatus.Failed? =
+    if (this == CaptureStatus.AwaitingProjectionConsent) {
+        CaptureStatus.Failed(CAPTURE_SERVICE_RETIRING_MESSAGE)
+    } else {
+        null
+    }
+
+internal const val CAPTURE_SERVICE_RETIRING_MESSAGE =
+    "Previous capture session is still stopping; wait briefly and start capture again"

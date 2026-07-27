@@ -32,7 +32,10 @@ UI. The activity owns only user interaction and the platform consent launch:
   result only advances its matching pending state, so stale callbacks cannot
   open overlapping consent flows or create a second capture session;
 - transfer the one current consent result directly to the foreground service for
-  immediate setup; never persist, cache, or reuse the projection token;
+  immediate setup; never persist, cache, or reuse the projection token. If a
+  fresh result reaches the same service instance after its one-way teardown has
+  begun, reject it and replace the matching consent-wait state with an
+  actionable retry failure rather than silently consuming the result;
 - emit no PCM, encoded frames, keys, or high-rate metering events to Compose;
   evidence summaries are capped at two state publications per second.
 
@@ -62,7 +65,10 @@ no completion claimant can win before the selected terminal outcome and the
 reader stop/interrupt requests are published. Exactly one claimant then waits for
 a successfully launched reader to exit before releasing resources. Duplicate
 stop/error notifications may retry the completion check but cannot retire the
-same capture resources twice. Once cleanup is claimed, service references are
+same capture resources twice. The service start-admission policy distinguishes
+active duplicate starts from a start delivered to a retiring generation: active
+duplicates remain no-ops, while a retiring generation cannot admit new consent
+or capture resources. Once cleanup is claimed, service references are
 retired before platform callbacks run and each release, terminal publication,
 foreground-removal, and service-stop step is attempted independently. One
 platform cleanup exception cannot prevent the remaining retirement steps.
@@ -141,11 +147,11 @@ observable symptom, not evidence about a particular source application.
 
 Host JVM tests exercise reader-start rollback, rejection of a reader after
 teardown admission, duplicate-reader rejection, concurrent launch/teardown
-ordering, outcome-publication ordering, exactly-once finish claims,
-read-call exception accounting, and best-effort continuation after a cleanup
-step fails. These tests validate only the pure coordination helpers; they do not
-establish
-Android service, AudioRecord, or MediaProjection lifecycle behavior on a device.
+ordering, outcome-publication ordering, exactly-once finish claims, fresh-start
+rejection during teardown, read-call exception accounting, and best-effort
+continuation after a cleanup step fails. These tests validate only the pure
+coordination helpers; they do not establish Android service, AudioRecord, or
+MediaProjection lifecycle behavior on a device.
 
 - capture-only runs on the reference Android 12-17 matrix, recording actual
   AudioRecord format, channels, buffer sizes, read errors, and silent periods;

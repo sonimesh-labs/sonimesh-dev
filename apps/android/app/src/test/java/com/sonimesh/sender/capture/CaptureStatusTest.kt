@@ -1,5 +1,6 @@
 package com.sonimesh.sender.capture
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -30,6 +31,20 @@ class CaptureStatusTest {
         assertFalse(CaptureStatus.AwaitingPermission.canStart())
         assertFalse(CaptureStatus.AwaitingNotificationPermission.canStart())
         assertFalse(CaptureStatus.Capturing(observedFormat()).canStart())
+    }
+
+    @Test
+    fun retiring_service_rejection_only_replaces_the_matching_consent_state() {
+        assertEquals(
+            CaptureStatus.Failed(CAPTURE_SERVICE_RETIRING_MESSAGE),
+            CaptureStatus.AwaitingProjectionConsent.retiringServiceStartFailure(),
+        )
+        assertEquals(null, CaptureStatus.AwaitingPermission.retiringServiceStartFailure())
+        assertEquals(null, CaptureStatus.Capturing(observedFormat()).retiringServiceStartFailure())
+        assertEquals(
+            null,
+            CaptureStatus.Stopped(CaptureStopReason.UserRequested).retiringServiceStartFailure(),
+        )
     }
 
     private fun observedFormat(): CaptureFormat = requireNotNull(

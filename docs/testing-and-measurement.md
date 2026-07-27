@@ -157,7 +157,8 @@ Before MVP release:
 - output-device unplug/replug;
 - sleep/wake and user-session changes;
 - Android lock, backgrounding, service recreation, projection revocation, and
-  teardown races between outcome publication, reader exit, and duplicate stops;
+  teardown races between outcome publication, reader exit, duplicate stops, and
+  fresh starts delivered while the old service generation is retiring;
   read-error accounting for negative return codes and thrown read-call
   exceptions; and injected failures in each final cleanup step;
 - representative Android OEMs across the supported baseline;

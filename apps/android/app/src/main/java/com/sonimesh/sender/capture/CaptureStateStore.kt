@@ -115,6 +115,12 @@ object CaptureStateStore {
         publish(CaptureStatus.AwaitingProjectionConsent)
     }
 
+    /** Replaces only the fresh consent state rejected by a retiring service. */
+    fun publishRetiringServiceStartFailure() {
+        val failure = mutableState.value.status.retiringServiceStartFailure() ?: return
+        publish(failure)
+    }
+
     fun publishCapturing(format: CaptureFormat) {
         publish(CaptureStatus.Capturing(format))
     }

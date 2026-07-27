@@ -52,8 +52,18 @@ class CaptureService : Service() {
             teardown(TerminalOutcome.Stopped(CaptureStopReason.UserRequested))
             return START_NOT_STICKY
         }
-        if (teardownGate.isTeardownStarted() || audioRecord != null || mediaProjection != null) {
-            return START_NOT_STICKY
+        when (captureStartAdmission(
+            teardownStarted = teardownGate.isTeardownStarted(),
+            ownsCaptureLifecycle = audioRecord != null ||
+                mediaProjection != null ||
+                captureThread != null,
+        )) {
+            CaptureStartAdmission.Start -> Unit
+            CaptureStartAdmission.IgnoreActiveDuplicate -> return START_NOT_STICKY
+            CaptureStartAdmission.RejectRetiringGeneration -> {
+                CaptureStateStore.publishRetiringServiceStartFailure()
+                return START_NOT_STICKY
+            }
         }
 
         val resultCode = intent?.getIntExtra(EXTRA_RESULT_CODE, Activity.RESULT_CANCELED)
