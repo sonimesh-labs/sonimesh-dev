@@ -8,6 +8,9 @@ import os
 import subprocess
 import sys
 import unittest
+from contextlib import redirect_stderr
+from io import StringIO
+from unittest.mock import patch
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -48,6 +51,17 @@ def adb_path(explicit: Path | None) -> str:
     return "adb"
 
 
+def validate_serial(serial: str) -> None:
+    """Rejects empty or multi-line ADB selectors before any command is issued."""
+    if not serial.strip() or any(character in serial for character in "\r\n\x00"):
+        raise ValueError("ADB serial must be nonempty and single-line")
+
+
+def redact_serial(value: str, serial: str) -> str:
+    """Prevents a locally selected serial from entering preflight output."""
+    return value.replace(serial, "<redacted-device>")
+
+
 def run_adb(
     adb: str,
     serial: str,
@@ -55,6 +69,7 @@ def run_adb(
     runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
 ) -> str:
     """Runs one read-only ADB shell command without exposing the serial in output."""
+    validate_serial(serial)
     completed = runner(
         [adb, "-s", serial, *arguments],
         check=False,
@@ -64,8 +79,8 @@ def run_adb(
     )
     if completed.returncode != 0:
         detail = completed.stderr.strip() or "ADB command failed"
-        raise RuntimeError(detail.replace(serial, "<redacted-device>"))
-    return completed.stdout.strip()
+        raise RuntimeError(redact_serial(detail, serial))
+    return redact_serial(completed.stdout.strip(), serial)
 
 
 def collect_record(
@@ -74,6 +89,7 @@ def collect_record(
     runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
 ) -> DeviceRecord:
     """Collects only the Android matrix preparation fields for one explicit device."""
+    validate_serial(serial)
     values = {
         label: run_adb(adb, serial, ["shell", "getprop", property_name], runner)
         for label, property_name in PROPERTIES
@@ -120,7 +136,7 @@ def main() -> int:
     arguments = parser.parse_args()
     try:
         record = collect_record(adb_path(arguments.adb), arguments.serial)
-    except (OSError, RuntimeError) as error:
+    except (OSError, RuntimeError, ValueError) as error:
         print(f"Android capture preflight: failed: {error}", file=sys.stderr)
         return 1
     print(format_record(record))
@@ -150,6 +166,50 @@ class AndroidCapturePreflightTests(unittest.TestCase):
         self.assertTrue(record.capture_package_installed)
         self.assertIn("Example OEM / Model X", rendered)
         self.assertNotIn("private-serial", rendered)
+
+    def test_rejects_empty_or_multiline_serial_before_issuing_adb_commands(self) -> None:
+        calls: list[list[str]] = []
+
+        def runner(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+            calls.append(command)
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        for serial in ("", "  ", "private-serial\nnext-line"):
+            with self.subTest(serial=serial):
+                with self.assertRaisesRegex(ValueError, "serial must be nonempty and single-line"):
+                    collect_record("adb", serial, runner)
+        self.assertEqual(calls, [])
+
+    def test_redacts_selected_serial_from_untrusted_adb_output(self) -> None:
+        serial = "private-serial"
+        values = {
+            "ro.product.manufacturer": f"Example {serial} OEM",
+            "ro.product.model": "Model X",
+            "ro.build.version.release": "15",
+            "ro.build.version.sdk": "35",
+            "ro.build.fingerprint": "example/model/build:15/ABC/123:userdebug/test-keys",
+            "ro.product.cpu.abi": "arm64-v8a",
+        }
+
+        def runner(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+            property_name = command[-1]
+            return subprocess.CompletedProcess(command, 0, values.get(property_name, ""), "")
+
+        record = collect_record("adb", serial, runner)
+        rendered = format_record(record)
+        self.assertNotIn(serial, record.manufacturer)
+        self.assertNotIn(serial, rendered)
+        self.assertIn("Example <redacted-device> OEM", rendered)
+
+    def test_main_reports_invalid_serial_without_a_traceback(self) -> None:
+        stderr = StringIO()
+        with patch.object(sys, "argv", ["android_capture_preflight.py", "--serial", ""]):
+            with redirect_stderr(stderr):
+                self.assertEqual(main(), 1)
+        self.assertEqual(
+            stderr.getvalue(),
+            "Android capture preflight: failed: ADB serial must be nonempty and single-line\n",
+        )
 
     def test_rejects_missing_required_property_and_adb_failure(self) -> None:
         def missing_runner(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
