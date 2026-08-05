@@ -112,7 +112,23 @@ pub enum ProfileError {
 
 impl fmt::Display for ProfileError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "invalid virtual-network profile: {self:?}")
+        match self {
+            Self::InvalidPercentage => {
+                formatter.write_str("virtual-network impairment percentage exceeds 100")
+            }
+            Self::ZeroInFlightCapacity => {
+                formatter.write_str("virtual-network in-flight capacity must be at least one")
+            }
+            Self::InFlightCapacityTooLarge => formatter
+                .write_str("virtual-network in-flight capacity exceeds the explicit hard bound"),
+            Self::DelayTooLarge => formatter
+                .write_str("virtual-network combined delay exceeds the explicit hard bound"),
+            Self::BurstIntervalMissing => formatter
+                .write_str("virtual-network burst length requires a non-zero burst interval"),
+            Self::BandwidthTooLarge => {
+                formatter.write_str("virtual-network bandwidth exceeds the explicit hard bound")
+            }
+        }
     }
 }
 
@@ -120,6 +136,8 @@ impl std::error::Error for ProfileError {}
 
 #[cfg(test)]
 mod tests {
+    use std::error::Error;
+
     use super::*;
 
     #[test]
@@ -128,5 +146,34 @@ mod tests {
         profile.bandwidth_bytes_per_second = MAX_BANDWIDTH_BYTES_PER_SECOND + 1;
 
         assert_eq!(profile.validate(), Err(ProfileError::BandwidthTooLarge));
+    }
+
+    #[test]
+    fn profile_errors_have_descriptive_stable_messages() {
+        assert_eq!(
+            ProfileError::InvalidPercentage.to_string(),
+            "virtual-network impairment percentage exceeds 100"
+        );
+        assert_eq!(
+            ProfileError::ZeroInFlightCapacity.to_string(),
+            "virtual-network in-flight capacity must be at least one"
+        );
+        assert_eq!(
+            ProfileError::InFlightCapacityTooLarge.to_string(),
+            "virtual-network in-flight capacity exceeds the explicit hard bound"
+        );
+        assert_eq!(
+            ProfileError::DelayTooLarge.to_string(),
+            "virtual-network combined delay exceeds the explicit hard bound"
+        );
+        assert_eq!(
+            ProfileError::BurstIntervalMissing.to_string(),
+            "virtual-network burst length requires a non-zero burst interval"
+        );
+        assert_eq!(
+            ProfileError::BandwidthTooLarge.to_string(),
+            "virtual-network bandwidth exceeds the explicit hard bound"
+        );
+        assert!(Error::source(&ProfileError::InvalidPercentage).is_none());
     }
 }
