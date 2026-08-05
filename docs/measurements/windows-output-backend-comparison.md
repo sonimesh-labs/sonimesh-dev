@@ -120,8 +120,9 @@ Validate a completed physical default-role transcript before recording it:
     python tools/check_output_recovery_log.py --scenario default --backend wasapi output/wasapi-default-recovery.log
 
 The verifier requires two healthy status stages and the explicit values
-`require default change: true` and `default changed: true`. It rejects a
-no-change command check as default-role evidence.
+`require default change: true` and `default changed: true`. It also requires the
+control-domain order: required change, pre-stop status, observed change, then
+recovered status. It rejects a no-change command check as default-role evidence.
 
 For a CPAL pinned-device removal experiment, first obtain the opaque identifier
 from the local `output_probe` command. Do not paste that identifier into an
@@ -143,10 +144,11 @@ Validate a completed CPAL pinned-device transcript before recording it:
 
     python tools/check_output_recovery_log.py --scenario pinned --backend cpal output/cpal-pinned-recovery.log
 
-The verifier requires the pre-stop observation and accepts exactly one outcome:
-`recovery_result=pinned_device_unavailable`, or a healthy recovered status with
-`pre_stop_healthy=true` and `recovery_result=pinned_device_restarted`. The
-unavailable result remains a negative observation, not proof of recovery.
+The verifier requires the pre-stop observation before either outcome and
+accepts exactly one: `recovery_result=pinned_device_unavailable`, or a healthy
+recovered status with `pre_stop_healthy=true` followed by
+`recovery_result=pinned_device_restarted`. The unavailable result remains a
+negative observation, not proof of recovery.
 
 ## Manual device and power recovery procedure
 

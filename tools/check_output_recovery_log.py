@@ -63,6 +63,14 @@ class Status:
     health: str
 
 
+@dataclass(frozen=True)
+class RecoveryTranscript:
+    fields: dict[str, str]
+    statuses: dict[str, Status]
+    field_lines: dict[str, int]
+    status_lines: dict[str, int]
+
+
 def parse_status(line: str, spec: BackendSpec) -> Status | None:
     """Parses one redacted status line from a recovery experiment."""
     match = STATUS_PATTERN.fullmatch(line)
@@ -92,23 +100,26 @@ def parse_status(line: str, spec: BackendSpec) -> Status | None:
         raise ValueError("invalid numeric recovery status field") from error
 
 
-def parse(lines: list[str], backend: str) -> tuple[dict[str, str], dict[str, Status]]:
-    """Collects the checked fields and status stages without retaining endpoint data."""
+def parse(lines: list[str], backend: str) -> RecoveryTranscript:
+    """Collects checked fields, stages, and line order without retaining endpoint data."""
     spec = BACKENDS[backend]
     fields: dict[str, str] = {}
     statuses: dict[str, Status] = {}
+    field_lines: dict[str, int] = {}
+    status_lines: dict[str, int] = {}
     accepted = {
         "require default change",
         "default changed",
         "pre_stop_healthy",
         "recovery_result",
     }
-    for line in lines:
+    for line_number, line in enumerate(lines, start=1):
         status = parse_status(line, spec)
         if status is not None:
             if status.stage in statuses:
                 raise ValueError(f"duplicate {status.stage} status")
             statuses[status.stage] = status
+            status_lines[status.stage] = line_number
             continue
         key, separator, value = line.partition(": ")
         if not separator:
@@ -117,7 +128,8 @@ def parse(lines: list[str], backend: str) -> tuple[dict[str, str], dict[str, Sta
             if key in fields:
                 raise ValueError(f"duplicate {key} field")
             fields[key] = value
-    return fields, statuses
+            field_lines[key] = line_number
+    return RecoveryTranscript(fields, statuses, field_lines, status_lines)
 
 
 def validate_healthy(status: Status) -> None:
@@ -134,14 +146,20 @@ def validate_healthy(status: Status) -> None:
 
 def validate_default(lines: list[str], backend: str) -> None:
     """Validates one observed default-role transition transcript."""
-    fields, statuses = parse(lines, backend)
-    if fields.get("require default change") != "true":
+    transcript = parse(lines, backend)
+    if transcript.fields.get("require default change") != "true":
         raise ValueError("default-role transcript did not require a change")
-    if fields.get("default changed") != "true":
+    if transcript.fields.get("default changed") != "true":
         raise ValueError("default-role transcript did not observe a change")
-    if set(statuses) != {"before_stop", "recovered"}:
+    if set(transcript.statuses) != {"before_stop", "recovered"}:
         raise ValueError("default-role transcript requires before_stop and recovered statuses")
-    for status in statuses.values():
+    require_change_line = transcript.field_lines["require default change"]
+    before_stop_line = transcript.status_lines["before_stop"]
+    default_changed_line = transcript.field_lines["default changed"]
+    recovered_line = transcript.status_lines["recovered"]
+    if not require_change_line < before_stop_line < default_changed_line < recovered_line:
+        raise ValueError("default-role transcript is not in the expected control-domain order")
+    for status in transcript.statuses.values():
         validate_healthy(status)
 
 
@@ -149,22 +167,30 @@ def validate_pinned(lines: list[str], backend: str) -> None:
     """Validates one CPAL pinned-device outcome without upgrading it to a claim."""
     if backend != "cpal":
         raise ValueError("pinned-device verification is CPAL-only")
-    fields, statuses = parse(lines, backend)
-    before_stop = statuses.get("before_stop")
+    transcript = parse(lines, backend)
+    before_stop = transcript.statuses.get("before_stop")
     if before_stop is None:
         raise ValueError("pinned transcript requires a before_stop status")
-    outcome = fields.get("recovery_result")
+    before_stop_line = transcript.status_lines["before_stop"]
+    outcome = transcript.fields.get("recovery_result")
+    outcome_line = transcript.field_lines.get("recovery_result")
     if outcome == "pinned_device_unavailable":
-        if "recovered" in statuses or "pre_stop_healthy" in fields:
+        if "recovered" in transcript.statuses or "pre_stop_healthy" in transcript.fields:
             raise ValueError("unavailable transcript contains a restart outcome")
+        if outcome_line is None or outcome_line <= before_stop_line:
+            raise ValueError("pinned unavailable transcript is not in the expected control-domain order")
         return
     if outcome != "pinned_device_restarted":
         raise ValueError("pinned transcript has no recognized recovery result")
-    if fields.get("pre_stop_healthy") != "true":
+    if transcript.fields.get("pre_stop_healthy") != "true":
         raise ValueError("pinned restart transcript did not retain healthy pre-stop status")
-    recovered = statuses.get("recovered")
+    recovered = transcript.statuses.get("recovered")
     if recovered is None:
         raise ValueError("pinned restart transcript requires a recovered status")
+    pre_stop_healthy_line = transcript.field_lines["pre_stop_healthy"]
+    recovered_line = transcript.status_lines["recovered"]
+    if outcome_line is None or not before_stop_line < recovered_line < pre_stop_healthy_line < outcome_line:
+        raise ValueError("pinned restart transcript is not in the expected control-domain order")
     validate_healthy(before_stop)
     validate_healthy(recovered)
 
@@ -212,6 +238,28 @@ class RecoveryLogTests(unittest.TestCase):
                 "cpal",
             )
 
+    def test_rejects_default_status_or_change_observation_out_of_order(self) -> None:
+        with self.assertRaisesRegex(ValueError, "expected control-domain order"):
+            validate_default(
+                [
+                    "require default change: true",
+                    cpal_status("recovered", 200),
+                    "default changed: true",
+                    cpal_status("before_stop", 199),
+                ],
+                "cpal",
+            )
+        with self.assertRaisesRegex(ValueError, "expected control-domain order"):
+            validate_default(
+                [
+                    "require default change: true",
+                    cpal_status("before_stop", 199),
+                    cpal_status("recovered", 200),
+                    "default changed: true",
+                ],
+                "cpal",
+            )
+
     def test_accepts_pinned_unavailable_and_healthy_restart_only(self) -> None:
         validate_pinned(
             [cpal_status("before_stop", 199), "recovery_result=pinned_device_unavailable"],
@@ -226,6 +274,34 @@ class RecoveryLogTests(unittest.TestCase):
             ],
             "cpal",
         )
+        with self.assertRaisesRegex(ValueError, "expected control-domain order"):
+            validate_pinned(
+                [
+                    "recovery_result=pinned_device_unavailable",
+                    cpal_status("before_stop", 199),
+                ],
+                "cpal",
+            )
+        with self.assertRaisesRegex(ValueError, "expected control-domain order"):
+            validate_pinned(
+                [
+                    cpal_status("recovered", 200),
+                    cpal_status("before_stop", 199),
+                    "pre_stop_healthy=true",
+                    "recovery_result=pinned_device_restarted",
+                ],
+                "cpal",
+            )
+        with self.assertRaisesRegex(ValueError, "expected control-domain order"):
+            validate_pinned(
+                [
+                    cpal_status("before_stop", 199),
+                    cpal_status("recovered", 200),
+                    "recovery_result=pinned_device_restarted",
+                    "pre_stop_healthy=true",
+                ],
+                "cpal",
+            )
         with self.assertRaisesRegex(ValueError, "CPAL-only"):
             validate_pinned([], "wasapi")
 
