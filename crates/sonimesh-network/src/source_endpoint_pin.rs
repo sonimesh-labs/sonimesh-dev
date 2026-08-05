@@ -137,6 +137,28 @@ mod tests {
     }
 
     #[test]
+    fn failed_processing_from_the_pinned_source_preserves_the_binding() {
+        let mut pin = SourceEndpointPin::new();
+        assert_eq!(pin.process(endpoint(4000), || Ok::<_, ()>(())), Ok(()));
+
+        assert_eq!(
+            pin.process(endpoint(4000), || Err::<(), _>("rejected")),
+            Err(SourceEndpointAdmissionError::Processing("rejected"))
+        );
+        assert_eq!(pin.pinned(), Some(endpoint(4000)));
+
+        let called = Cell::new(false);
+        assert_eq!(
+            pin.process(endpoint(4001), || {
+                called.set(true);
+                Ok::<_, ()>(())
+            }),
+            Err(SourceEndpointAdmissionError::SourceEndpointChanged)
+        );
+        assert!(!called.get());
+    }
+
+    #[test]
     fn fresh_session_clear_allows_a_new_source_to_bind() {
         let mut pin = SourceEndpointPin::new();
         assert_eq!(pin.process(endpoint(4000), || Ok::<_, ()>(())), Ok(()));
