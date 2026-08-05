@@ -34,7 +34,14 @@ impl fmt::Display for SampleRateMappedRenderSourceError {
     }
 }
 
-impl std::error::Error for SampleRateMappedRenderSourceError {}
+impl std::error::Error for SampleRateMappedRenderSourceError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Resampler(error) => Some(error),
+            Self::InvalidMaximumCallbackFrames | Self::ScratchSizeOverflow => None,
+        }
+    }
+}
 
 /// Failure while applying a non-realtime drift decision to a source.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -62,7 +62,14 @@ impl fmt::Display for RenderSourceFactoryError {
     }
 }
 
-impl std::error::Error for RenderSourceFactoryError {}
+impl std::error::Error for RenderSourceFactoryError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::InvalidConfig(error) => Some(error),
+            Self::Build(_) => None,
+        }
+    }
+}
 
 /// Low-rate health state published by a platform output adapter.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -135,4 +142,14 @@ impl fmt::Display for OutputError {
     }
 }
 
-impl std::error::Error for OutputError {}
+impl std::error::Error for OutputError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::InvalidConfig(error) => Some(error),
+            Self::DeviceUnavailable
+            | Self::UnsupportedFormat
+            | Self::AlreadyRunning
+            | Self::Backend(_) => None,
+        }
+    }
+}

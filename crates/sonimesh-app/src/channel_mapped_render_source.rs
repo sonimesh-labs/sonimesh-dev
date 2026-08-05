@@ -28,7 +28,14 @@ impl fmt::Display for ChannelMappedRenderSourceError {
     }
 }
 
-impl std::error::Error for ChannelMappedRenderSourceError {}
+impl std::error::Error for ChannelMappedRenderSourceError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Mapping(error) => Some(error),
+            Self::InvalidMaximumCallbackFrames | Self::ScratchSizeOverflow => None,
+        }
+    }
+}
 
 /// Realtime-safe source wrapper that maps a decoded layout to the output layout.
 ///

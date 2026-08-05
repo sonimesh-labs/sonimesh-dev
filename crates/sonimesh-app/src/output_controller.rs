@@ -173,4 +173,12 @@ impl fmt::Display for OutputLifecycleError {
     }
 }
 
-impl std::error::Error for OutputLifecycleError {}
+impl std::error::Error for OutputLifecycleError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::MissingSelection => None,
+            Self::SourceFactory(error) => Some(error),
+            Self::Output(error) => Some(error),
+        }
+    }
+}
