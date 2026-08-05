@@ -11,6 +11,8 @@ export function useDesktopState() {
   const isStreaming = computed(() => snapshot.value?.session === 'streaming')
 
   async function run(command: () => Promise<DesktopSnapshot>) {
+    if (busy.value) return
+
     busy.value = true
     error.value = null
     try {
