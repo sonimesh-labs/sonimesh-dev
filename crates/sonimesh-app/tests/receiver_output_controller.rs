@@ -138,6 +138,27 @@ fn enqueue_decoded_block(
 }
 
 #[test]
+fn healthy_monitor_keeps_the_active_output_and_format_published() {
+    let counters = Arc::new(StreamCounters::default());
+    let mut pipeline = pipeline(Arc::clone(&counters));
+    let mut controller = controller(Arc::clone(&counters));
+
+    controller.start(selection(), &mut pipeline).unwrap();
+
+    assert_eq!(controller.monitor(), None);
+    assert_eq!(controller.output().start_calls, 1);
+    assert_eq!(controller.output().stop_calls, 0);
+    assert!(matches!(
+        controller.recover(&mut pipeline),
+        Err(ReceiverOutputLifecycleError::StreamAlreadyActive)
+    ));
+    assert_eq!(controller.output().start_calls, 1);
+    let snapshot = counters.snapshot();
+    assert_eq!(snapshot.nominal_input_sample_rate_hz, 48_000);
+    assert_eq!(snapshot.nominal_output_sample_rate_hz, 48_000);
+}
+
+#[test]
 fn failed_start_keeps_the_existing_pipeline_producer() {
     let counters = Arc::new(StreamCounters::default());
     let mut pipeline = pipeline(Arc::clone(&counters));
