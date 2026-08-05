@@ -260,6 +260,10 @@ fn start_retries_require_matching_operation_and_audio_configuration() {
         coordinator.accept(&retry),
         Err(ControlStreamError::PendingChange)
     ));
+    assert_eq!(
+        coordinator.accept(&stop(0)).unwrap(),
+        ControlStreamAction::Noop
+    );
     coordinator.complete_stop(token, identity).unwrap();
 }
 
