@@ -74,7 +74,7 @@ const { busy, createPairing, error, expirePairing, refresh, selectOutput, snapsh
           />
           <div class="secondary-stack">
             <OutputPanel :devices="snapshot.outputDevices" :selected-id="snapshot.selectedOutputId" :busy="busy" @select="selectOutput" />
-            <PairingPanel :pairing="snapshot.pairing" :busy="busy" @create="createPairing" @expire="expirePairing" />
+            <PairingPanel :pairing="snapshot.pairing" :busy="busy" @create="createPairing" @expire="expirePairing" @refresh="refresh" />
           </div>
         </div>
         <DiagnosticsPanel id="diagnostics" :metrics="snapshot.metrics" />

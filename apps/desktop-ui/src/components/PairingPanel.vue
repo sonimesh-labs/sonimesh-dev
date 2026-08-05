@@ -12,10 +12,12 @@ const props = defineProps<{
 const emit = defineEmits<{
   create: []
   expire: []
+  refresh: []
 }>()
 
 const remainingSeconds = ref<number | null>(null)
 let countdownTimer: number | undefined
+let expiryStatusRefreshRequested = false
 
 function clearCountdown() {
   if (countdownTimer !== undefined) {
@@ -24,21 +26,40 @@ function clearCountdown() {
   }
 }
 
+function refreshExpiryStatusOnce() {
+  if (!expiryStatusRefreshRequested) {
+    expiryStatusRefreshRequested = true
+    emit('refresh')
+  }
+}
+
+function countdownReachedDeadline(deadlineMillis: number): boolean {
+  const secondsRemaining = Math.max(0, Math.ceil((deadlineMillis - Date.now()) / 1_000))
+  remainingSeconds.value = secondsRemaining
+  if (secondsRemaining !== 0) return false
+
+  refreshExpiryStatusOnce()
+  return true
+}
+
 function beginCountdown(pairing: PairingStatus) {
   clearCountdown()
-  remainingSeconds.value = pairing.state === 'active' ? pairing.expiresInSeconds : null
+  if (pairing.state !== 'active') {
+    expiryStatusRefreshRequested = false
+    remainingSeconds.value = null
+    return
+  }
 
-  if (remainingSeconds.value === null) return
+  const expiresInSeconds = pairing.expiresInSeconds
+  remainingSeconds.value = expiresInSeconds
+  if (expiresInSeconds === null) return
+
+  const deadlineMillis = Date.now() + expiresInSeconds * 1_000
+  if (countdownReachedDeadline(deadlineMillis)) return
 
   countdownTimer = window.setInterval(() => {
-    if (remainingSeconds.value === null) {
+    if (countdownReachedDeadline(deadlineMillis)) {
       clearCountdown()
-      return
-    }
-    remainingSeconds.value = Math.max(0, remainingSeconds.value - 1)
-    if (remainingSeconds.value === 0) {
-      clearCountdown()
-      emit('expire')
     }
   }, 1_000)
 }
