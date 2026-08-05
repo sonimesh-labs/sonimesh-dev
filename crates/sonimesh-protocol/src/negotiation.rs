@@ -66,7 +66,14 @@ impl fmt::Display for ControlNegotiationError {
     }
 }
 
-impl std::error::Error for ControlNegotiationError {}
+impl std::error::Error for ControlNegotiationError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::PeerHello(error) => Some(error),
+            Self::LocalTooManyCapabilities | Self::NoCommonProtocolVersion => None,
+        }
+    }
+}
 
 /// Selects the current protocol version and canonical common capabilities.
 ///

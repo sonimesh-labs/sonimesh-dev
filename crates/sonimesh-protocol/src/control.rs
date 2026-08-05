@@ -109,7 +109,15 @@ impl fmt::Display for ControlFrameError {
     }
 }
 
-impl std::error::Error for ControlFrameError {}
+impl std::error::Error for ControlFrameError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Decode(error) => Some(error),
+            Self::Encode(error) => Some(error),
+            _ => None,
+        }
+    }
+}
 
 /// Encodes one validated envelope as a big-endian length-prefixed control frame.
 ///
@@ -248,4 +256,23 @@ fn validate_detail(detail: &str) -> Result<(), ControlFrameError> {
         return Err(ControlFrameError::DetailTooLong);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod error_source_tests {
+    use std::error::Error;
+
+    use super::{ControlFrameError, decode_control_frame};
+
+    #[test]
+    fn protobuf_decode_error_is_retained_as_the_cause() {
+        let error = decode_control_frame(&[0, 0, 0, 1, 0x80]).unwrap_err();
+
+        assert!(
+            Error::source(&error)
+                .and_then(|source| source.downcast_ref::<prost::DecodeError>())
+                .is_some()
+        );
+        assert!(Error::source(&ControlFrameError::TruncatedLength).is_none());
+    }
 }

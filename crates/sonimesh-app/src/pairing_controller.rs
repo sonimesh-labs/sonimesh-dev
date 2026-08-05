@@ -62,7 +62,15 @@ impl fmt::Display for PairingInvitationError {
     }
 }
 
-impl std::error::Error for PairingInvitationError {}
+impl std::error::Error for PairingInvitationError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Record(error) => Some(error),
+            Self::Transition(error) => Some(error),
+            _ => None,
+        }
+    }
+}
 
 impl<const MAX_SOURCES: usize> PairingInvitationController<MAX_SOURCES> {
     /// Creates an owner with no retained pairing invitation.

@@ -140,4 +140,13 @@ impl fmt::Display for ControlStreamError {
     }
 }
 
-impl std::error::Error for ControlStreamError {}
+impl std::error::Error for ControlStreamError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Protocol(error) => Some(error),
+            Self::Negotiation(error) => Some(error),
+            Self::Transition(error) => Some(error),
+            _ => None,
+        }
+    }
+}
