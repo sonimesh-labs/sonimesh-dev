@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from datetime import datetime
 import sys
 import unittest
 from pathlib import Path
@@ -58,6 +59,22 @@ def require_nonempty_string(value: Any, label: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{label} must be a nonempty string")
     return value
+
+
+def require_offset_timestamp(value: Any, label: str) -> str:
+    timestamp = require_nonempty_string(value, label)
+    normalized = f"{timestamp[:-1]}+00:00" if timestamp.endswith("Z") else timestamp
+    if len(timestamp) < 11 or timestamp[10] != "T":
+        raise ValueError(f"{label} must be an ISO 8601 timestamp with an explicit UTC offset")
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError as error:
+        raise ValueError(
+            f"{label} must be an ISO 8601 timestamp with an explicit UTC offset"
+        ) from error
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError(f"{label} must be an ISO 8601 timestamp with an explicit UTC offset")
+    return timestamp
 
 
 def require_enum_string(value: Any, allowed: frozenset[str], message: str) -> str:
@@ -184,7 +201,7 @@ def validate_record(record: Any) -> None:
     schema_version = require_nonnegative_int(root["schema_version"], "schema_version")
     if schema_version not in SUPPORTED_SCHEMA_VERSIONS:
         raise ValueError("record schema_version must be 1 or 2")
-    require_nonempty_string(root["recorded_at"], "recorded_at")
+    require_offset_timestamp(root["recorded_at"], "recorded_at")
     scenario = require_enum_string(
         root["scenario"],
         SCENARIOS,
@@ -362,6 +379,25 @@ class AndroidCaptureRecordTests(unittest.TestCase):
         record["final_snapshot"]["silent_frames"] = 100
         with self.assertRaisesRegex(ValueError, "silent_frames regressed"):
             validate_record(record)
+
+    def test_requires_an_auditable_offset_timestamp(self) -> None:
+        record = active_record()
+        record["recorded_at"] = "2026-07-20T12:30:00Z"
+        validate_record(record)
+
+        for value in (
+            "2026-07-20 20:30:00+08:00",
+            "2026-07-20 20:30:00T+08:00",
+            "2026-07-20T20:30:00",
+            "2026-02-30T20:30:00+08:00",
+        ):
+            with self.subTest(value=value):
+                record = active_record()
+                record["recorded_at"] = value
+                with self.assertRaisesRegex(
+                    ValueError, "ISO 8601 timestamp with an explicit UTC offset"
+                ):
+                    validate_record(record)
 
     def test_rejects_snapshot_values_larger_than_android_long(self) -> None:
         record = active_record()

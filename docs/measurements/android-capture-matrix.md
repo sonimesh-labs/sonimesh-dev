@@ -90,7 +90,10 @@ its evidence fields locally:
 The current record format is schema version 2. The validator continues to
 accept legacy version 1 records, but new records must use version 2 so completed
 silent-frame duration can be checked independently from non-blocking read count.
-Both versions have these required top-level fields:
+Both versions have these required top-level fields. `recorded_at` must be an
+ISO 8601 timestamp with an explicit UTC offset (for example,
+`2026-07-20T20:30:00+08:00` or a `Z` suffix) so records remain independently
+auditable across operator time zones:
 
 ```text
 schema_version, recorded_at, scenario, device, app, observed_source_category,
@@ -339,7 +342,7 @@ and units instead of calculating a source-specific explanation for silence.
 
 | Field | Recorded value |
 | --- | --- |
-| Date and local time | — |
+| `recorded_at` | ISO 8601 timestamp with explicit UTC offset, for example `2026-07-20T20:30:00+08:00` or `2026-07-20T12:30:00Z` |
 | Scenario | Permission denied, cancelled consent, allowed, idle/silent, protected/unknown, lock/background, notification stop, projection `onStop()`, or process recreation |
 | Device/OEM/model | — |
 | Android release/API/build fingerprint | — |
