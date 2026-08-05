@@ -156,6 +156,22 @@ fn drift_control_publishes_low_rate_resampling_diagnostics() {
 }
 
 #[test]
+fn non_frame_aligned_multichannel_callback_preserves_a_silent_tail() {
+    let mut source = SampleRateMappedRenderSource::new(
+        Box::new(RampSource { next: 0.0 }),
+        48_000,
+        48_000,
+        2,
+        MAX_CALLBACK_FRAMES,
+    )
+    .unwrap();
+    let mut output = [f32::NAN; 5];
+
+    source.render(&mut output);
+
+    assert_samples(&output, &[0.0, 1.0, 2.0, 3.0, 0.0]);
+}
+#[test]
 fn output_tail_and_oversized_callbacks_are_silence() {
     let mut source = resampled_source(&[1.0, 2.0], 48_000, 48_000);
     let mut tail = [f32::NAN; 2];
