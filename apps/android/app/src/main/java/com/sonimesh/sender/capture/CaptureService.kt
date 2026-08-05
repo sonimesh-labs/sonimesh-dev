@@ -136,7 +136,15 @@ class CaptureService : Service() {
         } catch (error: CaptureSetupException) {
             teardown(TerminalOutcome.Failed(error.message ?: "Capture setup failed"))
         } finally {
-            candidateRecord?.let { record -> runCatching { record.release() } }
+            candidateRecord?.let { record ->
+                val failedCleanupSteps = runAllCaptureCleanupSteps({ record.release() })
+                if (failedCleanupSteps > 0) {
+                    Log.e(
+                        LOG_TAG,
+                        "Capture setup cleanup completed with $failedCleanupSteps failed steps",
+                    )
+                }
+            }
         }
     }
 

@@ -30,6 +30,26 @@ class CaptureCleanupTest {
 
 
     @Test
+    fun a_single_setup_resource_release_failure_is_counted_without_being_rethrown() {
+        val failedSteps = runAllCaptureCleanupSteps(
+            { throw IllegalStateException("candidate record release failed") },
+        )
+
+        assertEquals(1, failedSteps)
+    }
+
+    @Test
+    fun a_single_setup_resource_fatal_release_failure_is_rethrown() {
+        val failure = AssertionError("candidate record release failed")
+
+        val thrown = assertThrows(AssertionError::class.java) {
+            runAllCaptureCleanupSteps({ throw failure })
+        }
+
+        assertSame(failure, thrown)
+    }
+
+    @Test
     fun ordinary_failure_count_is_exact() {
         val failedSteps = runAllCaptureCleanupSteps(
             { throw IllegalStateException("first") },
