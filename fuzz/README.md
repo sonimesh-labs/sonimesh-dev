@@ -4,7 +4,7 @@ This independent Cargo workspace contains the LibFuzzer entry points for bounded
 untrusted protocol and media ingress. It is intentionally separate from the
 production workspace so `libfuzzer-sys` never becomes a shipping dependency.
 
-Targets:
+## Targets
 
 - `control_frame` feeds arbitrary bytes plus mutations of the five published
   Hello, StartStream, StopStream, StreamStatus, and ControlError frames into the
@@ -21,8 +21,9 @@ Targets:
   rejecting reflected and altered proofs; it does not create a TLS connection,
   QR payload, identity, pairing record, or trust state.
 
-Install the pinned nightly source component and run a target from this
-directory:
+## Run a target
+
+Install the pinned nightly source component and run a target from this directory:
 
 ```text
 rustup toolchain install nightly-2026-07-18 --component rust-src

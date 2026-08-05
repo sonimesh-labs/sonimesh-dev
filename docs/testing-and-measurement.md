@@ -83,14 +83,18 @@ may be compromised.
 The Rust foundation keeps deterministic adversarial-input regressions for bounded
 control/media parsing and invalid AEAD payloads. The independent `fuzz/`
 workspace adds LibFuzzer targets for arbitrary control frames, mutations of
-all five published control payload shapes, near-valid media packets, and
-protected ingress. The ingress target also constructs valid
-AEAD packets carrying arbitrary bounded payload bytes, retries them as replay,
-uses undersized output storage, mutates one authenticated header/ciphertext/tag
-byte, and requires every rejected path to clear plaintext.
+all five published control payload shapes, near-valid media packets,
+protected ingress, and the pure pairing-binding verifier. The ingress target
+also constructs valid AEAD packets carrying arbitrary bounded payload bytes,
+retries them as replay, uses undersized output storage, mutates one authenticated
+header/ciphertext/tag byte, and requires every rejected path to clear plaintext.
+The pairing target exercises both local roles, rejects reflected and altered
+proofs, and checks arbitrary proof input against the exact opposite-role proof.
 
-Linux CI is configured to compile these targets with AddressSanitizer and
-perform 512 executions per target as a finite smoke gate. A successful job shows
+`tools/check_fuzz_targets.py` keeps the manifest registration, fuzz README
+inventory and runnable commands, and finite CI smoke list synchronized. Linux
+CI is configured to compile these targets with AddressSanitizer and perform 512
+executions per target as a finite smoke gate. A successful job shows
 that the harnesses remain buildable under the pinned toolchain and catches
 immediate regressions; it is not a sustained fuzz campaign, coverage acceptance
 result, physical-network test, or malformed-input qualification of a future
