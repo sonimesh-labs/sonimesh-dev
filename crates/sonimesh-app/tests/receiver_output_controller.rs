@@ -213,6 +213,38 @@ fn recovery_replaces_the_pipeline_producer_only_after_platform_start() {
 }
 
 #[test]
+fn explicit_stop_clears_format_disarms_stale_health_and_allows_recovery() {
+    let counters = Arc::new(StreamCounters::default());
+    let mut pipeline = pipeline(Arc::clone(&counters));
+    let mut sealer = MediaSealer::new(&SessionSecret::new([0xA5; 32]), context()).unwrap();
+    let mut controller = controller(Arc::clone(&counters));
+
+    controller.start(selection(), &mut pipeline).unwrap();
+    enqueue_decoded_block(&mut pipeline, &mut sealer, 0);
+    controller.output_mut().health = OutputHealth::StreamError;
+
+    controller.stop();
+
+    assert_eq!(controller.monitor(), None);
+    assert_eq!(controller.output().stop_calls, 1);
+    assert_eq!(pipeline.queued_pcm_blocks(), 1);
+    let stopped = counters.snapshot();
+    assert_eq!(stopped.stream_resets, 1);
+    assert_eq!(stopped.nominal_input_sample_rate_hz, 0);
+    assert_eq!(stopped.nominal_output_sample_rate_hz, 0);
+
+    controller.output_mut().health = OutputHealth::Healthy;
+    controller.recover(&mut pipeline).unwrap();
+
+    assert_eq!(controller.output().start_calls, 2);
+    assert_eq!(pipeline.queued_pcm_blocks(), 0);
+    let recovered = counters.snapshot();
+    assert_eq!(recovered.stream_resets, 2);
+    assert_eq!(recovered.nominal_input_sample_rate_hz, 48_000);
+    assert_eq!(recovered.nominal_output_sample_rate_hz, 48_000);
+}
+
+#[test]
 fn duplicate_start_and_recovery_preserve_the_active_receiver_pipeline() {
     let counters = Arc::new(StreamCounters::default());
     let mut pipeline = pipeline(Arc::clone(&counters));
