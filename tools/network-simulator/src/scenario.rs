@@ -78,11 +78,51 @@ pub enum ScenarioError {
 
 impl fmt::Display for ScenarioError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "invalid deterministic scenario: {self:?}")
+        match self {
+            Self::InvalidFrameCount => formatter.write_str(
+                "invalid deterministic scenario: frame count is outside the explicit bound",
+            ),
+            Self::InvalidFrameDuration => formatter.write_str(
+                "invalid deterministic scenario: frame duration is not a negotiated value",
+            ),
+            Self::InvalidTargetBuffer => formatter.write_str(
+                "invalid deterministic scenario: target buffer is outside the explicit bound",
+            ),
+            Self::InvalidMediaDatagramBytes => formatter.write_str(
+                "invalid deterministic scenario: media datagram size is outside the protocol bound",
+            ),
+            Self::Profile(error) => {
+                write!(
+                    formatter,
+                    "invalid deterministic scenario network profile: {error}"
+                )
+            }
+            Self::Clock(error) => {
+                write!(
+                    formatter,
+                    "invalid deterministic scenario clock operation: {error}"
+                )
+            }
+            Self::InternalCapacityInvariant => formatter.write_str(
+                "invalid deterministic scenario: internal capacity invariant was violated",
+            ),
+        }
     }
 }
 
-impl std::error::Error for ScenarioError {}
+impl std::error::Error for ScenarioError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Profile(error) => Some(error),
+            Self::Clock(error) => Some(error),
+            Self::InvalidFrameCount
+            | Self::InvalidFrameDuration
+            | Self::InvalidTargetBuffer
+            | Self::InvalidMediaDatagramBytes
+            | Self::InternalCapacityInvariant => None,
+        }
+    }
+}
 
 /// Runs a deterministic encoded-frame and jitter-buffer scenario.
 ///
@@ -180,6 +220,8 @@ fn sample_timestamp(sequence: u32, frame: OpusFrameConfig) -> u64 {
 
 #[cfg(test)]
 mod tests {
+    use std::error::Error;
+
     use super::*;
 
     #[test]
@@ -303,5 +345,25 @@ mod tests {
         };
 
         assert_eq!(simulate(config), Err(ScenarioError::InvalidFrameDuration));
+    }
+
+    #[test]
+    fn preserved_error_variants_expose_their_causes() {
+        let profile = ScenarioError::Profile(ProfileError::DelayTooLarge);
+        assert!(
+            Error::source(&profile)
+                .and_then(|source| source.downcast_ref::<ProfileError>())
+                .is_some()
+        );
+
+        let clock = ScenarioError::Clock(ClockError::Overflow);
+        assert!(
+            Error::source(&clock)
+                .and_then(|source| source.downcast_ref::<ClockError>())
+                .is_some()
+        );
+
+        assert!(Error::source(&ScenarioError::InvalidFrameCount).is_none());
+        assert!(Error::source(&ScenarioError::InternalCapacityInvariant).is_none());
     }
 }

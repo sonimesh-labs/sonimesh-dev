@@ -56,11 +56,32 @@ pub enum DriftScenarioError {
 
 impl fmt::Display for DriftScenarioError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "invalid drift scenario: {self:?}")
+        match self {
+            Self::InvalidTickCount => formatter
+                .write_str("invalid drift scenario: tick count is outside the explicit bound"),
+            Self::InvalidInitialOccupancy => formatter.write_str(
+                "invalid drift scenario: initial occupancy exceeds the bounded PCM queue",
+            ),
+            Self::InvalidSourceRate => formatter.write_str(
+                "invalid drift scenario: source rate is outside the explicit model bound",
+            ),
+            Self::Controller(error) => {
+                write!(formatter, "invalid drift scenario controller: {error}")
+            }
+        }
     }
 }
 
-impl std::error::Error for DriftScenarioError {}
+impl std::error::Error for DriftScenarioError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Controller(error) => Some(error),
+            Self::InvalidTickCount | Self::InvalidInitialOccupancy | Self::InvalidSourceRate => {
+                None
+            }
+        }
+    }
+}
 
 /// Runs an integerized PCM-occupancy control loop without an ASRC implementation.
 ///
@@ -141,6 +162,8 @@ fn rounded_occupancy(quanta: i64) -> u16 {
 
 #[cfg(test)]
 mod tests {
+    use std::error::Error;
+
     use super::*;
     use sonimesh_audio::MAX_DRIFT_ADJUSTMENT_PPM;
 
@@ -232,5 +255,17 @@ mod tests {
             }),
             Err(DriftScenarioError::InvalidSourceRate)
         );
+    }
+
+    #[test]
+    fn preserved_error_variants_expose_their_causes() {
+        let controller = DriftScenarioError::Controller(DriftConfigError::InvalidGain);
+        assert!(
+            Error::source(&controller)
+                .and_then(|source| source.downcast_ref::<DriftConfigError>())
+                .is_some()
+        );
+
+        assert!(Error::source(&DriftScenarioError::InvalidTickCount).is_none());
     }
 }
