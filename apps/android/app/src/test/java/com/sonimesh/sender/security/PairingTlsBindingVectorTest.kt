@@ -17,12 +17,12 @@ class PairingTlsBindingVectorTest {
         )
 
         assertTrue(
-            binding.proof(PairingRole.ANDROID_CLIENT).contentEquals(
+            binding.localProof(PairingRole.ANDROID_CLIENT).contentEquals(
                 hex("c274dfe72135ae558034ca1e8a27a4eab7aac9b87a0cd93c17bf17126e27f4f2"),
             ),
         )
         assertTrue(
-            binding.proof(PairingRole.DESKTOP_SERVER).contentEquals(
+            binding.localProof(PairingRole.DESKTOP_SERVER).contentEquals(
                 hex("f347ab32006e8acb220f91b0e826bbd58257c55773d7284f8794217f896b4601"),
             ),
         )
@@ -40,10 +40,16 @@ class PairingTlsBindingVectorTest {
         val changedSecret = PairingTlsBinding(1, ByteArray(16), ByteArray(32) { 4 }, ByteArray(32) { 2 })
         val changedExporter = PairingTlsBinding(1, ByteArray(16), ByteArray(32) { 1 }, ByteArray(32) { 5 })
 
-        assertFalse(binding.proof(PairingRole.ANDROID_CLIENT).contentEquals(binding.proof(PairingRole.DESKTOP_SERVER)))
-        assertFalse(binding.proof(PairingRole.ANDROID_CLIENT).contentEquals(changedPairingId.proof(PairingRole.ANDROID_CLIENT)))
-        assertFalse(binding.proof(PairingRole.ANDROID_CLIENT).contentEquals(changedSecret.proof(PairingRole.ANDROID_CLIENT)))
-        assertFalse(binding.proof(PairingRole.ANDROID_CLIENT).contentEquals(changedExporter.proof(PairingRole.ANDROID_CLIENT)))
+        assertFalse(binding.localProof(PairingRole.ANDROID_CLIENT).contentEquals(binding.localProof(PairingRole.DESKTOP_SERVER)))
+        assertFalse(binding.localProof(PairingRole.ANDROID_CLIENT).contentEquals(changedPairingId.localProof(PairingRole.ANDROID_CLIENT)))
+        assertFalse(binding.localProof(PairingRole.ANDROID_CLIENT).contentEquals(changedSecret.localProof(PairingRole.ANDROID_CLIENT)))
+        assertFalse(binding.localProof(PairingRole.ANDROID_CLIENT).contentEquals(changedExporter.localProof(PairingRole.ANDROID_CLIENT)))
+
+        val clientProof = binding.localProof(PairingRole.ANDROID_CLIENT)
+        assertTrue(binding.verifyPeerProof(PairingRole.DESKTOP_SERVER, clientProof))
+        assertFalse(binding.verifyPeerProof(PairingRole.ANDROID_CLIENT, clientProof))
+        assertFalse(binding.verifyPeerProof(PairingRole.DESKTOP_SERVER, clientProof.copyOf(31)))
+        assertFalse(binding.verifyPeerProof(PairingRole.DESKTOP_SERVER, clientProof + byteArrayOf(0)))
     }
 
     @Test(expected = IllegalArgumentException::class)
@@ -68,7 +74,12 @@ class PairingTlsBindingVectorTest {
 
 private enum class PairingRole(val wireValue: Byte) {
     ANDROID_CLIENT(0),
-    DESKTOP_SERVER(1),
+    DESKTOP_SERVER(1);
+
+    fun peer(): PairingRole = when (this) {
+        ANDROID_CLIENT -> DESKTOP_SERVER
+        DESKTOP_SERVER -> ANDROID_CLIENT
+    }
 }
 
 private class PairingTlsBinding(
@@ -89,11 +100,27 @@ private class PairingTlsBinding(
         prk = hmac(pairingSecret, tlsExporter)
     }
 
-    fun proof(role: PairingRole): ByteArray = expand(
-        PROOF_LABEL + byteArrayOf(protocolVersion, role.wireValue) + pairingId,
-    )
+    fun localProof(localRole: PairingRole): ByteArray = proofForRole(localRole)
+
+    fun verifyPeerProof(localRole: PairingRole, proof: ByteArray): Boolean {
+        if (proof.size != OUTPUT_BYTES) {
+            return false
+        }
+
+        val expected = proofForRole(localRole.peer())
+        var difference = 0
+        for (index in expected.indices) {
+            difference = difference or (expected[index].toInt() xor proof[index].toInt())
+        }
+        expected.fill(0)
+        return difference == 0
+    }
 
     fun mediaRoot(): ByteArray = expand(MEDIA_ROOT_LABEL + byteArrayOf(protocolVersion) + pairingId)
+
+    private fun proofForRole(role: PairingRole): ByteArray = expand(
+        PROOF_LABEL + byteArrayOf(protocolVersion, role.wireValue) + pairingId,
+    )
 
     private fun expand(info: ByteArray): ByteArray {
         val output = ByteArray(OUTPUT_BYTES)

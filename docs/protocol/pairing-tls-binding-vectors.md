@@ -70,10 +70,13 @@ media_root = HKDF-Expand(
 
 `0x00` means Android/client and `0x01` means desktop/server. Each peer sends
 only its own 32-byte proof inside the pinned TLS channel and verifies the
-opposite role's expected proof in constant time. Reflection of a client proof
-as a server proof must fail. `media_root` must remain in zeroizing secret
-storage and becomes the existing `SessionSecret` input for ADR 0005; it is not
-transmitted in the control protocol.
+opposite role's expected proof in constant time. Pairing helpers take the
+endpoint's local role and derive the opposite expected role internally; a
+pairing owner must not select an arbitrary expected peer role at the verification
+call site. Reflection of a client proof as a server proof must fail.
+`media_root` must remain in zeroizing secret storage and becomes the existing
+`SessionSecret` input for ADR 0005; it is not transmitted in the control
+protocol.
 
 ## Expected outputs
 

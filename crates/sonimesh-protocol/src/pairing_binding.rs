@@ -27,6 +27,15 @@ pub enum PairingRole {
     DesktopServer = 1,
 }
 
+impl PairingRole {
+    const fn peer(self) -> Self {
+        match self {
+            Self::AndroidClient => Self::DesktopServer,
+            Self::DesktopServer => Self::AndroidClient,
+        }
+    }
+}
+
 /// Error deriving a pairing proof or media root from TLS exporter bytes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PairingBindingError {
@@ -95,13 +104,52 @@ impl PairingBinding {
         })
     }
 
-    /// Derives the proof sent by `role` inside the pinned TLS connection.
+    /// Derives the proof this endpoint sends for its `local_role`.
+    ///
+    /// The pairing owner supplies only its own role. The opposite role remains
+    /// an internal verification detail, preventing a call site from accepting
+    /// its own proof as a peer proof by selecting an arbitrary expected role.
     ///
     /// # Errors
     ///
     /// Returns [`PairingBindingError::DerivationFailed`] if the fixed HKDF
     /// proof expansion cannot produce its required 32 bytes.
-    pub fn proof(
+    pub fn local_proof(
+        &self,
+        local_role: PairingRole,
+    ) -> Result<[u8; PAIRING_SECRET_LEN], PairingBindingError> {
+        self.proof_for_role(local_role)
+    }
+
+    /// Verifies a peer proof for this endpoint's `local_role`.
+    ///
+    /// The proof is checked against the opposite role in constant time after
+    /// rejecting non-canonical proof lengths. A reflected local proof therefore
+    /// cannot verify as a peer proof.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PairingBindingError::DerivationFailed`] if the fixed HKDF
+    /// proof expansion cannot produce its required 32 bytes.
+    pub fn verify_peer_proof(
+        &self,
+        local_role: PairingRole,
+        proof: &[u8],
+    ) -> Result<bool, PairingBindingError> {
+        let proof: &[u8; PAIRING_SECRET_LEN] = match proof.try_into() {
+            Ok(proof) => proof,
+            Err(_) => return Ok(false),
+        };
+        let mut expected = self.proof_for_role(local_role.peer())?;
+        let mut difference = 0_u8;
+        for (expected_byte, proof_byte) in expected.iter().zip(proof) {
+            difference |= expected_byte ^ proof_byte;
+        }
+        expected.zeroize();
+        Ok(difference == 0)
+    }
+
+    fn proof_for_role(
         &self,
         role: PairingRole,
     ) -> Result<[u8; PAIRING_SECRET_LEN], PairingBindingError> {
@@ -115,26 +163,6 @@ impl PairingBinding {
         offset += 1;
         info[offset..].copy_from_slice(&self.pairing_id);
         hkdf_expand(&self.prk, &info)
-    }
-
-    /// Verifies one peer proof against the expected `role` in constant time.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`PairingBindingError::DerivationFailed`] if the fixed HKDF
-    /// proof expansion cannot produce its required 32 bytes.
-    pub fn verify_proof(
-        &self,
-        role: PairingRole,
-        proof: &[u8],
-    ) -> Result<bool, PairingBindingError> {
-        let mut expected = self.proof(role)?;
-        let mut difference = u8::from(proof.len() != PAIRING_SECRET_LEN);
-        for (index, expected_byte) in expected.iter().enumerate() {
-            difference |= *expected_byte ^ proof.get(index).copied().unwrap_or(0);
-        }
-        expected.zeroize();
-        Ok(difference == 0)
     }
 
     /// Derives the one-time media root passed to the existing media-key boundary.
@@ -217,7 +245,7 @@ mod tests {
     fn matches_published_role_proof_and_media_root_vector() {
         let binding = binding();
         assert_eq!(
-            binding.proof(PairingRole::AndroidClient).unwrap(),
+            binding.local_proof(PairingRole::AndroidClient).unwrap(),
             [
                 0xC2, 0x74, 0xDF, 0xE7, 0x21, 0x35, 0xAE, 0x55, 0x80, 0x34, 0xCA, 0x1E, 0x8A, 0x27,
                 0xA4, 0xEA, 0xB7, 0xAA, 0xC9, 0xB8, 0x7A, 0x0C, 0xD9, 0x3C, 0x17, 0xBF, 0x17, 0x12,
@@ -225,7 +253,7 @@ mod tests {
             ]
         );
         assert_eq!(
-            binding.proof(PairingRole::DesktopServer).unwrap(),
+            binding.local_proof(PairingRole::DesktopServer).unwrap(),
             [
                 0xF3, 0x47, 0xAB, 0x32, 0x00, 0x6E, 0x8A, 0xCB, 0x22, 0x0F, 0x91, 0xB0, 0xE8, 0x26,
                 0xBB, 0xD5, 0x82, 0x57, 0xC5, 0x57, 0x73, 0xD7, 0x28, 0x4F, 0x87, 0x94, 0x21, 0x7F,
@@ -250,36 +278,45 @@ mod tests {
         let changed_exporter = PairingBinding::new(1, [0; 16], [1; 32], &[5; 32]).unwrap();
 
         assert_ne!(
-            base.proof(PairingRole::AndroidClient).unwrap(),
-            base.proof(PairingRole::DesktopServer).unwrap()
+            base.local_proof(PairingRole::AndroidClient).unwrap(),
+            base.local_proof(PairingRole::DesktopServer).unwrap()
         );
         assert_ne!(
-            base.proof(PairingRole::AndroidClient).unwrap(),
+            base.local_proof(PairingRole::AndroidClient).unwrap(),
             changed_pairing_id
-                .proof(PairingRole::AndroidClient)
+                .local_proof(PairingRole::AndroidClient)
                 .unwrap()
         );
         assert_ne!(
-            base.proof(PairingRole::AndroidClient).unwrap(),
-            changed_secret.proof(PairingRole::AndroidClient).unwrap()
+            base.local_proof(PairingRole::AndroidClient).unwrap(),
+            changed_secret
+                .local_proof(PairingRole::AndroidClient)
+                .unwrap()
         );
         assert_ne!(
-            base.proof(PairingRole::AndroidClient).unwrap(),
-            changed_exporter.proof(PairingRole::AndroidClient).unwrap()
+            base.local_proof(PairingRole::AndroidClient).unwrap(),
+            changed_exporter
+                .local_proof(PairingRole::AndroidClient)
+                .unwrap()
         );
-        let client_proof = base.proof(PairingRole::AndroidClient).unwrap();
+        let client_proof = base.local_proof(PairingRole::AndroidClient).unwrap();
         assert!(
-            base.verify_proof(PairingRole::AndroidClient, &client_proof)
+            base.verify_peer_proof(PairingRole::DesktopServer, &client_proof)
                 .unwrap()
         );
         assert!(
             !base
-                .verify_proof(PairingRole::DesktopServer, &client_proof)
+                .verify_peer_proof(PairingRole::AndroidClient, &client_proof)
                 .unwrap()
         );
         assert!(
             !base
-                .verify_proof(PairingRole::AndroidClient, &client_proof[..31])
+                .verify_peer_proof(PairingRole::DesktopServer, &client_proof[..31])
+                .unwrap()
+        );
+        assert!(
+            !base
+                .verify_peer_proof(PairingRole::DesktopServer, &[0; 33])
                 .unwrap()
         );
     }

@@ -44,8 +44,11 @@ length = 32
 The provider output is an opaque `tls_exporter` value. The peers prove knowledge
 of the pairing secret with the fixed HKDF-SHA256 construction published in
 `docs/protocol/pairing-tls-binding-vectors.md`; client and server proofs have
-distinct role bytes. The media root uses a separate label under the same
-exporter/secret extract. No implementation may replace this mechanism with a
+distinct role bytes. Pairing helpers must accept the endpoint's local role and
+internally derive the opposite expected proof role, rather than allowing a
+pairing owner to select an arbitrary expected role when it verifies a peer
+proof. The media root uses a separate label under the same exporter/secret
+extract. No implementation may replace this mechanism with a
 custom transcript hash, certificate fingerprint, discovery record, or one-sided
 code. A provider that cannot pin the QR SPKI, complete TLS 1.3, or export these
 exact bytes fails pairing closed. The exact proof bytes must be published as
