@@ -5,7 +5,11 @@ use crate::{OutputConfig, OutputConfigError, OutputDeviceId, OutputDeviceInfo};
 /// Source invoked by the platform's realtime output callback.
 ///
 /// Implementations must not allocate, lock, await, decode, log, enumerate
-/// devices, or call UI IPC from [`Self::render`]. Underflow must write silence.
+/// devices, or call UI IPC from [`Self::render`]. Underflow must write silence,
+/// and sources should write finite normalized PCM samples. Windows output paths
+/// initialize callback buffers to silence, then defensively silence non-finite
+/// values and clamp amplitudes to the normalized range before handing data to
+/// the platform.
 pub trait RenderSource: Send + 'static {
     /// Fills an interleaved output buffer completely.
     fn render(&mut self, interleaved_output: &mut [f32]);

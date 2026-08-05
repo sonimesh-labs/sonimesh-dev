@@ -356,7 +356,11 @@ impl RenderStream {
                 let samples = sample_count(frames, self.mix.channels);
                 // WASAPI owns a correctly aligned interleaved buffer for the negotiated mix format.
                 let output = unsafe { std::slice::from_raw_parts_mut(data.cast::<f32>(), samples) };
+                output.fill(0.0);
                 source.render(output);
+                for sample in output {
+                    *sample = sanitize_float32(*sample);
+                }
             }
             SampleFormat::Signed16 => {
                 let samples = sample_count(frames, self.mix.channels);
@@ -580,11 +584,17 @@ fn sample_count(frames: u32, channels: u16) -> usize {
         .saturating_mul(usize::from(channels))
 }
 
+fn sanitize_float32(sample: f32) -> f32 {
+    if sample.is_finite() {
+        sample.clamp(-1.0, 1.0)
+    } else {
+        0.0
+    }
+}
+
 #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
 fn float_to_i16(sample: f32) -> i16 {
-    if !sample.is_finite() {
-        return 0;
-    }
+    let sample = sanitize_float32(sample);
     if sample <= -1.0 {
         return i16::MIN;
     }
@@ -658,6 +668,17 @@ mod tests {
             maximum_callback_frames: 960,
         };
         assert_eq!(requested_duration(config), 100_000);
+    }
+
+    #[test]
+    fn float32_sanitization_rejects_non_finite_and_bounds_samples() {
+        assert_eq!(sanitize_float32(f32::NAN).to_bits(), 0.0_f32.to_bits());
+        assert_eq!(
+            sanitize_float32(f32::NEG_INFINITY).to_bits(),
+            0.0_f32.to_bits()
+        );
+        assert_eq!(sanitize_float32(-2.0).to_bits(), (-1.0_f32).to_bits());
+        assert_eq!(sanitize_float32(2.0).to_bits(), 1.0_f32.to_bits());
     }
 
     #[test]

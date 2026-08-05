@@ -72,7 +72,11 @@ fn render_float32(
         status.oversized();
         return;
     }
+    output.fill(0.0);
     source.render(output);
+    for sample in output {
+        *sample = sanitize_float32(*sample);
+    }
 }
 
 fn render_signed16(
@@ -93,12 +97,15 @@ fn render_signed16(
     float_output.fill(0.0);
     source.render(float_output);
     for (destination, sample) in output.iter_mut().zip(float_output) {
-        let finite = if sample.is_finite() {
-            sample.clamp(-1.0, 1.0)
-        } else {
-            0.0
-        };
-        *destination = i16::from_sample(finite);
+        *destination = i16::from_sample(sanitize_float32(*sample));
+    }
+}
+
+fn sanitize_float32(sample: f32) -> f32 {
+    if sample.is_finite() {
+        sample.clamp(-1.0, 1.0)
+    } else {
+        0.0
     }
 }
 
@@ -139,6 +146,61 @@ mod tests {
 
         assert!(output.iter().all(|sample| sample.abs() < f32::EPSILON));
         assert_eq!(status.snapshot().oversized_callbacks, 1);
+    }
+
+    #[test]
+    fn float_callback_sanitizes_and_bounds_source_samples() {
+        struct InvalidSource;
+
+        impl RenderSource for InvalidSource {
+            fn render(&mut self, output: &mut [f32]) {
+                output.copy_from_slice(&[f32::NAN, f32::INFINITY, -2.0, 2.0]);
+            }
+        }
+
+        let status = CallbackStatus::default();
+        let mut source = InvalidSource;
+        let mut output = [f32::NAN; 4];
+
+        render_float32(&mut source, &mut output, 4, 2, &status);
+
+        assert_eq!(
+            output.map(f32::to_bits),
+            [
+                0.0_f32.to_bits(),
+                0.0_f32.to_bits(),
+                (-1.0_f32).to_bits(),
+                1.0_f32.to_bits()
+            ]
+        );
+        assert_eq!(status.snapshot().maximum_callback_samples, 4);
+    }
+
+    #[test]
+    fn float_callback_keeps_an_underfilled_source_tail_silent() {
+        struct PartialSource;
+
+        impl RenderSource for PartialSource {
+            fn render(&mut self, output: &mut [f32]) {
+                output[..2].copy_from_slice(&[f32::NAN, 2.0]);
+            }
+        }
+
+        let status = CallbackStatus::default();
+        let mut source = PartialSource;
+        let mut output = [f32::NAN; 4];
+
+        render_float32(&mut source, &mut output, 4, 2, &status);
+
+        assert_eq!(
+            output.map(f32::to_bits),
+            [
+                0.0_f32.to_bits(),
+                1.0_f32.to_bits(),
+                0.0_f32.to_bits(),
+                0.0_f32.to_bits()
+            ]
+        );
     }
 
     #[test]
