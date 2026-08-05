@@ -7,6 +7,8 @@ use std::thread;
 use sonimesh_network::{
     UntrustedControlError, UntrustedControlPoll, UntrustedControlStream, UntrustedControlWrite,
 };
+const CONTROL_LENGTH_BYTES: usize = 4;
+
 use sonimesh_protocol::{
     CONTROL_PROTOCOL_VERSION, Capability, ControlFrameError, Envelope, Hello,
     MAX_CONTROL_FRAME_BYTES, encode_control_frame, envelope,
@@ -228,4 +230,25 @@ fn peer_close_is_reported_without_treating_partial_data_as_a_frame() {
         }
     }
     panic!("peer close was not observed");
+}
+
+#[test]
+fn peer_close_after_a_complete_length_never_decodes_a_partial_payload() {
+    let (mut sender, mut reader) = connected_reader();
+    let frame = hello_frame();
+    let partial_payload_end = CONTROL_LENGTH_BYTES + 1;
+    sender.write_all(&frame[..partial_payload_end]).unwrap();
+    drop(sender);
+
+    for _ in 0..1_000 {
+        match reader.poll().unwrap() {
+            UntrustedControlPoll::Empty => thread::yield_now(),
+            UntrustedControlPoll::Closed => {
+                assert_eq!(reader.poll().unwrap(), UntrustedControlPoll::Closed);
+                return;
+            }
+            UntrustedControlPoll::Frame(_) => panic!("partial payload was decoded"),
+        }
+    }
+    panic!("peer close after complete length was not observed");
 }
