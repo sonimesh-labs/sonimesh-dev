@@ -4,17 +4,14 @@
 //! Generic Credential, verifies the round trip, and removes it before exit.
 
 #[cfg(windows)]
-use std::sync::atomic::{AtomicU64, Ordering};
-#[cfg(windows)]
-use std::time::{SystemTime, UNIX_EPOCH};
-
-#[cfg(windows)]
 use windows::Win32::Foundation::{ERROR_NOT_FOUND, GetLastError};
 #[cfg(windows)]
 use windows::Win32::Security::Credentials::{
     CRED_PERSIST_SESSION, CRED_TYPE_GENERIC, CREDENTIALW, CredDeleteW, CredFree, CredReadW,
     CredWriteW,
 };
+#[cfg(windows)]
+use windows::Win32::Security::Cryptography::{BCRYPT_USE_SYSTEM_PREFERRED_RNG, BCryptGenRandom};
 #[cfg(windows)]
 use windows::core::PCWSTR;
 
@@ -25,7 +22,11 @@ const TEST_BLOB: [u8; 32] = [
 ];
 
 #[cfg(windows)]
-static TARGET_COUNTER: AtomicU64 = AtomicU64::new(0);
+const TARGET_NONCE_BYTES: usize = 16;
+#[cfg(windows)]
+const TARGET_PREFIX: &str = "SoniMesh/credential-spike/";
+#[cfg(windows)]
+const HEX: &[u8; 16] = b"0123456789abcdef";
 
 #[cfg(windows)]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -59,15 +60,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[cfg(windows)]
-fn target_name() -> Result<String, std::time::SystemTimeError> {
-    let nanos = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
-    let counter = TARGET_COUNTER.fetch_add(1, Ordering::Relaxed);
-    Ok(target_name_from_parts(nanos, counter))
+fn target_name() -> Result<String, windows::core::Error> {
+    let mut nonce = [0_u8; TARGET_NONCE_BYTES];
+    // A null algorithm handle with this flag requests the Windows system-preferred RNG.
+    let status = unsafe { BCryptGenRandom(None, &mut nonce, BCRYPT_USE_SYSTEM_PREFERRED_RNG) };
+    if !status.is_ok() {
+        return Err(status.into());
+    }
+    Ok(target_name_from_nonce(&nonce))
 }
 
 #[cfg(windows)]
-fn target_name_from_parts(nanos: u128, counter: u64) -> String {
-    format!("SoniMesh/credential-spike/{nanos:032x}-{counter:016x}")
+fn target_name_from_nonce(nonce: &[u8; TARGET_NONCE_BYTES]) -> String {
+    let mut name = String::with_capacity(TARGET_PREFIX.len() + nonce.len() * 2);
+    name.push_str(TARGET_PREFIX);
+    for &byte in nonce {
+        name.push(char::from(HEX[usize::from(byte >> 4)]));
+        name.push(char::from(HEX[usize::from(byte & 0x0f)]));
+    }
+    name
 }
 
 #[cfg(windows)]
@@ -203,12 +214,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn opaque_target_name_is_fresh_and_contains_no_test_blob() {
-        let first = target_name_from_parts(1, 1);
-        let second = target_name_from_parts(1, 2);
+    fn opaque_target_name_encodes_a_fixed_nonce_without_test_bytes() {
+        let first = target_name_from_nonce(&[0; TARGET_NONCE_BYTES]);
+        let second = target_name_from_nonce(&[0xff; TARGET_NONCE_BYTES]);
+
+        assert_eq!(
+            first,
+            "SoniMesh/credential-spike/00000000000000000000000000000000"
+        );
+        assert_eq!(
+            second,
+            "SoniMesh/credential-spike/ffffffffffffffffffffffffffffffff"
+        );
+        assert!(!first.contains("Credential Spike"));
+    }
+
+    #[test]
+    fn system_rng_generates_distinct_opaque_target_names() {
+        let first = target_name().unwrap();
+        let second = target_name().unwrap();
 
         assert_ne!(first, second);
-        assert!(first.starts_with("SoniMesh/credential-spike/"));
+        assert!(first.starts_with(TARGET_PREFIX));
+        assert_eq!(first.len(), TARGET_PREFIX.len() + TARGET_NONCE_BYTES * 2);
         assert!(!first.contains("Credential Spike"));
     }
 

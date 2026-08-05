@@ -79,12 +79,13 @@ revocation retires that trusted session.
 
 Before selecting a production Windows store, a Windows-only credential-store
 spike may create a random, session-persisted Generic Credential containing only
-fixed non-secret test bytes. The spike must write, read, validate, delete, and
-verify absence using a fresh target name, while redacting both the target and
-credential blob. It is an API and failure-path experiment only: it must not
-persist a pairing secret, private key, QR payload, trust record, session ticket,
-or media context; it does not select Credential Manager over DPAPI for the
-production identity format.
+fixed non-secret test bytes. Its target must come from the Windows
+system-preferred CNG RNG with no predictable fallback. The spike must write,
+read, validate, delete, and verify absence using that fresh target name, while
+redacting both the target and credential blob. It is an API and failure-path
+experiment only: it must not persist a pairing secret, private key, QR payload,
+trust record, session ticket, or media context; it does not select Credential
+Manager over DPAPI for the production identity format.
 
 ## Security implications
 

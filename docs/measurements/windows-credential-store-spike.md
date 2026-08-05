@@ -21,10 +21,14 @@ Run the standalone Windows-only experiment:
 
     cargo run -p windows-credential-prototype
 
-The tool creates a fresh opaque target in the current user session and stores a
-fixed non-secret test blob with `CRED_PERSIST_SESSION`. It prints only stage
-success/failure, byte length, and the post-delete error category. It must not
-print the target, username, credential bytes, or any stable local identifier.
+The tool creates a fresh opaque target from 128 random bits (16 bytes)
+supplied by the Windows system-preferred CNG RNG, then stores a fixed non-secret
+test blob with
+`CRED_PERSIST_SESSION`. It fails before any Credential Manager operation when
+that RNG call fails; it does not fall back to a timestamp, process counter, or
+other predictable target. It prints only stage success/failure, byte length, and
+the post-delete error category. It must not print the target, username,
+credential bytes, or any stable local identifier.
 
 The tool first removes a stale credential with its generated target, then uses a
 cleanup guard so every path after a successful write attempts deletion. A run is
