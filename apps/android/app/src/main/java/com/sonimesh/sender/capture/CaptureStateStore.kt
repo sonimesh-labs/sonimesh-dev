@@ -6,13 +6,14 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-class CaptureEvidence {
+internal class CaptureEvidence(
+    private val capturedFrames: CaptureEvidenceCounter = SaturatingAtomicCounter(),
+    private val silentFrames: CaptureEvidenceCounter = SaturatingAtomicCounter(),
+    private val silentReads: CaptureEvidenceCounter = SaturatingAtomicCounter(),
+    private val readErrors: CaptureEvidenceCounter = SaturatingAtomicCounter(),
+) {
     private val captureStartedAtMillis = AtomicLong(NO_CAPTURE_START)
     private val lastReadCompletedAtMillis = AtomicLong(NO_READ_COMPLETION)
-    private val capturedFrames = SaturatingAtomicCounter()
-    private val silentFrames = SaturatingAtomicCounter()
-    private val silentReads = SaturatingAtomicCounter()
-    private val readErrors = SaturatingAtomicCounter()
 
     /** Records one successful read and its local monotonic completion time. */
     fun recordRead(frames: Int, silent: Boolean, completedAtMillis: Long) {
@@ -101,7 +102,7 @@ object CaptureStateStore {
     private val mutableState = MutableStateFlow(CaptureUiState())
 
     val state: StateFlow<CaptureUiState> = mutableState.asStateFlow()
-    val evidence = CaptureEvidence()
+    internal val evidence = CaptureEvidence()
 
     fun publishAwaitingPermission() {
         evidence.reset()
