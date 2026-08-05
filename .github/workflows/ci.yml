@@ -120,7 +120,7 @@ jobs:
       - name: Install Android build components
         run: |
           yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager "platform-tools" "platforms;android-36" "build-tools;34.0.0"
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;35.0.0"
       - name: Build Android capture bootstrap
         working-directory: apps/android
         run: ./gradlew lintDebug testDebugUnitTest assembleDebug :tls-provider-spike:assembleDebugAndroidTest --no-daemon

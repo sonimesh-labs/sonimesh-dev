@@ -11,7 +11,7 @@
 
 The portable Rust workspace builds without an Android SDK, audio device, or
 network service. The capture-only Android prototype requires the checked-in
-Gradle wrapper, Java 21, Android API 36, and Android Build Tools 34.0.0.
+Gradle wrapper, Java 21, Android API 36, and Android Build Tools 35.0.0.
 
 ## Core checks
 
@@ -69,7 +69,7 @@ cargo run -p sonimesh-platform --example output_smoke --features cpal-output
 ~~~
 
 CI runs formatting, linting, and tests on Linux and Windows, and builds the
-capture-only Android bootstrap with Java 21, API 36, and Build Tools 34.0.0.
+capture-only Android bootstrap with Java 21, API 36, and Build Tools 35.0.0.
 The Android job proves a reproducible host build only; none of these checks
 validate Android capture, Windows callback timing, acoustic latency, Opus
 behavior, or physical WLANs.
