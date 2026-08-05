@@ -44,8 +44,8 @@ CAPTURE_SAMPLE_RATE_RANGE = range(8_000, 192_001)
 MAX_CAPTURE_CHANNELS = 8
 MAX_CAPTURE_BUFFER_BYTES = 64 * 1024
 CAPTURE_READ_DURATION_MS = 20
-CURRENT_SCHEMA_VERSION = 2
-SUPPORTED_SCHEMA_VERSIONS = frozenset({1, CURRENT_SCHEMA_VERSION})
+CURRENT_SCHEMA_VERSION = 3
+SUPPORTED_SCHEMA_VERSIONS = frozenset({1, 2, CURRENT_SCHEMA_VERSION})
 MAX_SIGNED_64 = (1 << 63) - 1
 
 
@@ -200,7 +200,7 @@ def validate_record(record: Any) -> None:
     )
     schema_version = require_nonnegative_int(root["schema_version"], "schema_version")
     if schema_version not in SUPPORTED_SCHEMA_VERSIONS:
-        raise ValueError("record schema_version must be 1 or 2")
+        raise ValueError("record schema_version must be 1, 2, or 3")
     require_offset_timestamp(root["recorded_at"], "recorded_at")
     scenario = require_enum_string(
         root["scenario"],
@@ -218,7 +218,7 @@ def validate_record(record: Any) -> None:
     )
 
     if scenario in NO_CAPTURE_SCENARIOS:
-        validate_no_capture_record(root, scenario, terminal_state)
+        validate_no_capture_record(root, scenario, terminal_state, schema_version)
         return
 
     source_category = require_enum_string(
@@ -238,7 +238,7 @@ def validate_record(record: Any) -> None:
     initial = validate_snapshot(root["initial_snapshot"], "initial_snapshot", schema_version)
     final = validate_snapshot(root["final_snapshot"], "final_snapshot", schema_version)
     validate_snapshot_progress(initial, final)
-    validate_terminal_lifecycle(root["lifecycle"], scenario, terminal_state)
+    validate_terminal_lifecycle(root["lifecycle"], scenario, terminal_state, schema_version)
 
 
 def validate_device(value: Any) -> None:
@@ -283,7 +283,9 @@ def validate_device_conditions(value: Any) -> None:
         require_nonempty_string(observation, f"device_conditions.{field}")
 
 
-def validate_no_capture_record(root: dict[str, Any], scenario: str, terminal_state: str) -> None:
+def validate_no_capture_record(
+    root: dict[str, Any], scenario: str, terminal_state: str, schema_version: int
+) -> None:
     expected_terminal = "permission_denied" if scenario == "permission_denied" else "consent_cancelled"
     if terminal_state != expected_terminal:
         raise ValueError(f"{scenario} record has an incompatible terminal state")
@@ -291,6 +293,8 @@ def validate_no_capture_record(root: dict[str, Any], scenario: str, terminal_sta
         raise ValueError(f"{scenario} record must not retain a capture source category")
     if any(root[field] is not None for field in ("capture_format", "initial_snapshot", "final_snapshot")):
         raise ValueError(f"{scenario} record must not retain capture evidence")
+    if schema_version >= 3 and root["lifecycle"]["suppressed_teardown_wakeup"]:
+        raise ValueError(f"{scenario} record cannot report a suppressed teardown wake-up")
     validate_absent_lifecycle(root["lifecycle"], scenario)
 
 
@@ -310,7 +314,9 @@ def validate_snapshot_progress(initial: dict[str, int | None], final: dict[str, 
         raise ValueError("final_snapshot read completion offset regressed")
 
 
-def validate_terminal_lifecycle(lifecycle: dict[str, Any], scenario: str, terminal_state: str) -> None:
+def validate_terminal_lifecycle(
+    lifecycle: dict[str, Any], scenario: str, terminal_state: str, schema_version: int
+) -> None:
     expected_terminal = {
         "notification_stop": "user_requested",
         "projection_revoked": "projection_revoked",
@@ -318,8 +324,16 @@ def validate_terminal_lifecycle(lifecycle: dict[str, Any], scenario: str, termin
     }.get(scenario)
     if expected_terminal is not None and terminal_state != expected_terminal:
         raise ValueError(f"{scenario} record has an incompatible terminal state")
+    if schema_version >= 3 and terminal_state in {"permission_denied", "consent_cancelled"}:
+        raise ValueError("capture scenario cannot end with a pre-capture authorization terminal")
     if scenario in {"background", "lock_screen"} and lifecycle["event_duration_ms"] == 0:
         raise ValueError(f"{scenario} record requires a positive event duration")
+    if schema_version >= 3 and terminal_state == "active":
+        if any(lifecycle[field] != "present" for field in ("notification", "service", "projection")):
+            raise ValueError("active capture record requires present notification, service, and projection")
+        if lifecycle["suppressed_teardown_wakeup"]:
+            raise ValueError("active capture record cannot report a suppressed teardown wake-up")
+        return
     if terminal_state in {"user_requested", "projection_revoked", "service_destroyed", "failed"}:
         validate_absent_lifecycle(lifecycle, scenario)
 
@@ -353,10 +367,22 @@ class AndroidCaptureRecordTests(unittest.TestCase):
     def test_accepts_legacy_v1_records_without_silent_frames(self) -> None:
         validate_record(active_record(schema_version=1))
 
+    def test_preserves_legacy_lifecycle_validation_for_versions_one_and_two(self) -> None:
+        for schema_version in (1, 2):
+            with self.subTest(schema_version=schema_version):
+                record = active_record(schema_version=schema_version, terminal_state="permission_denied")
+                record["lifecycle"]["notification"] = "not_measured"
+                record["lifecycle"]["suppressed_teardown_wakeup"] = True
+                validate_record(record)
+
+                for scenario in ("permission_denied", "consent_cancelled"):
+                    with self.subTest(scenario=scenario):
+                        validate_record(no_capture_record(scenario, schema_version=schema_version))
+
     def test_rejects_unknown_schema_and_inconsistent_silent_frame_counters(self) -> None:
         record = active_record()
-        record["schema_version"] = 3
-        with self.assertRaisesRegex(ValueError, "schema_version must be 1 or 2"):
+        record["schema_version"] = 4
+        with self.assertRaisesRegex(ValueError, "schema_version must be 1, 2, or 3"):
             validate_record(record)
 
         record = active_record()
@@ -428,6 +454,15 @@ class AndroidCaptureRecordTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "must not retain capture evidence"):
             validate_record(record)
 
+        for scenario in ("permission_denied", "consent_cancelled"):
+            with self.subTest(scenario=scenario):
+                record = no_capture_record(scenario)
+                record["lifecycle"]["suppressed_teardown_wakeup"] = True
+                with self.assertRaisesRegex(
+                    ValueError, "cannot report a suppressed teardown wake-up"
+                ):
+                    validate_record(record)
+
     def test_rejects_non_scalar_enum_fields_and_noninteger_read_samples(self) -> None:
         invalid_enum_values = (
             ("scenario", ["allowed"], "record scenario is not in the Phase 0A matrix"),
@@ -468,6 +503,37 @@ class AndroidCaptureRecordTests(unittest.TestCase):
         record["capture_format"]["read_samples"] = 1_919
         with self.assertRaisesRegex(ValueError, "fixed 20 ms read"):
             validate_record(record)
+
+    def test_requires_observable_active_capture_and_capture_terminal_states(self) -> None:
+        for field, value in (
+            ("notification", "absent"),
+            ("notification", "not_measured"),
+            ("service", "absent"),
+            ("projection", "not_measured"),
+        ):
+            with self.subTest(field=field, value=value):
+                record = active_record()
+                record["lifecycle"][field] = value
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "active capture record requires present notification, service, and projection",
+                ):
+                    validate_record(record)
+
+        record = active_record()
+        record["lifecycle"]["suppressed_teardown_wakeup"] = True
+        with self.assertRaisesRegex(
+            ValueError, "active capture record cannot report a suppressed teardown wake-up"
+        ):
+            validate_record(record)
+
+        for terminal_state in ("permission_denied", "consent_cancelled"):
+            with self.subTest(terminal_state=terminal_state):
+                record = active_record(terminal_state=terminal_state)
+                with self.assertRaisesRegex(
+                    ValueError, "capture scenario cannot end with a pre-capture authorization terminal"
+                ):
+                    validate_record(record)
 
 
 def active_record(
@@ -535,23 +601,31 @@ def active_record(
     return record
 
 
-def absent_lifecycle() -> dict[str, Any]:
+def absent_lifecycle(suppressed_teardown_wakeup: bool = True) -> dict[str, Any]:
     return {
         "notification": "absent",
         "service": "absent",
         "projection": "absent",
         "event_duration_ms": 0,
-        "suppressed_teardown_wakeup": True,
+        "suppressed_teardown_wakeup": suppressed_teardown_wakeup,
     }
 
 
-def no_capture_record(scenario: str) -> dict[str, Any]:
-    record = active_record(scenario=scenario, terminal_state=scenario)
+def no_capture_record(
+    scenario: str, schema_version: int = CURRENT_SCHEMA_VERSION
+) -> dict[str, Any]:
+    record = active_record(
+        scenario=scenario,
+        terminal_state=scenario,
+        schema_version=schema_version,
+    )
     record["observed_source_category"] = None
     record["capture_format"] = None
     record["initial_snapshot"] = None
     record["final_snapshot"] = None
-    record["lifecycle"] = absent_lifecycle()
+    record["lifecycle"] = absent_lifecycle(
+        suppressed_teardown_wakeup=schema_version < CURRENT_SCHEMA_VERSION
+    )
     return record
 
 

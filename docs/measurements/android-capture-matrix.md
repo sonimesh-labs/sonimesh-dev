@@ -1,7 +1,7 @@
 # Android capture feasibility matrix
 
 > Status: partial physical-device evidence; remaining lifecycle matrix required
-> Updated: 2026-07-19
+> Updated: 2026-08-05
 
 This document is the evidence boundary for the capture-only Android bootstrap.
 A successful Gradle build proves only that the application and its bounded
@@ -87,11 +87,15 @@ its evidence fields locally:
 
     python tools/check_android_capture_record.py path/to/android-capture-record.json
 
-The current record format is schema version 2. The validator continues to
-accept legacy version 1 records, but new records must use version 2 so completed
-silent-frame duration can be checked independently from non-blocking read count.
-Both versions have these required top-level fields. `recorded_at` must be an
-ISO 8601 timestamp with an explicit UTC offset (for example,
+The current record format is schema version 3. The validator continues to
+accept legacy versions 1 and 2, but new records must use version 3. Version 2
+added completed silent-frame duration so it can be checked independently from
+non-blocking read count. Version 3 retains the version-2 fields and adds
+stricter lifecycle consistency: an active session must retain observable
+foreground service evidence, while no-capture records cannot claim a suppressed
+teardown wake-up. Legacy records continue to use their original validation
+semantics. All versions have these required top-level fields. `recorded_at` must
+be an ISO 8601 timestamp with an explicit UTC offset (for example,
 `2026-07-20T20:30:00+08:00` or a `Z` suffix) so records remain independently
 auditable across operator time zones:
 
@@ -116,11 +120,16 @@ completion offset to be at most its snapshot's local duration. It checks the
 same 20 ms read-size calculation and 64 KiB buffer bound
 as the capture bootstrap.
 
-`terminal_state` is `active` only while a session remains observable. The
-terminal teardown values `user_requested`, `projection_revoked`,
-`service_destroyed`, and `failed` require `notification`, `service`, and
-`projection` to be recorded as `absent`; this records the common teardown
-invariant instead of assuming that an old stream recovered.
+For schema version 3, `terminal_state` is `active` only while a session
+remains observable: the record must mark `notification`, `service`, and
+`projection` as `present`, and it cannot report a suppressed teardown wake-up.
+The pre-capture terminal values `permission_denied` and `consent_cancelled` are
+valid only for their matching no-capture scenarios, which also cannot report a
+suppressed teardown wake-up. Across all schema versions, the terminal teardown
+values `user_requested`, `projection_revoked`, `service_destroyed`, and
+`failed` require `notification`, `service`, and `projection` to be recorded as
+`absent`; this records the common teardown invariant instead of assuming that
+an old stream recovered.
 
 `observed_source_category` is limited to `allowed`, `idle`, `silent`, or
 `protected_unknown` for a capture session. It cannot contain an application
