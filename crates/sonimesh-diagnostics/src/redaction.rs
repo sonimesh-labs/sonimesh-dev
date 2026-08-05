@@ -21,4 +21,13 @@ mod tests {
         assert_eq!(redacted, "[ipv4-address-redacted]:49321");
         assert!(!redacted.contains("192.168"));
     }
+
+    #[test]
+    fn does_not_retain_ipv6_address() {
+        let endpoint: SocketAddr = "[2001:db8:85a3::8a2e:370:7334]:49321".parse().unwrap();
+        let redacted = redact_endpoint(endpoint);
+        assert_eq!(redacted, "[ipv6-address-redacted]:49321");
+        assert!(!redacted.contains("2001:db8"));
+        assert!(!redacted.contains("7334"));
+    }
 }
