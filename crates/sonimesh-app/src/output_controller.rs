@@ -130,7 +130,9 @@ where
     /// Stops the backend; lifecycle completion remains owned by the caller.
     pub fn stop(&mut self) {
         self.output.stop();
-        self.source_factory.output_stopped();
+        if self.stream_active {
+            self.source_factory.output_stopped();
+        }
         self.stream_active = false;
         self.fault_reported = true;
     }

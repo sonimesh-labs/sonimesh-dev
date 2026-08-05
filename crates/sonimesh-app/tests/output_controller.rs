@@ -218,6 +218,29 @@ fn starts_without_mutating_external_session_state() {
 }
 
 #[test]
+fn stopping_without_an_active_stream_keeps_source_factory_hooks_balanced() {
+    let created = Arc::new(AtomicUsize::new(0));
+    let starts = Arc::new(AtomicUsize::new(0));
+    let mut controller = controller(
+        Arc::clone(&created),
+        Arc::new(AtomicUsize::new(0)),
+        Arc::new(AtomicBool::new(false)),
+        Arc::clone(&starts),
+    );
+
+    controller.stop();
+    controller.stop();
+
+    assert_eq!(controller.output().stop_calls, 2);
+    assert_eq!(starts.load(Ordering::Relaxed), 0);
+    assert_eq!(created.load(Ordering::Relaxed), 0);
+
+    controller.start(selection()).unwrap();
+    assert_eq!(starts.load(Ordering::Relaxed), 1);
+    assert_eq!(created.load(Ordering::Relaxed), 1);
+}
+
+#[test]
 fn explicit_stop_disarms_stale_health_until_a_new_start() {
     let created = Arc::new(AtomicUsize::new(0));
     let last_output_channels = Arc::new(AtomicUsize::new(0));

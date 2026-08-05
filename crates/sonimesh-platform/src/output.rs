@@ -43,8 +43,9 @@ pub trait RenderSourceFactory {
 
     /// Records that the platform stopped its current source.
     ///
-    /// This runs in the control domain after [`AudioOutput::stop`]. Factories
-    /// can clear metadata that is valid only while a callback source is active.
+    /// This runs in the control domain after [`AudioOutput::stop`] releases a
+    /// source previously accepted by [`AudioOutput::start`]. Factories can clear
+    /// metadata that is valid only while a callback source is active.
     fn output_stopped(&mut self) {}
 }
 
