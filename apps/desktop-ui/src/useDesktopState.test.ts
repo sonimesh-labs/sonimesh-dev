@@ -59,16 +59,22 @@ function receiverSnapshot(session: DesktopSnapshot['session']): DesktopSnapshot 
 
 function deferred<T>() {
   let resolve: (value: T) => void
-  const promise = new Promise<T>((resolvePromise) => {
+  let reject: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
     resolve = resolvePromise
+    reject = rejectPromise
   })
-  return { promise, resolve: (value: T) => resolve(value) }
+  return {
+    promise,
+    resolve: (value: T) => resolve(value),
+    reject: (reason?: unknown) => reject(reason),
+  }
 }
 
 enableAutoUnmount(afterEach)
 
 afterEach(() => {
-  vi.clearAllMocks()
+  vi.resetAllMocks()
 })
 
 describe('useDesktopState', () => {
@@ -89,5 +95,33 @@ describe('useDesktopState', () => {
     await Promise.all([first, second])
 
     expect(wrapper.vm.snapshot?.session).toBe('streaming')
+  })
+
+  it('recovers from a rejected bridge command before accepting a later command', async () => {
+    desktopBridgeMock.snapshot.mockResolvedValueOnce(receiverSnapshot('ready'))
+    const wrapper = mount(StateHarness)
+    await flushPromises()
+
+    const pendingStart = deferred<DesktopSnapshot>()
+    desktopBridgeMock.startStream.mockImplementationOnce(() => pendingStart.promise)
+
+    const start = wrapper.vm.start()
+    expect(wrapper.vm.busy).toBe(true)
+    expect(wrapper.vm.error).toBe(null)
+
+    pendingStart.reject(new Error('desktop control unavailable'))
+    await start
+
+    expect(wrapper.vm.busy).toBe(false)
+    expect(wrapper.vm.error).toBe('The desktop control service did not accept this command.')
+    expect(wrapper.vm.snapshot?.session).toBe('ready')
+
+    desktopBridgeMock.snapshot.mockResolvedValueOnce(receiverSnapshot('streaming'))
+    await wrapper.vm.refresh()
+
+    expect(wrapper.vm.busy).toBe(false)
+    expect(wrapper.vm.error).toBe(null)
+    expect(wrapper.vm.snapshot?.session).toBe('streaming')
+    expect(desktopBridgeMock.snapshot).toHaveBeenCalledTimes(2)
   })
 })
