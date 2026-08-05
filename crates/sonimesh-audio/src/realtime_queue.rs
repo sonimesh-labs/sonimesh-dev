@@ -107,7 +107,7 @@ impl<const SAMPLES_PER_BLOCK: usize> RealtimePcmProducer<SAMPLES_PER_BLOCK> {
             initialized: samples.len(),
         };
         self.next_sequence = self.next_sequence.wrapping_add(1);
-        self.state.active_blocks.fetch_add(1, Ordering::Relaxed);
+        increment_active_blocks(&self.state.active_blocks, self.state.queue.capacity());
 
         let discarded = self.state.queue.force_push(block);
         if let Some(discarded) = discarded {
@@ -278,6 +278,15 @@ fn active_block_count<const SAMPLES_PER_BLOCK: usize>(
         .min(state.queue.capacity())
 }
 
+fn increment_active_blocks(active_blocks: &AtomicUsize, capacity: usize) {
+    // One transient extra count preserves occupancy when `force_push` replaces
+    // an active oldest block immediately after this pre-insertion increment.
+    let transient_maximum = capacity.saturating_add(1);
+    let _ = active_blocks.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |count| {
+        Some(count.saturating_add(1).min(transient_maximum))
+    });
+}
+
 fn decrement_active_blocks(active_blocks: &AtomicUsize) {
     let _ = active_blocks.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |count| {
         count.checked_sub(1)
@@ -293,6 +302,24 @@ mod tests {
         let (producer, consumer) = realtime_pcm_queue::<1>(2).unwrap();
         producer.state.active_blocks.store(3, Ordering::Relaxed);
 
+        assert_eq!(producer.active_len(), 2);
+        assert_eq!(consumer.active_len(), 2);
+    }
+
+    #[test]
+    fn active_block_counter_does_not_wrap_during_oldest_replacement() {
+        let (mut producer, consumer) = realtime_pcm_queue::<1>(2).unwrap();
+        producer.push(&[1.0]);
+        producer.push(&[2.0]);
+        producer
+            .state
+            .active_blocks
+            .store(usize::MAX, Ordering::Relaxed);
+
+        assert_eq!(
+            producer.push(&[3.0]),
+            RealtimePcmPushOutcome::ReplacedOldest
+        );
         assert_eq!(producer.active_len(), 2);
         assert_eq!(consumer.active_len(), 2);
     }
