@@ -2,15 +2,15 @@
 
 use sonimesh_app::{
     ControlSessionToken, ControlStreamAction, ControlStreamCoordinator, ControlStreamError,
-    PairingAttemptOutcome, PairingId, PairingInvitationController, PairingProofVerification,
-    PairingSource, SessionEvent, SessionState,
+    PairingAttemptOutcome, PairingId, PairingInvitationController, PairingInvitationError,
+    PairingProofVerification, PairingSource, SessionEvent, SessionState,
 };
 use sonimesh_protocol::{
-    CONTROL_PROTOCOL_VERSION, Capability, Envelope, Hello, StartStream, encode_control_frame,
-    envelope,
+    CONTROL_PROTOCOL_VERSION, Capability, ControlFrameError, Envelope, Hello, StartStream,
+    encode_control_frame, envelope,
 };
 
-use crate::{NetworkProfile, VirtualNetwork};
+use crate::{NetworkProfile, ProfileError, VirtualNetwork};
 
 /// Rejections observed for work owned by the retired control transport.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -43,9 +43,51 @@ pub struct ControlSimulationReport {
 #[derive(Debug)]
 pub enum ControlScenarioError {
     /// A bounded pairing operation failed.
-    Pairing,
+    Pairing(PairingInvitationError),
     /// A control envelope or transition violated its expected contract.
-    Control,
+    Control(ControlStreamError),
+    /// A control envelope could not be encoded for deterministic transport.
+    Protocol(ControlFrameError),
+    /// The deterministic virtual network profile was invalid.
+    Network(ProfileError),
+    /// The fixed scenario would require a frame length larger than `u64`.
+    FrameLengthOverflow,
+    /// The fixed deterministic scenario violated its expected state machine.
+    UnexpectedScenarioState,
+}
+
+impl core::fmt::Display for ControlScenarioError {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Pairing(error) => write!(formatter, "control scenario pairing failed: {error}"),
+            Self::Control(error) => {
+                write!(formatter, "control scenario control step failed: {error}")
+            }
+            Self::Protocol(error) => write!(formatter, "control scenario envelope failed: {error}"),
+            Self::Network(error) => write!(
+                formatter,
+                "control scenario network profile failed: {error}"
+            ),
+            Self::FrameLengthOverflow => {
+                formatter.write_str("control scenario frame length overflowed")
+            }
+            Self::UnexpectedScenarioState => {
+                formatter.write_str("control scenario violated its expected state")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ControlScenarioError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Pairing(error) => Some(error),
+            Self::Control(error) => Some(error),
+            Self::Protocol(error) => Some(error),
+            Self::Network(error) => Some(error),
+            Self::FrameLengthOverflow | Self::UnexpectedScenarioState => None,
+        }
+    }
 }
 
 /// Verifies that reconnect with fresh session material invalidates old work.
@@ -58,25 +100,25 @@ pub fn simulate_control_reconnect() -> Result<ControlSimulationReport, ControlSc
     let capabilities = [Capability::FrameDuration20Ms];
     let mut pairing = PairingInvitationController::<1>::new();
     let mut coordinator = ControlStreamCoordinator::new(SessionState::IDLE, &capabilities)
-        .map_err(|_| ControlScenarioError::Control)?;
+        .map_err(ControlScenarioError::Control)?;
     let retired_session = pair(&mut coordinator, &mut pairing, 1)?;
     let mut profile = NetworkProfile::stable(0xC011_2026);
     profile.base_delay_ms = 15;
     profile.jitter_ms = 0;
-    let mut network = VirtualNetwork::new(profile).map_err(|_| ControlScenarioError::Control)?;
+    let mut network = VirtualNetwork::new(profile).map_err(ControlScenarioError::Network)?;
     let hello = deliver(&mut network, hello_frame(&capabilities))?;
     if !matches!(
         coordinator.accept(retired_session, &hello),
         Ok(ControlStreamAction::Negotiated(_))
     ) {
-        return Err(ControlScenarioError::Control);
+        return Err(ControlScenarioError::UnexpectedScenarioState);
     }
     let start_frame = deliver(&mut network, start())?;
     let ControlStreamAction::Start { token, request } = coordinator
         .accept(retired_session, &start_frame)
-        .map_err(|_| ControlScenarioError::Control)?
+        .map_err(ControlScenarioError::Control)?
     else {
-        return Err(ControlScenarioError::Control);
+        return Err(ControlScenarioError::UnexpectedScenarioState);
     };
 
     let mut delayed_profile = NetworkProfile::stable(0xC011_2027);
@@ -85,19 +127,19 @@ pub fn simulate_control_reconnect() -> Result<ControlSimulationReport, ControlSc
     delayed_profile.reorder_percent = 100;
     delayed_profile.reorder_delay_ms = 30;
     let mut delayed_network =
-        VirtualNetwork::new(delayed_profile).map_err(|_| ControlScenarioError::Control)?;
+        VirtualNetwork::new(delayed_profile).map_err(ControlScenarioError::Network)?;
     submit(&mut delayed_network, start())?;
 
     coordinator
         .acknowledge_platform_event(SessionEvent::ConnectionLost)
-        .map_err(|_| ControlScenarioError::Control)?;
+        .map_err(ControlScenarioError::Control)?;
     coordinator
         .acknowledge_platform_event(SessionEvent::Reconnected)
-        .map_err(|_| ControlScenarioError::Control)?;
+        .map_err(ControlScenarioError::Control)?;
     let stale_completion_rejected = coordinator.complete_start(token, request).is_err();
     let fresh_session = coordinator
         .install_authenticated_control_session()
-        .map_err(|_| ControlScenarioError::Control)?;
+        .map_err(ControlScenarioError::Control)?;
     let restarted_start = deliver(&mut network, start())?;
     let fresh_hello_required = matches!(
         coordinator.accept(fresh_session, &restarted_start),
@@ -108,7 +150,7 @@ pub fn simulate_control_reconnect() -> Result<ControlSimulationReport, ControlSc
         coordinator.accept(fresh_session, &fresh_hello),
         Ok(ControlStreamAction::Negotiated(_))
     ) {
-        return Err(ControlScenarioError::Control);
+        return Err(ControlScenarioError::UnexpectedScenarioState);
     }
 
     let delayed = delayed_network.drain_ready(45);
@@ -140,17 +182,19 @@ fn pair(
     n: u8,
 ) -> Result<ControlSessionToken, ControlScenarioError> {
     c.begin_pairing(p, PairingId::new([n; 16]), 0, 10, 1)
-        .map_err(|_| ControlScenarioError::Pairing)?;
+        .map_err(ControlScenarioError::Pairing)?;
     match c
         .verify_pairing_proof(p, 1, PairingSource::new([n; 16]), || {
             PairingProofVerification::Verified
         })
-        .map_err(|_| ControlScenarioError::Pairing)?
+        .map_err(ControlScenarioError::Pairing)?
     {
         PairingAttemptOutcome::Paired => c
             .install_authenticated_control_session()
-            .map_err(|_| ControlScenarioError::Control),
-        PairingAttemptOutcome::Rejected { .. } => Err(ControlScenarioError::Pairing),
+            .map_err(ControlScenarioError::Control),
+        PairingAttemptOutcome::Rejected { .. } => {
+            Err(ControlScenarioError::UnexpectedScenarioState)
+        }
     }
 }
 
@@ -173,9 +217,12 @@ fn deliver(
     submit(network, frame)?;
     let mut ready = network.drain_ready(15);
     if ready.len() != 1 {
-        return Err(ControlScenarioError::Control);
+        return Err(ControlScenarioError::UnexpectedScenarioState);
     }
-    Ok(ready.pop().ok_or(ControlScenarioError::Control)?.payload)
+    Ok(ready
+        .pop()
+        .ok_or(ControlScenarioError::UnexpectedScenarioState)?
+        .payload)
 }
 
 fn submit(
@@ -184,10 +231,10 @@ fn submit(
 ) -> Result<(), ControlScenarioError> {
     let payload_bytes = u64::try_from(
         encode_control_frame(&frame)
-            .map_err(|_| ControlScenarioError::Control)?
+            .map_err(ControlScenarioError::Protocol)?
             .len(),
     )
-    .map_err(|_| ControlScenarioError::Control)?;
+    .map_err(|_| ControlScenarioError::FrameLengthOverflow)?;
     network.send(0, frame, payload_bytes);
     Ok(())
 }
@@ -209,7 +256,10 @@ fn start() -> Envelope {
 
 #[cfg(test)]
 mod tests {
+    use std::error::Error;
+
     use super::*;
+
     #[test]
     fn reconnect_retires_old_control_work() {
         let report = simulate_control_reconnect().unwrap();
@@ -219,5 +269,38 @@ mod tests {
                 && report.fresh.hello_required
                 && report.fresh.command_accepted
         );
+    }
+
+    #[test]
+    fn preserved_error_variants_expose_their_causes() {
+        let pairing = ControlScenarioError::Pairing(PairingInvitationError::MissingInvitation);
+        assert!(
+            Error::source(&pairing)
+                .and_then(|source| source.downcast_ref::<PairingInvitationError>())
+                .is_some()
+        );
+
+        let control = ControlScenarioError::Control(ControlStreamError::MissingNegotiation);
+        assert!(
+            Error::source(&control)
+                .and_then(|source| source.downcast_ref::<ControlStreamError>())
+                .is_some()
+        );
+
+        let protocol = ControlScenarioError::Protocol(ControlFrameError::TruncatedLength);
+        assert!(
+            Error::source(&protocol)
+                .and_then(|source| source.downcast_ref::<ControlFrameError>())
+                .is_some()
+        );
+
+        let network = ControlScenarioError::Network(ProfileError::DelayTooLarge);
+        assert!(
+            Error::source(&network)
+                .and_then(|source| source.downcast_ref::<ProfileError>())
+                .is_some()
+        );
+
+        assert!(Error::source(&ControlScenarioError::UnexpectedScenarioState).is_none());
     }
 }
