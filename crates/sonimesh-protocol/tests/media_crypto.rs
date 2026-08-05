@@ -47,7 +47,8 @@ fn rejects_tampered_header_and_ciphertext_without_plaintext() {
         ),
         Err(MediaCryptoError::AuthenticationFailed)
     );
-    assert!(plaintext.iter().all(|byte| *byte == 0 || *byte == 0xFF));
+    assert_eq!(&plaintext[..12], [0; 12]);
+    assert_eq!(&plaintext[12..], [0xFF; 20]);
 
     let mut ciphertext_tampered = protected.datagram;
     let last = ciphertext_tampered.len() - 1;
@@ -60,7 +61,29 @@ fn rejects_tampered_header_and_ciphertext_without_plaintext() {
         ),
         Err(MediaCryptoError::AuthenticationFailed)
     );
-    assert!(plaintext.iter().all(|byte| *byte == 0 || *byte == 0xFF));
+    assert_eq!(&plaintext[..12], [0; 12]);
+    assert_eq!(&plaintext[12..], [0xFF; 20]);
+}
+
+#[test]
+fn rejects_the_reverse_direction_without_leaking_ciphertext_to_output() {
+    let secret = secret();
+    let sender_context = context(7, MediaDirection::AndroidToDesktop);
+    let mut sealer = MediaSealer::new(&secret, sender_context).unwrap();
+    let protected = sealer.seal(0, 0, b"secret audio").unwrap();
+    let reverse_direction =
+        MediaOpener::new(&secret, context(7, MediaDirection::DesktopToAndroid)).unwrap();
+    let mut plaintext = [0xCC; 32];
+
+    assert_eq!(
+        reverse_direction.open(
+            parse_media_packet(&protected.datagram).unwrap(),
+            &mut plaintext
+        ),
+        Err(MediaCryptoError::AuthenticationFailed)
+    );
+    assert_eq!(&plaintext[..12], [0; 12]);
+    assert_eq!(&plaintext[12..], [0xCC; 20]);
 }
 
 #[test]
@@ -102,6 +125,14 @@ fn rejects_plaintext_larger_than_media_capacity() {
     assert_eq!(
         sealer.seal(0, 0, &oversized),
         Err(MediaCryptoError::PayloadTooLarge)
+    );
+    assert_eq!(
+        sealer
+            .seal(0, 0, b"valid after rejection")
+            .unwrap()
+            .header
+            .sequence,
+        0
     );
 }
 
