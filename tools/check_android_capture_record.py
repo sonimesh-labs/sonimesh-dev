@@ -60,6 +60,12 @@ def require_nonempty_string(value: Any, label: str) -> str:
     return value
 
 
+def require_enum_string(value: Any, allowed: frozenset[str], message: str) -> str:
+    if not isinstance(value, str) or value not in allowed:
+        raise ValueError(message)
+    return value
+
+
 def require_nonnegative_int(value: Any, label: str) -> int:
     if not isinstance(value, int) or isinstance(value, bool) or value < 0:
         raise ValueError(f"{label} must be a nonnegative integer")
@@ -151,7 +157,8 @@ def validate_capture_format(value: Any) -> None:
     if not 1 <= minimum_buffer <= buffer_size <= MAX_CAPTURE_BUFFER_BYTES:
         raise ValueError("capture format buffers are outside the Phase 0A bound")
     expected_read_samples = (sample_rate * CAPTURE_READ_DURATION_MS + 999) // 1_000 * channels
-    if capture_format["read_samples"] != expected_read_samples:
+    read_samples = require_nonnegative_int(capture_format["read_samples"], "read_samples")
+    if read_samples != expected_read_samples:
         raise ValueError("capture format read_samples does not match the fixed 20 ms read")
 
 
@@ -178,24 +185,30 @@ def validate_record(record: Any) -> None:
     if schema_version not in SUPPORTED_SCHEMA_VERSIONS:
         raise ValueError("record schema_version must be 1 or 2")
     require_nonempty_string(root["recorded_at"], "recorded_at")
-    scenario = root["scenario"]
-    if scenario not in SCENARIOS:
-        raise ValueError("record scenario is not in the Phase 0A matrix")
+    scenario = require_enum_string(
+        root["scenario"],
+        SCENARIOS,
+        "record scenario is not in the Phase 0A matrix",
+    )
     validate_device(root["device"])
     validate_app(root["app"])
     validate_lifecycle(root["lifecycle"])
     validate_device_conditions(root["device_conditions"])
-    terminal_state = root["terminal_state"]
-    if terminal_state not in TERMINAL_STATES:
-        raise ValueError("record terminal_state is not recognized")
+    terminal_state = require_enum_string(
+        root["terminal_state"],
+        TERMINAL_STATES,
+        "record terminal_state is not recognized",
+    )
 
     if scenario in NO_CAPTURE_SCENARIOS:
         validate_no_capture_record(root, scenario, terminal_state)
         return
 
-    source_category = root["observed_source_category"]
-    if source_category not in SOURCE_CATEGORIES:
-        raise ValueError("capture record requires a bounded observed source category")
+    source_category = require_enum_string(
+        root["observed_source_category"],
+        SOURCE_CATEGORIES,
+        "capture record requires a bounded observed source category",
+    )
     if scenario == "allowed" and source_category != "allowed":
         raise ValueError("allowed scenario must retain the allowed source category")
     if scenario == "idle_silent" and source_category not in {"idle", "silent"}:
@@ -237,8 +250,11 @@ def validate_lifecycle(value: Any) -> None:
         {"notification", "service", "projection", "event_duration_ms", "suppressed_teardown_wakeup"},
     )
     for field in ("notification", "service", "projection"):
-        if lifecycle[field] not in PRESENCE_VALUES:
-            raise ValueError(f"lifecycle.{field} must be present, absent, or not_measured")
+        require_enum_string(
+            lifecycle[field],
+            PRESENCE_VALUES,
+            f"lifecycle.{field} must be present, absent, or not_measured",
+        )
     require_nonnegative_int(lifecycle["event_duration_ms"], "lifecycle.event_duration_ms")
     if not isinstance(lifecycle["suppressed_teardown_wakeup"], bool):
         raise ValueError("lifecycle.suppressed_teardown_wakeup must be boolean")
@@ -374,6 +390,33 @@ class AndroidCaptureRecordTests(unittest.TestCase):
         validate_record(record)
         record["capture_format"] = active_record()["capture_format"]
         with self.assertRaisesRegex(ValueError, "must not retain capture evidence"):
+            validate_record(record)
+
+    def test_rejects_non_scalar_enum_fields_and_noninteger_read_samples(self) -> None:
+        invalid_enum_values = (
+            ("scenario", ["allowed"], "record scenario is not in the Phase 0A matrix"),
+            ("terminal_state", {"state": "active"}, "record terminal_state is not recognized"),
+            (
+                "observed_source_category",
+                ["allowed"],
+                "capture record requires a bounded observed source category",
+            ),
+        )
+        for field, value, message in invalid_enum_values:
+            with self.subTest(field=field):
+                record = active_record()
+                record[field] = value
+                with self.assertRaisesRegex(ValueError, message):
+                    validate_record(record)
+
+        record = active_record()
+        record["lifecycle"]["notification"] = ["present"]
+        with self.assertRaisesRegex(ValueError, "lifecycle.notification"):
+            validate_record(record)
+
+        record = active_record()
+        record["capture_format"]["read_samples"] = 1_920.0
+        with self.assertRaisesRegex(ValueError, "read_samples must be a nonnegative integer"):
             validate_record(record)
 
     def test_validates_fixed_read_shape_and_terminal_teardown(self) -> None:
