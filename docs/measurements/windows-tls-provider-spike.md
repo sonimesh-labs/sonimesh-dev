@@ -46,9 +46,22 @@ using:
 | Context supplied | Yes |
 | Exporter output | 32 bytes |
 
-The run succeeds only when the two exporter values compare equal in memory and
-the altered-pin connection fails. The tool prints only `ok`/`rejected` stage
-categories, the negotiated TLS version, and the requested length.
+The run succeeds only when the two exporter values compare equal in memory, the
+client and server negotiate the same TLS version, and the altered-pin
+connection fails. The tool prints only `ok`/`rejected` stage categories, the
+confirmed negotiated TLS version, and the requested length:
+
+```text
+tls13_handshake: ok
+tls13_certificate_verify: ok
+tls_version: TLSv1.3
+exporter: matched (32 bytes)
+altered_spki: rejected
+```
+
+The `tls_version` line is emitted only after both sides independently confirm
+TLS 1.3 and the positive connection confirms equal versions. It contains no
+certificate, SPKI, private-key, exporter, pairing, or endpoint material.
 
 ## Required record
 

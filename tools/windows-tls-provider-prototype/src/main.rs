@@ -33,18 +33,17 @@ const SOCKET_TIMEOUT: Duration = Duration::from_secs(5);
 type ProbeResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 fn main() {
-    if let Ok(()) = run_probe() {
-        println!("tls13_handshake: ok");
-        println!("tls13_certificate_verify: ok");
-        println!("exporter: matched ({PAIRING_TLS_EXPORTER_LEN} bytes)");
-        println!("altered_spki: rejected");
+    if let Ok(version) = run_probe() {
+        for line in success_output_lines(version) {
+            println!("{line}");
+        }
     } else {
         eprintln!("windows-tls-provider-prototype: failed");
         std::process::exit(1);
     }
 }
 
-fn run_probe() -> ProbeResult<()> {
+fn run_probe() -> ProbeResult<ProtocolVersion> {
     let certified_key = generate_simple_self_signed(vec!["localhost".to_owned()])?;
     let certificate = certified_key.cert.der().clone();
     let spki_pin = certified_key.key_pair.public_key_der();
@@ -57,6 +56,9 @@ fn run_probe() -> ProbeResult<()> {
     if positive.client_exporter.as_ref() != positive.server_exporter.as_ref() {
         return Err(io::Error::other("client and server exporters differed").into());
     }
+    if positive.client_version != positive.server_version {
+        return Err(io::Error::other("client and server negotiated different TLS versions").into());
+    }
 
     let mut altered_pin = spki_pin;
     let final_byte = altered_pin
@@ -67,7 +69,24 @@ fn run_probe() -> ProbeResult<()> {
         return Err(io::Error::other("altered SPKI completed a TLS handshake").into());
     }
 
-    Ok(())
+    Ok(positive.client_version)
+}
+
+fn success_output_lines(version: ProtocolVersion) -> [&'static str; 5] {
+    [
+        "tls13_handshake: ok",
+        "tls13_certificate_verify: ok",
+        tls_version_output_line(version),
+        "exporter: matched (32 bytes)",
+        "altered_spki: rejected",
+    ]
+}
+
+fn tls_version_output_line(version: ProtocolVersion) -> &'static str {
+    match version {
+        ProtocolVersion::TLSv1_3 => "tls_version: TLSv1.3",
+        _ => "tls_version: unexpected",
+    }
 }
 
 fn server_config(
@@ -84,6 +103,8 @@ fn server_config(
 struct ProbeExporters {
     client_exporter: Zeroizing<[u8; PAIRING_TLS_EXPORTER_LEN]>,
     server_exporter: Zeroizing<[u8; PAIRING_TLS_EXPORTER_LEN]>,
+    client_version: ProtocolVersion,
+    server_version: ProtocolVersion,
 }
 
 fn run_loopback(
@@ -99,16 +120,20 @@ fn run_loopback(
         .join()
         .map_err(|_| io::Error::other("TLS server thread panicked"))?;
 
+    let (client_exporter, client_version) = client_result?;
+    let (server_exporter, server_version) = server_result?;
     Ok(ProbeExporters {
-        client_exporter: client_result?,
-        server_exporter: server_result?,
+        client_exporter,
+        server_exporter,
+        client_version,
+        server_version,
     })
 }
 
 fn client_exporter(
     address: std::net::SocketAddr,
     spki_pin: Vec<u8>,
-) -> ProbeResult<Zeroizing<[u8; PAIRING_TLS_EXPORTER_LEN]>> {
+) -> ProbeResult<(Zeroizing<[u8; PAIRING_TLS_EXPORTER_LEN]>, ProtocolVersion)> {
     let stream = TcpStream::connect_timeout(&address, SOCKET_TIMEOUT)?;
     configure_socket(&stream)?;
     let config = client_config(spki_pin)?;
@@ -116,23 +141,23 @@ fn client_exporter(
     let mut connection = ClientConnection::new(Arc::new(config), server_name)?;
 
     complete_client_handshake(&mut connection, stream)?;
-    confirm_tls13(connection.protocol_version())?;
-    export_client(&connection)
+    let version = confirm_tls13(connection.protocol_version())?;
+    Ok((export_client(&connection)?, version))
 }
 
 #[allow(clippy::needless_pass_by_value)]
 fn server_exporter(
     listener: TcpListener,
     config: Arc<ServerConfig>,
-) -> ProbeResult<Zeroizing<[u8; PAIRING_TLS_EXPORTER_LEN]>> {
+) -> ProbeResult<(Zeroizing<[u8; PAIRING_TLS_EXPORTER_LEN]>, ProtocolVersion)> {
     // The server thread owns the listener so returning always drops the bound port.
     let (stream, _) = listener.accept()?;
     configure_socket(&stream)?;
     let mut connection = ServerConnection::new(config)?;
 
     complete_server_handshake(&mut connection, stream)?;
-    confirm_tls13(connection.protocol_version())?;
-    export_server(&connection)
+    let version = confirm_tls13(connection.protocol_version())?;
+    Ok((export_server(&connection)?, version))
 }
 
 fn configure_socket(stream: &TcpStream) -> io::Result<()> {
@@ -160,11 +185,10 @@ fn complete_server_handshake(
     Ok(())
 }
 
-fn confirm_tls13(version: Option<ProtocolVersion>) -> ProbeResult<()> {
-    if version == Some(ProtocolVersion::TLSv1_3) {
-        Ok(())
-    } else {
-        Err(io::Error::other("connection did not negotiate TLS 1.3").into())
+fn confirm_tls13(version: Option<ProtocolVersion>) -> ProbeResult<ProtocolVersion> {
+    match version {
+        Some(version @ ProtocolVersion::TLSv1_3) => Ok(version),
+        _ => Err(io::Error::other("connection did not negotiate TLS 1.3").into()),
     }
 }
 
@@ -280,7 +304,24 @@ mod tests {
 
     #[test]
     fn loopback_tls13_exporter_requires_the_exact_spki_pin() {
-        run_probe().expect("fresh TLS 1.3 pin and exporter probe should pass");
+        assert_eq!(
+            run_probe().expect("fresh TLS 1.3 pin and exporter probe should pass"),
+            ProtocolVersion::TLSv1_3
+        );
+    }
+
+    #[test]
+    fn successful_probe_output_is_exact_and_non_sensitive() {
+        assert_eq!(
+            success_output_lines(ProtocolVersion::TLSv1_3),
+            [
+                "tls13_handshake: ok",
+                "tls13_certificate_verify: ok",
+                "tls_version: TLSv1.3",
+                "exporter: matched (32 bytes)",
+                "altered_spki: rejected",
+            ]
+        );
     }
 
     #[test]
