@@ -93,4 +93,25 @@ mod tests {
         assert_eq!(window.accept_authenticated(1000), ReplayDecision::Accepted);
         assert_eq!(window.accept_authenticated(999), ReplayDecision::Accepted);
     }
+
+    #[test]
+    fn accepts_the_oldest_in_window_sequence_at_the_maximum_value() {
+        let mut window = ReplayWindow::new();
+        assert_eq!(
+            window.accept_authenticated(u32::MAX),
+            ReplayDecision::Accepted
+        );
+        assert_eq!(
+            window.accept_authenticated(u32::MAX - (WINDOW_BITS - 1)),
+            ReplayDecision::Accepted
+        );
+        assert_eq!(
+            window.accept_authenticated(u32::MAX - WINDOW_BITS),
+            ReplayDecision::TooOld
+        );
+        assert_eq!(
+            window.accept_authenticated(u32::MAX - (WINDOW_BITS - 1)),
+            ReplayDecision::Duplicate
+        );
+    }
 }
