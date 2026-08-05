@@ -828,6 +828,57 @@ fn reconnect_with_fresh_material_invalidates_pending_start_and_negotiation() {
 }
 
 #[test]
+fn reconnect_retires_an_active_stream_before_accepting_a_fresh_start() {
+    let capabilities = [Capability::FrameDuration20Ms];
+    let mut coordinator = coordinator(&capabilities);
+    activate(&mut coordinator, 0);
+    let retired_session = coordinator.session;
+    let retired_identity = coordinator.active().expect("expected active stream");
+
+    coordinator
+        .acknowledge_platform_event(SessionEvent::ConnectionLost)
+        .unwrap();
+    assert_eq!(
+        coordinator.state().phase(),
+        sonimesh_app::SessionPhase::Reconnecting
+    );
+    assert_eq!(coordinator.active(), Some(retired_identity));
+    assert!(coordinator.negotiation().is_some());
+
+    coordinator
+        .acknowledge_platform_event(SessionEvent::Reconnected)
+        .unwrap();
+
+    assert_eq!(
+        coordinator.state().phase(),
+        sonimesh_app::SessionPhase::Ready
+    );
+    assert_eq!(coordinator.active(), None);
+    assert_eq!(coordinator.negotiation(), None);
+    assert!(matches!(
+        coordinator.accept(&start(0)),
+        Err(ControlStreamError::StaleControlSession)
+    ));
+
+    let fresh_session = coordinator.install_session().unwrap();
+    assert_ne!(fresh_session, retired_session);
+    assert!(matches!(
+        coordinator
+            .inner
+            .accept(retired_session, &hello(&capabilities)),
+        Err(ControlStreamError::StaleControlSession)
+    ));
+    assert!(matches!(
+        coordinator.accept(&hello(&capabilities)),
+        Ok(ControlStreamAction::Negotiated(_))
+    ));
+    let ControlStreamAction::Start { request, .. } = coordinator.accept(&start(0)).unwrap() else {
+        panic!("expected a fresh stream start action");
+    };
+    assert_eq!(request.identity, retired_identity);
+}
+
+#[test]
 fn expiring_active_pairing_returns_the_coordinator_to_idle() {
     let capabilities = [Capability::FrameDuration20Ms];
     let mut coordinator = ControlStreamCoordinator::new(SessionState::IDLE, &capabilities).unwrap();
