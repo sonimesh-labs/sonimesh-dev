@@ -144,7 +144,7 @@ fn validate(config: DriftScenarioConfig) -> Result<(), DriftScenarioError> {
     if usize::from(config.initial_occupancy_blocks) > MAX_PCM_QUEUE_BLOCKS {
         return Err(DriftScenarioError::InvalidInitialOccupancy);
     }
-    if config.source_rate_ppm.abs() > MAX_SOURCE_RATE_PPM {
+    if i64::from(config.source_rate_ppm).abs() > i64::from(MAX_SOURCE_RATE_PPM) {
         return Err(DriftScenarioError::InvalidSourceRate);
     }
     config
@@ -251,6 +251,13 @@ mod tests {
         assert_eq!(
             simulate_drift(DriftScenarioConfig {
                 source_rate_ppm: MAX_SOURCE_RATE_PPM + 1,
+                ..base
+            }),
+            Err(DriftScenarioError::InvalidSourceRate)
+        );
+        assert_eq!(
+            simulate_drift(DriftScenarioConfig {
+                source_rate_ppm: i32::MIN,
                 ..base
             }),
             Err(DriftScenarioError::InvalidSourceRate)
