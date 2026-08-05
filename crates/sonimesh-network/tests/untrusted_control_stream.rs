@@ -8,8 +8,8 @@ use sonimesh_network::{
     UntrustedControlError, UntrustedControlPoll, UntrustedControlStream, UntrustedControlWrite,
 };
 use sonimesh_protocol::{
-    CONTROL_PROTOCOL_VERSION, Capability, Envelope, Hello, MAX_CONTROL_FRAME_BYTES,
-    encode_control_frame, envelope,
+    CONTROL_PROTOCOL_VERSION, Capability, ControlFrameError, Envelope, Hello,
+    MAX_CONTROL_FRAME_BYTES, encode_control_frame, envelope,
 };
 
 fn hello_envelope() -> Envelope {
@@ -76,6 +76,29 @@ fn writer_uses_the_same_validated_length_prefixed_frame() {
         writer.send(&hello_envelope()).unwrap(),
         UntrustedControlWrite::Complete
     );
+    let mut actual = vec![0; expected.len()];
+    peer.read_exact(&mut actual).unwrap();
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn invalid_outbound_frame_does_not_retire_or_block_the_writer() {
+    let (mut peer, mut writer) = connected_reader();
+    let mut invalid = hello_envelope();
+    invalid.protocol_version = CONTROL_PROTOCOL_VERSION + 1;
+
+    assert!(matches!(
+        writer.send(&invalid),
+        Err(UntrustedControlError::Protocol(
+            ControlFrameError::UnsupportedVersion(version)
+        )) if version == invalid.protocol_version
+    ));
+    assert_eq!(
+        writer.send(&hello_envelope()).unwrap(),
+        UntrustedControlWrite::Complete
+    );
+
+    let expected = hello_frame();
     let mut actual = vec![0; expected.len()];
     peer.read_exact(&mut actual).unwrap();
     assert_eq!(actual, expected);
