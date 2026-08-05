@@ -131,8 +131,10 @@ impl<const CAPACITY: usize, const MAX_PAYLOAD: usize> JitterBuffer<CAPACITY, MAX
 
     /// Creates an empty buffer whose negotiated playout sequence is known.
     ///
-    /// A playout decision before that sequence arrives reports a missing frame,
-    /// allowing the decoder worker to schedule PLC at the negotiated deadline.
+    /// With nonzero capacity, a playout decision before that sequence arrives
+    /// reports a missing frame, allowing the decoder worker to schedule PLC at
+    /// the negotiated deadline. A zero-capacity buffer is disabled and instead
+    /// remains [`PlayoutOutcome::NotReady`].
     #[must_use]
     pub fn with_start_sequence(sequence: u32) -> Self {
         let mut buffer = Self::new();
@@ -196,6 +198,9 @@ impl<const CAPACITY: usize, const MAX_PAYLOAD: usize> JitterBuffer<CAPACITY, MAX
 
     /// Takes the next sequence for decode or reports a missing frame.
     pub fn take_next(&mut self) -> PlayoutOutcome<MAX_PAYLOAD> {
+        if CAPACITY == 0 {
+            return PlayoutOutcome::NotReady;
+        }
         let Some(sequence) = self.next_sequence else {
             return PlayoutOutcome::NotReady;
         };
@@ -313,6 +318,15 @@ mod tests {
         assert!(matches!(buffer.take_next(), PlayoutOutcome::Frame(_)));
         buffer.insert(frame(7));
         assert_eq!(buffer.insert(frame(5)), InsertOutcome::Late);
+    }
+
+    #[test]
+    fn disabled_buffer_never_schedules_playout() {
+        let mut buffer = JitterBuffer::<0, 8>::with_start_sequence(10);
+
+        assert_eq!(buffer.insert(frame(10)), InsertOutcome::Disabled);
+        assert_eq!(buffer.take_next(), PlayoutOutcome::NotReady);
+        assert_eq!(buffer.take_next(), PlayoutOutcome::NotReady);
     }
 
     #[test]

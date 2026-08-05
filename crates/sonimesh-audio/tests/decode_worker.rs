@@ -37,6 +37,57 @@ impl FrameDecoder for TestDecoder {
     }
 }
 
+struct CountingDecoder {
+    decodes: Arc<AtomicUsize>,
+    plc_calls: Arc<AtomicUsize>,
+}
+
+impl FrameDecoder for CountingDecoder {
+    type Error = TestDecodeError;
+
+    fn decode(&mut self, _encoded: &[u8], output: &mut [f32]) -> Result<usize, Self::Error> {
+        self.decodes.fetch_add(1, Ordering::Relaxed);
+        output[0] = 1.0;
+        Ok(1)
+    }
+
+    fn decode_plc(&mut self, output: &mut [f32]) -> Result<usize, Self::Error> {
+        self.plc_calls.fetch_add(1, Ordering::Relaxed);
+        output[0] = -1.0;
+        Ok(1)
+    }
+}
+
+#[test]
+fn zero_capacity_jitter_does_not_decode_or_schedule_plc() {
+    let decodes = Arc::new(AtomicUsize::new(0));
+    let plc_calls = Arc::new(AtomicUsize::new(0));
+    let (producer, mut consumer) = realtime_pcm_queue::<4>(2).unwrap();
+    let mut worker = StreamDecodeWorker::<CountingDecoder, 0, 8, 4>::new(
+        CountingDecoder {
+            decodes: Arc::clone(&decodes),
+            plc_calls: Arc::clone(&plc_calls),
+        },
+        producer,
+        10,
+    );
+
+    assert_eq!(
+        worker.admit(10, 9_600, &[3]).unwrap(),
+        InsertOutcome::Disabled
+    );
+    assert_eq!(worker.decode_next().unwrap(), DecodeStep::NotReady);
+    assert_eq!(worker.queued_blocks(), 0);
+    assert_eq!(decodes.load(Ordering::Relaxed), 0);
+    assert_eq!(plc_calls.load(Ordering::Relaxed), 0);
+
+    let mut output = [f32::NAN; 4];
+    assert!(matches!(
+        consumer.pop_into(&mut output),
+        RealtimePcmPopOutcome::Underflow { .. }
+    ));
+}
+
 #[test]
 fn decodes_frames_and_runs_plc_before_realtime_consumption() {
     let (producer, mut consumer) = realtime_pcm_queue::<4>(4).unwrap();
