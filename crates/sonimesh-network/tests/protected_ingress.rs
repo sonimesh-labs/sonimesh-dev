@@ -129,11 +129,28 @@ fn rotation_rejects_non_increasing_or_changed_context_without_mutation() {
     let secret = SessionSecret::new([0xA5; 32]);
     let initial = context_at_epoch(2);
     let mut ingress = ProtectedMediaIngress::new(&secret, initial).unwrap();
+    let mut sealer = MediaSealer::new(&secret, initial).unwrap();
+    let packet = sealer.seal(0, 0, b"initial epoch").unwrap();
+    let mut plaintext = [0_u8; 64];
+    assert!(ingress.receive(&packet.datagram, &mut plaintext).is_ok());
 
     assert_eq!(
         ingress.rotate(&secret, initial),
         Err(ProtectedIngressError::NonIncreasingEpoch)
     );
+
+    let wrong_session = MediaKeyContext::new(
+        initial.session_id + 1,
+        initial.stream_id,
+        3,
+        initial.direction,
+    )
+    .unwrap();
+    assert_eq!(
+        ingress.rotate(&secret, wrong_session),
+        Err(ProtectedIngressError::RotationContextMismatch)
+    );
+
     let wrong_stream = MediaKeyContext::new(
         initial.session_id,
         initial.stream_id + 1,
@@ -145,5 +162,24 @@ fn rotation_rejects_non_increasing_or_changed_context_without_mutation() {
         ingress.rotate(&secret, wrong_stream),
         Err(ProtectedIngressError::RotationContextMismatch)
     );
+
+    let wrong_direction = MediaKeyContext::new(
+        initial.session_id,
+        initial.stream_id,
+        3,
+        MediaDirection::DesktopToAndroid,
+    )
+    .unwrap();
+    assert_eq!(
+        ingress.rotate(&secret, wrong_direction),
+        Err(ProtectedIngressError::RotationContextMismatch)
+    );
     assert_eq!(ingress.context(), initial);
+    assert_eq!(ingress.identity().key_epoch, initial.key_epoch);
+    plaintext.fill(0xFF);
+    assert_eq!(
+        ingress.receive(&packet.datagram, &mut plaintext),
+        Err(IngressError::Replay(ReplayDecision::Duplicate))
+    );
+    assert!(plaintext.iter().all(|byte| *byte == 0));
 }
