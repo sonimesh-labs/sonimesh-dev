@@ -109,8 +109,14 @@ fn sanitize_float32(sample: f32) -> f32 {
     }
 }
 
+/// Converts an interleaved sample count to a conservative frame count.
+///
+/// CPAL callbacks are expected to contain whole interleaved frames. If an
+/// unexpected partial frame reaches this adapter, round up so low-rate
+/// diagnostics never underreport the callback size. Capacity enforcement still
+/// uses the exact sample count before this conversion.
 fn frames(samples: usize, channels: u16) -> u32 {
-    u32::try_from(samples / usize::from(channels)).unwrap_or(u32::MAX)
+    u32::try_from(samples.div_ceil(usize::from(channels))).unwrap_or(u32::MAX)
 }
 
 #[cfg(test)]
@@ -134,6 +140,12 @@ mod tests {
             self.calls += 1;
             output.fill(1.0);
         }
+    }
+
+    #[test]
+    fn frame_count_rounds_up_an_unexpected_partial_interleaved_frame() {
+        assert_eq!(frames(4, 2), 2);
+        assert_eq!(frames(5, 2), 3);
     }
 
     #[test]

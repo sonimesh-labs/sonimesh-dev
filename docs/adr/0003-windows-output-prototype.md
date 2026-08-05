@@ -32,9 +32,12 @@ Add an optional `cpal-output` feature to `sonimesh-platform` for the first Windo
   bound;
 - publish the latest and largest callback frame counts, latest monotonic
   callback offset, and largest callback gap through atomics for low-rate
-  comparison; cumulative callback, capacity-fault, and stream-error counters
-  saturate at `u64::MAX` instead of wrapping; these are software scheduling
-  observations, not a latency measurement;
+  comparison; an unexpected non-frame-aligned callback sample count rounds up
+  to the next frame for diagnostics so it cannot underreport the observed
+  callback size, while capacity enforcement still uses its exact sample count;
+  cumulative callback, capacity-fault, and stream-error counters saturate at
+  `u64::MAX` instead of wrapping; these are software scheduling observations,
+  not a latency measurement;
 - render Float32 directly and convert signed 16-bit output through scratch memory
   allocated before stream start;
 - if a callback exceeds its preallocated bound, write silence and atomically expose
