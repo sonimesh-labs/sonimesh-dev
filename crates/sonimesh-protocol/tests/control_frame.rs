@@ -3,9 +3,10 @@
 use prost::Message;
 use sonimesh_protocol::{
     CONTROL_PROTOCOL_VERSION, Capability, ControlError, ControlFrameError, Envelope, ErrorCode,
-    Hello, MAX_CONTROL_CAPABILITIES, MAX_CONTROL_DETAIL_BYTES, MAX_CONTROL_FRAME_BYTES,
-    MAX_CONTROL_MEDIA_KEY_EPOCH, StartStream, StopStream, StreamState, StreamStatus,
-    decode_control_frame, encode_control_frame, envelope,
+    Hello, MAX_CONTROL_CAPABILITIES, MAX_CONTROL_DETAIL_BYTES, MAX_CONTROL_DISPLAY_NAME_BYTES,
+    MAX_CONTROL_FRAME_BYTES, MAX_CONTROL_MEDIA_KEY_EPOCH, MAX_CONTROL_SUPPORTED_VERSIONS,
+    StartStream, StopStream, StreamState, StreamStatus, decode_control_frame, encode_control_frame,
+    envelope,
 };
 
 fn hello_envelope() -> Envelope {
@@ -244,6 +245,80 @@ fn rejects_version_and_field_bound_violations() {
     assert!(matches!(
         encode_control_frame(&error),
         Err(ControlFrameError::DetailTooLong)
+    ));
+}
+
+#[test]
+fn validates_hello_bounds_on_encode_and_untrusted_decode_paths() {
+    let maximum = Envelope {
+        protocol_version: CONTROL_PROTOCOL_VERSION,
+        request_id: 15,
+        payload: Some(envelope::Payload::Hello(Hello {
+            supported_versions: vec![CONTROL_PROTOCOL_VERSION; MAX_CONTROL_SUPPORTED_VERSIONS],
+            capabilities: vec![Capability::FrameDuration20Ms as i32; MAX_CONTROL_CAPABILITIES],
+            display_name: "x".repeat(MAX_CONTROL_DISPLAY_NAME_BYTES),
+        })),
+    };
+    assert_eq!(
+        decode_control_frame(&encode_control_frame(&maximum).unwrap()).unwrap(),
+        maximum
+    );
+
+    let too_many_versions = Envelope {
+        protocol_version: CONTROL_PROTOCOL_VERSION,
+        request_id: 16,
+        payload: Some(envelope::Payload::Hello(Hello {
+            supported_versions: vec![CONTROL_PROTOCOL_VERSION; MAX_CONTROL_SUPPORTED_VERSIONS + 1],
+            capabilities: Vec::new(),
+            display_name: String::new(),
+        })),
+    };
+    assert!(matches!(
+        encode_control_frame(&too_many_versions),
+        Err(ControlFrameError::TooManySupportedVersions)
+    ));
+    assert!(matches!(
+        decode_control_frame(&raw_frame(&too_many_versions)),
+        Err(ControlFrameError::TooManySupportedVersions)
+    ));
+
+    let too_many_capabilities = Envelope {
+        protocol_version: CONTROL_PROTOCOL_VERSION,
+        request_id: 17,
+        payload: Some(envelope::Payload::Hello(Hello {
+            supported_versions: vec![CONTROL_PROTOCOL_VERSION],
+            capabilities: vec![0; MAX_CONTROL_CAPABILITIES + 1],
+            display_name: String::new(),
+        })),
+    };
+    assert!(matches!(
+        encode_control_frame(&too_many_capabilities),
+        Err(ControlFrameError::TooManyCapabilities)
+    ));
+    assert!(matches!(
+        decode_control_frame(&raw_frame(&too_many_capabilities)),
+        Err(ControlFrameError::TooManyCapabilities)
+    ));
+
+    let display_name_too_long = "é".repeat(MAX_CONTROL_DISPLAY_NAME_BYTES / "é".len() + 1);
+    assert!(display_name_too_long.len() > MAX_CONTROL_DISPLAY_NAME_BYTES);
+    assert!(display_name_too_long.chars().count() <= MAX_CONTROL_DISPLAY_NAME_BYTES);
+    let display_name_too_long = Envelope {
+        protocol_version: CONTROL_PROTOCOL_VERSION,
+        request_id: 18,
+        payload: Some(envelope::Payload::Hello(Hello {
+            supported_versions: vec![CONTROL_PROTOCOL_VERSION],
+            capabilities: Vec::new(),
+            display_name: display_name_too_long,
+        })),
+    };
+    assert!(matches!(
+        encode_control_frame(&display_name_too_long),
+        Err(ControlFrameError::DisplayNameTooLong)
+    ));
+    assert!(matches!(
+        decode_control_frame(&raw_frame(&display_name_too_long)),
+        Err(ControlFrameError::DisplayNameTooLong)
     ));
 }
 
