@@ -24,9 +24,9 @@ pub struct NetworkProfile {
     pub reorder_delay_ms: u64,
     /// Serial link bandwidth in bytes per second; zero disables shaping.
     pub bandwidth_bytes_per_second: u64,
-    /// Start one burst every N submitted packets; zero disables bursts.
+    /// Start one non-overlapping burst every N submitted packets; zero disables bursts.
     pub burst_interval_packets: u32,
-    /// Consecutive packets dropped in each configured burst.
+    /// Consecutive packets dropped in each configured non-overlapping burst.
     pub burst_length_packets: u16,
     /// Hard bound on scheduled packet copies.
     pub max_in_flight_packets: usize,
@@ -83,6 +83,9 @@ impl NetworkProfile {
         if self.burst_interval_packets == 0 && self.burst_length_packets != 0 {
             return Err(ProfileError::BurstIntervalMissing);
         }
+        if u32::from(self.burst_length_packets) > self.burst_interval_packets {
+            return Err(ProfileError::BurstLengthExceedsInterval);
+        }
         Ok(())
     }
 }
@@ -106,6 +109,8 @@ pub enum ProfileError {
     DelayTooLarge,
     /// Burst length was set without a non-zero interval.
     BurstIntervalMissing,
+    /// Burst length would overlap the next configured burst interval.
+    BurstLengthExceedsInterval,
     /// Link bandwidth exceeds [`MAX_BANDWIDTH_BYTES_PER_SECOND`].
     BandwidthTooLarge,
 }
@@ -125,6 +130,9 @@ impl fmt::Display for ProfileError {
                 .write_str("virtual-network combined delay exceeds the explicit hard bound"),
             Self::BurstIntervalMissing => formatter
                 .write_str("virtual-network burst length requires a non-zero burst interval"),
+            Self::BurstLengthExceedsInterval => {
+                formatter.write_str("virtual-network burst length must not exceed its interval")
+            }
             Self::BandwidthTooLarge => {
                 formatter.write_str("virtual-network bandwidth exceeds the explicit hard bound")
             }
@@ -139,6 +147,42 @@ mod tests {
     use std::error::Error;
 
     use super::*;
+
+    #[test]
+    fn accepts_disabled_bursts() {
+        let profile = NetworkProfile::stable(1);
+
+        assert_eq!(profile.validate(), Ok(()));
+    }
+
+    #[test]
+    fn rejects_burst_length_without_an_interval_before_overlap_validation() {
+        let mut profile = NetworkProfile::stable(1);
+        profile.burst_length_packets = 1;
+
+        assert_eq!(profile.validate(), Err(ProfileError::BurstIntervalMissing));
+    }
+
+    #[test]
+    fn allows_adjacent_non_overlapping_bursts() {
+        let mut profile = NetworkProfile::stable(1);
+        profile.burst_interval_packets = 4;
+        profile.burst_length_packets = 4;
+
+        assert_eq!(profile.validate(), Ok(()));
+    }
+
+    #[test]
+    fn rejects_overlapping_burst_configuration() {
+        let mut profile = NetworkProfile::stable(1);
+        profile.burst_interval_packets = 3;
+        profile.burst_length_packets = 4;
+
+        assert_eq!(
+            profile.validate(),
+            Err(ProfileError::BurstLengthExceedsInterval)
+        );
+    }
 
     #[test]
     fn rejects_an_unbounded_bandwidth_configuration() {
@@ -169,6 +213,10 @@ mod tests {
         assert_eq!(
             ProfileError::BurstIntervalMissing.to_string(),
             "virtual-network burst length requires a non-zero burst interval"
+        );
+        assert_eq!(
+            ProfileError::BurstLengthExceedsInterval.to_string(),
+            "virtual-network burst length must not exceed its interval"
         );
         assert_eq!(
             ProfileError::BandwidthTooLarge.to_string(),

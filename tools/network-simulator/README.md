@@ -8,9 +8,10 @@ a physical latency claim.
 
 - `VirtualClock` rejects backward movement and numeric overflow.
 - `NetworkProfile` bounds probability fields, combined delay, and in-flight copies.
-- `VirtualNetwork<T>` schedules random loss, deterministic burst loss, jitter,
-  duplication, reorder delay, finite-bandwidth serialization, and capacity drops
-  from one reproducible seed. Senders provide payload byte counts explicitly.
+- `VirtualNetwork<T>` schedules random loss, non-overlapping deterministic
+  burst loss, jitter, duplication, reorder delay, finite-bandwidth
+  serialization, and capacity drops from one reproducible seed. Senders provide
+  payload byte counts explicitly.
 - `ScenarioConfig` drives sender and playout deadlines independently with a
   protocol-bounded complete media datagram size and negotiated 10/20 ms frames.
 - `DriftScenarioConfig` closes an integerized PCM-occupancy loop around the
