@@ -12,9 +12,10 @@ production workspace so `libfuzzer-sys` never becomes a shipping dependency.
 - `media_packet` feeds arbitrary and near-valid bytes into the bounded media
   packet parser.
 - `protected_media_ingress` exercises raw input, valid authenticated arbitrary
-  payloads, duplicate replay, undersized output buffers, and single-byte
-  header/ciphertext/tag tampering. Every rejected path must clear the
-  caller-owned plaintext buffer.
+  payloads, duplicate replay, undersized output buffers, and deterministic
+  single-byte flags-byte and tag tampering plus ciphertext tampering for
+  nonempty payloads. Every rejected path must clear the caller-owned plaintext
+  buffer.
 - `pairing_binding` derives public fuzz-only pairing material, exercises both
   local roles on every input, and feeds arbitrary peer-proof lengths into the
   pure TLS-binding helper. It asserts exact opposite-role verification while

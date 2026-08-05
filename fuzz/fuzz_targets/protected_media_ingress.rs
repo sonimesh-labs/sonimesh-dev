@@ -3,9 +3,12 @@
 use libfuzzer_sys::fuzz_target;
 use sonimesh_network::ProtectedMediaIngress;
 use sonimesh_protocol::{
-    MAX_MEDIA_PLAINTEXT_LEN, MediaDirection, MediaKeyContext, MediaSealer, SessionSecret,
+    MAX_MEDIA_PLAINTEXT_LEN, MEDIA_HEADER_LEN, MediaDirection, MediaKeyContext, MediaSealer,
+    SessionSecret,
 };
 
+/// Offset of `MediaHeader::flags` in the canonical fixed header encoding.
+const FLAGS_OFFSET: usize = 5;
 const SESSION_ID: u64 = 0x0102_0304_0506_0708;
 const STREAM_ID: u32 = 0x0A0B_0C0D;
 const KEY_EPOCH: u16 = 0x0E0F;
@@ -33,10 +36,17 @@ fn exercise_untrusted_datagram(secret: &SessionSecret, datagram: &[u8]) {
     }
 }
 
-fn assert_rejected_and_cleared(secret: &SessionSecret, datagram: &[u8]) {
+fn assert_tampered_byte_is_rejected_and_cleared(
+    secret: &SessionSecret,
+    datagram: &[u8],
+    index: usize,
+    mutation: u8,
+) {
+    let mut tampered = datagram.to_vec();
+    tampered[index] ^= mutation;
     let mut ingress = ingress(secret);
     let mut plaintext = [0xA5; MAX_MEDIA_PLAINTEXT_LEN];
-    assert!(ingress.receive(datagram, &mut plaintext).is_err());
+    assert!(ingress.receive(&tampered, &mut plaintext).is_err());
     assert!(plaintext.iter().all(|byte| *byte == 0));
 }
 
@@ -83,13 +93,20 @@ fuzz_target!(|data: &[u8]| {
         );
     }
 
-    let mut tampered = packet.datagram;
-    let index_bytes = [
-        data.first().copied().unwrap_or_default(),
-        data.get(1).copied().unwrap_or_default(),
-    ];
-    let mutation_index = usize::from(u16::from_le_bytes(index_bytes)) % tampered.len();
     let mutation = data.get(2).copied().unwrap_or(1).max(1);
-    tampered[mutation_index] ^= mutation;
-    assert_rejected_and_cleared(&secret, &tampered);
+    assert_tampered_byte_is_rejected_and_cleared(&secret, &packet.datagram, FLAGS_OFFSET, mutation);
+    if !payload.is_empty() {
+        assert_tampered_byte_is_rejected_and_cleared(
+            &secret,
+            &packet.datagram,
+            MEDIA_HEADER_LEN,
+            mutation,
+        );
+    }
+    assert_tampered_byte_is_rejected_and_cleared(
+        &secret,
+        &packet.datagram,
+        packet.datagram.len() - 1,
+        mutation,
+    );
 });

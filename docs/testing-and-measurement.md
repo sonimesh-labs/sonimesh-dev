@@ -86,8 +86,9 @@ workspace adds LibFuzzer targets for arbitrary control frames, mutations of
 all five published control payload shapes, near-valid media packets,
 protected ingress, and the pure pairing-binding verifier. The ingress target
 also constructs valid AEAD packets carrying arbitrary bounded payload bytes,
-retries them as replay, uses undersized output storage, mutates one authenticated
-header/ciphertext/tag byte, and requires every rejected path to clear plaintext.
+retries them as replay, uses undersized output storage, deterministically mutates a
+flags byte in the authenticated header and a tag byte on every input plus a ciphertext byte for nonempty
+payloads, and requires every rejected path to clear plaintext.
 The pairing target exercises both local roles, rejects reflected and altered
 proofs, and checks arbitrary proof input against the exact opposite-role proof.
 
