@@ -197,6 +197,29 @@ mod tests {
         successful_calls: usize,
     }
 
+    struct InvalidLengthAuthenticator {
+        calls: usize,
+    }
+
+    impl Authenticator for InvalidLengthAuthenticator {
+        type Error = TestAuthError;
+
+        fn authenticate(
+            &mut self,
+            _header: &MediaHeader,
+            _authenticated_header: &[u8],
+            _ciphertext: &[u8],
+            plaintext: &mut [u8],
+        ) -> Result<usize, Self::Error> {
+            self.calls += 1;
+            if self.calls == 1 {
+                return Ok(plaintext.len() + 1);
+            }
+            plaintext[0] = 0xCC;
+            Ok(1)
+        }
+    }
+
     impl Authenticator for TestAuthenticator {
         type Error = TestAuthError;
 
@@ -272,6 +295,31 @@ mod tests {
                 .receive(&datagram(5, &[0xAA, 7]), &mut plaintext)
                 .is_ok()
         );
+    }
+
+    #[test]
+    fn invalid_plaintext_length_clears_storage_without_advancing_replay() {
+        let mut ingress = MediaIngress::new(
+            StreamIdentity {
+                session_id: 7,
+                stream_id: 9,
+                key_epoch: 1,
+            },
+            InvalidLengthAuthenticator { calls: 0 },
+        );
+        let mut plaintext = [0xFF; 4];
+
+        assert_eq!(
+            ingress.receive(&datagram(4, &[0xAA]), &mut plaintext),
+            Err(IngressError::InvalidPlaintextLength),
+        );
+        assert!(plaintext.iter().all(|byte| *byte == 0));
+
+        plaintext.fill(0xFF);
+        let frame = ingress
+            .receive(&datagram(4, &[0xAA]), &mut plaintext)
+            .expect("invalid length must not consume the sequence");
+        assert_eq!(frame.opus_payload, [0xCC]);
     }
 
     #[test]
