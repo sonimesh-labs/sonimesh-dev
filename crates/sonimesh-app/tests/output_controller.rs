@@ -179,6 +179,31 @@ fn failed_recovery_preserves_retryable_output_state() {
 }
 
 #[test]
+fn duplicate_start_and_recovery_do_not_rebuild_an_active_output() {
+    let created = Arc::new(AtomicUsize::new(0));
+    let starts = Arc::new(AtomicUsize::new(0));
+    let mut controller = controller(
+        Arc::clone(&created),
+        Arc::new(AtomicUsize::new(0)),
+        Arc::new(AtomicBool::new(false)),
+        Arc::clone(&starts),
+    );
+    controller.start(selection()).unwrap();
+
+    assert_eq!(
+        controller.start(selection()),
+        Err(OutputLifecycleError::StreamAlreadyActive)
+    );
+    assert_eq!(
+        controller.recover(),
+        Err(OutputLifecycleError::StreamAlreadyActive)
+    );
+    assert_eq!(created.load(Ordering::Relaxed), 1);
+    assert_eq!(controller.output().start_calls, 1);
+    assert_eq!(starts.load(Ordering::Relaxed), 1);
+}
+
+#[test]
 fn starts_without_mutating_external_session_state() {
     let created = Arc::new(AtomicUsize::new(0));
     let last_output_channels = Arc::new(AtomicUsize::new(0));

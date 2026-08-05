@@ -213,6 +213,30 @@ fn recovery_replaces_the_pipeline_producer_only_after_platform_start() {
 }
 
 #[test]
+fn duplicate_start_and_recovery_preserve_the_active_receiver_pipeline() {
+    let counters = Arc::new(StreamCounters::default());
+    let mut pipeline = pipeline(Arc::clone(&counters));
+    let mut sealer = MediaSealer::new(&SessionSecret::new([0xA5; 32]), context()).unwrap();
+    let mut controller = controller(Arc::clone(&counters));
+
+    controller.start(selection(), &mut pipeline).unwrap();
+    enqueue_decoded_block(&mut pipeline, &mut sealer, 0);
+    assert_eq!(pipeline.queued_pcm_blocks(), 1);
+
+    assert!(matches!(
+        controller.start(selection(), &mut pipeline),
+        Err(ReceiverOutputLifecycleError::StreamAlreadyActive)
+    ));
+    assert!(matches!(
+        controller.recover(&mut pipeline),
+        Err(ReceiverOutputLifecycleError::StreamAlreadyActive)
+    ));
+    assert_eq!(controller.output().start_calls, 1);
+    assert_eq!(pipeline.queued_pcm_blocks(), 1);
+    assert_eq!(counters.snapshot().stream_resets, 1);
+}
+
+#[test]
 fn controller_accepts_the_udp_receiver_pipeline_boundary() {
     let counters = Arc::new(StreamCounters::default());
     let mut pipeline = udp_pipeline(Arc::clone(&counters));

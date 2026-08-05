@@ -46,9 +46,13 @@ where
     ///
     /// # Errors
     ///
-    /// Returns [`OutputLifecycleError`] when stream creation fails. The caller
-    /// commits `Streaming` through the control-session completion token.
+    /// Returns [`OutputLifecycleError`] when a stream is already active or
+    /// creation fails. The caller commits `Streaming` through the control-session
+    /// completion token.
     pub fn start(&mut self, selection: OutputSelection) -> Result<(), OutputLifecycleError> {
+        if self.stream_active {
+            return Err(OutputLifecycleError::StreamAlreadyActive);
+        }
         selection
             .config
             .validate()
@@ -94,9 +98,13 @@ where
     ///
     /// # Errors
     ///
-    /// Returns [`OutputLifecycleError`] when no previous selection exists or
-    /// backend creation fails. The caller commits recovery separately.
+    /// Returns [`OutputLifecycleError`] when a stream is already active, no
+    /// previous selection exists, or backend creation fails. The caller commits
+    /// recovery separately.
     pub fn recover(&mut self) -> Result<(), OutputLifecycleError> {
+        if self.stream_active {
+            return Err(OutputLifecycleError::StreamAlreadyActive);
+        }
         let selection = self
             .selection
             .clone()
@@ -155,6 +163,8 @@ where
 pub enum OutputLifecycleError {
     /// No successful start has supplied a recovery selection.
     MissingSelection,
+    /// A start or recovery was requested while this controller already owns a stream.
+    StreamAlreadyActive,
     /// Render-source construction failed before reaching the platform adapter.
     SourceFactory(RenderSourceFactoryError),
     /// Platform stream operation failed.
@@ -165,6 +175,7 @@ impl fmt::Display for OutputLifecycleError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::MissingSelection => formatter.write_str("output recovery has no saved selection"),
+            Self::StreamAlreadyActive => formatter.write_str("output stream is already active"),
             Self::SourceFactory(error) => {
                 write!(formatter, "render source creation failed: {error}")
             }
@@ -176,7 +187,7 @@ impl fmt::Display for OutputLifecycleError {
 impl std::error::Error for OutputLifecycleError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::MissingSelection => None,
+            Self::MissingSelection | Self::StreamAlreadyActive => None,
             Self::SourceFactory(error) => Some(error),
             Self::Output(error) => Some(error),
         }

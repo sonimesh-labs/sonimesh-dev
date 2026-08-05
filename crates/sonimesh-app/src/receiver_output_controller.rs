@@ -80,8 +80,8 @@ where
     ///
     /// # Errors
     ///
-    /// Returns before changing the receiver pipeline when endpoint construction
-    /// or platform start fails.
+    /// Returns before changing the receiver pipeline when a stream is already
+    /// active, endpoint construction fails, or platform start fails.
     pub fn start<P>(
         &mut self,
         selection: OutputSelection,
@@ -90,6 +90,9 @@ where
     where
         P: ReceiverPcmProducerInstaller<PCM_SAMPLES_PER_BLOCK>,
     {
+        if self.stream_active {
+            return Err(ReceiverOutputLifecycleError::StreamAlreadyActive);
+        }
         self.install(&selection, pipeline)?;
         self.selection = Some(selection);
         self.stream_active = true;
@@ -119,12 +122,16 @@ where
     ///
     /// # Errors
     ///
-    /// Returns without changing the receiver pipeline when endpoint construction
-    /// or platform start fails, so a later retry can reuse its existing producer.
+    /// Returns without changing the receiver pipeline when a stream is already
+    /// active, endpoint construction fails, or platform start fails, so a later
+    /// retry can reuse its existing producer.
     pub fn recover<P>(&mut self, pipeline: &mut P) -> Result<(), ReceiverOutputLifecycleError>
     where
         P: ReceiverPcmProducerInstaller<PCM_SAMPLES_PER_BLOCK>,
     {
+        if self.stream_active {
+            return Err(ReceiverOutputLifecycleError::StreamAlreadyActive);
+        }
         let selection = self
             .selection
             .clone()
@@ -182,6 +189,8 @@ where
 pub enum ReceiverOutputLifecycleError {
     /// Recovery has no successfully started output selection.
     MissingSelection,
+    /// A start or recovery was requested while this controller already owns a stream.
+    StreamAlreadyActive,
     /// The queue or source endpoint could not be created.
     Endpoint(ReceiverPcmEndpointError),
     /// The platform backend rejected the paired output source.
@@ -194,6 +203,9 @@ impl fmt::Display for ReceiverOutputLifecycleError {
             Self::MissingSelection => {
                 formatter.write_str("receiver output recovery has no selection")
             }
+            Self::StreamAlreadyActive => {
+                formatter.write_str("receiver output stream is already active")
+            }
             Self::Endpoint(error) => {
                 write!(formatter, "receiver PCM endpoint setup failed: {error}")
             }
@@ -205,7 +217,7 @@ impl fmt::Display for ReceiverOutputLifecycleError {
 impl std::error::Error for ReceiverOutputLifecycleError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::MissingSelection => None,
+            Self::MissingSelection | Self::StreamAlreadyActive => None,
             Self::Endpoint(error) => Some(error),
             Self::Output(error) => Some(error),
         }

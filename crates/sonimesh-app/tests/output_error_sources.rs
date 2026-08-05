@@ -3,7 +3,8 @@
 use std::error::Error;
 
 use sonimesh_app::{
-    ChannelMappedRenderSourceError, OutputLifecycleError, SampleRateMappedRenderSourceError,
+    ChannelMappedRenderSourceError, OutputLifecycleError, ReceiverOutputLifecycleError,
+    SampleRateMappedRenderSourceError,
 };
 use sonimesh_audio::{ChannelMappingError, ResamplerError};
 use sonimesh_platform::{OutputConfigError, OutputError, RenderSourceFactoryError};
@@ -77,4 +78,7 @@ fn output_lifecycle_wrappers_retain_platform_causes() {
     assert!(config.downcast_ref::<OutputConfigError>().is_some());
 
     assert!(Error::source(&OutputLifecycleError::MissingSelection).is_none());
+    assert!(Error::source(&OutputLifecycleError::StreamAlreadyActive).is_none());
+    assert!(Error::source(&ReceiverOutputLifecycleError::MissingSelection).is_none());
+    assert!(Error::source(&ReceiverOutputLifecycleError::StreamAlreadyActive).is_none());
 }
