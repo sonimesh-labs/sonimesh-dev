@@ -98,7 +98,25 @@ pub enum OutputConfigError {
 
 impl fmt::Display for OutputConfigError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "invalid bounded output configuration: {self:?}")
+        match self {
+            Self::InvalidSampleRate => {
+                formatter.write_str("output sample rate is outside the supported 8-192 kHz range")
+            }
+            Self::InvalidChannelCount => {
+                formatter.write_str("output channel count is outside the supported 1-8 range")
+            }
+            Self::InvalidRequestedCallbackFrames => formatter.write_str(
+                "requested output callback frames are outside the supported 16-8192 range",
+            ),
+            Self::InvalidMaximumCallbackFrames => formatter.write_str(
+                "maximum output callback frames are outside the supported 16-8192 range",
+            ),
+            Self::RequestedExceedsMaximum => formatter
+                .write_str("requested output callback frames exceed the configured maximum"),
+            Self::InterleavedSizeOverflow => {
+                formatter.write_str("output interleaved callback sample count overflowed")
+            }
+        }
     }
 }
 
@@ -106,6 +124,8 @@ impl std::error::Error for OutputConfigError {}
 
 #[cfg(test)]
 mod tests {
+    use std::error::Error;
+
     use super::*;
 
     fn valid_config() -> OutputConfig {
@@ -159,5 +179,34 @@ mod tests {
             config.validate(),
             Err(OutputConfigError::RequestedExceedsMaximum)
         );
+    }
+
+    #[test]
+    fn output_config_errors_have_descriptive_stable_messages() {
+        assert_eq!(
+            OutputConfigError::InvalidSampleRate.to_string(),
+            "output sample rate is outside the supported 8-192 kHz range"
+        );
+        assert_eq!(
+            OutputConfigError::InvalidChannelCount.to_string(),
+            "output channel count is outside the supported 1-8 range"
+        );
+        assert_eq!(
+            OutputConfigError::InvalidRequestedCallbackFrames.to_string(),
+            "requested output callback frames are outside the supported 16-8192 range"
+        );
+        assert_eq!(
+            OutputConfigError::InvalidMaximumCallbackFrames.to_string(),
+            "maximum output callback frames are outside the supported 16-8192 range"
+        );
+        assert_eq!(
+            OutputConfigError::RequestedExceedsMaximum.to_string(),
+            "requested output callback frames exceed the configured maximum"
+        );
+        assert_eq!(
+            OutputConfigError::InterleavedSizeOverflow.to_string(),
+            "output interleaved callback sample count overflowed"
+        );
+        assert!(Error::source(&OutputConfigError::InvalidSampleRate).is_none());
     }
 }
