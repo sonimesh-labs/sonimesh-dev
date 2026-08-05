@@ -27,12 +27,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "default format: {} Hz, {} channels, {:?}",
         fixed_config.sample_rate_hz, fixed_config.channels, fixed_config.sample_format
     );
+    println!("maximum frames: {}", fixed_config.maximum_callback_frames);
 
     for cycle in 1..=experiment.cycles {
         let config = match output.start(None, fixed_config, Box::new(Silence)) {
             Ok(()) => fixed_config,
             Err(error) => {
-                println!("fixed 480-frame request rejected: {error}");
+                println!("cycle {cycle}: fixed 480-frame request rejected: {error}");
                 let default_config = OutputConfig {
                     requested_callback_frames: None,
                     ..fixed_config

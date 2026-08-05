@@ -3,7 +3,7 @@
 > Status: measurement protocol with dated local observations in
 > `2026-07-20-windows-output-backend-comparison.md` and
 > `2026-07-20-windows-output-backend-recheck.md`; Phase 0B remains incomplete.
-> Updated: 2026-07-19
+> Updated: 2026-08-05
 
 ## Purpose
 
@@ -89,11 +89,17 @@ and every cycle line:
     python tools/check_output_lifecycle_log.py --backend cpal output/cpal-output-lifecycle.log
     python tools/check_output_lifecycle_log.py --backend wasapi output/wasapi-output-lifecycle.log
 
-The verifier requires a contiguous status line for every configured cycle,
-positive observed callback/render work, valid observed frame bounds, zero
-faults/errors, and `Healthy` status. It accepts either the fixed request or an
-explicit per-cycle default-request fallback, and it does not make a lifecycle
-or latency claim beyond transcript integrity.
+The verifier requires one nonempty default-format header and one declared
+maximum-callback-frame header within the shared 16–8,192 frame bound, plus a
+contiguous status line for every configured cycle. Every numeric request must
+be the command's fixed 480-frame request and remain within the declared
+capacity; observed maxima must also stay within it. Each cycle further requires
+positive observed callback/render work, zero faults/errors, and `Healthy`
+status. A default-request status must be preceded by the same cycle's retained
+`fixed 480-frame request rejected` line, after the prior cycle's status when one
+exists; the checker rejects an unpaired fallback, an early/late rejection marker,
+or a rejection retained next to a fixed-request status. This validation does not
+make a lifecycle or latency claim beyond transcript integrity.
 
 For a manual default-role-change and explicit recreation experiment, run one
 backend at a time, switch the Windows default render endpoint during the wait,

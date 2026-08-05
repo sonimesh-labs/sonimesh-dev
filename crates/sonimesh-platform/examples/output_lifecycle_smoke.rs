@@ -20,9 +20,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "default format: {} Hz, {} channels, {}",
         probe.sample_rate_hz, probe.channels, probe.backend_sample_format
     );
+    println!("maximum frames: {}", fixed_config.maximum_callback_frames);
 
     for cycle in 1..=experiment.cycles {
-        let config = start_with_fixed_or_default(&mut output, fixed_config)?;
+        let config = start_with_fixed_or_default(&mut output, fixed_config, cycle)?;
         thread::sleep(experiment.active_duration);
         let status = output.status();
         let health = output.health();
@@ -144,6 +145,7 @@ fn invalid_input_error(name: &str, message: &str) -> std::io::Error {
 fn start_with_fixed_or_default(
     output: &mut sonimesh_platform::CpalOutput,
     fixed_config: sonimesh_platform::OutputConfig,
+    cycle: u32,
 ) -> Result<sonimesh_platform::OutputConfig, sonimesh_platform::OutputError> {
     use sonimesh_platform::{AudioOutput, OutputConfig, RenderSource};
 
@@ -158,7 +160,7 @@ fn start_with_fixed_or_default(
     match output.start(None, fixed_config, Box::new(Silence)) {
         Ok(()) => Ok(fixed_config),
         Err(error) => {
-            println!("fixed 480-frame request rejected: {error}");
+            println!("cycle {cycle}: fixed 480-frame request rejected: {error}");
             let default_config = OutputConfig {
                 requested_callback_frames: None,
                 ..fixed_config
