@@ -35,3 +35,10 @@ path = "fuzz_targets/protected_media_ingress.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "pairing_binding"
+path = "fuzz_targets/pairing_binding.rs"
+test = false
+doc = false
+bench = false

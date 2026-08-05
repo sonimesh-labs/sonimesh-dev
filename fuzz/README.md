@@ -15,6 +15,11 @@ Targets:
   payloads, duplicate replay, undersized output buffers, and single-byte
   header/ciphertext/tag tampering. Every rejected path must clear the
   caller-owned plaintext buffer.
+- `pairing_binding` derives public fuzz-only pairing material, exercises both
+  local roles on every input, and feeds arbitrary peer-proof lengths into the
+  pure TLS-binding helper. It asserts exact opposite-role verification while
+  rejecting reflected and altered proofs; it does not create a TLS connection,
+  QR payload, identity, pairing record, or trust state.
 
 Install the pinned nightly source component and run a target from this
 directory:
@@ -25,6 +30,7 @@ cargo +nightly-2026-07-18 install cargo-fuzz --version 0.13.2 --locked
 cargo +nightly-2026-07-18 fuzz run control_frame -- -max_len=66052
 cargo +nightly-2026-07-18 fuzz run media_packet -- -max_len=1264
 cargo +nightly-2026-07-18 fuzz run protected_media_ingress -- -max_len=1264
+cargo +nightly-2026-07-18 fuzz run pairing_binding -- -max_len=4096
 ```
 
 `cargo-fuzz` supports LibFuzzer execution on x86-64 Unix-like systems rather
