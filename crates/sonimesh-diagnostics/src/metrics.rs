@@ -423,9 +423,20 @@ mod tests {
     }
 
     #[test]
-    fn unpublished_rates_do_not_produce_resampling_ratios() {
-        let snapshot = StreamCounters::default().snapshot();
+    fn unpublished_or_partial_rates_do_not_produce_resampling_ratios() {
+        let counters = StreamCounters::default();
+        counters.set_drift_adjustment_ppm(125);
+        let snapshot = counters.snapshot();
+        assert_eq!(snapshot.nominal_resampling_ratio(), None);
+        assert_eq!(snapshot.effective_resampling_ratio(), None);
 
+        counters.set_nominal_sample_rates(48_000, 0);
+        let snapshot = counters.snapshot();
+        assert_eq!(snapshot.nominal_resampling_ratio(), None);
+        assert_eq!(snapshot.effective_resampling_ratio(), None);
+
+        counters.set_nominal_sample_rates(0, 44_100);
+        let snapshot = counters.snapshot();
         assert_eq!(snapshot.nominal_resampling_ratio(), None);
         assert_eq!(snapshot.effective_resampling_ratio(), None);
     }
