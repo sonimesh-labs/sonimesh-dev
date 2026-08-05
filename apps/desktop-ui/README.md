@@ -22,6 +22,7 @@ refill-budget exhaustion counts.
 
 ```powershell
 npm install
+npm test
 npm run dev
 npm run build
 ```
