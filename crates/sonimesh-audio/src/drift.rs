@@ -270,24 +270,43 @@ mod tests {
     }
 
     #[test]
-    fn hard_resync_clears_adjustment_and_integral_history() {
-        let mut controller = DriftController::new(CONFIG).unwrap();
-        let _ = controller.update(6);
-        assert!(controller.adjustment_ppm() > 0);
-
+    fn hard_resync_clears_adjustment_and_integral_history_in_both_directions() {
+        let mut high_side_controller = DriftController::new(CONFIG).unwrap();
         assert_eq!(
-            controller.update(8),
+            high_side_controller.update(6),
+            DriftDecision::Adjust { ppm: 50 }
+        );
+        assert_eq!(high_side_controller.integral_block_ticks, 2);
+        assert_eq!(
+            high_side_controller.update(8),
             DriftDecision::HardResync {
                 direction: DriftResyncDirection::High,
             }
         );
-        assert_eq!(controller.adjustment_ppm(), 0);
-        assert_eq!(controller.integral_block_ticks, 0);
+        assert_eq!(high_side_controller.adjustment_ppm(), 0);
+        assert_eq!(high_side_controller.integral_block_ticks, 0);
         assert_eq!(
-            controller.update(0),
+            high_side_controller.update(4),
+            DriftDecision::Adjust { ppm: 0 }
+        );
+
+        let mut low_side_controller = DriftController::new(CONFIG).unwrap();
+        assert_eq!(
+            low_side_controller.update(2),
+            DriftDecision::Adjust { ppm: -50 }
+        );
+        assert_eq!(low_side_controller.integral_block_ticks, -2);
+        assert_eq!(
+            low_side_controller.update(0),
             DriftDecision::HardResync {
                 direction: DriftResyncDirection::Low,
             }
+        );
+        assert_eq!(low_side_controller.adjustment_ppm(), 0);
+        assert_eq!(low_side_controller.integral_block_ticks, 0);
+        assert_eq!(
+            low_side_controller.update(4),
+            DriftDecision::Adjust { ppm: 0 }
         );
     }
 }
