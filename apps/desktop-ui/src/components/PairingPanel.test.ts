@@ -74,6 +74,22 @@ describe('PairingPanel', () => {
     expect(wrapper.emitted('refresh')).toHaveLength(2)
   })
 
+  it('labels synthetic pairing state as preview-only instead of claiming sender verification', () => {
+    const wrapper = mount(PairingPanel, {
+      props: {
+        pairing: { state: 'consumed', expiresInSeconds: null },
+        busy: false,
+        preview: true,
+      },
+    })
+
+    expect(wrapper.find('.eyebrow').text()).toBe('Pairing preview')
+    expect(wrapper.get('h2').text()).toBe('Simulate sender trust')
+    expect(wrapper.text()).toContain('Preview trust state')
+    expect(wrapper.text()).toContain('does not create or verify a real invitation')
+    expect(wrapper.text()).not.toContain('Sender verified')
+  })
+
   it('uses elapsed time rather than interval count when a callback is delayed', async () => {
     let nowMillis = Date.parse('2026-08-05T00:00:00Z')
     let intervalCallback: (() => void) | undefined

@@ -5,6 +5,7 @@ import type { StreamMetrics } from '../types'
 
 const props = defineProps<{
   metrics: StreamMetrics
+  preview?: boolean
 }>()
 
 function formatRate(sampleRateHz: number) {
@@ -32,9 +33,9 @@ function formatCounter(counter: string) {
   <section class="diagnostics panel" aria-labelledby="diagnostics-heading">
     <div class="diagnostics-heading">
       <div>
-        <p class="eyebrow">Signal observability</p>
-        <h2 id="diagnostics-heading">A calm view of stream health</h2>
-        <p>Transport, recovery, queue and clock data from the current bounded session.</p>
+        <p class="eyebrow">{{ preview ? 'Preview observability' : 'Signal observability' }}</p>
+        <h2 id="diagnostics-heading">{{ preview ? 'Simulated stream state' : 'A calm view of stream health' }}</h2>
+        <p>{{ preview ? 'Synthetic preview values; not transport, audio, or hardware measurements.' : 'Transport, recovery, queue and clock data from the current bounded session.' }}</p>
       </div>
       <span class="telemetry-mark"><Activity :size="21" aria-hidden="true" /></span>
     </div>

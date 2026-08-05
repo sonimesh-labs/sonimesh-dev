@@ -7,6 +7,7 @@ import type { PairingStatus } from '../types'
 const props = defineProps<{
   pairing: PairingStatus
   busy: boolean
+  preview?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -65,6 +66,21 @@ function beginCountdown(pairing: PairingStatus) {
 }
 
 const pairingMessage = computed(() => {
+  if (props.preview) {
+    switch (props.pairing.state) {
+      case 'active':
+        return remainingSeconds.value === null ? 'Preview invitation is open' : `Preview · ${remainingSeconds.value}s remaining`
+      case 'consumed':
+        return 'Preview trust state'
+      case 'expired':
+        return 'Preview invitation expired'
+      case 'inactive':
+        return 'No preview invitation'
+      case 'revoked':
+        return 'Preview trust revoked'
+    }
+  }
+
   switch (props.pairing.state) {
     case 'active':
       return remainingSeconds.value === null ? 'Invitation is open' : `${remainingSeconds.value}s remaining`
@@ -80,6 +96,10 @@ const pairingMessage = computed(() => {
 })
 
 const pairingHint = computed(() => {
+  if (props.preview) {
+    return 'The preview adapter changes local UI state only; it does not create or verify a real invitation.'
+  }
+
   switch (props.pairing.state) {
     case 'active':
       return 'Keep this window open while the sender verifies the invitation.'
@@ -94,6 +114,10 @@ const pairingHint = computed(() => {
   }
 })
 
+const pairingEyebrow = computed(() => (props.preview ? 'Pairing preview' : 'Private pairing'))
+const pairingHeading = computed(() => (props.preview ? 'Simulate sender trust' : 'Trust a sender'))
+const createButtonLabel = computed(() => (props.preview ? 'Create preview invitation' : 'Create invitation'))
+
 watch(() => props.pairing, beginCountdown, { immediate: true })
 onUnmounted(clearCountdown)
 </script>
@@ -103,8 +127,8 @@ onUnmounted(clearCountdown)
     <div class="panel-heading">
       <div class="panel-icon"><QrCode :size="19" aria-hidden="true" /></div>
       <div>
-        <p class="eyebrow">Private pairing</p>
-        <h2 id="pairing-heading">Trust a sender</h2>
+        <p class="eyebrow">{{ pairingEyebrow }}</p>
+        <h2 id="pairing-heading">{{ pairingHeading }}</h2>
       </div>
     </div>
 
@@ -119,9 +143,9 @@ onUnmounted(clearCountdown)
 
     <div class="inline-actions">
       <button class="secondary-action" :disabled="busy || pairing.state === 'active' || pairing.state === 'consumed'" @click="emit('create')">
-        Create invitation
+        {{ createButtonLabel }}
       </button>
-      <button v-if="pairing.state === 'active'" class="icon-action subtle" title="Expire invitation" aria-label="Expire invitation" :disabled="busy" @click="emit('expire')">
+      <button v-if="pairing.state === 'active'" class="icon-action subtle" :title="preview ? 'Expire preview invitation' : 'Expire invitation'" :aria-label="preview ? 'Expire preview invitation' : 'Expire invitation'" :disabled="busy" @click="emit('expire')">
         <X :size="18" aria-hidden="true" />
       </button>
     </div>

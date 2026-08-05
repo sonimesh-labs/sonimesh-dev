@@ -38,8 +38,8 @@ const { busy, createPairing, error, expirePairing, refresh, selectOutput, snapsh
       <div class="sidebar-footer">
         <span class="sidebar-signal" aria-hidden="true"><i></i></span>
         <div>
-          <strong>Control plane online</strong>
-          <span>{{ snapshot?.previewAdapter ? 'Preview adapter' : 'Desktop bridge' }}</span>
+          <strong>{{ snapshot === null ? 'Connecting control service' : snapshot.previewAdapter ? 'Preview adapter active' : 'Control plane online' }}</strong>
+          <span>{{ snapshot === null ? 'State pending' : snapshot.previewAdapter ? 'Preview adapter' : 'Desktop bridge' }}</span>
         </div>
       </div>
     </aside>
@@ -47,13 +47,15 @@ const { busy, createPairing, error, expirePairing, refresh, selectOutput, snapsh
     <div class="content-shell">
       <header class="topbar">
         <div class="title-block">
-          <p class="eyebrow">Desktop receiver</p>
-          <h1>Route your phone audio,<br /><span>without the cloud.</span></h1>
-          <p class="topbar-copy">A private, bounded listening session on the output device you choose.</p>
+          <p class="eyebrow">{{ snapshot === null ? 'Desktop control' : snapshot.previewAdapter ? 'Desktop receiver preview' : 'Desktop receiver' }}</p>
+          <h1 v-if="snapshot === null">Connecting to desktop,<br /><span>control service.</span></h1>
+          <h1 v-else-if="snapshot.previewAdapter">Preview the receiver,<br /><span>without real audio.</span></h1>
+          <h1 v-else>Route your phone audio,<br /><span>without the cloud.</span></h1>
+          <p class="topbar-copy">{{ snapshot === null ? 'Waiting for authoritative desktop state.' : snapshot.previewAdapter ? 'Preview adapter only — no audio is captured, transported, or played.' : 'A private, bounded listening session on the output device you choose.' }}</p>
         </div>
         <div class="topbar-actions">
           <span v-if="snapshot" class="session-chip" :class="`chip-${snapshot.session}`" role="status" aria-live="polite">
-            <span class="chip-dot" aria-hidden="true"></span>{{ snapshot.session }}
+            <span class="chip-dot" aria-hidden="true"></span>{{ snapshot.previewAdapter ? 'Preview ' : '' }}{{ snapshot.session }}
           </span>
           <button class="icon-action refresh" title="Refresh state" aria-label="Refresh state" :disabled="busy" @click="refresh">
             <RefreshCw :size="18" :class="{ spinning: busy }" aria-hidden="true" />
@@ -73,11 +75,11 @@ const { busy, createPairing, error, expirePairing, refresh, selectOutput, snapsh
             @stop="stop"
           />
           <div class="secondary-stack">
-            <OutputPanel :devices="snapshot.outputDevices" :selected-id="snapshot.selectedOutputId" :busy="busy" @select="selectOutput" />
-            <PairingPanel :pairing="snapshot.pairing" :busy="busy" @create="createPairing" @expire="expirePairing" @refresh="refresh" />
+            <OutputPanel :devices="snapshot.outputDevices" :selected-id="snapshot.selectedOutputId" :busy="busy" :preview="snapshot.previewAdapter" @select="selectOutput" />
+            <PairingPanel :pairing="snapshot.pairing" :busy="busy" :preview="snapshot.previewAdapter" @create="createPairing" @expire="expirePairing" @refresh="refresh" />
           </div>
         </div>
-        <DiagnosticsPanel id="diagnostics" :metrics="snapshot.metrics" />
+        <DiagnosticsPanel id="diagnostics" :metrics="snapshot.metrics" :preview="snapshot.previewAdapter" />
       </template>
       <div v-else class="loading-state">
         <span class="loading-orbit" aria-hidden="true"></span>

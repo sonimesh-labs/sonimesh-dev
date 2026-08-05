@@ -32,6 +32,19 @@ function metrics(overrides: Partial<StreamMetrics> = {}): StreamMetrics {
 }
 
 describe('DiagnosticsPanel', () => {
+  it('labels synthetic metrics as preview values instead of measurements', () => {
+    const wrapper = mount(DiagnosticsPanel, {
+      props: {
+        metrics: metrics(),
+        preview: true,
+      },
+    })
+
+    expect(wrapper.find('.eyebrow').text()).toBe('Preview observability')
+    expect(wrapper.get('h2').text()).toBe('Simulated stream state')
+    expect(wrapper.text()).toContain('not transport, audio, or hardware measurements')
+  })
+
   it('formats u64 counters as decimal strings without precision loss and rejects malformed bridge values', () => {
     const wrapper = mount(DiagnosticsPanel, {
       props: {

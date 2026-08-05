@@ -1,14 +1,17 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { ArrowUpRight, Radio, ShieldCheck, Square } from '@lucide/vue'
 
 import type { PairingState, SessionState } from '../types'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   state: SessionState
   pairingState: PairingState
-  preview: boolean
+  preview?: boolean
   busy: boolean
-}>()
+}>(), {
+  preview: false,
+})
 
 const emit = defineEmits<{
   start: []
@@ -40,21 +43,44 @@ const controlLabels: Record<PairingState, string> = {
   expired: 'Not authenticated',
   revoked: 'Revoked',
 }
+
+const previewLabels: Record<SessionState, string> = {
+  idle: 'Preview standing by',
+  pairing: 'Preview pairing state',
+  ready: 'Preview ready',
+  streaming: 'Preview streaming',
+  reconnecting: 'Preview reconnecting',
+  outputUnavailable: 'Preview output unavailable',
+}
+
+const previewSummaries: Record<SessionState, string> = {
+  idle: 'The preview adapter is waiting for a simulated session.',
+  pairing: 'The preview adapter is showing a simulated pairing state; no sender is being verified.',
+  ready: 'The preview adapter is ready for simulated controls; it is not connected to a sender or output device.',
+  streaming: 'The preview adapter is simulating a streaming state; no audio is captured, transported, or played.',
+  reconnecting: 'The preview adapter is simulating output recovery; it does not control a real audio device.',
+  outputUnavailable: 'The preview adapter is showing an unavailable-output state; it does not inspect hardware.',
+}
+
+const displayLabel = computed(() => (props.preview ? previewLabels[props.state] : labels[props.state]))
+const displaySummary = computed(() => (props.preview ? previewSummaries[props.state] : summaries[props.state]))
+const displayControl = computed(() => (props.preview ? 'Preview state' : controlLabels[props.pairingState]))
+const displayState = computed(() => (props.preview ? `Preview ${props.state}` : props.state))
 </script>
 
 <template>
   <section class="session-panel" :class="`session-${state}`" aria-labelledby="session-heading">
     <div class="session-topline">
-      <span class="session-kicker">Live receiver</span>
+      <span class="session-kicker">{{ preview ? 'Preview receiver' : 'Live receiver' }}</span>
       <span class="state-badge" :class="`state-${state}`">
         <span class="state-dot" aria-hidden="true"></span>
-        {{ state }}
+        {{ displayState }}
       </span>
     </div>
 
     <div class="session-copy">
-      <h2 id="session-heading" aria-live="polite">{{ labels[state] }}</h2>
-      <p>{{ summaries[state] }}</p>
+      <h2 id="session-heading" aria-live="polite">{{ displayLabel }}</h2>
+      <p>{{ displaySummary }}</p>
     </div>
 
     <div class="signal-stage" :class="`rail-${state}`" aria-hidden="true">
@@ -65,7 +91,7 @@ const controlLabels: Record<PairingState, string> = {
       <div>
         <ShieldCheck :size="17" aria-hidden="true" />
         <dt>Control</dt>
-        <dd>{{ controlLabels[pairingState] }}</dd>
+        <dd>{{ displayControl }}</dd>
       </div>
       <div>
         <Radio :size="17" aria-hidden="true" />
