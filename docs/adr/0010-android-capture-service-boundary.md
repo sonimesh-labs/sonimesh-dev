@@ -121,9 +121,9 @@ capture implementation cannot reach every indirect dependency or that an
 instrumentation spike proves a production capability.
 
 `tools/android_capture_preflight.py` is a separate, read-only lab helper. It
-requires an explicitly selected ADB serial but does not print that serial. It
-collects the connected device's manufacturer/model, Android release/API/build,
-ABI, and installed capture-package state before an operator begins a matrix
+requires an explicitly selected, printable single-line ADB serial but does not
+print that serial. It collects the connected device's manufacturer/model, Android
+release/API/build, ABI, and installed capture-package state before an operator begins a matrix
 row. Before rendering, it rejects non-printable or oversized property values so
 untrusted device metadata cannot inject extra output lines or terminal control
 sequences; rendering rechecks that presentation boundary. ADB failures never

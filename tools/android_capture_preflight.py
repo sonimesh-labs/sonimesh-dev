@@ -53,9 +53,9 @@ def adb_path(explicit: Path | None) -> str:
 
 
 def validate_serial(serial: str) -> None:
-    """Rejects empty or multi-line ADB selectors before any command is issued."""
-    if not serial.strip() or any(character in serial for character in "\r\n\x00"):
-        raise ValueError("ADB serial must be nonempty and single-line")
+    """Rejects empty or non-printable ADB selectors before any command is issued."""
+    if not serial.strip() or not serial.isprintable():
+        raise ValueError("ADB serial must be nonempty, printable, and single-line")
 
 
 def redact_serial(value: str, serial: str) -> str:
@@ -204,9 +204,18 @@ class AndroidCapturePreflightTests(unittest.TestCase):
             calls.append(command)
             return subprocess.CompletedProcess(command, 0, "", "")
 
-        for serial in ("", "  ", "private-serial\nnext-line"):
-            with self.subTest(serial=serial):
-                with self.assertRaisesRegex(ValueError, "serial must be nonempty and single-line"):
+        for serial in (
+            "",
+            "  ",
+            "private-serial\nnext-line",
+            "private-serial\tother",
+            "private-serial\x1b[31m",
+        ):
+            with self.subTest(serial=repr(serial)):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    "serial must be nonempty, printable, and single-line",
+                ):
                     collect_record("adb", serial, runner)
         self.assertEqual(calls, [])
 
@@ -298,7 +307,7 @@ class AndroidCapturePreflightTests(unittest.TestCase):
                 self.assertEqual(main(), 1)
         self.assertEqual(
             stderr.getvalue(),
-            "Android capture preflight: failed: ADB serial must be nonempty and single-line\n",
+            "Android capture preflight: failed: ADB serial must be nonempty, printable, and single-line\n",
         )
 
     def test_rejects_missing_required_property_and_adb_failure(self) -> None:
