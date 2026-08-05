@@ -124,7 +124,12 @@ instrumentation spike proves a production capability.
 requires an explicitly selected ADB serial but does not print that serial. It
 collects the connected device's manufacturer/model, Android release/API/build,
 ABI, and installed capture-package state before an operator begins a matrix
-row. It does not install an APK, change a permission, request projection,
+row. Before rendering, it rejects non-printable or oversized property values so
+untrusted device metadata cannot inject extra output lines or terminal control
+sequences; rendering rechecks that presentation boundary. ADB failures never
+include ADB-provided detail and instead use a fixed message naming the constant
+collection operation. Property-validation errors name only the affected metadata
+field. It does not install an APK, change a permission, request projection,
 inspect PCM, or automate any capture scenario, so its output is preparation
 metadata rather than capture, policy, lifecycle, power, or latency evidence.
 

@@ -17,6 +17,7 @@ from pathlib import Path
 
 
 PACKAGE_NAME = "com.sonimesh.sender"
+MAX_PROPERTY_VALUE_LENGTH = 512
 PROPERTIES = (
     ("Manufacturer", "ro.product.manufacturer"),
     ("Model", "ro.product.model"),
@@ -62,10 +63,30 @@ def redact_serial(value: str, serial: str) -> str:
     return value.replace(serial, "<redacted-device>")
 
 
+def validate_property_value(label: str, value: str) -> None:
+    """Rejects untrusted property values that cannot be rendered safely in one line."""
+    if len(value) > MAX_PROPERTY_VALUE_LENGTH or not value.isprintable():
+        raise RuntimeError(f"connected device reported invalid {label} metadata")
+
+
+def validate_record_properties(record: DeviceRecord) -> None:
+    """Rechecks every rendered metadata field at the presentation boundary."""
+    for label, value in (
+        ("Manufacturer", record.manufacturer),
+        ("Model", record.model),
+        ("Android release", record.android_release),
+        ("Android API", record.android_api),
+        ("Build fingerprint", record.build_fingerprint),
+        ("ABI", record.abi),
+    ):
+        validate_property_value(label, value)
+
+
 def run_adb(
     adb: str,
     serial: str,
     arguments: list[str],
+    operation: str,
     runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
 ) -> str:
     """Runs one read-only ADB shell command without exposing the serial in output."""
@@ -78,8 +99,7 @@ def run_adb(
         text=True,
     )
     if completed.returncode != 0:
-        detail = completed.stderr.strip() or "ADB command failed"
-        raise RuntimeError(redact_serial(detail, serial))
+        raise RuntimeError(f"ADB command failed while collecting {operation}")
     return redact_serial(completed.stdout.strip(), serial)
 
 
@@ -91,16 +111,25 @@ def collect_record(
     """Collects only the Android matrix preparation fields for one explicit device."""
     validate_serial(serial)
     values = {
-        label: run_adb(adb, serial, ["shell", "getprop", property_name], runner)
+        label: run_adb(
+            adb,
+            serial,
+            ["shell", "getprop", property_name],
+            f"{label} metadata",
+            runner,
+        )
         for label, property_name in PROPERTIES
     }
     missing = [label for label, value in values.items() if not value]
     if missing:
         raise RuntimeError(f"connected device did not report required fields: {', '.join(missing)}")
+    for label, value in values.items():
+        validate_property_value(label, value)
     installed_packages = run_adb(
         adb,
         serial,
         ["shell", "pm", "list", "packages", "--user", "0", PACKAGE_NAME],
+        "Capture package state",
         runner,
     )
     return DeviceRecord(
@@ -116,6 +145,7 @@ def collect_record(
 
 def format_record(record: DeviceRecord) -> str:
     """Formats stable matrix preparation data without an ADB serial or source details."""
+    validate_record_properties(record)
     package_state = "installed" if record.capture_package_installed else "not installed"
     return "\n".join(
         (
@@ -201,6 +231,66 @@ class AndroidCapturePreflightTests(unittest.TestCase):
         self.assertNotIn(serial, rendered)
         self.assertIn("Example <redacted-device> OEM", rendered)
 
+    def test_adb_failures_expose_only_constant_operation_labels(self) -> None:
+        serial = "private-serial"
+        safe_values = {
+            "ro.product.manufacturer": "Example OEM",
+            "ro.product.model": "Model X",
+            "ro.build.version.release": "15",
+            "ro.build.version.sdk": "35",
+            "ro.build.fingerprint": "example/model/build:15/ABC/123:userdebug/test-keys",
+            "ro.product.cpu.abi": "arm64-v8a",
+        }
+        hostile_detail = f"{serial}\x1b[31m forged preflight result: approved"
+        failure_cases = (
+            ("ro.product.model", "Model metadata"),
+            (PACKAGE_NAME, "Capture package state"),
+        )
+
+        for failing_argument, operation in failure_cases:
+            with self.subTest(operation=operation):
+                def runner(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
+                    if command[-1] == failing_argument:
+                        return subprocess.CompletedProcess(command, 1, "", hostile_detail)
+                    return subprocess.CompletedProcess(command, 0, safe_values.get(command[-1], ""), "")
+
+                expected = f"ADB command failed while collecting {operation}"
+                with self.assertRaisesRegex(RuntimeError, f"^{expected}$") as failure:
+                    collect_record("adb", serial, runner)
+                self.assertNotIn(hostile_detail, str(failure.exception))
+                self.assertNotIn(serial, str(failure.exception))
+                self.assertNotIn("\x1b", str(failure.exception))
+
+    def test_property_values_are_bounded_single_line_presentation_data(self) -> None:
+        validate_property_value("Model", "x" * MAX_PROPERTY_VALUE_LENGTH)
+
+        for unsafe_value in (
+            "x" * (MAX_PROPERTY_VALUE_LENGTH + 1),
+            "Model\nforged output",
+            "Model\rforged output",
+            "Model\tforged output",
+            "Model\x1b[31mforged output",
+        ):
+            with self.subTest(unsafe_value=repr(unsafe_value)):
+                with self.assertRaisesRegex(RuntimeError, "^connected device reported invalid Model metadata$") as failure:
+                    validate_property_value("Model", unsafe_value)
+                self.assertNotIn(unsafe_value, str(failure.exception))
+
+    def test_renderer_rechecks_device_record_presentation_fields(self) -> None:
+        record = DeviceRecord(
+            manufacturer="Example OEM",
+            model="Model X\nforged output",
+            android_release="15",
+            android_api="35",
+            build_fingerprint="example/model/build:15/ABC/123:userdebug/test-keys",
+            abi="arm64-v8a",
+            capture_package_installed=True,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "^connected device reported invalid Model metadata$") as failure:
+            format_record(record)
+        self.assertNotIn("forged output", str(failure.exception))
+
     def test_main_reports_invalid_serial_without_a_traceback(self) -> None:
         stderr = StringIO()
         with patch.object(sys, "argv", ["android_capture_preflight.py", "--serial", ""]):
@@ -221,7 +311,8 @@ class AndroidCapturePreflightTests(unittest.TestCase):
         def failed_runner(command: list[str], **_: object) -> subprocess.CompletedProcess[str]:
             return subprocess.CompletedProcess(command, 1, "", "private-serial device offline")
 
-        with self.assertRaisesRegex(RuntimeError, "device offline") as failure:
+        expected = "ADB command failed while collecting Manufacturer metadata"
+        with self.assertRaisesRegex(RuntimeError, f"^{expected}$") as failure:
             collect_record("adb", "private-serial", failed_runner)
         self.assertNotIn("private-serial", str(failure.exception))
 
