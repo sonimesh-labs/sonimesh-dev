@@ -6,7 +6,7 @@
 - on Linux or WSL, nightly 2026-07-18 with `rust-src` plus `cargo-fuzz`
   0.13.2 for the optional local LibFuzzer targets;
 - Java 21 and an Android SDK when phase 0A starts;
-- Node.js 22 or newer when the desktop control UI starts;
+- Node.js 22.22.2 when the desktop control UI starts;
 - Windows 11 and documented audio hardware for output validation.
 
 The portable Rust workspace builds without an Android SDK, audio device, or
@@ -111,9 +111,16 @@ dependency reachability.
 ~~~powershell
 Set-Location apps/desktop-ui
 npm install
+npm test
 npm run build
 npm run dev
 ~~~
+
+Use `npm ci` instead of `npm install` when reproducing the CI dependency graph.
+CI runs `npm ci`, `npm test`, and `npm run build` on current Ubuntu and
+Windows runners with Node.js 22.22.2. This validates the deterministic preview UI
+tests and production bundle only; it does not validate a Tauri integration or any
+audio, pairing, or platform capability.
 
 The bundled preview bridge is intentionally not a Tauri implementation. It
 exists to validate the control surface without turning pending Windows output,
