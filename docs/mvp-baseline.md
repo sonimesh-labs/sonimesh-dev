@@ -1,7 +1,7 @@
 # MVP implementation baseline
 
 > Status: foundation implemented; platform feasibility remains open
-> Updated: 2026-07-27
+> Updated: 2026-08-06
 
 This baseline turns the architecture documents into a buildable core without
 claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
@@ -44,6 +44,10 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
 - allocation-free gain smoothing, saturating atomic stream and output-status
   counters, endpoint redaction, output adapter contracts, and a tested desktop
   session state machine;
+- diagnostic-safe Debug boundaries for media payloads, encoded jitter frames,
+  PCM queue blocks, UDP endpoints, control-envelope text, output device metadata,
+  and free-form output backend errors; control-session and operation token
+  issuance fails closed instead of wrapping at the `u64` boundary;
 - control-domain output health monitoring and stream recreation with a fresh
   render source; platform operations never mutate session state directly, which
   remains owned by the control-session coordinator;
