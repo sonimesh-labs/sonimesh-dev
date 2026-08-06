@@ -3,6 +3,8 @@ use core::fmt;
 /// Failure while constructing a bounded encoded frame.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FrameError {
+    /// Payload is empty and cannot represent an encoded audio frame.
+    EmptyPayload,
     /// Payload exceeds the configured per-frame capacity.
     PayloadTooLarge,
 }
@@ -10,6 +12,7 @@ pub enum FrameError {
 impl fmt::Display for FrameError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::EmptyPayload => formatter.write_str("encoded frame payload is empty"),
             Self::PayloadTooLarge => {
                 formatter.write_str("encoded frame payload exceeds inline capacity")
             }
@@ -46,9 +49,13 @@ impl<const MAX_PAYLOAD: usize> EncodedFrame<MAX_PAYLOAD> {
     ///
     /// # Errors
     ///
-    /// Returns [`FrameError::PayloadTooLarge`] when `payload` exceeds the
-    /// configured capacity.
+    /// Returns [`FrameError::EmptyPayload`] for a zero-byte payload or
+    /// [`FrameError::PayloadTooLarge`] when `payload` exceeds the configured
+    /// capacity.
     pub fn new(sequence: u32, sample_timestamp: u64, payload: &[u8]) -> Result<Self, FrameError> {
+        if payload.is_empty() {
+            return Err(FrameError::EmptyPayload);
+        }
         if payload.len() > MAX_PAYLOAD {
             return Err(FrameError::PayloadTooLarge);
         }
@@ -282,6 +289,14 @@ mod tests {
             &[sequence.to_le_bytes()[0]],
         )
         .unwrap()
+    }
+
+    #[test]
+    fn rejects_empty_encoded_payload() {
+        assert_eq!(
+            EncodedFrame::<8>::new(7, 960, &[]),
+            Err(FrameError::EmptyPayload)
+        );
     }
 
     #[test]

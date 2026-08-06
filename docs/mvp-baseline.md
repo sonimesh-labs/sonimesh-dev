@@ -73,8 +73,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   fresh session material
   requires a newly installed transport token and hello.
 - a per-stream, non-realtime decode-worker boundary that schedules ordinary
-  decode and PLC from authenticated jitter decisions, then writes bounded PCM
-  blocks to the existing lock-free output queue; no concrete Opus binding yet.
+  decode and PLC from authenticated jitter decisions, rejects empty or
+  oversized encoded frames before decoder work, then writes bounded PCM blocks
+  to the existing lock-free output queue; no concrete Opus binding yet.
 - an application-domain receiver pipeline that composes protected ingress,
   bounded decode admission, and stream-local epoch reset without owning TLS,
   platform output, or a concrete decoder implementation. It can install a
@@ -166,7 +167,7 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
 | Encrypted payload with fixed header | 1,164 bytes | Extensions reduce this available payload |
 | Replay window | 64 packets | Reject authenticated duplicate or too-old packet |
 | Jitter storage | Compile-time capacity per stream | Stream-local reset on capacity collision |
-| Encoded frame | Compile-time capacity per stream | Reject oversized frame copy |
+| Encoded frame | Compile-time capacity per stream | Reject empty or oversized frame copy |
 | Local PCM ring | Compile-time blocks and samples | Drop oldest block; output silence when empty |
 | Cross-thread PCM queue | 1–128 inline blocks | Atomically replace oldest; report sequence gap |
 | Realtime render refills | 128 block pops per callback | Stop refilling, emit silence, and count one limit hit |

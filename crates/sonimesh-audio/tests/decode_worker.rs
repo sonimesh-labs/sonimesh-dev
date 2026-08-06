@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use sonimesh_audio::{
-    DecodeStep, DecodeWorkerError, FrameDecoder, InsertOutcome, OpusFrameConfig,
+    DecodeStep, DecodeWorkerError, FrameDecoder, FrameError, InsertOutcome, OpusFrameConfig,
     OpusFrameConfigError, RealtimePcmPopOutcome, RealtimePcmPushOutcome, StreamDecodeWorker,
     realtime_pcm_queue,
 };
@@ -204,6 +204,25 @@ impl FrameDecoder for EmptyDecoder {
     fn decode_plc(&mut self, _output: &mut [f32]) -> Result<usize, Self::Error> {
         Ok(0)
     }
+}
+
+#[test]
+fn rejects_empty_encoded_payload_before_decoder_work() {
+    let (producer, mut consumer) = realtime_pcm_queue::<4>(2).unwrap();
+    let mut worker = StreamDecodeWorker::<TestDecoder, 2, 8, 4>::new(TestDecoder, producer, 0);
+
+    assert_eq!(
+        worker.admit(0, 0, &[]),
+        Err(DecodeWorkerError::Frame(FrameError::EmptyPayload))
+    );
+    assert_eq!(worker.queued_blocks(), 0);
+
+    let mut output = [f32::NAN; 4];
+    assert!(matches!(
+        consumer.pop_into(&mut output),
+        RealtimePcmPopOutcome::Underflow { .. }
+    ));
+    assert!(output.iter().all(|sample| sample.abs() < f32::EPSILON));
 }
 
 #[test]
