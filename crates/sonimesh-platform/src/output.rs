@@ -50,12 +50,26 @@ pub trait RenderSourceFactory {
 }
 
 /// Stable source-construction failure suitable for output lifecycle handling.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub enum RenderSourceFactoryError {
     /// The selected output format violates a platform-neutral bound.
     InvalidConfig(OutputConfigError),
     /// Source setup failed without a more stable platform-neutral category.
     Build(String),
+}
+
+impl fmt::Debug for RenderSourceFactoryError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidConfig(error) => {
+                formatter.debug_tuple("InvalidConfig").field(error).finish()
+            }
+            Self::Build(message) => formatter
+                .debug_struct("Build")
+                .field("message_len", &message.len())
+                .finish(),
+        }
+    }
 }
 
 impl fmt::Display for RenderSourceFactoryError {
@@ -121,7 +135,7 @@ pub trait AudioOutput {
 }
 
 /// Stable platform adapter error categories suitable for UI mapping.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub enum OutputError {
     /// Configuration exceeds a platform-neutral hard bound.
     InvalidConfig(OutputConfigError),
@@ -133,6 +147,23 @@ pub enum OutputError {
     AlreadyRunning,
     /// Backend failed without a more stable category.
     Backend(String),
+}
+
+impl fmt::Debug for OutputError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidConfig(error) => {
+                formatter.debug_tuple("InvalidConfig").field(error).finish()
+            }
+            Self::DeviceUnavailable => formatter.write_str("DeviceUnavailable"),
+            Self::UnsupportedFormat => formatter.write_str("UnsupportedFormat"),
+            Self::AlreadyRunning => formatter.write_str("AlreadyRunning"),
+            Self::Backend(message) => formatter
+                .debug_struct("Backend")
+                .field("message_len", &message.len())
+                .finish(),
+        }
+    }
 }
 
 impl fmt::Display for OutputError {
@@ -156,5 +187,24 @@ impl std::error::Error for OutputError {
             | Self::AlreadyRunning
             | Self::Backend(_) => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod debug_tests {
+    use super::{OutputError, RenderSourceFactoryError};
+
+    #[test]
+    fn backend_debug_redacts_free_form_error_messages() {
+        let factory_error = RenderSourceFactoryError::Build("Private Headphones".to_owned());
+        let output_error = OutputError::Backend("wasapi:{persistent-device-id}".to_owned());
+
+        let factory_debug = format!("{factory_error:?}");
+        let output_debug = format!("{output_error:?}");
+
+        assert!(factory_debug.contains("Build { message_len:"));
+        assert!(output_debug.contains("Backend { message_len:"));
+        assert!(!factory_debug.contains("Private Headphones"));
+        assert!(!output_debug.contains("persistent-device-id"));
     }
 }
