@@ -45,7 +45,8 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   counters, endpoint redaction, output adapter contracts, and a tested desktop
   session state machine;
 - diagnostic-safe Debug boundaries for media payloads, encoded jitter frames,
-  PCM queue blocks, UDP endpoints, control-envelope text, output device metadata,
+  PCM queue blocks, UDP endpoints and network I/O error text, control-envelope
+  text, output device metadata,
   and free-form output backend errors; control-session and operation token
   issuance fails closed instead of wrapping at the `u64` boundary;
 - control-domain output health monitoring and stream recreation with a fresh

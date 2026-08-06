@@ -4,7 +4,7 @@ use std::net::{SocketAddr, UdpSocket};
 
 use sonimesh_protocol::MAX_MEDIA_DATAGRAM_LEN;
 
-use crate::redacted_endpoint::RedactedEndpoint;
+use crate::{redacted_endpoint::RedactedEndpoint, redacted_io_error::RedactedIoError};
 
 const RECEIVE_BUFFER_LEN: usize = MAX_MEDIA_DATAGRAM_LEN + 1;
 
@@ -30,12 +30,23 @@ impl fmt::Debug for ReceivedDatagram<'_> {
 }
 
 /// Failure while polling the bounded UDP media socket.
-#[derive(Debug)]
 pub enum UdpReceiveError {
     /// The datagram exceeded the protocol's complete-media limit.
     DatagramTooLarge,
     /// The operating system rejected the receive operation.
     Io(io::Error),
+}
+
+impl fmt::Debug for UdpReceiveError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::DatagramTooLarge => formatter.write_str("DatagramTooLarge"),
+            Self::Io(error) => formatter
+                .debug_tuple("Io")
+                .field(&RedactedIoError(error))
+                .finish(),
+        }
+    }
 }
 
 impl fmt::Display for UdpReceiveError {
@@ -132,7 +143,9 @@ fn is_datagram_too_large(error: &io::Error) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::ReceivedDatagram;
+    use std::io;
+
+    use super::{ReceivedDatagram, UdpReceiveError};
 
     #[test]
     fn debug_output_redacts_endpoint_and_payload() {
@@ -148,5 +161,19 @@ mod tests {
         assert!(debug.contains("payload_len: 21"));
         assert!(!debug.contains("192.168.10.42"));
         assert!(!debug.contains("untrusted audio bytes"));
+    }
+
+    #[test]
+    fn io_failure_debug_omits_the_free_form_error_message() {
+        let error = UdpReceiveError::Io(io::Error::new(
+            io::ErrorKind::ConnectionRefused,
+            "UDP receive at 192.168.10.42:49321 was refused",
+        ));
+
+        let debug = format!("{error:?}");
+
+        assert!(debug.contains("ConnectionRefused"));
+        assert!(!debug.contains("192.168.10.42"));
+        assert!(!debug.contains("was refused"));
     }
 }

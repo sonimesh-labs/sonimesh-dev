@@ -2,6 +2,8 @@ use core::fmt;
 use std::io::{self, Read, Write};
 use std::net::TcpStream;
 
+use crate::redacted_io_error::RedactedIoError;
+
 use sonimesh_protocol::{
     ControlFrameError, Envelope, MAX_CONTROL_FRAME_BYTES, decode_control_frame,
     encode_control_frame, envelope,
@@ -48,7 +50,6 @@ fn control_payload_kind(envelope: &Envelope) -> &'static str {
 }
 
 /// Failure while reading or validating an untrusted control stream.
-#[derive(Debug)]
 pub enum UntrustedControlError {
     /// The peer sent a malformed or semantically invalid frame.
     Protocol(ControlFrameError),
@@ -56,6 +57,19 @@ pub enum UntrustedControlError {
     Io(io::Error),
     /// A previous encoded frame is still waiting for socket progress.
     WritePending,
+}
+
+impl fmt::Debug for UntrustedControlError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Protocol(error) => formatter.debug_tuple("Protocol").field(error).finish(),
+            Self::Io(error) => formatter
+                .debug_tuple("Io")
+                .field(&RedactedIoError(error))
+                .finish(),
+            Self::WritePending => formatter.write_str("WritePending"),
+        }
+    }
 }
 
 impl fmt::Display for UntrustedControlError {
@@ -331,9 +345,13 @@ enum ReadState {
 
 #[cfg(test)]
 mod debug_tests {
+    use std::io;
+
     use sonimesh_protocol::{ControlError, Hello, StreamStatus};
 
-    use super::{Envelope, UntrustedControlPoll, control_payload_kind, envelope};
+    use super::{
+        Envelope, UntrustedControlError, UntrustedControlPoll, control_payload_kind, envelope,
+    };
 
     #[test]
     fn control_poll_debug_omits_untrusted_payload_text() {
@@ -397,5 +415,19 @@ mod debug_tests {
         };
 
         assert_eq!(control_payload_kind(&envelope), "missing");
+    }
+
+    #[test]
+    fn io_failure_debug_omits_the_free_form_error_message() {
+        let error = UntrustedControlError::Io(io::Error::new(
+            io::ErrorKind::ConnectionReset,
+            "control peer 192.168.10.42:443 reset the connection",
+        ));
+
+        let debug = format!("{error:?}");
+
+        assert!(debug.contains("ConnectionReset"));
+        assert!(!debug.contains("192.168.10.42"));
+        assert!(!debug.contains("reset the connection"));
     }
 }
