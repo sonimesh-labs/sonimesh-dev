@@ -67,7 +67,6 @@ pub enum RealtimePcmPopOutcome {
     },
 }
 
-#[derive(Debug)]
 struct PcmBlock<const SAMPLES_PER_BLOCK: usize> {
     epoch: u64,
     sequence: u64,
