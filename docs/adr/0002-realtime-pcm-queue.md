@@ -25,6 +25,7 @@ and consumer endpoints in `sonimesh-audio`.
 - allocation and `Arc` creation occur only when the stream queue is constructed;
 - queue capacity is non-zero and capped at 128 blocks;
 - every PCM block stores samples inline with a compile-time sample limit;
+  zero-sample input is rejected before it can consume queue capacity;
 - `force_push` atomically replaces the oldest block when full;
 - producer publishes an atomic active epoch before emitting new PCM blocks;
   consumer-side epoch and sequence markers let the callback discard stale blocks

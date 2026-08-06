@@ -5,6 +5,8 @@ pub enum PcmPushOutcome {
     Inserted,
     /// Oldest block was discarded before the new block was written.
     DroppedOldest,
+    /// Block contained no samples.
+    EmptyBlock,
     /// Block exceeded per-slot capacity.
     BlockTooLarge,
     /// Zero-capacity configuration cannot accept blocks.
@@ -76,6 +78,9 @@ impl<const CAPACITY: usize, const SAMPLES_PER_BLOCK: usize>
         if CAPACITY == 0 {
             return PcmPushOutcome::Disabled;
         }
+        if samples.is_empty() {
+            return PcmPushOutcome::EmptyBlock;
+        }
         if samples.len() > SAMPLES_PER_BLOCK {
             return PcmPushOutcome::BlockTooLarge;
         }
@@ -122,6 +127,14 @@ mod tests {
 
         assert_eq!(ring.pop_into(&mut output), PcmPopOutcome::Underflow);
         assert!(output.iter().all(|sample| sample.abs() < f32::EPSILON));
+    }
+
+    #[test]
+    fn empty_block_does_not_consume_ring_capacity() {
+        let mut ring = PcmBlockRing::<1, 2>::new();
+
+        assert_eq!(ring.push(&[]), PcmPushOutcome::EmptyBlock);
+        assert!(ring.is_empty());
     }
 
     #[test]

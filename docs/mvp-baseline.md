@@ -17,9 +17,10 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
 - per-stream fixed-capacity encoded jitter storage with duplicate, late-frame,
   gap/PLC, controlled-resynchronization, and explicit sequence-exhaustion
   results;
-- a preallocated PCM block ring that drops the oldest block on overflow and
-  emits initialized silence on underflow;
+- a preallocated PCM block ring that rejects empty blocks, drops the oldest
+  block on overflow, and emits initialized silence on underflow;
 - a lock-free cross-thread PCM queue with non-cloneable logical endpoints,
+  empty-block rejection,
   oldest-block replacement, and exact discontinuity detection;
 - a bounded index-based Float32 channel mapper and preallocated realtime source
   adapter for mono/stereo-to-device layout conversion without callback allocation;

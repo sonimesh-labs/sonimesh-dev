@@ -42,6 +42,8 @@ pub enum RealtimePcmPushOutcome {
     Inserted,
     /// Queue was full and atomically replaced its oldest block.
     ReplacedOldest,
+    /// Input contains no samples.
+    EmptyBlock,
     /// Input exceeds the configured samples per block.
     BlockTooLarge,
 }
@@ -93,6 +95,9 @@ pub struct RealtimePcmProducer<const SAMPLES_PER_BLOCK: usize> {
 impl<const SAMPLES_PER_BLOCK: usize> RealtimePcmProducer<SAMPLES_PER_BLOCK> {
     /// Copies a decoded block into fixed-capacity storage.
     pub fn push(&mut self, samples: &[f32]) -> RealtimePcmPushOutcome {
+        if samples.is_empty() {
+            return RealtimePcmPushOutcome::EmptyBlock;
+        }
         if samples.len() > SAMPLES_PER_BLOCK {
             return RealtimePcmPushOutcome::BlockTooLarge;
         }
@@ -295,6 +300,15 @@ fn decrement_active_blocks(active_blocks: &AtomicUsize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn empty_block_does_not_consume_queue_capacity() {
+        let (mut producer, consumer) = realtime_pcm_queue::<2>(1).unwrap();
+
+        assert_eq!(producer.push(&[]), RealtimePcmPushOutcome::EmptyBlock);
+        assert_eq!(producer.len(), 0);
+        assert_eq!(consumer.active_len(), 0);
+    }
 
     #[test]
     fn public_active_length_clamps_transient_internal_overcount() {
