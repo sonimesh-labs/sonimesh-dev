@@ -47,8 +47,8 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   session state machine;
 - diagnostic-safe Debug boundaries for media payloads, encoded jitter frames,
   PCM queue blocks, UDP endpoints and network I/O error text, control-envelope
-  text, output device metadata, and arbitrary decoder or output-backend error
-  details; control-session and operation token
+  text, output device metadata, and arbitrary protocol-decoder, decoder, or
+  output-backend error details; control-session and operation token
   issuance fails closed instead of wrapping at the `u64` boundary;
 - control-domain output health monitoring and stream recreation with a fresh
   render source; platform operations never mutate session state directly, which

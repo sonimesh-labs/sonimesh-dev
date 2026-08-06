@@ -29,7 +29,6 @@ pub const MAX_CONTROL_CHANNELS: u32 = 8;
 pub const MAX_CONTROL_MEDIA_KEY_EPOCH: u32 = u16::MAX as u32;
 
 /// Failure while framing, decoding, or validating a control envelope.
-#[derive(Debug)]
 pub enum ControlFrameError {
     /// Input cannot contain the four-byte frame length.
     TruncatedLength,
@@ -65,6 +64,39 @@ pub enum ControlFrameError {
     InvalidStopStream,
     /// Stream command epoch cannot fit the media protocol's 16-bit field.
     InvalidMediaKeyEpoch,
+}
+
+impl fmt::Debug for ControlFrameError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::TruncatedLength => formatter.write_str("TruncatedLength"),
+            Self::FrameTooLarge => formatter.write_str("FrameTooLarge"),
+            Self::LengthMismatch => formatter.write_str("LengthMismatch"),
+            Self::Decode(_) => formatter.write_str("Decode"),
+            Self::Encode(_) => formatter.write_str("Encode"),
+            Self::UnsupportedVersion(version) => formatter
+                .debug_tuple("UnsupportedVersion")
+                .field(version)
+                .finish(),
+            Self::MissingPayload => formatter.write_str("MissingPayload"),
+            Self::TooManyCapabilities => formatter.write_str("TooManyCapabilities"),
+            Self::TooManySupportedVersions => formatter.write_str("TooManySupportedVersions"),
+            Self::DisplayNameTooLong => formatter.write_str("DisplayNameTooLong"),
+            Self::DetailTooLong => formatter.write_str("DetailTooLong"),
+            Self::InvalidStreamStatusIdentity => formatter.write_str("InvalidStreamStatusIdentity"),
+            Self::InvalidStreamState(state) => formatter
+                .debug_tuple("InvalidStreamState")
+                .field(state)
+                .finish(),
+            Self::InvalidErrorCode(code) => formatter
+                .debug_tuple("InvalidErrorCode")
+                .field(code)
+                .finish(),
+            Self::InvalidStartStream => formatter.write_str("InvalidStartStream"),
+            Self::InvalidStopStream => formatter.write_str("InvalidStopStream"),
+            Self::InvalidMediaKeyEpoch => formatter.write_str("InvalidMediaKeyEpoch"),
+        }
+    }
 }
 
 impl fmt::Display for ControlFrameError {
@@ -263,6 +295,16 @@ mod error_source_tests {
     use std::error::Error;
 
     use super::{ControlFrameError, decode_control_frame};
+
+    #[test]
+    fn protobuf_debug_omits_free_form_decoder_details() {
+        let error = decode_control_frame(&[0, 0, 0, 1, 0x80]).unwrap_err();
+
+        let debug = format!("{error:?}");
+
+        assert_eq!(debug, "Decode");
+        assert!(!debug.contains("buffer"));
+    }
 
     #[test]
     fn protobuf_decode_error_is_retained_as_the_cause() {
