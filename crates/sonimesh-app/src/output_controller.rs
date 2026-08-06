@@ -8,12 +8,22 @@ use sonimesh_platform::{
 use crate::OutputSnapshot;
 
 /// Pinned or default output selection retained for control-domain recovery.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct OutputSelection {
     /// `None` follows the operating system's default output role.
     pub device: Option<OutputDeviceId>,
     /// Requested and bounded device format.
     pub config: OutputConfig,
+}
+
+impl fmt::Debug for OutputSelection {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("OutputSelection")
+            .field("device", &self.device)
+            .field("config", &self.config)
+            .finish()
+    }
 }
 
 /// Desktop control-domain owner for output start, fault detection, and recreation.
@@ -193,5 +203,31 @@ impl std::error::Error for OutputLifecycleError {
             Self::SourceFactory(error) => Some(error),
             Self::Output(error) => Some(error),
         }
+    }
+}
+
+#[cfg(test)]
+mod debug_tests {
+    use sonimesh_platform::{OutputConfig, OutputDeviceId, SampleFormat};
+
+    use super::OutputSelection;
+
+    #[test]
+    fn selection_debug_uses_the_redacted_device_identifier() {
+        let selection = OutputSelection {
+            device: Some(OutputDeviceId::new("persistent-output-id")),
+            config: OutputConfig {
+                sample_rate_hz: 48_000,
+                channels: 2,
+                sample_format: SampleFormat::Float32,
+                requested_callback_frames: Some(480),
+                maximum_callback_frames: 1_024,
+            },
+        };
+
+        let debug = format!("{selection:?}");
+
+        assert!(debug.contains("OutputDeviceId([REDACTED])"));
+        assert!(!debug.contains("persistent-output-id"));
     }
 }
