@@ -3,6 +3,7 @@
 mod ingress;
 mod protected_ingress;
 mod protocol_authenticator;
+mod redacted_endpoint;
 mod source_endpoint_pin;
 mod udp_receiver;
 mod untrusted_control_stream;

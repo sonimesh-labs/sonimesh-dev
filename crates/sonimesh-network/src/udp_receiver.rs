@@ -4,10 +4,12 @@ use std::net::{SocketAddr, UdpSocket};
 
 use sonimesh_protocol::MAX_MEDIA_DATAGRAM_LEN;
 
+use crate::redacted_endpoint::RedactedEndpoint;
+
 const RECEIVE_BUFFER_LEN: usize = MAX_MEDIA_DATAGRAM_LEN + 1;
 
 /// One datagram observed by the non-blocking media socket.
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Eq, PartialEq)]
 pub struct ReceivedDatagram<'a> {
     /// Source endpoint supplied by the operating system.
     ///
@@ -15,6 +17,16 @@ pub struct ReceivedDatagram<'a> {
     pub source: SocketAddr,
     /// Bytes received before protocol parsing and authentication.
     pub payload: &'a [u8],
+}
+
+impl fmt::Debug for ReceivedDatagram<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ReceivedDatagram")
+            .field("source", &RedactedEndpoint(self.source))
+            .field("payload_len", &self.payload.len())
+            .finish()
+    }
 }
 
 /// Failure while polling the bounded UDP media socket.
@@ -116,4 +128,25 @@ impl UdpMediaReceiver {
 
 fn is_datagram_too_large(error: &io::Error) -> bool {
     matches!(error.raw_os_error(), Some(40 | 90 | 10040))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ReceivedDatagram;
+
+    #[test]
+    fn debug_output_redacts_endpoint_and_payload() {
+        let datagram = ReceivedDatagram {
+            source: "192.168.10.42:49321".parse().unwrap(),
+            payload: b"untrusted audio bytes",
+        };
+
+        let debug = format!("{datagram:?}");
+
+        assert!(debug.contains("ipv4"));
+        assert!(debug.contains("49321"));
+        assert!(debug.contains("payload_len: 21"));
+        assert!(!debug.contains("192.168.10.42"));
+        assert!(!debug.contains("untrusted audio bytes"));
+    }
 }

@@ -1,6 +1,8 @@
 use core::fmt;
 use std::net::SocketAddr;
 
+use crate::redacted_endpoint::RedactedEndpoint;
+
 /// Failure while applying the authenticated UDP source-endpoint policy.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SourceEndpointAdmissionError<E> {
@@ -41,9 +43,20 @@ where
 /// committed only when `process` returns success, so parsing, authentication,
 /// replay admission, and bounded jitter handling can remain transactional with
 /// the source pin.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Default, Eq, PartialEq)]
 pub struct SourceEndpointPin {
     pinned: Option<SocketAddr>,
+}
+
+impl fmt::Debug for SourceEndpointPin {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut debug = formatter.debug_struct("SourceEndpointPin");
+        match self.pinned {
+            Some(endpoint) => debug.field("pinned", &RedactedEndpoint(endpoint)),
+            None => debug.field("pinned", &Option::<SocketAddr>::None),
+        };
+        debug.finish()
+    }
 }
 
 impl SourceEndpointPin {
@@ -156,6 +169,19 @@ mod tests {
             Err(SourceEndpointAdmissionError::SourceEndpointChanged)
         );
         assert!(!called.get());
+    }
+
+    #[test]
+    fn debug_output_redacts_the_pinned_ip_address() {
+        let mut pin = SourceEndpointPin::new();
+        let endpoint = "192.168.10.42:49321".parse().unwrap();
+        assert_eq!(pin.process(endpoint, || Ok::<_, ()>(())), Ok(()));
+
+        let debug = format!("{pin:?}");
+
+        assert!(debug.contains("ipv4"));
+        assert!(debug.contains("49321"));
+        assert!(!debug.contains("192.168.10.42"));
     }
 
     #[test]

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use sonimesh_audio::{
     DecodeStep, DecodeWorkerError, FrameDecoder, InsertOutcome, RealtimePcmProducer,
 };
-use sonimesh_diagnostics::StreamCounters;
+use sonimesh_diagnostics::{StreamCounters, redact_endpoint};
 use sonimesh_network::{
     ProtectedIngressError, SourceEndpointAdmissionError, SourceEndpointPin, UdpMediaReceiver,
     UdpReceiveError,
@@ -79,7 +79,7 @@ where
 }
 
 /// Result of one non-blocking UDP media poll.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub enum UdpPollOutcome {
     /// No datagram was ready and no work was performed.
     Empty,
@@ -93,6 +93,22 @@ pub enum UdpPollOutcome {
         /// Jitter admission result for the authenticated packet.
         admission: InsertOutcome,
     },
+}
+
+impl fmt::Debug for UdpPollOutcome {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Empty => formatter.write_str("Empty"),
+            Self::Processed { source, admission } => {
+                let redacted_source = redact_endpoint(*source);
+                formatter
+                    .debug_struct("Processed")
+                    .field("source", &redacted_source)
+                    .field("admission", admission)
+                    .finish()
+            }
+        }
+    }
 }
 
 /// Application-domain composition of UDP polling, protected ingress, and decode.
@@ -376,5 +392,25 @@ mod error_source_tests {
         assert!(
             Error::source(&UdpReceiverError::<MediaCryptoError>::SourceEndpointChanged).is_none()
         );
+    }
+}
+
+#[cfg(test)]
+mod poll_debug_tests {
+    use sonimesh_audio::InsertOutcome;
+
+    use super::UdpPollOutcome;
+
+    #[test]
+    fn processed_poll_debug_redacts_the_source_address() {
+        let outcome = UdpPollOutcome::Processed {
+            source: "192.168.10.42:49321".parse().unwrap(),
+            admission: InsertOutcome::Inserted,
+        };
+
+        let debug = format!("{outcome:?}");
+
+        assert!(debug.contains("[ipv4-address-redacted]:49321"));
+        assert!(!debug.contains("192.168.10.42"));
     }
 }
