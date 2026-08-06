@@ -1,3 +1,5 @@
+use core::fmt;
+
 use chacha20poly1305::aead::{AeadInOut, KeyInit};
 use chacha20poly1305::{ChaCha20Poly1305, Nonce, Tag};
 use zeroize::Zeroize;
@@ -13,12 +15,22 @@ const POLY1305_TAG_BYTES: usize = 16;
 pub const MAX_MEDIA_PLAINTEXT_LEN: usize = MAX_ENCRYPTED_PAYLOAD_LEN - POLY1305_TAG_BYTES;
 
 /// One authenticated media packet produced by [`MediaSealer`].
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct ProtectedMediaPacket {
     /// Parsed fixed header fields used to create the packet.
     pub header: MediaHeader,
     /// Complete encoded datagram: header followed by ciphertext and tag.
     pub datagram: Vec<u8>,
+}
+
+impl fmt::Debug for ProtectedMediaPacket {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ProtectedMediaPacket")
+            .field("header", &self.header)
+            .field("datagram_len", &self.datagram.len())
+            .finish()
+    }
 }
 
 /// Sender-side state that guarantees a sequence is not reused within one epoch.
@@ -170,5 +182,31 @@ fn map_packet_error(error: PacketParseError) -> MediaCryptoError {
         | PacketParseError::UnsupportedVersion(_)
         | PacketParseError::InvalidHeaderLength
         | PacketParseError::LengthMismatch => MediaCryptoError::PayloadTooLarge,
+    }
+}
+
+#[cfg(test)]
+mod debug_tests {
+    use crate::{MediaHeader, ProtectedMediaPacket};
+
+    #[test]
+    fn protected_packet_debug_omits_complete_datagram_bytes() {
+        let packet = ProtectedMediaPacket {
+            header: MediaHeader {
+                flags: 0,
+                session_id: 7,
+                stream_id: 9,
+                sequence: 3,
+                sample_timestamp: 2_880,
+                key_epoch: 1,
+            },
+            datagram: b"complete protected datagram".to_vec(),
+        };
+
+        let debug = format!("{packet:?}");
+
+        assert!(debug.contains("datagram_len: 27"));
+        assert!(!debug.contains("datagram:"));
+        assert!(!debug.contains("99, 111, 109"));
     }
 }

@@ -60,7 +60,7 @@ impl MediaHeader {
 }
 
 /// A bounded packet view borrowing directly from the received datagram.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, PartialEq)]
 pub struct MediaPacket<'a> {
     /// Parsed fixed fields.
     pub header: MediaHeader,
@@ -68,6 +68,17 @@ pub struct MediaPacket<'a> {
     pub authenticated_header: &'a [u8],
     /// Encrypted payload, including its authentication tag.
     pub ciphertext: &'a [u8],
+}
+
+impl fmt::Debug for MediaPacket<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("MediaPacket")
+            .field("header", &self.header)
+            .field("authenticated_header_len", &self.authenticated_header.len())
+            .field("ciphertext_len", &self.ciphertext.len())
+            .finish()
+    }
 }
 
 /// Failure returned before authentication or allocation is attempted.
@@ -188,6 +199,23 @@ mod tests {
             sample_timestamp: 960,
             key_epoch: 3,
         }
+    }
+
+    #[test]
+    fn packet_debug_omits_authenticated_header_and_ciphertext_bytes() {
+        let packet = MediaPacket {
+            header: header(),
+            authenticated_header: b"authenticated header",
+            ciphertext: b"encrypted packet bytes",
+        };
+
+        let debug = format!("{packet:?}");
+
+        assert!(debug.contains("authenticated_header_len: 20"));
+        assert!(debug.contains("ciphertext_len: 22"));
+        assert!(!debug.contains("authenticated_header:"));
+        assert!(!debug.contains("ciphertext:"));
+        assert!(!debug.contains("101, 110, 99"));
     }
 
     #[test]

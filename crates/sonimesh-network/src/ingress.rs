@@ -40,12 +40,22 @@ pub trait Authenticator {
 }
 
 /// Authenticated media returned by [`MediaIngress`].
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Eq, PartialEq)]
 pub struct ReceivedFrame<'a> {
     /// Authenticated media metadata.
     pub header: MediaHeader,
     /// Decrypted Opus payload in caller-owned storage.
     pub opus_payload: &'a [u8],
+}
+
+impl fmt::Debug for ReceivedFrame<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ReceivedFrame")
+            .field("header", &self.header)
+            .field("opus_payload_len", &self.opus_payload.len())
+            .finish()
+    }
 }
 
 /// Failure before an Opus payload may reach the per-stream decoder.
@@ -265,6 +275,27 @@ mod tests {
                 successful_calls: 0,
             },
         )
+    }
+
+    #[test]
+    fn received_frame_debug_omits_decrypted_opus_bytes() {
+        let frame = ReceivedFrame {
+            header: MediaHeader {
+                flags: 0,
+                session_id: 7,
+                stream_id: 9,
+                sequence: 3,
+                sample_timestamp: 2_880,
+                key_epoch: 1,
+            },
+            opus_payload: b"decrypted opus bytes",
+        };
+
+        let debug = format!("{frame:?}");
+
+        assert!(debug.contains("opus_payload_len: 20"));
+        assert!(!debug.contains("opus_payload:"));
+        assert!(!debug.contains("100, 101, 99"));
     }
 
     #[test]
