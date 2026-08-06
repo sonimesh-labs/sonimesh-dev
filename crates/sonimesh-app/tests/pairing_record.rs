@@ -38,6 +38,17 @@ fn valid_proof_consumes_the_record_exactly_once() {
     assert_eq!(verifier_calls.get(), 1);
     record.expire();
     assert_eq!(record.state(), PairingRecordState::Consumed);
+
+    record.revoke();
+    assert_eq!(record.state(), PairingRecordState::Revoked);
+    assert_eq!(
+        record.verify_proof(12, source(1), || {
+            verifier_calls.set(verifier_calls.get() + 1);
+            PairingProofVerification::Verified
+        }),
+        Err(PairingRecordError::Revoked)
+    );
+    assert_eq!(verifier_calls.get(), 1);
 }
 
 #[test]
