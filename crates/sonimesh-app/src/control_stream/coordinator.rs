@@ -598,3 +598,25 @@ fn identity_from_stop(stop: &StopStream) -> Result<MediaStreamIdentity, ControlS
             .map_err(|_| ControlStreamError::InvalidEpoch)?,
     })
 }
+
+#[cfg(test)]
+mod token_tests {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    use super::{ControlStreamError, issue_process_unique_token};
+
+    #[test]
+    fn process_unique_tokens_fail_closed_after_issuing_u64_max_once() {
+        let counter = AtomicU64::new(u64::MAX - 1);
+
+        assert!(matches!(
+            issue_process_unique_token(&counter, ControlStreamError::OperationTokenExhausted),
+            Ok(value) if value == u64::MAX
+        ));
+        assert!(matches!(
+            issue_process_unique_token(&counter, ControlStreamError::OperationTokenExhausted),
+            Err(ControlStreamError::OperationTokenExhausted)
+        ));
+        assert_eq!(counter.load(Ordering::Relaxed), u64::MAX);
+    }
+}
