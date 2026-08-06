@@ -358,5 +358,12 @@ mod tests {
             Err(IngressError::UnknownStream)
         );
         assert!(plaintext.iter().all(|byte| *byte == 0));
+        assert_eq!(ingress.authenticator.successful_calls, 0);
+
+        let frame = ingress
+            .receive(&datagram(3, &[0xAA, 1]), &mut plaintext)
+            .expect("unknown stream must not consume the authentic packet sequence");
+        assert_eq!(frame.opus_payload, [1]);
+        assert_eq!(ingress.authenticator.successful_calls, 1);
     }
 }
