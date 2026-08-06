@@ -63,7 +63,7 @@ pub enum DecodeStep {
 }
 
 /// Failure while admitting or decoding a stream-local frame.
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Eq, PartialEq)]
 pub enum DecodeWorkerError<DecoderError> {
     /// An authenticated payload exceeded inline jitter storage.
     Frame(FrameError),
@@ -71,6 +71,16 @@ pub enum DecodeWorkerError<DecoderError> {
     InvalidOutputLength,
     /// The concrete decoder rejected an authenticated frame or PLC request.
     Decoder(DecoderError),
+}
+
+impl<DecoderError> fmt::Debug for DecodeWorkerError<DecoderError> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Frame(error) => formatter.debug_tuple("Frame").field(error).finish(),
+            Self::InvalidOutputLength => formatter.write_str("InvalidOutputLength"),
+            Self::Decoder(_) => formatter.write_str("Decoder"),
+        }
+    }
 }
 
 impl<DecoderError: fmt::Display> fmt::Display for DecodeWorkerError<DecoderError> {

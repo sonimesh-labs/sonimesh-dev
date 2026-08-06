@@ -21,6 +21,24 @@ impl fmt::Display for TestDecodeError {
 
 impl std::error::Error for TestDecodeError {}
 
+struct SensitiveDecoderError;
+
+impl fmt::Debug for SensitiveDecoderError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("encoded frame bytes: [0xDE, 0xAD, 0xBE, 0xEF]")
+    }
+}
+
+#[test]
+fn decoder_error_debug_omits_arbitrary_decoder_details() {
+    let error = DecodeWorkerError::Decoder(SensitiveDecoderError);
+
+    let debug = format!("{error:?}");
+
+    assert_eq!(debug, "Decoder");
+    assert!(!debug.contains("0xDE"));
+}
+
 struct TestDecoder;
 
 impl FrameDecoder for TestDecoder {
