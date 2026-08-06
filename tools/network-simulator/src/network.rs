@@ -328,6 +328,26 @@ mod tests {
     }
 
     #[test]
+    fn duplicate_copy_is_dropped_independently_when_capacity_is_exhausted() {
+        let mut profile = NetworkProfile::stable(1);
+        profile.duplicate_percent = 100;
+        profile.max_in_flight_packets = 1;
+        let mut network = VirtualNetwork::new(profile).unwrap();
+
+        assert_eq!(
+            network.send(0, 7_u32, 100),
+            SendOutcome::Scheduled { copies: 1 }
+        );
+        assert_eq!(network.queued_copies(), 1);
+        assert_eq!(network.stats().scheduled_copies, 1);
+        assert_eq!(network.stats().duplicate_copies, 0);
+        assert_eq!(network.stats().capacity_dropped_copies, 1);
+
+        let delivered = network.drain_ready(u64::MAX);
+        assert_eq!(delivered.len(), 1);
+        assert_eq!(delivered[0].payload, 7);
+    }
+    #[test]
     fn capacity_drop_does_not_consume_bandwidth_time() {
         let mut profile = NetworkProfile::stable(1);
         profile.base_delay_ms = 0;
