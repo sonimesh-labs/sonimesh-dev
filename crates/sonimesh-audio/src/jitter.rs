@@ -20,7 +20,7 @@ impl fmt::Display for FrameError {
 impl std::error::Error for FrameError {}
 
 /// One encoded frame stored inline in a bounded jitter buffer.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct EncodedFrame<const MAX_PAYLOAD: usize> {
     /// Packet sequence.
     pub sequence: u32,
@@ -28,6 +28,17 @@ pub struct EncodedFrame<const MAX_PAYLOAD: usize> {
     pub sample_timestamp: u64,
     payload_len: usize,
     payload: [u8; MAX_PAYLOAD],
+}
+
+impl<const MAX_PAYLOAD: usize> fmt::Debug for EncodedFrame<MAX_PAYLOAD> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("EncodedFrame")
+            .field("sequence", &self.sequence)
+            .field("sample_timestamp", &self.sample_timestamp)
+            .field("payload_len", &self.payload_len)
+            .finish_non_exhaustive()
+    }
 }
 
 impl<const MAX_PAYLOAD: usize> EncodedFrame<MAX_PAYLOAD> {
@@ -271,6 +282,22 @@ mod tests {
             &[sequence.to_le_bytes()[0]],
         )
         .unwrap()
+    }
+
+    #[test]
+    fn encoded_frame_debug_omits_payload_bytes() {
+        let frame = EncodedFrame::<8>::new(7, 960, &[0xde, 0xad, 0xbe, 0xef]).unwrap();
+
+        let debug = format!("{frame:?}");
+
+        assert!(debug.contains("sequence: 7"));
+        assert!(debug.contains("sample_timestamp: 960"));
+        assert!(debug.contains("payload_len: 4"));
+        assert!(!debug.contains("222"));
+        assert!(!debug.contains("173"));
+        assert!(!debug.contains("190"));
+        assert!(!debug.contains("239"));
+        assert!(!debug.contains("deadbeef"));
     }
 
     #[test]
