@@ -16,12 +16,24 @@ use sonimesh_protocol::{MAX_MEDIA_PLAINTEXT_LEN, MediaKeyContext, SessionSecret}
 use crate::{FreshSessionInstallError, ReceiverPipelineError, ReceiverStreamPipeline};
 
 /// Error while constructing a UDP-backed receiver pipeline.
-#[derive(Debug)]
 pub enum UdpReceiverSetupError {
     /// The local media socket could not be bound or configured.
     Socket(io::Error),
     /// The protected ingress could not derive its initial media key.
     Pipeline(ProtectedIngressError),
+}
+
+impl fmt::Debug for UdpReceiverSetupError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Socket(error) => formatter
+                .debug_struct("Socket")
+                .field("kind", &error.kind())
+                .field("raw_os_error", &error.raw_os_error())
+                .finish(),
+            Self::Pipeline(error) => formatter.debug_tuple("Pipeline").field(error).finish(),
+        }
+    }
 }
 
 impl fmt::Display for UdpReceiverSetupError {
@@ -392,6 +404,27 @@ mod error_source_tests {
         assert!(
             Error::source(&UdpReceiverError::<MediaCryptoError>::SourceEndpointChanged).is_none()
         );
+    }
+}
+
+#[cfg(test)]
+mod setup_debug_tests {
+    use std::io;
+
+    use super::UdpReceiverSetupError;
+
+    #[test]
+    fn socket_failure_debug_omits_the_free_form_error_message() {
+        let error = UdpReceiverSetupError::Socket(io::Error::new(
+            io::ErrorKind::AddrNotAvailable,
+            "bind failed for 192.168.10.42:49321",
+        ));
+
+        let debug = format!("{error:?}");
+
+        assert!(debug.contains("AddrNotAvailable"));
+        assert!(!debug.contains("192.168.10.42"));
+        assert!(!debug.contains("bind failed"));
     }
 }
 
