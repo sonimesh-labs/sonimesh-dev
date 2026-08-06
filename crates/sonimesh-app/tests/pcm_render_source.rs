@@ -26,6 +26,23 @@ fn renders_across_blocks_without_losing_the_cursor() {
 }
 
 #[test]
+fn empty_callback_does_not_consume_pcm_or_record_underflow() {
+    let (mut producer, consumer) = realtime_pcm_queue::<4>(4).unwrap();
+    producer.push(&[1.0, 2.0]);
+    let counters = Arc::new(StreamCounters::default());
+    let mut source = PcmRenderSource::new(consumer, Arc::clone(&counters));
+    let mut empty = [];
+
+    source.render(&mut empty);
+
+    assert_eq!(producer.len(), 1);
+    assert_eq!(counters.snapshot().pcm_underflows, 0);
+    let mut output = [f32::NAN; 2];
+    source.render(&mut output);
+    assert_samples(&output, &[1.0, 2.0]);
+}
+
+#[test]
 fn underflow_fills_silence_and_records_one_callback_event() {
     let (_producer, consumer) = realtime_pcm_queue::<4>(4).unwrap();
     let counters = Arc::new(StreamCounters::default());
