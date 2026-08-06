@@ -4,14 +4,14 @@ use std::net::TcpStream;
 
 use sonimesh_protocol::{
     ControlFrameError, Envelope, MAX_CONTROL_FRAME_BYTES, decode_control_frame,
-    encode_control_frame,
+    encode_control_frame, envelope,
 };
 
 const CONTROL_LENGTH_BYTES: usize = 4;
 const CONTROL_BUFFER_BYTES: usize = CONTROL_LENGTH_BYTES + MAX_CONTROL_FRAME_BYTES;
 
 /// One result from polling an untrusted control stream.
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Eq, PartialEq)]
 pub enum UntrustedControlPoll {
     /// No complete frame is ready and the socket would block.
     Empty,
@@ -19,6 +19,32 @@ pub enum UntrustedControlPoll {
     Frame(Envelope),
     /// The peer closed the connection or framing failed permanently.
     Closed,
+}
+
+impl fmt::Debug for UntrustedControlPoll {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Empty => formatter.write_str("Empty"),
+            Self::Closed => formatter.write_str("Closed"),
+            Self::Frame(envelope) => formatter
+                .debug_struct("Frame")
+                .field("protocol_version", &envelope.protocol_version)
+                .field("request_id", &envelope.request_id)
+                .field("payload_kind", &control_payload_kind(envelope))
+                .finish(),
+        }
+    }
+}
+
+fn control_payload_kind(envelope: &Envelope) -> &'static str {
+    match envelope.payload.as_ref() {
+        Some(envelope::Payload::Hello(_)) => "hello",
+        Some(envelope::Payload::StartStream(_)) => "start_stream",
+        Some(envelope::Payload::StopStream(_)) => "stop_stream",
+        Some(envelope::Payload::StreamStatus(_)) => "stream_status",
+        Some(envelope::Payload::Error(_)) => "error",
+        None => "missing",
+    }
 }
 
 /// Failure while reading or validating an untrusted control stream.
@@ -301,4 +327,75 @@ enum ReadState {
     WouldBlock,
     Closed,
     Io(io::Error),
+}
+
+#[cfg(test)]
+mod debug_tests {
+    use sonimesh_protocol::{ControlError, Hello, StreamStatus};
+
+    use super::{Envelope, UntrustedControlPoll, control_payload_kind, envelope};
+
+    #[test]
+    fn control_poll_debug_omits_untrusted_payload_text() {
+        let polls = [
+            (
+                UntrustedControlPoll::Frame(Envelope {
+                    protocol_version: 1,
+                    request_id: 7,
+                    payload: Some(envelope::Payload::Hello(Hello {
+                        supported_versions: vec![1],
+                        capabilities: vec![1],
+                        display_name: "Private Android device".to_owned(),
+                    })),
+                }),
+                "hello",
+                "Private Android device",
+            ),
+            (
+                UntrustedControlPoll::Frame(Envelope {
+                    protocol_version: 1,
+                    request_id: 8,
+                    payload: Some(envelope::Payload::StreamStatus(StreamStatus {
+                        media_session_id: 1,
+                        stream_id: 1,
+                        state: 5,
+                        detail: "Private stream failure detail".to_owned(),
+                    })),
+                }),
+                "stream_status",
+                "Private stream failure detail",
+            ),
+            (
+                UntrustedControlPoll::Frame(Envelope {
+                    protocol_version: 1,
+                    request_id: 9,
+                    payload: Some(envelope::Payload::Error(ControlError {
+                        code: 3,
+                        retryable: false,
+                        detail: "Private control error detail".to_owned(),
+                    })),
+                }),
+                "error",
+                "Private control error detail",
+            ),
+        ];
+
+        for (poll, payload_kind, private_text) in polls {
+            let debug = format!("{poll:?}");
+
+            assert!(debug.contains(&format!("payload_kind: \"{payload_kind}\"")));
+            assert!(!debug.contains(private_text));
+        }
+    }
+
+    #[test]
+    fn control_payload_kind_handles_a_missing_payload() {
+        let envelope = Envelope {
+            protocol_version: 1,
+            request_id: 1,
+            payload: None,
+        };
+
+        assert_eq!(control_payload_kind(&envelope), "missing");
+    }
 }
