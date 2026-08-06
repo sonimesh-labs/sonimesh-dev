@@ -593,6 +593,50 @@ fn fresh_session_rejects_reusing_the_active_session_id() {
 }
 
 #[test]
+fn rejected_fresh_session_preserves_admitted_playout_state() {
+    let secret = SessionSecret::new([0xA5; 32]);
+    let active = context(2);
+    let mut sealer = MediaSealer::new(&secret, active).unwrap();
+    let packet = sealer.seal(0, 0, &[3]).unwrap();
+    let (producer, mut consumer) = realtime_pcm_queue::<4>(4).unwrap();
+    let counters = Arc::new(StreamCounters::default());
+    let mut pipeline = ReceiverStreamPipeline::<ByteDecoder, 4, 8, 4>::new(
+        &secret,
+        active,
+        ByteDecoder,
+        producer,
+        Arc::clone(&counters),
+        0,
+    )
+    .unwrap();
+    let mut plaintext = [0_u8; 8];
+
+    pipeline.receive(&packet.datagram, &mut plaintext).unwrap();
+
+    assert_eq!(
+        pipeline.install_fresh_session(&secret, active, 0),
+        Err(sonimesh_app::FreshSessionInstallError::ReusedSessionId)
+    );
+    assert_eq!(pipeline.context(), active);
+    assert!(matches!(
+        pipeline.decode_next().unwrap(),
+        DecodeStep::Decoded { sequence: 0, .. }
+    ));
+
+    let mut output = [f32::NAN; 4];
+    assert!(matches!(
+        consumer.pop_into(&mut output),
+        RealtimePcmPopOutcome::Filled {
+            sequence: 0,
+            discontinuity: false,
+            ..
+        }
+    ));
+    assert!((output[0] - 3.0).abs() < f32::EPSILON);
+    assert_eq!(counters.snapshot().stream_resets, 0);
+}
+
+#[test]
 fn replacing_pcm_producer_restarts_only_the_output_side_of_one_stream() {
     let secret = SessionSecret::new([0xA5; 32]);
     let context = context(2);
