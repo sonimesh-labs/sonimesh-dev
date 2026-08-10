@@ -107,6 +107,11 @@ fields. The Kotlin test also rejects truncated, mismatched, and oversized length
 prefixes, a `media_key_epoch` above `65535`, zero status identities, and
 unspecified or unknown status/error enums.
 
+The Android host-JVM `HelloNegotiationVectorTest` mirrors `negotiate_hello`'s
+canonical capability intersection and the bounded hello admission rules (16
+capabilities, 8 supported versions, 128-byte display name) so the sender and
+receiver select the same version-one control capability set.
+
 This is wire-format and host-test evidence only. The Android production source
 set still contains no control transport, generated Protobuf client, pairing, or
 TLS session.
