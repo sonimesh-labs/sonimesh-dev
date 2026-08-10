@@ -32,6 +32,12 @@ and record both the source reference and desktop output through a common audio
 interface or calibrated acoustic setup. Compute the correlation offset and report
 p50, p95, and p99 over multiple runs.
 
+The `tools/latency-measurement` crate implements this workflow: it generates a
+deterministic MLS reference WAVE file, reads WAVE recordings, estimates the
+correlation offset, and prints per-run offsets plus a p50/p95/p99 summary. It
+is a software measurement aid; the acoustic setup and the report metadata
+above still define what the result means.
+
 Every report must include Android model and build, Windows version, Wi-Fi AP,
 network band, output device, sample rate, channel count, buffer mode, frame size,
 Opus bitrate, jitter mode, and limiter configuration.
