@@ -95,6 +95,24 @@ mod tests {
     }
 
     #[test]
+    fn keeps_the_oldest_sequence_in_window_after_a_maximum_in_window_shift() {
+        let mut window = ReplayWindow::new();
+        assert_eq!(window.accept_authenticated(1), ReplayDecision::Accepted);
+        assert_eq!(
+            window.accept_authenticated(1 + (WINDOW_BITS - 1)),
+            ReplayDecision::Accepted
+        );
+        // The previous highest is still inside the window (distance 63).
+        assert_eq!(window.accept_authenticated(1), ReplayDecision::Duplicate);
+        // One more advance pushes it out (distance 64).
+        assert_eq!(
+            window.accept_authenticated(1 + WINDOW_BITS),
+            ReplayDecision::Accepted
+        );
+        assert_eq!(window.accept_authenticated(1), ReplayDecision::TooOld);
+    }
+
+    #[test]
     fn accepts_the_oldest_in_window_sequence_at_the_maximum_value() {
         let mut window = ReplayWindow::new();
         assert_eq!(
