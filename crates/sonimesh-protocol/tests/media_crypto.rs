@@ -1,8 +1,8 @@
 //! AEAD, context, and caller-owned-output tests for protected media packets.
 
 use sonimesh_protocol::{
-    MAX_MEDIA_PLAINTEXT_LEN, MediaCryptoError, MediaDirection, MediaKeyContext, MediaOpener,
-    MediaSealer, SessionSecret, parse_media_packet,
+    MAX_MEDIA_DATAGRAM_LEN, MAX_MEDIA_PLAINTEXT_LEN, MediaCryptoError, MediaDirection,
+    MediaKeyContext, MediaOpener, MediaSealer, SessionSecret, parse_media_packet,
 };
 
 fn context(stream_id: u32, direction: MediaDirection) -> MediaKeyContext {
@@ -134,6 +134,31 @@ fn rejects_plaintext_larger_than_media_capacity() {
             .sequence,
         0
     );
+}
+
+#[test]
+fn seals_and_opens_at_the_exact_media_plaintext_capacity() {
+    let secret = secret();
+    let context = context(7, MediaDirection::AndroidToDesktop);
+    let mut sealer = MediaSealer::new(&secret, context).unwrap();
+    let opener = MediaOpener::new(&secret, context).unwrap();
+    let plaintext = vec![0x7F_u8; MAX_MEDIA_PLAINTEXT_LEN];
+
+    let protected = sealer.seal(0, 0, &plaintext).unwrap();
+
+    // At the exact capacity the sealed datagram lands on the no-fragmentation
+    // limit, so the bounded UDP receiver also accepts it.
+    assert_eq!(protected.datagram.len(), MAX_MEDIA_DATAGRAM_LEN);
+    let mut output = vec![0_u8; MAX_MEDIA_PLAINTEXT_LEN];
+    let length = opener
+        .open(
+            parse_media_packet(&protected.datagram).unwrap(),
+            &mut output,
+        )
+        .unwrap();
+
+    assert_eq!(length, MAX_MEDIA_PLAINTEXT_LEN);
+    assert_eq!(output, plaintext);
 }
 
 #[test]
