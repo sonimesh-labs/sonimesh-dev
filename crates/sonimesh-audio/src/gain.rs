@@ -81,4 +81,35 @@ mod tests {
         );
         assert!((gain.current() - 1.0).abs() < 1e-6);
     }
+
+    #[test]
+    fn zero_length_ramp_applies_the_target_immediately() {
+        let mut gain = GainSmoother::new(0.5);
+        gain.set_target(1.0, 0);
+
+        assert!((gain.current() - 1.0).abs() < 1e-6);
+        let mut samples = [0.5; 4];
+        gain.apply(&mut samples);
+        assert!(samples.iter().all(|sample| (*sample - 0.5).abs() < 1e-6));
+        assert!((gain.current() - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn completed_ramp_holds_the_target_gain_without_drift() {
+        let mut gain = GainSmoother::new(0.0);
+        gain.set_target(1.0, 3);
+        let mut ramp = [1.0; 3];
+        gain.apply(&mut ramp);
+        assert!(
+            ramp.iter()
+                .zip([1.0 / 3.0, 2.0 / 3.0, 1.0])
+                .all(|(left, right)| (left - right).abs() < 1e-6)
+        );
+        assert!((gain.current() - 1.0).abs() < 1e-6);
+
+        let mut held = [1.0; 3];
+        gain.apply(&mut held);
+        assert!(held.iter().all(|sample| (*sample - 1.0).abs() < 1e-6));
+        assert!((gain.current() - 1.0).abs() < 1e-6);
+    }
 }

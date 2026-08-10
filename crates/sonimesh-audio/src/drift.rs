@@ -309,4 +309,25 @@ mod tests {
             DriftDecision::Adjust { ppm: 0 }
         );
     }
+
+    #[test]
+    fn adjustment_stays_within_the_ratio_cap_under_sustained_error() {
+        let config = DriftConfig {
+            max_adjustment_ppm: 100,
+            max_step_ppm: 100,
+            ..CONFIG
+        };
+
+        let mut controller = DriftController::new(config).unwrap();
+        for _ in 0..8 {
+            assert_eq!(controller.update(7), DriftDecision::Adjust { ppm: 100 });
+        }
+        assert_eq!(controller.adjustment_ppm(), 100);
+
+        let mut controller = DriftController::new(config).unwrap();
+        for _ in 0..8 {
+            assert_eq!(controller.update(1), DriftDecision::Adjust { ppm: -100 });
+        }
+        assert_eq!(controller.adjustment_ppm(), -100);
+    }
 }
