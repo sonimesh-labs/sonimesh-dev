@@ -1,6 +1,6 @@
 //! Bounded incremental control framing tests without transport authentication.
 
-use std::io::{Read, Write};
+use std::io::{ErrorKind, Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
 use std::thread;
 
@@ -127,6 +127,108 @@ fn writer_rejects_a_second_frame_while_the_first_is_pending() {
         writer.send(&hello_envelope()),
         Err(UntrustedControlError::WritePending)
     ));
+}
+
+#[test]
+fn pending_write_resumes_after_the_peer_drains() {
+    let (mut peer, mut writer) = connected_reader();
+    let frame = hello_frame();
+    let mut completed_sends = 0_u32;
+
+    // Fill the loopback send buffer until the writer reports backpressure.
+    let mut pending = false;
+    for _ in 0..100_000 {
+        match writer.send(&hello_envelope()).unwrap() {
+            UntrustedControlWrite::Complete => completed_sends += 1,
+            UntrustedControlWrite::Pending => {
+                pending = true;
+                break;
+            }
+            UntrustedControlWrite::Closed => panic!("loopback writer closed unexpectedly"),
+        }
+    }
+    assert!(pending, "loopback socket never applied backpressure");
+    assert!(completed_sends > 0);
+
+    peer.set_nonblocking(true).unwrap();
+    let mut drain = [0_u8; 8_192];
+    let mut received_bytes = 0_usize;
+
+    // Finish the partially buffered frame while draining the peer.
+    let mut resumed = false;
+    for _ in 0..100_000 {
+        match writer.flush_write() {
+            Ok(UntrustedControlWrite::Complete) => {
+                resumed = true;
+                break;
+            }
+            Ok(UntrustedControlWrite::Pending) => {}
+            Ok(UntrustedControlWrite::Closed) => panic!("writer closed while flushing"),
+            Err(error) => panic!("writer flush failed after peer backpressure: {error}"),
+        }
+        match peer.read(&mut drain) {
+            Ok(read) => received_bytes += read,
+            Err(error) if error.kind() == ErrorKind::WouldBlock => {}
+            Err(error) => panic!("peer read failed while resuming the pending frame: {error}"),
+        }
+        thread::yield_now();
+    }
+    assert!(
+        resumed,
+        "pending control frame never completed after peer drain"
+    );
+
+    // A fresh frame is accepted and fully flushed once the resume completed.
+    let mut fresh_submitted = false;
+    let mut fresh_completed = false;
+    for _ in 0..100_000 {
+        if !fresh_submitted {
+            match writer.send(&hello_envelope()) {
+                Ok(UntrustedControlWrite::Complete) => {
+                    fresh_completed = true;
+                    break;
+                }
+                Ok(UntrustedControlWrite::Pending) => fresh_submitted = true,
+                Ok(UntrustedControlWrite::Closed) => {
+                    panic!("loopback writer closed while sending a fresh frame")
+                }
+                Err(error) => panic!("writer rejected a fresh frame after resuming: {error}"),
+            }
+        }
+        match writer.flush_write() {
+            Ok(UntrustedControlWrite::Complete) => {
+                fresh_completed = true;
+                break;
+            }
+            Ok(UntrustedControlWrite::Pending) => {}
+            Ok(UntrustedControlWrite::Closed) => panic!("writer closed while flushing"),
+            Err(error) => panic!("writer flush failed for the fresh frame: {error}"),
+        }
+        match peer.read(&mut drain) {
+            Ok(read) => received_bytes += read,
+            Err(error) if error.kind() == ErrorKind::WouldBlock => {}
+            Err(error) => panic!("peer read failed while flushing the fresh frame: {error}"),
+        }
+        thread::yield_now();
+    }
+    assert!(
+        fresh_completed,
+        "writer did not complete a fresh frame after resuming"
+    );
+
+    // Closing the writer sends FIN; drain until EOF and verify every accepted
+    // frame arrived intact.
+    drop(writer);
+    loop {
+        match peer.read(&mut drain) {
+            Ok(0) => break,
+            Ok(read) => received_bytes += read,
+            Err(error) if error.kind() == ErrorKind::WouldBlock => thread::yield_now(),
+            Err(error) => panic!("peer read failed while draining after close: {error}"),
+        }
+    }
+    let expected = usize::try_from(completed_sends + 2).unwrap() * frame.len();
+    assert_eq!(received_bytes, expected);
 }
 
 #[test]
