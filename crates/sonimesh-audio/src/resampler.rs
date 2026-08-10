@@ -270,6 +270,40 @@ mod tests {
         );
     }
 
+    #[test]
+    fn ppm_adjustment_sign_matches_the_drift_consumption_convention() {
+        let mut resampler = LinearResampler::new(48_000, 48_000, 1).unwrap();
+        let output_frames = 100_000;
+
+        let nominal = resampler.input_frames_for_output(output_frames).unwrap();
+        assert_eq!(nominal, output_frames + 2);
+
+        resampler
+            .set_rate_adjustment_ppm(MAX_DRIFT_ADJUSTMENT_PPM)
+            .unwrap();
+        let faster = resampler.input_frames_for_output(output_frames).unwrap();
+        assert_eq!(faster, 100_202);
+        assert!(faster > nominal);
+
+        resampler
+            .set_rate_adjustment_ppm(-MAX_DRIFT_ADJUSTMENT_PPM)
+            .unwrap();
+        let slower = resampler.input_frames_for_output(output_frames).unwrap();
+        assert_eq!(slower, 99_802);
+        assert!(slower < nominal);
+    }
+
+    #[test]
+    fn input_capacity_helper_returns_none_only_on_overflow() {
+        let mut resampler = LinearResampler::new(192_000, 8_000, 1).unwrap();
+        resampler
+            .set_rate_adjustment_ppm(MAX_DRIFT_ADJUSTMENT_PPM)
+            .unwrap();
+
+        assert_eq!(resampler.input_frames_for_output(1), Some(27));
+        assert_eq!(resampler.input_frames_for_output(usize::MAX), None);
+    }
+
     fn assert_samples(actual: &[f32], expected: &[f32]) {
         assert_eq!(actual.len(), expected.len());
         assert!(
