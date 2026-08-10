@@ -86,6 +86,13 @@ protocol.
 | Server proof | `f347ab32006e8acb220f91b0e826bbd58257c55773d7284f8794217f896b4601` |
 | Media root | `25b4e89fb655ed5a9a9ad9b28e6ac7e6d49c1246757b75f20a120167bfd2452a` |
 
+Both the Rust `matches_published_role_proof_and_media_root_vector` test and the
+Android host-JVM `PairingTlsBindingVectorTest` reproduce the client proof,
+server proof, and media root above from the public inputs and reject changed
+inputs or a reflected role. The Android test is a host JVM unit test; it is
+derivation evidence only and does not prove Android runtime TLS exporter
+behavior, key storage, or an authenticated pairing source.
+
 Implementations must reject a changed pairing ID, pairing secret, exporter,
 protocol version, or peer role. They must not accept a proof from another TLS
 connection, another QR invitation, or the same role. These pure tests do not
