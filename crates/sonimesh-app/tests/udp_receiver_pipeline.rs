@@ -5,11 +5,16 @@ use std::net::UdpSocket;
 use std::sync::Arc;
 use std::thread;
 
-use sonimesh_app::{UdpPollOutcome, UdpReceiverError, UdpReceiverPipeline};
-use sonimesh_audio::{DecodeStep, FrameDecoder, RealtimePcmPopOutcome, realtime_pcm_queue};
+use sonimesh_app::{ReceiverPipelineError, UdpPollOutcome, UdpReceiverError, UdpReceiverPipeline};
+use sonimesh_audio::{
+    DecodeStep, DecodeWorkerError, FrameDecoder, FrameError, RealtimePcmPopOutcome,
+    realtime_pcm_queue,
+};
 use sonimesh_diagnostics::StreamCounters;
-use sonimesh_network::UdpReceiveError;
-use sonimesh_protocol::{MediaDirection, MediaKeyContext, MediaSealer, SessionSecret};
+use sonimesh_network::{IngressError, UdpReceiveError};
+use sonimesh_protocol::{
+    MediaDirection, MediaKeyContext, MediaSealer, ReplayDecision, SessionSecret,
+};
 
 struct ByteDecoder;
 
@@ -102,6 +107,70 @@ fn receives_authenticated_udp_media_before_decode() {
     ));
     assert!((output[0] - 7.0).abs() < f32::EPSILON);
     assert_eq!(counters.snapshot().authenticated_packets, 1);
+}
+
+#[test]
+fn authenticated_empty_payload_is_rejected_before_decoder_and_does_not_pin_source() {
+    let counters = Arc::new(StreamCounters::default());
+    let (mut pipeline, mut consumer) = pipeline(Arc::clone(&counters));
+    let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let secret = SessionSecret::new([0xA5; 32]);
+    let mut sealer = MediaSealer::new(&secret, context()).unwrap();
+    let empty = sealer.seal(0, 0, &[]).unwrap();
+
+    send(&sender, &pipeline, &empty.datagram);
+    assert!(matches!(
+        poll_until_datagram(&mut pipeline),
+        Err(UdpReceiverError::Pipeline(ReceiverPipelineError::Decode(
+            DecodeWorkerError::Frame(FrameError::EmptyPayload)
+        )))
+    ));
+    assert_eq!(pipeline.pinned_source(), None);
+    let mut output = [f32::NAN; 4];
+    assert!(matches!(
+        consumer.pop_into(&mut output),
+        RealtimePcmPopOutcome::Underflow { .. }
+    ));
+    assert!(output.iter().all(|sample| sample.abs() < f32::EPSILON));
+
+    // The authenticated packet still consumed its sequence, so a replay is
+    // rejected as a duplicate instead of retrying decoder admission.
+    send(&sender, &pipeline, &empty.datagram);
+    assert!(matches!(
+        poll_until_datagram(&mut pipeline),
+        Err(UdpReceiverError::Pipeline(ReceiverPipelineError::Ingress(
+            IngressError::Replay(ReplayDecision::Duplicate)
+        )))
+    ));
+    assert_eq!(pipeline.pinned_source(), None);
+
+    // A valid packet from the same sender establishes the pin normally. The
+    // rejected empty frame still occupies its timeline slot, so playout first
+    // conceals the missing sequence before decoding the valid frame.
+    let valid = sealer.seal(0, 960, &[7]).unwrap();
+    send(&sender, &pipeline, &valid.datagram);
+    assert!(matches!(
+        poll_until_datagram(&mut pipeline),
+        Ok(UdpPollOutcome::Processed { .. })
+    ));
+    assert_eq!(pipeline.pinned_source(), Some(sender.local_addr().unwrap()));
+    assert!(matches!(
+        pipeline.decode_next().unwrap(),
+        DecodeStep::Concealed { sequence: 0, .. }
+    ));
+    assert!(matches!(
+        pipeline.decode_next().unwrap(),
+        DecodeStep::Decoded {
+            sequence: 1,
+            samples: 1,
+            ..
+        }
+    ));
+
+    let snapshot = counters.snapshot();
+    assert_eq!(snapshot.authenticated_packets, 3);
+    assert_eq!(snapshot.rejected_packets, 2);
+    assert_eq!(snapshot.duplicate_packets, 1);
 }
 
 #[test]
