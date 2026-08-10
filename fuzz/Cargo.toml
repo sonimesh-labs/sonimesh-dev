@@ -42,3 +42,10 @@ path = "fuzz_targets/pairing_binding.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "untrusted_control_stream"
+path = "fuzz_targets/untrusted_control_stream.rs"
+test = false
+doc = false
+bench = false

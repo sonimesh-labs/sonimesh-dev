@@ -21,6 +21,10 @@ production workspace so `libfuzzer-sys` never becomes a shipping dependency.
   pure TLS-binding helper. It asserts exact opposite-role verification while
   rejecting reflected and altered proofs; it does not create a TLS connection,
   QR payload, identity, pairing record, or trust state.
+- `untrusted_control_stream` feeds arbitrary bytes through the bounded
+  length-prefixed control framing state machine in a deterministic per-input
+  chunk size, exercising partial length and payload reads, oversize and
+  zero-length rejection, and peer-close retirement.
 
 ## Run a target
 
@@ -33,6 +37,7 @@ cargo +nightly-2026-07-18 fuzz run control_frame -- -max_len=66052
 cargo +nightly-2026-07-18 fuzz run media_packet -- -max_len=1264
 cargo +nightly-2026-07-18 fuzz run protected_media_ingress -- -max_len=1264
 cargo +nightly-2026-07-18 fuzz run pairing_binding -- -max_len=4096
+cargo +nightly-2026-07-18 fuzz run untrusted_control_stream -- -max_len=65540
 ```
 
 `cargo-fuzz` supports LibFuzzer execution on x86-64 Unix-like systems rather

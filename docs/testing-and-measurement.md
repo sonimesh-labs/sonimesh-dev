@@ -84,7 +84,8 @@ The Rust foundation keeps deterministic adversarial-input regressions for bounde
 control/media parsing and invalid AEAD payloads. The independent `fuzz/`
 workspace adds LibFuzzer targets for arbitrary control frames, mutations of
 all five published control payload shapes, near-valid media packets,
-protected ingress, and the pure pairing-binding verifier. The ingress target
+protected ingress, the pure pairing-binding verifier, and bounded
+length-prefixed control framing fed through arbitrary chunk boundaries. The ingress target
 also constructs valid AEAD packets carrying arbitrary bounded payload bytes,
 retries them as replay, uses undersized output storage, deterministically mutates a
 flags byte in the authenticated header and a tag byte on every input plus a ciphertext byte for nonempty
