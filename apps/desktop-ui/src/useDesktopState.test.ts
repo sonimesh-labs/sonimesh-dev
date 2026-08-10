@@ -9,6 +9,10 @@ const desktopBridgeMock = vi.hoisted(() => ({
   expirePairing: vi.fn(),
   revokePairing: vi.fn(),
   selectOutput: vi.fn(),
+  simulateConnectionLost: vi.fn(),
+  simulateOutputLost: vi.fn(),
+  simulateOutputRestored: vi.fn(),
+  simulateReconnected: vi.fn(),
   snapshot: vi.fn(),
   startStream: vi.fn(),
   stopStream: vi.fn(),
@@ -96,6 +100,19 @@ describe('useDesktopState', () => {
     await Promise.all([first, second])
 
     expect(wrapper.vm.snapshot?.session).toBe('streaming')
+  })
+
+  it('forwards a preview connection-loss simulation and projects its snapshot', async () => {
+    desktopBridgeMock.snapshot.mockResolvedValueOnce(receiverSnapshot('ready'))
+    const wrapper = mount(StateHarness)
+    await flushPromises()
+
+    desktopBridgeMock.simulateConnectionLost.mockResolvedValueOnce(receiverSnapshot('reconnecting'))
+
+    await wrapper.vm.simulateConnectionLost()
+
+    expect(desktopBridgeMock.simulateConnectionLost).toHaveBeenCalledTimes(1)
+    expect(wrapper.vm.snapshot?.session).toBe('reconnecting')
   })
 
   it('forwards a revoke command and projects the returned snapshot', async () => {

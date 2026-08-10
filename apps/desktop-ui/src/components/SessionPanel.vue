@@ -16,6 +16,10 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   start: []
   stop: []
+  simulateConnectionLost: []
+  simulateReconnected: []
+  simulateOutputLost: []
+  simulateOutputRestored: []
 }>()
 
 const labels: Record<SessionState, string> = {
@@ -114,6 +118,21 @@ const displayState = computed(() => (props.preview ? `Preview ${props.state}` : 
       <button v-else class="danger-action" :disabled="busy" @click="emit('stop')">
         <Square :size="16" aria-hidden="true" />
         <span>{{ preview ? 'Stop listening preview' : 'Stop listening' }}</span>
+      </button>
+    </div>
+
+    <div v-if="preview" class="simulate-actions" aria-label="Preview fault simulation">
+      <button v-if="state === 'ready' || state === 'streaming'" class="preview-action" :disabled="busy" @click="emit('simulateConnectionLost')">
+        Simulate connection loss
+      </button>
+      <button v-if="state === 'reconnecting'" class="preview-action" :disabled="busy" @click="emit('simulateReconnected')">
+        Reconnect
+      </button>
+      <button v-if="state === 'streaming'" class="preview-action" :disabled="busy" @click="emit('simulateOutputLost')">
+        Simulate output loss
+      </button>
+      <button v-if="state === 'outputUnavailable'" class="preview-action" :disabled="busy" @click="emit('simulateOutputRestored')">
+        Restore output
       </button>
     </div>
   </section>

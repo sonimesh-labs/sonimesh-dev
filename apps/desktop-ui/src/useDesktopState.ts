@@ -31,6 +31,10 @@ export function useDesktopState() {
   const createPairing = () => run(() => desktopBridge.createPairing())
   const expirePairing = () => run(() => desktopBridge.expirePairing())
   const revokePairing = () => run(() => desktopBridge.revokePairing())
+  const simulateConnectionLost = () => run(() => desktopBridge.simulateConnectionLost())
+  const simulateReconnected = () => run(() => desktopBridge.simulateReconnected())
+  const simulateOutputLost = () => run(() => desktopBridge.simulateOutputLost())
+  const simulateOutputRestored = () => run(() => desktopBridge.simulateOutputRestored())
 
   onMounted(refresh)
 
@@ -46,5 +50,9 @@ export function useDesktopState() {
     createPairing,
     expirePairing,
     revokePairing,
+    simulateConnectionLost,
+    simulateReconnected,
+    simulateOutputLost,
+    simulateOutputRestored,
   }
 }

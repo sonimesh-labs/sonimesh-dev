@@ -8,6 +8,10 @@ const desktopBridgeMock = vi.hoisted(() => ({
   expirePairing: vi.fn(),
   revokePairing: vi.fn(),
   selectOutput: vi.fn(),
+  simulateConnectionLost: vi.fn(),
+  simulateOutputLost: vi.fn(),
+  simulateOutputRestored: vi.fn(),
+  simulateReconnected: vi.fn(),
   snapshot: vi.fn(),
   startStream: vi.fn(),
   stopStream: vi.fn(),
@@ -81,6 +85,26 @@ describe('App', () => {
 
     pendingSnapshot.resolve(previewSnapshot())
     await flushPromises()
+  })
+
+  it('simulates connection loss from the preview session panel', async () => {
+    desktopBridgeMock.snapshot.mockResolvedValueOnce(previewSnapshot())
+    const wrapper = mount(App)
+    await flushPromises()
+
+    desktopBridgeMock.simulateConnectionLost.mockResolvedValueOnce({
+      ...previewSnapshot(),
+      session: 'reconnecting',
+    })
+
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === 'Simulate connection loss')!
+      .trigger('click')
+    await flushPromises()
+
+    expect(desktopBridgeMock.simulateConnectionLost).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('.session-chip').text()).toBe('Preview reconnecting')
   })
 
   it('revokes synthetic preview trust from the pairing panel', async () => {

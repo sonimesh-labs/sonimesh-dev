@@ -23,6 +23,83 @@ describe('SessionPanel', () => {
     expect(wrapper.get('button').text()).toContain('Stop listening preview')
   })
 
+  it('exposes preview fault simulation only in preview mode', async () => {
+    const wrapper = mount(SessionPanel, {
+      props: {
+        state: 'streaming',
+        pairingState: 'consumed',
+        preview: true,
+        busy: false,
+      },
+    })
+
+    expect(wrapper.findAll('.simulate-actions button').map((button) => button.text())).toEqual([
+      'Simulate connection loss',
+      'Simulate output loss',
+    ])
+
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === 'Simulate connection loss')!
+      .trigger('click')
+    expect(wrapper.emitted('simulateConnectionLost')).toHaveLength(1)
+
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === 'Simulate output loss')!
+      .trigger('click')
+    expect(wrapper.emitted('simulateOutputLost')).toHaveLength(1)
+  })
+
+  it('offers reconnect and restore actions for recovery preview states', async () => {
+    const reconnecting = mount(SessionPanel, {
+      props: {
+        state: 'reconnecting',
+        pairingState: 'consumed',
+        preview: true,
+        busy: false,
+      },
+    })
+    expect(reconnecting.findAll('.simulate-actions button').map((button) => button.text())).toEqual([
+      'Reconnect',
+    ])
+    await reconnecting
+      .findAll('button')
+      .find((button) => button.text() === 'Reconnect')!
+      .trigger('click')
+    expect(reconnecting.emitted('simulateReconnected')).toHaveLength(1)
+
+    const unavailable = mount(SessionPanel, {
+      props: {
+        state: 'outputUnavailable',
+        pairingState: 'consumed',
+        preview: true,
+        busy: false,
+      },
+    })
+    expect(unavailable.findAll('.simulate-actions button').map((button) => button.text())).toEqual([
+      'Restore output',
+    ])
+    await unavailable
+      .findAll('button')
+      .find((button) => button.text() === 'Restore output')!
+      .trigger('click')
+    expect(unavailable.emitted('simulateOutputRestored')).toHaveLength(1)
+  })
+
+  it('hides fault simulation from the live receiver view', () => {
+    const wrapper = mount(SessionPanel, {
+      props: {
+        state: 'streaming',
+        pairingState: 'consumed',
+        busy: false,
+      },
+    })
+
+    expect(wrapper.find('.simulate-actions').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Simulate connection loss')
+  })
+
   it('preserves receiver copy when preview is omitted', () => {
     const wrapper = mount(SessionPanel, {
       props: {

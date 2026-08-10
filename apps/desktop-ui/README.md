@@ -12,7 +12,11 @@ invitation as authenticated. The bridge mirrors the Rust pairing owner's
 trust (pairing → `revoked`, session → `idle`) and makes the invitation-creation
 flow (create → active countdown → expire) reachable from the running app. The
 preview never simulates a sender verifying an invitation, so after revocation
-the adapter stays in the invitation lifecycle until the page is reloaded. It
+the adapter stays in the invitation lifecycle until the page is reloaded. The
+preview also mirrors the session owner's platform events: connection loss and
+output loss can be simulated from the session panel (trusted → `reconnecting`,
+`streaming` → `outputUnavailable`), with reconnect and output restore returning
+to `ready` and `streaming`, so recovery UI is exercisable without hardware. It
 must never receive PCM, Opus frames, keys, or realtime callbacks.
 
 The future bridge should project the Rust `DesktopControlSnapshot` after the

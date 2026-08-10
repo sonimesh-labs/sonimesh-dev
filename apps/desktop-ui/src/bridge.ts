@@ -8,6 +8,14 @@ export interface DesktopBridge {
   createPairing(): Promise<DesktopSnapshot>
   expirePairing(): Promise<DesktopSnapshot>
   revokePairing(): Promise<DesktopSnapshot>
+  /** Preview-only: simulates losing the control connection from a trusted session. */
+  simulateConnectionLost(): Promise<DesktopSnapshot>
+  /** Preview-only: simulates a reconnected control connection returning to ready. */
+  simulateReconnected(): Promise<DesktopSnapshot>
+  /** Preview-only: simulates the active output device disappearing. */
+  simulateOutputLost(): Promise<DesktopSnapshot>
+  /** Preview-only: simulates a recreated output device resuming streaming. */
+  simulateOutputRestored(): Promise<DesktopSnapshot>
 }
 
 const previewOutput: OutputDevice[] = [
@@ -97,6 +105,37 @@ export class PreviewDesktopBridge implements DesktopBridge {
       this.pairingExpiresAtMillis = null
       this.snapshotState.pairing = { state: 'revoked', expiresInSeconds: null }
       this.snapshotState.session = 'idle'
+    }
+    return this.copy()
+  }
+
+  async simulateConnectionLost(): Promise<DesktopSnapshot> {
+    if (
+      ['ready', 'streaming'].includes(this.snapshotState.session) &&
+      this.snapshotState.pairing.state === 'consumed'
+    ) {
+      this.snapshotState.session = 'reconnecting'
+    }
+    return this.copy()
+  }
+
+  async simulateReconnected(): Promise<DesktopSnapshot> {
+    if (this.snapshotState.session === 'reconnecting') {
+      this.snapshotState.session = 'ready'
+    }
+    return this.copy()
+  }
+
+  async simulateOutputLost(): Promise<DesktopSnapshot> {
+    if (this.snapshotState.session === 'streaming') {
+      this.snapshotState.session = 'outputUnavailable'
+    }
+    return this.copy()
+  }
+
+  async simulateOutputRestored(): Promise<DesktopSnapshot> {
+    if (this.snapshotState.session === 'outputUnavailable') {
+      this.snapshotState.session = 'streaming'
     }
     return this.copy()
   }

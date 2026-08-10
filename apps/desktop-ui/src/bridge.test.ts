@@ -89,6 +89,44 @@ describe('PreviewDesktopBridge', () => {
     expect(snapshot.pairing.state).toBe('revoked')
   })
 
+  it('simulates connection loss from a trusted session and reconnects to ready', async () => {
+    const bridge = new PreviewDesktopBridge()
+    await bridge.startStream()
+
+    const reconnecting = await bridge.simulateConnectionLost()
+    expect(reconnecting.session).toBe('reconnecting')
+    expect(reconnecting.pairing.state).toBe('consumed')
+
+    const reconnected = await bridge.simulateReconnected()
+    expect(reconnected.session).toBe('ready')
+  })
+
+  it('does not simulate connection loss without a trusted session', async () => {
+    const bridge = new PreviewDesktopBridge()
+    await bridge.revokePairing()
+
+    const snapshot = await bridge.simulateConnectionLost()
+    expect(snapshot.session).toBe('idle')
+  })
+
+  it('simulates output loss from streaming and restores it', async () => {
+    const bridge = new PreviewDesktopBridge()
+    await bridge.startStream()
+
+    const unavailable = await bridge.simulateOutputLost()
+    expect(unavailable.session).toBe('outputUnavailable')
+
+    const restored = await bridge.simulateOutputRestored()
+    expect(restored.session).toBe('streaming')
+  })
+
+  it('does not simulate output loss outside streaming', async () => {
+    const bridge = new PreviewDesktopBridge()
+
+    const snapshot = await bridge.simulateOutputLost()
+    expect(snapshot.session).toBe('ready')
+  })
+
   it('does not replace an active preview invitation', async () => {
     const bridge = fixedTimeBridge()
     await bridge.revokePairing()
