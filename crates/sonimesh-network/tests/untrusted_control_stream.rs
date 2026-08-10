@@ -196,6 +196,55 @@ fn malformed_protobuf_terminates_the_reader_after_protocol_error() {
 }
 
 #[test]
+fn read_protocol_error_retires_the_write_direction() {
+    let (mut sender, mut reader) = connected_reader();
+    sender.write_all(&[0, 0, 0, 1, 0xFF]).unwrap();
+
+    for _ in 0..1_000 {
+        match reader.poll() {
+            Err(UntrustedControlError::Protocol(ControlFrameError::Decode(_))) => {
+                assert_eq!(
+                    reader.send(&hello_envelope()).unwrap(),
+                    UntrustedControlWrite::Closed
+                );
+                assert_eq!(reader.flush_write().unwrap(), UntrustedControlWrite::Closed);
+                return;
+            }
+            Ok(UntrustedControlPoll::Empty) => thread::yield_now(),
+            Ok(UntrustedControlPoll::Frame(_)) => panic!("malformed frame was decoded"),
+            Ok(UntrustedControlPoll::Closed) => panic!("reader closed before protocol error"),
+            Err(other) => panic!("unexpected reader error: {other:?}"),
+        }
+    }
+    panic!("malformed control frame was not rejected");
+}
+
+#[test]
+fn retired_reader_never_decodes_later_valid_frames() {
+    let (mut sender, mut reader) = connected_reader();
+    // A valid frame already buffered behind the malformed one must never be
+    // decoded once the read-side protocol error retires the stream.
+    sender.write_all(&[0, 0, 0, 1, 0xFF]).unwrap();
+    sender.write_all(&hello_frame()).unwrap();
+
+    for _ in 0..1_000 {
+        match reader.poll() {
+            Err(UntrustedControlError::Protocol(ControlFrameError::Decode(_))) => {
+                for _ in 0..10 {
+                    assert_eq!(reader.poll().unwrap(), UntrustedControlPoll::Closed);
+                }
+                return;
+            }
+            Ok(UntrustedControlPoll::Empty) => thread::yield_now(),
+            Ok(UntrustedControlPoll::Frame(_)) => panic!("retired reader decoded a later frame"),
+            Ok(UntrustedControlPoll::Closed) => panic!("reader closed before protocol error"),
+            Err(other) => panic!("unexpected reader error: {other:?}"),
+        }
+    }
+    panic!("malformed control frame was not rejected");
+}
+
+#[test]
 fn oversized_length_terminates_the_untrusted_reader() {
     let (mut sender, mut reader) = connected_reader();
     let length = u32::try_from(MAX_CONTROL_FRAME_BYTES + 1).unwrap();
