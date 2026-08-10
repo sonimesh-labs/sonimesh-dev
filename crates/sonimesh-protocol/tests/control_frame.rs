@@ -196,6 +196,41 @@ fn rejects_truncated_oversized_and_inconsistent_frames() {
 }
 
 #[test]
+fn declared_length_at_maximum_capacity_is_not_frame_too_large() {
+    // The capacity check must be strictly greater-than: a declared payload of
+    // exactly MAX_CONTROL_FRAME_BYTES stays in bounds and fails later framing
+    // checks, never with FrameTooLarge.
+    let maximum = u32::try_from(MAX_CONTROL_FRAME_BYTES)
+        .unwrap()
+        .to_be_bytes();
+    assert!(matches!(
+        decode_control_frame(&maximum),
+        Err(ControlFrameError::LengthMismatch)
+    ));
+}
+
+#[test]
+fn maximum_size_frame_reaches_validation_without_frame_too_large() {
+    // A complete frame at the exact 64 KiB capacity must pass the capacity and
+    // length checks and reach envelope validation instead of being rejected as
+    // oversized. All-zero bytes decode to an empty envelope, which fails the
+    // version check first.
+    let mut frame = Vec::with_capacity(4 + MAX_CONTROL_FRAME_BYTES);
+    frame.extend_from_slice(
+        &u32::try_from(MAX_CONTROL_FRAME_BYTES)
+            .unwrap()
+            .to_be_bytes(),
+    );
+    frame.resize(4 + MAX_CONTROL_FRAME_BYTES, 0);
+    // All-zero bytes begin a protobuf field but the following zero tag is an
+    // invalid field number, so the bounded decode fails without a capacity or
+    // length error.
+    assert!(matches!(
+        decode_control_frame(&frame),
+        Err(ControlFrameError::Decode(_))
+    ));
+}
+#[test]
 fn rejects_malformed_and_semantically_incomplete_envelopes() {
     assert!(matches!(
         decode_control_frame(&[0, 0, 0, 1, 0xFF]),

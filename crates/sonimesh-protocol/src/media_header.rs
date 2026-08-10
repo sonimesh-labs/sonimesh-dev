@@ -277,6 +277,42 @@ mod tests {
             Err(PacketParseError::DatagramTooLarge)
         );
     }
+    #[test]
+    fn accepts_a_complete_datagram_at_the_fragmentation_limit() {
+        let encoded = header().encode(MAX_ENCRYPTED_PAYLOAD_LEN).unwrap();
+        assert_eq!(encoded.len(), MEDIA_HEADER_LEN);
+        let mut datagram = encoded.to_vec();
+        datagram.extend(std::iter::repeat_n(0, MAX_ENCRYPTED_PAYLOAD_LEN));
+        assert_eq!(datagram.len(), MAX_MEDIA_DATAGRAM_LEN);
+
+        let packet = parse_media_packet(&datagram).unwrap();
+
+        assert_eq!(packet.authenticated_header.len(), MEDIA_HEADER_LEN);
+        assert_eq!(packet.ciphertext.len(), MAX_ENCRYPTED_PAYLOAD_LEN);
+    }
+
+    #[test]
+    fn accepts_the_maximum_extended_header_as_authenticated_data() {
+        let encoded = header().encode(2).unwrap();
+        let mut datagram = encoded.to_vec();
+        datagram[6..8].copy_from_slice(&u16::try_from(MAX_HEADER_LEN).unwrap().to_be_bytes());
+        datagram.extend(std::iter::repeat_n(0xA5, MAX_HEADER_LEN - MEDIA_HEADER_LEN));
+        datagram.extend_from_slice(&[1, 2]);
+
+        let packet = parse_media_packet(&datagram).unwrap();
+
+        assert_eq!(packet.authenticated_header.len(), MAX_HEADER_LEN);
+        assert_eq!(
+            &packet.authenticated_header[..MEDIA_HEADER_LEN],
+            &datagram[..MEDIA_HEADER_LEN]
+        );
+        assert!(
+            packet.authenticated_header[MEDIA_HEADER_LEN..]
+                .iter()
+                .all(|byte| *byte == 0xA5)
+        );
+        assert_eq!(packet.ciphertext, [1, 2]);
+    }
 
     #[test]
     fn arbitrary_short_inputs_never_panic() {

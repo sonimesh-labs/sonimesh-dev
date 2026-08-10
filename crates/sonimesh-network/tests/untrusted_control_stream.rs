@@ -288,6 +288,29 @@ fn four_byte_payload_is_read_and_rejected_as_protocol_not_close() {
 }
 
 #[test]
+fn zero_length_payload_is_rejected_as_a_protocol_error() {
+    let (mut sender, mut reader) = connected_reader();
+    // A declared payload length of zero skips the payload read and decodes the
+    // length prefix itself: it must fail semantic validation and retire the
+    // stream instead of yielding an empty frame.
+    sender.write_all(&[0, 0, 0, 0]).unwrap();
+
+    for _ in 0..1_000 {
+        match reader.poll() {
+            Err(UntrustedControlError::Protocol(ControlFrameError::UnsupportedVersion(0))) => {
+                assert_eq!(reader.poll().unwrap(), UntrustedControlPoll::Closed);
+                return;
+            }
+            Ok(UntrustedControlPoll::Empty) => thread::yield_now(),
+            Ok(UntrustedControlPoll::Frame(_)) => panic!("empty frame was decoded"),
+            Ok(UntrustedControlPoll::Closed) => panic!("reader closed before protocol error"),
+            Err(other) => panic!("unexpected reader error: {other:?}"),
+        }
+    }
+    panic!("zero-length control payload was never rejected");
+}
+
+#[test]
 fn peer_close_is_reported_without_treating_partial_data_as_a_frame() {
     let (mut sender, mut reader) = connected_reader();
     sender.write_all(&[0, 0]).unwrap();
