@@ -420,3 +420,169 @@ fn authenticated_jitter_resync_retires_old_pcm_and_keeps_the_resync_packet() {
     );
     assert!((output[0] - 3.0).abs() < f32::EPSILON);
 }
+#[test]
+fn authenticated_pipeline_compensates_deterministic_burst_loss() {
+    let mut profile = NetworkProfile::stable(0xB0E5_7E1A);
+    profile.base_delay_ms = 0;
+    profile.jitter_ms = 0;
+    profile.burst_interval_packets = 4;
+    profile.burst_length_packets = 2;
+    let mut network = VirtualNetwork::new(profile).unwrap();
+    let secret = SessionSecret::new([0xA5; 32]);
+    let context = context();
+    let mut sealer = MediaSealer::new(&secret, context).unwrap();
+    let mut ingress = ProtectedMediaIngress::new(&secret, context).unwrap();
+    let (pcm_producer, mut pcm_consumer) = realtime_pcm_queue::<1>(4).unwrap();
+    let mut worker = StreamDecodeWorker::<LabDecoder, 16, 8, 1>::new(LabDecoder, pcm_producer, 0);
+    let mut plaintext = [0_u8; 8];
+    let mut next_send = 0_u32;
+    let mut next_playout = 0_u32;
+    let mut rejected = 0_u32;
+    let mut plc_frames = 0_u32;
+    let mut rendered = 0_u32;
+    let mut jitter_resets = 0_u32;
+    let end_ms = TARGET_MS + u64::from(FRAMES - 1) * FRAME_MS + 100;
+
+    for now_ms in 0..=end_ms {
+        if next_send < FRAMES && now_ms == u64::from(next_send) * FRAME_MS {
+            let datagram = media_datagram(&mut sealer, next_send);
+            let payload_bytes = u64::try_from(datagram.len()).unwrap_or(u64::MAX);
+            network.send(now_ms, datagram, payload_bytes);
+            next_send += 1;
+        }
+
+        for delivery in network.drain_ready(now_ms) {
+            match ingress.receive(&delivery.payload, &mut plaintext) {
+                Ok(frame) => {
+                    match worker
+                        .admit(
+                            frame.header.sequence,
+                            frame.header.sample_timestamp,
+                            frame.opus_payload,
+                        )
+                        .unwrap()
+                    {
+                        InsertOutcome::Inserted | InsertOutcome::Reordered => {}
+                        InsertOutcome::Resynchronized { .. } => {
+                            worker.reset_after_jitter_resynchronization();
+                            jitter_resets += 1;
+                        }
+                        InsertOutcome::Duplicate | InsertOutcome::Late => rejected += 1,
+                        InsertOutcome::SequenceExhausted => {
+                            panic!("test sequence range must not exhaust")
+                        }
+                        InsertOutcome::Disabled => panic!("test jitter buffer must be enabled"),
+                    }
+                }
+                Err(_) => rejected += 1,
+            }
+        }
+
+        if next_playout < FRAMES && now_ms == TARGET_MS + u64::from(next_playout) * FRAME_MS {
+            plc_frames += u32::from(decode_and_render(
+                &mut worker,
+                &mut pcm_consumer,
+                next_playout,
+            ));
+            rendered += 1;
+            next_playout += 1;
+        }
+    }
+
+    // The first interval always passes, then a non-overlapping two-packet burst
+    // drops each subsequent interval boundary.
+    let expected_lost = u64::from((FRAMES - 1) / profile.burst_interval_packets)
+        * u64::from(profile.burst_length_packets);
+    assert_eq!(network.stats().burst_loss_packets, expected_lost);
+    assert_eq!(network.stats().random_loss_packets, 0);
+    assert_eq!(
+        (next_send, rendered, rejected, jitter_resets),
+        (FRAMES, FRAMES, 0, 0)
+    );
+    assert_eq!(u64::from(plc_frames), expected_lost);
+    assert!(network.queued_copies() <= profile.max_in_flight_packets);
+}
+
+#[test]
+fn authenticated_pipeline_stays_bounded_under_bandwidth_capacity_pressure() {
+    let mut profile = NetworkProfile::stable(0xC4A0_2026);
+    profile.base_delay_ms = 0;
+    profile.jitter_ms = 0;
+    profile.bandwidth_bytes_per_second = 560;
+    profile.max_in_flight_packets = 4;
+    let mut network = VirtualNetwork::new(profile).unwrap();
+    let secret = SessionSecret::new([0xA5; 32]);
+    let context = context();
+    let mut sealer = MediaSealer::new(&secret, context).unwrap();
+    let mut ingress = ProtectedMediaIngress::new(&secret, context).unwrap();
+    let (pcm_producer, mut pcm_consumer) = realtime_pcm_queue::<1>(4).unwrap();
+    let mut worker = StreamDecodeWorker::<LabDecoder, 16, 8, 1>::new(LabDecoder, pcm_producer, 0);
+    let mut plaintext = [0_u8; 8];
+    let mut next_send = 0_u32;
+    let mut next_playout = 0_u32;
+    let mut rejected = 0_u32;
+    let mut plc_frames = 0_u32;
+    let mut rendered = 0_u32;
+    let mut jitter_resets = 0_u32;
+    let end_ms = TARGET_MS + u64::from(FRAMES - 1) * FRAME_MS + 1_000;
+
+    for now_ms in 0..=end_ms {
+        if next_send < FRAMES && now_ms == u64::from(next_send) * FRAME_MS {
+            let datagram = media_datagram(&mut sealer, next_send);
+            let payload_bytes = u64::try_from(datagram.len()).unwrap_or(u64::MAX);
+            network.send(now_ms, datagram, payload_bytes);
+            next_send += 1;
+        }
+
+        for delivery in network.drain_ready(now_ms) {
+            match ingress.receive(&delivery.payload, &mut plaintext) {
+                Ok(frame) => {
+                    match worker
+                        .admit(
+                            frame.header.sequence,
+                            frame.header.sample_timestamp,
+                            frame.opus_payload,
+                        )
+                        .unwrap()
+                    {
+                        InsertOutcome::Inserted | InsertOutcome::Reordered => {}
+                        InsertOutcome::Resynchronized { .. } => {
+                            worker.reset_after_jitter_resynchronization();
+                            jitter_resets += 1;
+                        }
+                        InsertOutcome::Duplicate | InsertOutcome::Late => rejected += 1,
+                        InsertOutcome::SequenceExhausted => {
+                            panic!("test sequence range must not exhaust")
+                        }
+                        InsertOutcome::Disabled => panic!("test jitter buffer must be enabled"),
+                    }
+                }
+                Err(_) => rejected += 1,
+            }
+        }
+
+        if next_playout < FRAMES && now_ms == TARGET_MS + u64::from(next_playout) * FRAME_MS {
+            plc_frames += u32::from(decode_and_render(
+                &mut worker,
+                &mut pcm_consumer,
+                next_playout,
+            ));
+            rendered += 1;
+            next_playout += 1;
+        }
+    }
+
+    let stats = network.stats();
+    assert_eq!((next_send, rendered), (FRAMES, FRAMES));
+    assert!(stats.bandwidth_shaped_copies > 0);
+    assert!(stats.capacity_dropped_copies > 0);
+    assert!(rejected > 0);
+    assert!(plc_frames > 0);
+    assert_eq!(jitter_resets, 0);
+    // Every packet is either late-rejected after delivery or capacity-dropped.
+    assert_eq!(
+        u64::from(rejected) + stats.capacity_dropped_copies,
+        u64::from(FRAMES)
+    );
+    assert!(network.queued_copies() <= profile.max_in_flight_packets);
+}
