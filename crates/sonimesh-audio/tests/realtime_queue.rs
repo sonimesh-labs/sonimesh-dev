@@ -134,3 +134,38 @@ fn concurrent_transfer_preserves_order_and_accounts_for_overwrite() {
     let overwritten = producer_thread.join().unwrap();
     assert_eq!(received_count + overwritten, TOTAL);
 }
+#[test]
+fn oversized_block_is_rejected_without_consuming_capacity() {
+    let (mut producer, consumer) = realtime_pcm_queue::<2>(1).unwrap();
+
+    assert_eq!(
+        producer.push(&[1.0, 2.0, 3.0]),
+        RealtimePcmPushOutcome::BlockTooLarge
+    );
+    assert_eq!(producer.len(), 0);
+    assert_eq!(consumer.active_len(), 0);
+}
+
+#[test]
+fn partial_block_preserves_initialized_samples_and_zeroes_the_tail() {
+    let (mut producer, mut consumer) = realtime_pcm_queue::<4>(1).unwrap();
+    assert_eq!(
+        producer.push(&[0.5, -0.25]),
+        RealtimePcmPushOutcome::Inserted
+    );
+    let mut output = [f32::NAN; 4];
+
+    assert_eq!(
+        consumer.pop_into(&mut output),
+        RealtimePcmPopOutcome::Filled {
+            samples: 2,
+            sequence: 0,
+            discontinuity: false,
+            discarded_stale_blocks: 0,
+        }
+    );
+    assert!((output[0] - 0.5).abs() < f32::EPSILON);
+    assert!((output[1] + 0.25).abs() < f32::EPSILON);
+    assert!(output[2].abs() < f32::EPSILON);
+    assert!(output[3].abs() < f32::EPSILON);
+}
