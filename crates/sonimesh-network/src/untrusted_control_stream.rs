@@ -110,8 +110,8 @@ pub enum UntrustedControlWrite {
 /// This type only provides bounded framing and semantic Protobuf validation. It
 /// must be placed behind the future authenticated TLS/pairing transport before
 /// its envelopes can influence a trusted control session.
-pub struct UntrustedControlStream {
-    stream: TcpStream,
+pub struct UntrustedControlStream<S> {
+    stream: S,
     buffer: Box<[u8]>,
     write_buffer: Box<[u8]>,
     write_len: usize,
@@ -122,7 +122,7 @@ pub struct UntrustedControlStream {
     terminated: bool,
 }
 
-impl UntrustedControlStream {
+impl UntrustedControlStream<TcpStream> {
     /// Takes ownership of a TCP stream and configures it for non-blocking reads.
     ///
     /// # Errors
@@ -130,17 +130,7 @@ impl UntrustedControlStream {
     /// Returns an operating-system error when non-blocking mode cannot be set.
     pub fn from_stream(stream: TcpStream) -> Result<Self, io::Error> {
         stream.set_nonblocking(true)?;
-        Ok(Self {
-            stream,
-            buffer: vec![0; CONTROL_BUFFER_BYTES].into_boxed_slice(),
-            write_buffer: vec![0; CONTROL_BUFFER_BYTES].into_boxed_slice(),
-            write_len: 0,
-            write_offset: 0,
-            length_filled: 0,
-            frame_len: None,
-            frame_filled: 0,
-            terminated: false,
-        })
+        Ok(Self::from_io(stream))
     }
 
     /// Returns the peer endpoint for control-domain connection bookkeeping.
@@ -150,6 +140,27 @@ impl UntrustedControlStream {
     /// Returns an operating-system error when the peer endpoint cannot be queried.
     pub fn peer_addr(&self) -> Result<std::net::SocketAddr, io::Error> {
         self.stream.peer_addr()
+    }
+}
+
+impl<S: Read + Write> UntrustedControlStream<S> {
+    /// Takes ownership of any byte stream used for bounded control framing.
+    ///
+    /// Unlike [`Self::from_stream`], this constructor does not configure
+    /// non-blocking mode; callers that need a non-blocking socket should use
+    /// the `TcpStream`-specific constructor.
+    pub fn from_io(stream: S) -> Self {
+        Self {
+            stream,
+            buffer: vec![0; CONTROL_BUFFER_BYTES].into_boxed_slice(),
+            write_buffer: vec![0; CONTROL_BUFFER_BYTES].into_boxed_slice(),
+            write_len: 0,
+            write_offset: 0,
+            length_filled: 0,
+            frame_len: None,
+            frame_filled: 0,
+            terminated: false,
+        }
     }
 
     /// Queues and advances one semantically validated control frame.

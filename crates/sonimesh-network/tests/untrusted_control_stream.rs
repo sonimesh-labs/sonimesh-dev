@@ -30,7 +30,7 @@ fn hello_frame() -> Vec<u8> {
     encode_control_frame(&hello_envelope()).unwrap()
 }
 
-fn connected_reader() -> (TcpStream, UntrustedControlStream) {
+fn connected_reader() -> (TcpStream, UntrustedControlStream<TcpStream>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
     let sender = TcpStream::connect(address).unwrap();
@@ -447,4 +447,147 @@ fn peer_close_after_a_complete_length_never_decodes_a_partial_payload() {
         }
     }
     panic!("peer close after complete length was not observed");
+}
+
+/// In-memory byte source that yields at most `chunk` bytes per read so the
+/// bounded framing state machine is exercised across arbitrary chunk boundaries.
+struct ChunkedBytes {
+    data: Vec<u8>,
+    offset: usize,
+    chunk: usize,
+}
+
+impl ChunkedBytes {
+    fn new(data: Vec<u8>, chunk: usize) -> Self {
+        Self {
+            data,
+            offset: 0,
+            chunk,
+        }
+    }
+}
+
+impl Read for ChunkedBytes {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if self.offset >= self.data.len() {
+            return Ok(0);
+        }
+        let count = (self.data.len() - self.offset)
+            .min(self.chunk)
+            .min(buf.len());
+        buf[..count].copy_from_slice(&self.data[self.offset..self.offset + count]);
+        self.offset += count;
+        Ok(count)
+    }
+}
+
+impl Write for ChunkedBytes {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Drains a chunked reader until closure or error, returning decoded request IDs.
+fn drain_frames(
+    stream: &mut UntrustedControlStream<ChunkedBytes>,
+) -> (Vec<u64>, Option<UntrustedControlError>) {
+    let mut request_ids = Vec::new();
+    let mut error = None;
+    for _ in 0..4096 {
+        match stream.poll() {
+            Ok(UntrustedControlPoll::Empty) => {}
+            Ok(UntrustedControlPoll::Frame(envelope)) => request_ids.push(envelope.request_id),
+            Ok(UntrustedControlPoll::Closed) => break,
+            Err(failure) => {
+                error = Some(failure);
+                break;
+            }
+        }
+    }
+    (request_ids, error)
+}
+
+#[test]
+fn in_memory_one_byte_chunks_decode_the_hello_frame() {
+    let mut stream = UntrustedControlStream::from_io(ChunkedBytes::new(hello_frame(), 1));
+
+    let (request_ids, error) = drain_frames(&mut stream);
+
+    assert!(error.is_none());
+    assert_eq!(request_ids, vec![7]);
+}
+
+#[test]
+fn in_memory_chunked_oversized_length_is_rejected_and_retires() {
+    let length = u32::try_from(MAX_CONTROL_FRAME_BYTES + 1).unwrap();
+    let mut stream =
+        UntrustedControlStream::from_io(ChunkedBytes::new(length.to_be_bytes().to_vec(), 1));
+
+    let (_, error) = drain_frames(&mut stream);
+
+    assert!(matches!(
+        error,
+        Some(UntrustedControlError::Protocol(
+            ControlFrameError::FrameTooLarge
+        ))
+    ));
+    assert_eq!(stream.poll().unwrap(), UntrustedControlPoll::Closed);
+}
+
+#[test]
+fn in_memory_chunked_zero_length_payload_is_rejected() {
+    let mut stream = UntrustedControlStream::from_io(ChunkedBytes::new(vec![0, 0, 0, 0], 1));
+
+    let (_, error) = drain_frames(&mut stream);
+
+    assert!(matches!(
+        error,
+        Some(UntrustedControlError::Protocol(
+            ControlFrameError::UnsupportedVersion(0)
+        ))
+    ));
+    assert_eq!(stream.poll().unwrap(), UntrustedControlPoll::Closed);
+}
+
+#[test]
+fn in_memory_eof_mid_payload_reports_closed_without_a_frame() {
+    let frame = hello_frame();
+    let truncated = frame[..=CONTROL_LENGTH_BYTES].to_vec();
+    let mut stream = UntrustedControlStream::from_io(ChunkedBytes::new(truncated, 2));
+
+    let (request_ids, error) = drain_frames(&mut stream);
+
+    assert!(error.is_none());
+    assert!(request_ids.is_empty());
+    assert_eq!(stream.poll().unwrap(), UntrustedControlPoll::Closed);
+}
+
+#[test]
+fn in_memory_consecutive_frames_decode_across_variable_chunks() {
+    let mut data = hello_frame();
+    data.extend_from_slice(&hello_frame());
+    let mut stream = UntrustedControlStream::from_io(ChunkedBytes::new(data, 7));
+
+    let (request_ids, error) = drain_frames(&mut stream);
+
+    assert!(error.is_none());
+    assert_eq!(request_ids, vec![7, 7]);
+}
+
+#[test]
+fn in_memory_writer_completes_a_frame_through_the_generic_constructor() {
+    let mut stream = UntrustedControlStream::from_io(ChunkedBytes::new(Vec::new(), 1));
+
+    assert_eq!(
+        stream.send(&hello_envelope()).unwrap(),
+        UntrustedControlWrite::Complete
+    );
+    assert_eq!(
+        stream.flush_write().unwrap(),
+        UntrustedControlWrite::Complete
+    );
 }
