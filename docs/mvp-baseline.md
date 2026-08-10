@@ -154,6 +154,12 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   diagnostics presentation for packet, PCM-queue/refill, and resampling state;
   it uses
   in-memory preview data and has no Tauri, audio, key, or realtime integration.
+- a dependency-free `tools/latency-measurement` crate that generates a
+  deterministic MLS reference WAVE, reads WAVE recordings (PCM 16/32, IEEE
+  float 32/64, and WAVE_FORMAT_EXTENSIBLE), estimates the correlation offset
+  with a bounded search window and distinctness check, and prints per-run
+  offsets plus p50/p95/p99 summaries; it is a software measurement aid, not a
+  physical latency proof.
 
 ## Initial capacities and policies
 

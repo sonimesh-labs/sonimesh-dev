@@ -68,6 +68,13 @@ renders silence while recording callback sizes. It is not part of ordinary CI:
 cargo run -p sonimesh-platform --example output_smoke --features cpal-output
 ~~~
 
+The `tools/latency-measurement` crate provides the deterministic MLS reference
+signal and correlation offset estimator used by the acoustic timing workflow.
+It has no dependencies and is covered by the ordinary `cargo test --workspace`
+gate; run `cargo run -p sonimesh-latency-measurement -- --help` for the
+`generate`, `measure`, and `summary` commands. It is a software measurement
+aid, not a physical latency proof.
+
 CI runs formatting, linting, and tests on Linux and Windows, and builds the
 capture-only Android bootstrap with Java 21, API 36, and Build Tools 35.0.0.
 The Android job proves a reproducible host build only; none of these checks
