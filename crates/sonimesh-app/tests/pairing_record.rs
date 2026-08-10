@@ -3,8 +3,8 @@
 use core::cell::Cell;
 
 use sonimesh_app::{
-    PairingAttemptOutcome, PairingId, PairingProofVerification, PairingRecord, PairingRecordError,
-    PairingRecordState, PairingSource,
+    MAX_PAIRING_ATTEMPTS_PER_SOURCE, PairingAttemptOutcome, PairingId, PairingProofVerification,
+    PairingRecord, PairingRecordError, PairingRecordState, PairingSource,
 };
 
 fn id() -> PairingId {
@@ -210,5 +210,35 @@ fn source_table_is_bounded_without_storing_raw_addresses() {
     assert_eq!(
         record.verify_proof(2, source(2), || PairingProofVerification::Rejected),
         Err(PairingRecordError::SourceTableFull)
+    );
+}
+
+#[test]
+fn constructor_rejects_zero_capacity_and_unbounded_attempt_limits() {
+    assert!(matches!(
+        PairingRecord::<0>::new(id(), 100, 1),
+        Err(PairingRecordError::ZeroSourceCapacity)
+    ));
+    assert!(matches!(
+        PairingRecord::<1>::new(id(), 100, 0),
+        Err(PairingRecordError::InvalidAttemptLimit)
+    ));
+    assert!(matches!(
+        PairingRecord::<1>::new(id(), 100, MAX_PAIRING_ATTEMPTS_PER_SOURCE + 1),
+        Err(PairingRecordError::InvalidAttemptLimit)
+    ));
+}
+
+#[test]
+fn observe_clock_regression_terminates_the_invitation_permanently() {
+    let mut record = PairingRecord::<1>::new(id(), 100, 1).unwrap();
+    assert_eq!(record.observe(50), Ok(PairingRecordState::Active));
+
+    assert_eq!(record.observe(49), Err(PairingRecordError::TimeRegressed));
+    assert_eq!(record.state(), PairingRecordState::Expired);
+    assert_eq!(record.observe(51), Ok(PairingRecordState::Expired));
+    assert_eq!(
+        record.verify_proof(51, source(1), || PairingProofVerification::Verified),
+        Err(PairingRecordError::Expired)
     );
 }
