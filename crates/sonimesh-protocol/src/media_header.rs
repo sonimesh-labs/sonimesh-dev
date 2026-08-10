@@ -328,4 +328,129 @@ mod tests {
             let _ = parse_media_packet(&bytes);
         }
     }
+
+    #[test]
+    fn round_trips_extreme_field_values() {
+        let header = MediaHeader {
+            flags: 0xFF,
+            session_id: u64::MAX,
+            stream_id: u32::MAX,
+            sequence: u32::MAX,
+            sample_timestamp: u64::MAX,
+            key_epoch: u16::MAX,
+        };
+        let encoded = header.encode(MAX_ENCRYPTED_PAYLOAD_LEN).unwrap();
+        let mut datagram = encoded.to_vec();
+        datagram.extend(std::iter::repeat_n(0x5A, MAX_ENCRYPTED_PAYLOAD_LEN));
+
+        let packet = parse_media_packet(&datagram).unwrap();
+
+        assert_eq!(packet.header, header);
+        assert_eq!(packet.ciphertext.len(), MAX_ENCRYPTED_PAYLOAD_LEN);
+    }
+
+    #[test]
+    fn round_trips_zero_fields_and_empty_payload() {
+        let header = MediaHeader {
+            flags: 0,
+            session_id: 0,
+            stream_id: 0,
+            sequence: 0,
+            sample_timestamp: 0,
+            key_epoch: 0,
+        };
+        let encoded = header.encode(0).unwrap();
+
+        let packet = parse_media_packet(&encoded).unwrap();
+
+        assert_eq!(packet.header, header);
+        assert!(packet.ciphertext.is_empty());
+    }
+
+    #[test]
+    fn round_trips_every_payload_length() {
+        for payload_len in 0..=MAX_ENCRYPTED_PAYLOAD_LEN {
+            let encoded = header().encode(payload_len).unwrap();
+            let mut datagram = encoded.to_vec();
+            datagram.extend(std::iter::repeat_n(0x11, payload_len));
+
+            let packet = parse_media_packet(&datagram).unwrap();
+
+            assert_eq!(packet.header, header());
+            assert_eq!(packet.ciphertext.len(), payload_len);
+        }
+    }
+
+    #[test]
+    fn rejects_bad_magic_and_unsupported_version() {
+        let mut datagram = header().encode(0).unwrap();
+        datagram[0] = 0;
+        assert_eq!(
+            parse_media_packet(&datagram),
+            Err(PacketParseError::InvalidMagic)
+        );
+
+        let mut datagram = header().encode(0).unwrap();
+        datagram[4] = 2;
+        assert_eq!(
+            parse_media_packet(&datagram),
+            Err(PacketParseError::UnsupportedVersion(2))
+        );
+    }
+
+    #[test]
+    fn rejects_header_length_outside_the_bounded_range() {
+        let mut below = header().encode(0).unwrap();
+        below[6..8].copy_from_slice(
+            &u16::try_from(MEDIA_HEADER_LEN - 1)
+                .expect("limit fits u16")
+                .to_be_bytes(),
+        );
+        assert_eq!(
+            parse_media_packet(&below),
+            Err(PacketParseError::InvalidHeaderLength)
+        );
+
+        let mut above = header().encode(0).unwrap();
+        above[6..8].copy_from_slice(
+            &u16::try_from(MAX_HEADER_LEN + 1)
+                .expect("limit fits u16")
+                .to_be_bytes(),
+        );
+        assert_eq!(
+            parse_media_packet(&above),
+            Err(PacketParseError::InvalidHeaderLength)
+        );
+    }
+
+    #[test]
+    fn rejects_payload_over_the_hard_limit_on_parse() {
+        // Keep the datagram at the fragmentation limit so the oversized
+        // declared payload, not the total size, triggers the rejection.
+        let mut datagram = header().encode(0).unwrap().to_vec();
+        datagram[32..34].copy_from_slice(
+            &u16::try_from(MAX_ENCRYPTED_PAYLOAD_LEN + 1)
+                .expect("limit fits u16")
+                .to_be_bytes(),
+        );
+        datagram.extend(std::iter::repeat_n(
+            0,
+            MAX_MEDIA_DATAGRAM_LEN - MEDIA_HEADER_LEN,
+        ));
+        assert_eq!(datagram.len(), MAX_MEDIA_DATAGRAM_LEN);
+        assert_eq!(
+            parse_media_packet(&datagram),
+            Err(PacketParseError::PayloadTooLarge)
+        );
+    }
+
+    #[test]
+    fn rejects_truncated_datagrams_below_the_fixed_header() {
+        for len in 0..MEDIA_HEADER_LEN {
+            assert_eq!(
+                parse_media_packet(&vec![0; len]),
+                Err(PacketParseError::Truncated)
+            );
+        }
+    }
 }
