@@ -150,6 +150,7 @@ fn authenticated_pipeline_stays_bounded_under_impairment() {
     let mut plc_frames = 0_u32;
     let mut rendered = 0_u32;
     let mut jitter_resets = 0_u32;
+    let mut reordered_admissions = 0_u32;
     let end_ms = TARGET_MS + u64::from(FRAMES - 1) * FRAME_MS + 100;
 
     for now_ms in 0..=end_ms {
@@ -171,7 +172,8 @@ fn authenticated_pipeline_stays_bounded_under_impairment() {
                         )
                         .unwrap()
                     {
-                        InsertOutcome::Inserted | InsertOutcome::Reordered => {}
+                        InsertOutcome::Inserted => {}
+                        InsertOutcome::Reordered => reordered_admissions += 1,
                         InsertOutcome::Resynchronized { .. } => {
                             worker.reset_after_jitter_resynchronization();
                             jitter_resets += 1;
@@ -207,6 +209,9 @@ fn authenticated_pipeline_stays_bounded_under_impairment() {
         plc_frames > 0
             && replayed > 0
             && network.stats().random_loss_packets > 0
+            && reordered_admissions > 0
+            && network.stats().reordered_packets > 0
+            && network.stats().duplicate_copies > 0
             && network.queued_copies() <= profile.max_in_flight_packets
     );
 }
