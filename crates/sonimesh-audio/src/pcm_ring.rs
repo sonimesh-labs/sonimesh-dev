@@ -152,4 +152,68 @@ mod tests {
         assert!((output[0] - 2.0).abs() < f32::EPSILON);
         assert!(output[1].abs() < f32::EPSILON);
     }
+
+    #[test]
+    fn rejects_block_larger_than_per_slot_capacity() {
+        let mut ring = PcmBlockRing::<2, 2>::new();
+        ring.push(&[1.0]);
+        assert_eq!(ring.push(&[2.0, 3.0, 4.0]), PcmPushOutcome::BlockTooLarge);
+
+        let mut output = [0.0; 2];
+        assert_eq!(
+            ring.pop_into(&mut output),
+            PcmPopOutcome::Filled { samples: 1 }
+        );
+        assert!((output[0] - 1.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn accepts_block_at_exact_slot_capacity() {
+        let mut ring = PcmBlockRing::<1, 3>::new();
+
+        assert_eq!(ring.push(&[1.0, 2.0, 3.0]), PcmPushOutcome::Inserted);
+        assert_eq!(ring.len(), 1);
+        let mut output = [0.0; 3];
+        assert_eq!(
+            ring.pop_into(&mut output),
+            PcmPopOutcome::Filled { samples: 3 }
+        );
+        assert!((output[0] - 1.0).abs() < f32::EPSILON);
+        assert!((output[1] - 2.0).abs() < f32::EPSILON);
+        assert!((output[2] - 3.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn disabled_zero_capacity_ring_never_accepts_or_plays() {
+        let mut ring = PcmBlockRing::<0, 2>::new();
+
+        assert_eq!(ring.push(&[1.0]), PcmPushOutcome::Disabled);
+        assert_eq!(ring.pop_into(&mut [0.0; 2]), PcmPopOutcome::Underflow);
+    }
+
+    #[test]
+    fn partial_pop_truncates_and_consumes_the_whole_block() {
+        let mut ring = PcmBlockRing::<2, 4>::new();
+        ring.push(&[1.0, 2.0, 3.0, 4.0]);
+        ring.push(&[5.0, 6.0]);
+
+        let mut first = [0.0; 2];
+        assert_eq!(
+            ring.pop_into(&mut first),
+            PcmPopOutcome::Filled { samples: 2 }
+        );
+        assert!((first[0] - 1.0).abs() < f32::EPSILON);
+        assert!((first[1] - 2.0).abs() < f32::EPSILON);
+
+        // The unread tail of the truncated block is discarded, not carried
+        // into a later callback; the next pop starts at the following block.
+        let mut second = [0.0; 2];
+        assert_eq!(
+            ring.pop_into(&mut second),
+            PcmPopOutcome::Filled { samples: 2 }
+        );
+        assert!((second[0] - 5.0).abs() < f32::EPSILON);
+        assert!((second[1] - 6.0).abs() < f32::EPSILON);
+        assert!(ring.is_empty());
+    }
 }
