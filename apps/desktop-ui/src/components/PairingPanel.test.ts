@@ -90,6 +90,56 @@ describe('PairingPanel', () => {
     expect(wrapper.text()).not.toContain('Sender verified')
   })
 
+  it('offers revoke for a consumed trust record while creation stays disabled', async () => {
+    const wrapper = mount(PairingPanel, {
+      props: {
+        pairing: { state: 'consumed', expiresInSeconds: null },
+        busy: false,
+      },
+    })
+
+    expect(wrapper.get('button.secondary-action').attributes('disabled')).toBeDefined()
+    await wrapper.get('button[aria-label="Revoke trust"]').trigger('click')
+    expect(wrapper.emitted('revoke')).toHaveLength(1)
+  })
+
+  it('labels the preview revoke action as preview-only', () => {
+    const wrapper = mount(PairingPanel, {
+      props: {
+        pairing: { state: 'consumed', expiresInSeconds: null },
+        busy: false,
+        preview: true,
+      },
+    })
+
+    expect(wrapper.find('button[aria-label="Revoke preview trust"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('Preview trust state')
+  })
+
+  it('enables creation from a revoked trust record without a revoke button', () => {
+    const wrapper = mount(PairingPanel, {
+      props: {
+        pairing: { state: 'revoked', expiresInSeconds: null },
+        busy: false,
+      },
+    })
+
+    expect(wrapper.find('button[aria-label="Revoke trust"]').exists()).toBe(false)
+    expect(wrapper.get('button.secondary-action').attributes('disabled')).toBeUndefined()
+  })
+
+  it('keeps revoke hidden while an invitation is active', () => {
+    const wrapper = mount(PairingPanel, {
+      props: {
+        pairing: { state: 'active', expiresInSeconds: 60 },
+        busy: false,
+      },
+    })
+
+    expect(wrapper.find('button[aria-label="Revoke trust"]').exists()).toBe(false)
+    expect(wrapper.find('button[aria-label="Expire invitation"]').exists()).toBe(true)
+  })
+
   it('uses elapsed time rather than interval count when a callback is delayed', async () => {
     let nowMillis = Date.parse('2026-08-05T00:00:00Z')
     let intervalCallback: (() => void) | undefined

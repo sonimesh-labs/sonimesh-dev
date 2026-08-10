@@ -30,6 +30,7 @@ export function useDesktopState() {
   const selectOutput = (id: string) => run(() => desktopBridge.selectOutput(id))
   const createPairing = () => run(() => desktopBridge.createPairing())
   const expirePairing = () => run(() => desktopBridge.expirePairing())
+  const revokePairing = () => run(() => desktopBridge.revokePairing())
 
   onMounted(refresh)
 
@@ -44,5 +45,6 @@ export function useDesktopState() {
     selectOutput,
     createPairing,
     expirePairing,
+    revokePairing,
   }
 }

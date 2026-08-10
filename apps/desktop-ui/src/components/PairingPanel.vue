@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue'
-import { Clock3, QrCode, X } from '@lucide/vue'
+import { Clock3, QrCode, ShieldX, X } from '@lucide/vue'
 
 import type { PairingStatus } from '../types'
 
@@ -14,6 +14,7 @@ const emit = defineEmits<{
   create: []
   expire: []
   refresh: []
+  revoke: []
 }>()
 
 const remainingSeconds = ref<number | null>(null)
@@ -147,6 +148,9 @@ onUnmounted(clearCountdown)
       </button>
       <button v-if="pairing.state === 'active'" class="icon-action subtle" :title="preview ? 'Expire preview invitation' : 'Expire invitation'" :aria-label="preview ? 'Expire preview invitation' : 'Expire invitation'" :disabled="busy" @click="emit('expire')">
         <X :size="18" aria-hidden="true" />
+      </button>
+      <button v-if="pairing.state === 'consumed'" class="icon-action subtle" :title="preview ? 'Revoke preview trust' : 'Revoke trust'" :aria-label="preview ? 'Revoke preview trust' : 'Revoke trust'" :disabled="busy" @click="emit('revoke')">
+        <ShieldX :size="18" aria-hidden="true" />
       </button>
     </div>
   </section>

@@ -6,6 +6,7 @@ import type { DesktopSnapshot } from './types'
 const desktopBridgeMock = vi.hoisted(() => ({
   createPairing: vi.fn(),
   expirePairing: vi.fn(),
+  revokePairing: vi.fn(),
   selectOutput: vi.fn(),
   snapshot: vi.fn(),
   startStream: vi.fn(),
@@ -80,6 +81,24 @@ describe('App', () => {
 
     pendingSnapshot.resolve(previewSnapshot())
     await flushPromises()
+  })
+
+  it('revokes synthetic preview trust from the pairing panel', async () => {
+    desktopBridgeMock.snapshot.mockResolvedValueOnce(previewSnapshot())
+    const wrapper = mount(App)
+    await flushPromises()
+
+    desktopBridgeMock.revokePairing.mockResolvedValueOnce({
+      ...previewSnapshot(),
+      session: 'idle',
+      pairing: { state: 'revoked', expiresInSeconds: null },
+    })
+
+    await wrapper.get('button[aria-label="Revoke preview trust"]').trigger('click')
+    await flushPromises()
+
+    expect(desktopBridgeMock.revokePairing).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('.session-chip').text()).toBe('Preview idle')
   })
 
   it('keeps the preview snapshot from looking like live audio transport', async () => {

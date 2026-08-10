@@ -7,6 +7,7 @@ export interface DesktopBridge {
   selectOutput(deviceId: string): Promise<DesktopSnapshot>
   createPairing(): Promise<DesktopSnapshot>
   expirePairing(): Promise<DesktopSnapshot>
+  revokePairing(): Promise<DesktopSnapshot>
 }
 
 const previewOutput: OutputDevice[] = [
@@ -14,7 +15,7 @@ const previewOutput: OutputDevice[] = [
   { id: 'usb', label: 'USB audio output', sampleRateHz: 48_000, channels: 2, isDefault: false },
 ]
 
-class PreviewDesktopBridge implements DesktopBridge {
+export class PreviewDesktopBridge implements DesktopBridge {
   private pairingExpiresAtMillis: number | null = null
 
   private snapshotState: DesktopSnapshot = {
@@ -86,6 +87,15 @@ class PreviewDesktopBridge implements DesktopBridge {
     if (this.snapshotState.pairing.state === 'active') {
       this.pairingExpiresAtMillis = null
       this.snapshotState.pairing = { state: 'expired', expiresInSeconds: 0 }
+      this.snapshotState.session = 'idle'
+    }
+    return this.copy()
+  }
+
+  async revokePairing(): Promise<DesktopSnapshot> {
+    if (this.snapshotState.pairing.state === 'consumed') {
+      this.pairingExpiresAtMillis = null
+      this.snapshotState.pairing = { state: 'revoked', expiresInSeconds: null }
       this.snapshotState.session = 'idle'
     }
     return this.copy()

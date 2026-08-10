@@ -175,6 +175,30 @@ fn revocation_retires_a_trusted_session_without_recreating_trust() {
 }
 
 #[test]
+fn revoked_trust_can_start_a_fresh_invitation() {
+    let mut controller = PairingInvitationController::<1>::new();
+    let mut session = SessionState::IDLE;
+    controller.begin(&mut session, id(1), 100, 50, 1).unwrap();
+    assert_eq!(
+        controller.verify_proof(&mut session, 101, source(1), || {
+            PairingProofVerification::Verified
+        }),
+        Ok(PairingAttemptOutcome::Paired)
+    );
+    assert_eq!(session.phase(), SessionPhase::Ready);
+
+    assert_eq!(
+        controller.revoke(&mut session),
+        Ok(PairingRecordState::Revoked)
+    );
+    assert_eq!(session.phase(), SessionPhase::Idle);
+
+    controller.begin(&mut session, id(2), 200, 50, 1).unwrap();
+    assert_eq!(session.phase(), SessionPhase::Pairing);
+    assert_eq!(controller.state(), Some(PairingRecordState::Active));
+}
+
+#[test]
 fn invalid_creation_leaves_session_and_controller_empty() {
     let mut controller = PairingInvitationController::<1>::new();
     let mut session = SessionState::IDLE;

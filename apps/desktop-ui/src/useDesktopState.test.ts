@@ -7,6 +7,7 @@ import type { DesktopSnapshot } from './types'
 const desktopBridgeMock = vi.hoisted(() => ({
   createPairing: vi.fn(),
   expirePairing: vi.fn(),
+  revokePairing: vi.fn(),
   selectOutput: vi.fn(),
   snapshot: vi.fn(),
   startStream: vi.fn(),
@@ -95,6 +96,23 @@ describe('useDesktopState', () => {
     await Promise.all([first, second])
 
     expect(wrapper.vm.snapshot?.session).toBe('streaming')
+  })
+
+  it('forwards a revoke command and projects the returned snapshot', async () => {
+    desktopBridgeMock.snapshot.mockResolvedValueOnce(receiverSnapshot('ready'))
+    const wrapper = mount(StateHarness)
+    await flushPromises()
+
+    desktopBridgeMock.revokePairing.mockResolvedValueOnce({
+      ...receiverSnapshot('idle'),
+      pairing: { state: 'revoked', expiresInSeconds: null },
+    })
+
+    await wrapper.vm.revokePairing()
+
+    expect(desktopBridgeMock.revokePairing).toHaveBeenCalledTimes(1)
+    expect(wrapper.vm.snapshot?.session).toBe('idle')
+    expect(wrapper.vm.snapshot?.pairing.state).toBe('revoked')
   })
 
   it('recovers from a rejected bridge command before accepting a later command', async () => {
