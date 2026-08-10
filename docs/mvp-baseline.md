@@ -1,7 +1,7 @@
 # MVP implementation baseline
 
 > Status: foundation implemented; platform feasibility remains open
-> Updated: 2026-08-06
+> Updated: 2026-08-11
 
 This baseline turns the architecture documents into a buildable core without
 claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
@@ -125,11 +125,12 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   and plaintext clearing. Configured finite CI executions are smoke evidence
   rather than a sustained campaign.
 - a bounded incremental TCP control-frame reader/writer that validates the
-  existing length-prefixed Protobuf envelope and retires partial state after a
-  permanent socket error, plus Rust/Kotlin-JVM host tests for
-  all five published Hello, StartStream, StopStream, StreamStatus, and
-  ControlError wire vectors and their semantic bounds. The transport is
-  explicitly unauthenticated and is not a TLS or pairing implementation.
+  existing length-prefixed Protobuf envelope and retires partial read/write
+  state after a framing, semantic, or non-transient socket error, plus
+  Rust/Kotlin-JVM host tests for all five published Hello, StartStream,
+  StopStream, StreamStatus, and ControlError wire vectors and their semantic
+  bounds. The transport is explicitly unauthenticated and is not a TLS or
+  pairing implementation.
 - a capture-only Kotlin/Compose Android phase 0A bootstrap with direct,
   non-persisted MediaProjection consent transfer, a media-projection foreground
   service, a fixed PCM16 AudioRecord read buffer, low-rate state publication
