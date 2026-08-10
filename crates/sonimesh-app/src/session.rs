@@ -178,4 +178,210 @@ mod tests {
         assert_eq!(error.state, SessionState::IDLE);
         assert_eq!(state, SessionState::IDLE);
     }
+
+    /// Exact `SessionState` × `SessionEvent` transition contract. `Ok(next)` is
+    /// the resulting state for an allowed event; `Err(())` marks a rejected event.
+    const LIFECYCLE_TRANSITIONS: &[(SessionState, SessionEvent, Result<SessionState, ()>)] = &[
+        // Idle
+        (
+            SessionState::IDLE,
+            SessionEvent::StartPairing,
+            Ok(SessionState::PAIRING),
+        ),
+        (SessionState::IDLE, SessionEvent::StartStream, Err(())),
+        (
+            SessionState::IDLE,
+            SessionEvent::StopStream,
+            Ok(SessionState::IDLE),
+        ),
+        (SessionState::IDLE, SessionEvent::ConnectionLost, Err(())),
+        (SessionState::IDLE, SessionEvent::Reconnected, Err(())),
+        (SessionState::IDLE, SessionEvent::OutputLost, Err(())),
+        (SessionState::IDLE, SessionEvent::OutputRestored, Err(())),
+        (
+            SessionState::IDLE,
+            SessionEvent::SessionExpired,
+            Ok(SessionState::IDLE),
+        ),
+        // Pairing
+        (SessionState::PAIRING, SessionEvent::StartPairing, Err(())),
+        (SessionState::PAIRING, SessionEvent::StartStream, Err(())),
+        (
+            SessionState::PAIRING,
+            SessionEvent::StopStream,
+            Ok(SessionState::PAIRING),
+        ),
+        (SessionState::PAIRING, SessionEvent::ConnectionLost, Err(())),
+        (SessionState::PAIRING, SessionEvent::Reconnected, Err(())),
+        (SessionState::PAIRING, SessionEvent::OutputLost, Err(())),
+        (SessionState::PAIRING, SessionEvent::OutputRestored, Err(())),
+        (
+            SessionState::PAIRING,
+            SessionEvent::SessionExpired,
+            Ok(SessionState::IDLE),
+        ),
+        // Ready
+        (SessionState::READY, SessionEvent::StartPairing, Err(())),
+        (
+            SessionState::READY,
+            SessionEvent::StartStream,
+            Ok(SessionState::STREAMING),
+        ),
+        (
+            SessionState::READY,
+            SessionEvent::StopStream,
+            Ok(SessionState::READY),
+        ),
+        (
+            SessionState::READY,
+            SessionEvent::ConnectionLost,
+            Ok(SessionState::RECONNECTING),
+        ),
+        (SessionState::READY, SessionEvent::Reconnected, Err(())),
+        (SessionState::READY, SessionEvent::OutputLost, Err(())),
+        (SessionState::READY, SessionEvent::OutputRestored, Err(())),
+        (
+            SessionState::READY,
+            SessionEvent::SessionExpired,
+            Ok(SessionState::IDLE),
+        ),
+        // Streaming
+        (SessionState::STREAMING, SessionEvent::StartPairing, Err(())),
+        (SessionState::STREAMING, SessionEvent::StartStream, Err(())),
+        (
+            SessionState::STREAMING,
+            SessionEvent::StopStream,
+            Ok(SessionState::READY),
+        ),
+        (
+            SessionState::STREAMING,
+            SessionEvent::ConnectionLost,
+            Ok(SessionState::RECONNECTING),
+        ),
+        (SessionState::STREAMING, SessionEvent::Reconnected, Err(())),
+        (
+            SessionState::STREAMING,
+            SessionEvent::OutputLost,
+            Ok(SessionState::OUTPUT_UNAVAILABLE),
+        ),
+        (
+            SessionState::STREAMING,
+            SessionEvent::OutputRestored,
+            Err(()),
+        ),
+        (
+            SessionState::STREAMING,
+            SessionEvent::SessionExpired,
+            Ok(SessionState::IDLE),
+        ),
+        // Reconnecting
+        (
+            SessionState::RECONNECTING,
+            SessionEvent::StartPairing,
+            Err(()),
+        ),
+        (
+            SessionState::RECONNECTING,
+            SessionEvent::StartStream,
+            Err(()),
+        ),
+        (
+            SessionState::RECONNECTING,
+            SessionEvent::StopStream,
+            Ok(SessionState::READY),
+        ),
+        (
+            SessionState::RECONNECTING,
+            SessionEvent::ConnectionLost,
+            Err(()),
+        ),
+        (
+            SessionState::RECONNECTING,
+            SessionEvent::Reconnected,
+            Ok(SessionState::READY),
+        ),
+        (
+            SessionState::RECONNECTING,
+            SessionEvent::OutputLost,
+            Err(()),
+        ),
+        (
+            SessionState::RECONNECTING,
+            SessionEvent::OutputRestored,
+            Err(()),
+        ),
+        (
+            SessionState::RECONNECTING,
+            SessionEvent::SessionExpired,
+            Ok(SessionState::IDLE),
+        ),
+        // OutputUnavailable
+        (
+            SessionState::OUTPUT_UNAVAILABLE,
+            SessionEvent::StartPairing,
+            Err(()),
+        ),
+        (
+            SessionState::OUTPUT_UNAVAILABLE,
+            SessionEvent::StartStream,
+            Err(()),
+        ),
+        (
+            SessionState::OUTPUT_UNAVAILABLE,
+            SessionEvent::StopStream,
+            Ok(SessionState::READY),
+        ),
+        (
+            SessionState::OUTPUT_UNAVAILABLE,
+            SessionEvent::ConnectionLost,
+            Err(()),
+        ),
+        (
+            SessionState::OUTPUT_UNAVAILABLE,
+            SessionEvent::Reconnected,
+            Err(()),
+        ),
+        (
+            SessionState::OUTPUT_UNAVAILABLE,
+            SessionEvent::OutputLost,
+            Err(()),
+        ),
+        (
+            SessionState::OUTPUT_UNAVAILABLE,
+            SessionEvent::OutputRestored,
+            Ok(SessionState::STREAMING),
+        ),
+        (
+            SessionState::OUTPUT_UNAVAILABLE,
+            SessionEvent::SessionExpired,
+            Ok(SessionState::IDLE),
+        ),
+    ];
+
+    #[test]
+    fn applies_the_exact_lifecycle_transition_matrix() {
+        for (start, event, expected) in LIFECYCLE_TRANSITIONS {
+            let mut state = *start;
+            let result = state.apply(*event);
+            if let Ok(next) = expected {
+                assert!(
+                    result.is_ok(),
+                    "transition from {start:?} on {event:?} should be allowed: {result:?}"
+                );
+                assert_eq!(
+                    &state, next,
+                    "transition from {start:?} on {event:?} must end in {next:?}"
+                );
+            } else {
+                assert!(
+                    result.is_err(),
+                    "transition from {start:?} on {event:?} should be rejected"
+                );
+                assert_eq!(
+                    &state, start,
+                    "rejected transition from {start:?} on {event:?} must not change state"
+                );
+            }
+        }
+    }
 }
