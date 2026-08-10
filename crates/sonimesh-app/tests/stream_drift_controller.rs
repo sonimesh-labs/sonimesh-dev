@@ -139,3 +139,81 @@ fn control_tick_publishes_ppm_then_retires_the_affected_stream() {
         }
     );
 }
+#[test]
+fn control_tick_retires_the_stream_when_occupancy_hits_the_low_threshold() {
+    let secret = SessionSecret::new([0xA5; 32]);
+    let context = context();
+    let mut sealer = MediaSealer::new(&secret, context).unwrap();
+    let counters = Arc::new(StreamCounters::default());
+    let (_source, adjustment) = SampleRateMappedRenderSource::new_with_drift_control_and_metrics(
+        Box::new(SilenceSource),
+        48_000,
+        48_000,
+        1,
+        MAX_CALLBACK_FRAMES,
+        Some(Arc::clone(&counters)),
+    )
+    .unwrap();
+    let (producer, mut consumer) = realtime_pcm_queue::<4>(4).unwrap();
+    let mut pipeline = ReceiverStreamPipeline::<ByteDecoder, 4, 8, 4>::new(
+        &secret,
+        context,
+        ByteDecoder,
+        producer,
+        Arc::clone(&counters),
+        0,
+    )
+    .unwrap();
+    let mut controller = StreamDriftController::new(CONFIG, adjustment.clone()).unwrap();
+    let mut plaintext = [0_u8; 8];
+
+    for sequence in 0_u8..2 {
+        let packet = sealer
+            .seal(0, u64::from(sequence) * 960, &[sequence])
+            .unwrap();
+        pipeline.receive(&packet.datagram, &mut plaintext).unwrap();
+        assert!(matches!(
+            pipeline.decode_next().unwrap(),
+            DecodeStep::Decoded { sequence: actual, .. } if actual == u32::from(sequence)
+        ));
+    }
+    assert_eq!(pipeline.queued_pcm_blocks(), 2);
+
+    // The realtime consumer drains both blocks, pushing occupancy to the low
+    // emergency threshold before the next control tick.
+    let mut output = [0.0; 4];
+    assert!(matches!(
+        consumer.pop_into(&mut output),
+        RealtimePcmPopOutcome::Filled { samples: 1, .. }
+    ));
+    assert!(matches!(
+        consumer.pop_into(&mut output),
+        RealtimePcmPopOutcome::Filled { samples: 1, .. }
+    ));
+    assert_eq!(pipeline.queued_pcm_blocks(), 0);
+
+    assert_eq!(
+        controller.update(&mut pipeline),
+        Ok(DriftDecision::HardResync {
+            direction: DriftResyncDirection::Low,
+        })
+    );
+    assert_eq!(controller.adjustment_ppm(), 0);
+    assert_eq!(adjustment.current_ppm(), 0);
+    let snapshot = counters.snapshot();
+    assert_eq!(snapshot.drift_adjustment_ppm, 0);
+    assert_eq!(snapshot.drift_hard_resyncs, 1);
+    assert_eq!(snapshot.stream_resets, 1);
+    assert_eq!(snapshot.queued_pcm_blocks, 0);
+    assert_eq!(snapshot.queued_pcm_high_water_blocks, 0);
+    assert_eq!(pipeline.queued_pcm_blocks(), 0);
+
+    // A later frame decodes into the fresh playout epoch.
+    let packet = sealer.seal(0, 1_920, &[2]).unwrap();
+    pipeline.receive(&packet.datagram, &mut plaintext).unwrap();
+    assert!(matches!(
+        pipeline.decode_next().unwrap(),
+        DecodeStep::Decoded { sequence: 2, .. }
+    ));
+    assert_eq!(pipeline.queued_pcm_blocks(), 1);
+}
