@@ -6,6 +6,7 @@ members = [
     "crates/sonimesh-network",
     "crates/sonimesh-platform",
     "crates/sonimesh-protocol",
+    "tools/latency-measurement",
     "tools/network-simulator",
     "tools/windows-credential-prototype",
     "tools/windows-tls-provider-prototype",

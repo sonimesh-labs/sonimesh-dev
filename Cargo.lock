@@ -1256,6 +1256,10 @@ name = "sonimesh-diagnostics"
 version = "0.1.0"
 
 [[package]]
+name = "sonimesh-latency-measurement"
+version = "0.1.0"
+
+[[package]]
 name = "sonimesh-network"
 version = "0.1.0"
 dependencies = [
