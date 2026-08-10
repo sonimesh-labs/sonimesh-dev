@@ -217,6 +217,28 @@ fn oversized_length_terminates_the_untrusted_reader() {
 }
 
 #[test]
+fn four_byte_payload_is_read_and_rejected_as_protocol_not_close() {
+    let (mut sender, mut reader) = connected_reader();
+    // Length-prefixed frame whose Protobuf payload is exactly four bytes:
+    // version=1, request_id=1, but no oneof payload.
+    sender
+        .write_all(&[0, 0, 0, 4, 0x08, 0x01, 0x10, 0x01])
+        .unwrap();
+
+    for _ in 0..1_000 {
+        match reader.poll() {
+            Err(UntrustedControlError::Protocol(ControlFrameError::MissingPayload)) => {
+                assert_eq!(reader.poll().unwrap(), UntrustedControlPoll::Closed);
+                return;
+            }
+            Ok(UntrustedControlPoll::Empty) => thread::yield_now(),
+            other => panic!("unexpected framing result: {other:?}"),
+        }
+    }
+    panic!("four-byte control payload was never validated");
+}
+
+#[test]
 fn peer_close_is_reported_without_treating_partial_data_as_a_frame() {
     let (mut sender, mut reader) = connected_reader();
     sender.write_all(&[0, 0]).unwrap();

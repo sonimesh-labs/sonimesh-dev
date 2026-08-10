@@ -242,7 +242,7 @@ impl UntrustedControlStream {
         }
 
         if self.frame_len.is_none() {
-            match self.read_into(CONTROL_LENGTH_BYTES, self.length_filled) {
+            match self.read_into(CONTROL_LENGTH_BYTES, self.length_filled, true) {
                 Err(ReadState::WouldBlock) => return Ok(UntrustedControlPoll::Empty),
                 Ok(_) => {}
                 Err(ReadState::Closed) => {
@@ -271,7 +271,7 @@ impl UntrustedControlStream {
             return self.protocol_failure(ControlFrameError::TruncatedLength);
         };
         if self.frame_filled < CONTROL_LENGTH_BYTES + payload_len {
-            match self.read_into(payload_len, self.frame_filled) {
+            match self.read_into(payload_len, self.frame_filled, false) {
                 Err(ReadState::WouldBlock) => return Ok(UntrustedControlPoll::Empty),
                 Ok(_) => {}
                 Err(ReadState::Closed) => {
@@ -294,17 +294,23 @@ impl UntrustedControlStream {
         Ok(UntrustedControlPoll::Frame(envelope))
     }
 
-    fn read_into(&mut self, target_len: usize, filled: usize) -> Result<usize, ReadState> {
-        let end = if target_len == CONTROL_LENGTH_BYTES {
+    fn read_into(
+        &mut self,
+        target_len: usize,
+        filled: usize,
+        reading_length: bool,
+    ) -> Result<usize, ReadState> {
+        let end = if reading_length {
             CONTROL_LENGTH_BYTES
         } else {
             CONTROL_LENGTH_BYTES + target_len
         };
         let start = filled;
+        debug_assert!(start < end, "read_into requires available buffer space");
         match self.stream.read(&mut self.buffer[start..end]) {
             Ok(0) => Err(ReadState::Closed),
             Ok(read) => {
-                if target_len == CONTROL_LENGTH_BYTES {
+                if reading_length {
                     self.length_filled += read;
                 } else {
                     self.frame_filled += read;
