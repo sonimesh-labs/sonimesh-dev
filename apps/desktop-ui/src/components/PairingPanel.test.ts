@@ -86,7 +86,7 @@ describe('PairingPanel', () => {
     expect(wrapper.find('.eyebrow').text()).toBe('Pairing preview')
     expect(wrapper.get('h2').text()).toBe('Simulate sender trust')
     expect(wrapper.text()).toContain('Preview trust state')
-    expect(wrapper.text()).toContain('does not create or verify a real invitation')
+    expect(wrapper.text()).toContain('verifies no real invitation')
     expect(wrapper.text()).not.toContain('Sender verified')
   })
 
@@ -161,5 +161,43 @@ describe('PairingPanel', () => {
     await nextTick()
 
     expect(wrapper.text()).toContain('2s remaining')
+  })
+  it('offers a preview-only sender-verification simulation while an invitation is active', async () => {
+    const wrapper = mount(PairingPanel, {
+      props: {
+        pairing: { state: 'active', expiresInSeconds: 60 },
+        busy: false,
+        preview: true,
+      },
+    })
+
+    const button = wrapper.find('button.preview-action')
+    expect(button.exists()).toBe(true)
+    expect(button.text()).toBe('Simulate sender verification')
+    await button.trigger('click')
+    expect(wrapper.emitted('simulatePairingConsumed')).toHaveLength(1)
+  })
+
+  it('hides the sender-verification simulation outside the preview adapter', () => {
+    const wrapper = mount(PairingPanel, {
+      props: {
+        pairing: { state: 'active', expiresInSeconds: 60 },
+        busy: false,
+      },
+    })
+
+    expect(wrapper.find('button.preview-action').exists()).toBe(false)
+  })
+
+  it('hides the sender-verification simulation once the invitation is no longer active', () => {
+    const wrapper = mount(PairingPanel, {
+      props: {
+        pairing: { state: 'expired', expiresInSeconds: 0 },
+        busy: false,
+        preview: true,
+      },
+    })
+
+    expect(wrapper.find('button.preview-action').exists()).toBe(false)
   })
 })

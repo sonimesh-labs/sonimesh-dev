@@ -11,6 +11,7 @@ const desktopBridgeMock = vi.hoisted(() => ({
   simulateConnectionLost: vi.fn(),
   simulateOutputLost: vi.fn(),
   simulateOutputRestored: vi.fn(),
+  simulatePairingConsumed: vi.fn(),
   simulateReconnected: vi.fn(),
   snapshot: vi.fn(),
   startStream: vi.fn(),
@@ -139,4 +140,29 @@ describe('App', () => {
     expect(wrapper.text()).toContain('Preview observability')
     expect(wrapper.text()).not.toContain('Route your phone audio')
   })
+  it('simulates the sender consuming the preview invitation from the pairing panel', async () => {
+    desktopBridgeMock.snapshot.mockResolvedValueOnce({
+      ...previewSnapshot(),
+      session: 'pairing',
+      pairing: { state: 'active', expiresInSeconds: 300 },
+    })
+    const wrapper = mount(App)
+    await flushPromises()
+
+    desktopBridgeMock.simulatePairingConsumed.mockResolvedValueOnce({
+      ...previewSnapshot(),
+      session: 'ready',
+      pairing: { state: 'consumed', expiresInSeconds: null },
+    })
+
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === 'Simulate sender verification')!
+      .trigger('click')
+    await flushPromises()
+
+    expect(desktopBridgeMock.simulatePairingConsumed).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('.session-chip').text()).toBe('Preview ready')
+  })
+
 })

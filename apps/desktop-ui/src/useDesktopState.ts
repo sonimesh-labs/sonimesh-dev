@@ -35,6 +35,7 @@ export function useDesktopState() {
   const simulateReconnected = () => run(() => desktopBridge.simulateReconnected())
   const simulateOutputLost = () => run(() => desktopBridge.simulateOutputLost())
   const simulateOutputRestored = () => run(() => desktopBridge.simulateOutputRestored())
+  const simulatePairingConsumed = () => run(() => desktopBridge.simulatePairingConsumed())
 
   onMounted(refresh)
 
@@ -54,5 +55,6 @@ export function useDesktopState() {
     simulateReconnected,
     simulateOutputLost,
     simulateOutputRestored,
+    simulatePairingConsumed,
   }
 }

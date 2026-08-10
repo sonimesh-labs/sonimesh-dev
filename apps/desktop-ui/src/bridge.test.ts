@@ -137,4 +137,23 @@ describe('PreviewDesktopBridge', () => {
     expect(again.pairing.state).toBe('active')
     expect(again.pairing.expiresInSeconds).toBe(300)
   })
+  it('simulates the sender consuming an open preview invitation', async () => {
+    const bridge = fixedTimeBridge()
+    await bridge.revokePairing()
+    await bridge.createPairing()
+
+    const consumed = await bridge.simulatePairingConsumed()
+
+    expect(consumed.session).toBe('ready')
+    expect(consumed.pairing).toEqual({ state: 'consumed', expiresInSeconds: null })
+  })
+
+  it('does not consume an invitation that is not active', async () => {
+    const bridge = new PreviewDesktopBridge()
+
+    const snapshot = await bridge.simulatePairingConsumed()
+
+    expect(snapshot.session).toBe('ready')
+    expect(snapshot.pairing.state).toBe('consumed')
+  })
 })

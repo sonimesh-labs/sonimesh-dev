@@ -11,8 +11,9 @@ invitation as authenticated. The bridge mirrors the Rust pairing owner's
 `revoke` transition: the synthetic record can be revoked, which retires the
 trust (pairing → `revoked`, session → `idle`) and makes the invitation-creation
 flow (create → active countdown → expire) reachable from the running app. The
-preview never simulates a sender verifying an invitation, so after revocation
-the adapter stays in the invitation lifecycle until the page is reloaded. The
+preview can simulate the sender verifying the invitation (active -> consumed,
+pairing -> ready), so after revocation the full trust cycle can be re-exercised
+without a page reload. The
 preview also mirrors the session owner's platform events: connection loss and
 output loss can be simulated from the session panel (trusted → `reconnecting`,
 `streaming` → `outputUnavailable`), with reconnect and output restore returning

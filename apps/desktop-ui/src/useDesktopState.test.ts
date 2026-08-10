@@ -12,6 +12,7 @@ const desktopBridgeMock = vi.hoisted(() => ({
   simulateConnectionLost: vi.fn(),
   simulateOutputLost: vi.fn(),
   simulateOutputRestored: vi.fn(),
+  simulatePairingConsumed: vi.fn(),
   simulateReconnected: vi.fn(),
   snapshot: vi.fn(),
   startStream: vi.fn(),
@@ -159,4 +160,17 @@ describe('useDesktopState', () => {
     expect(wrapper.vm.snapshot?.session).toBe('streaming')
     expect(desktopBridgeMock.snapshot).toHaveBeenCalledTimes(2)
   })
+  it('forwards a pairing-consumed simulation and projects its snapshot', async () => {
+    desktopBridgeMock.snapshot.mockResolvedValueOnce(receiverSnapshot('ready'))
+    const wrapper = mount(StateHarness)
+    await flushPromises()
+
+    desktopBridgeMock.simulatePairingConsumed.mockResolvedValueOnce(receiverSnapshot('ready'))
+
+    await wrapper.vm.simulatePairingConsumed()
+
+    expect(desktopBridgeMock.simulatePairingConsumed).toHaveBeenCalledTimes(1)
+    expect(wrapper.vm.snapshot?.session).toBe('ready')
+  })
+
 })

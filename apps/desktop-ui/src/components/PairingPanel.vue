@@ -15,6 +15,7 @@ const emit = defineEmits<{
   expire: []
   refresh: []
   revoke: []
+  simulatePairingConsumed: []
 }>()
 
 const remainingSeconds = ref<number | null>(null)
@@ -98,7 +99,7 @@ const pairingMessage = computed(() => {
 
 const pairingHint = computed(() => {
   if (props.preview) {
-    return 'The preview adapter changes local UI state only; it does not create or verify a real invitation.'
+    return 'The preview adapter changes local UI state only and verifies no real invitation; the buttons simulate each sender step.'
   }
 
   switch (props.pairing.state) {
@@ -148,6 +149,9 @@ onUnmounted(clearCountdown)
       </button>
       <button v-if="pairing.state === 'active'" class="icon-action subtle" :title="preview ? 'Expire preview invitation' : 'Expire invitation'" :aria-label="preview ? 'Expire preview invitation' : 'Expire invitation'" :disabled="busy" @click="emit('expire')">
         <X :size="18" aria-hidden="true" />
+      </button>
+      <button v-if="preview && pairing.state === 'active'" class="preview-action" :disabled="busy" @click="emit('simulatePairingConsumed')">
+        Simulate sender verification
       </button>
       <button v-if="pairing.state === 'consumed'" class="icon-action subtle" :title="preview ? 'Revoke preview trust' : 'Revoke trust'" :aria-label="preview ? 'Revoke preview trust' : 'Revoke trust'" :disabled="busy" @click="emit('revoke')">
         <ShieldX :size="18" aria-hidden="true" />

@@ -16,6 +16,8 @@ export interface DesktopBridge {
   simulateOutputLost(): Promise<DesktopSnapshot>
   /** Preview-only: simulates a recreated output device resuming streaming. */
   simulateOutputRestored(): Promise<DesktopSnapshot>
+  /** Preview-only: simulates the sender consuming the open pairing invitation. */
+  simulatePairingConsumed(): Promise<DesktopSnapshot>
 }
 
 const previewOutput: OutputDevice[] = [
@@ -136,6 +138,15 @@ export class PreviewDesktopBridge implements DesktopBridge {
   async simulateOutputRestored(): Promise<DesktopSnapshot> {
     if (this.snapshotState.session === 'outputUnavailable') {
       this.snapshotState.session = 'streaming'
+    }
+    return this.copy()
+  }
+
+  async simulatePairingConsumed(): Promise<DesktopSnapshot> {
+    if (this.snapshotState.pairing.state === 'active') {
+      this.pairingExpiresAtMillis = null
+      this.snapshotState.pairing = { state: 'consumed', expiresInSeconds: null }
+      this.snapshotState.session = 'ready'
     }
     return this.copy()
   }
