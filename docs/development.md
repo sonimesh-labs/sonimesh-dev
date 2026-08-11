@@ -21,6 +21,7 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-targets --all-features
 cargo run -p sonimesh-network-simulator
 python tools/check_workspace_boundaries.py
+python tools/check_fuzz_targets.py
 python tools/check_adr_index.py
 python tools/check_preview_alignment.py
 python tools/check_android_capture_boundary.py
