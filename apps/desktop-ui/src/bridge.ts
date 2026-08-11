@@ -12,6 +12,8 @@ export interface DesktopBridge {
   simulateConnectionLost(): Promise<DesktopSnapshot>
   /** Preview-only: simulates a reconnected control connection returning to ready. */
   simulateReconnected(): Promise<DesktopSnapshot>
+  /** Preview-only: simulates the trusted session expiring (trust or reconnect grace ends). */
+  simulateSessionExpired(): Promise<DesktopSnapshot>
   /** Preview-only: simulates the active output device disappearing. */
   simulateOutputLost(): Promise<DesktopSnapshot>
   /** Preview-only: simulates a recreated output device resuming streaming. */
@@ -132,6 +134,19 @@ export class PreviewDesktopBridge implements DesktopBridge {
   async simulateReconnected(): Promise<DesktopSnapshot> {
     if (this.snapshotState.session === 'reconnecting') {
       this.snapshotState.session = 'ready'
+    }
+    return this.copy()
+  }
+
+  async simulateSessionExpired(): Promise<DesktopSnapshot> {
+    if (
+      ['ready', 'streaming', 'reconnecting', 'outputUnavailable'].includes(this.snapshotState.session) &&
+      this.snapshotState.pairing.state === 'consumed'
+    ) {
+      // The session owner retires the trusted session on expiry while the
+      // consumed pairing record stays retained for audit; revoke clears it.
+      this.pairingExpiresAtMillis = null
+      this.snapshotState.session = 'idle'
     }
     return this.copy()
   }

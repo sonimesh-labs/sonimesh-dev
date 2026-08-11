@@ -213,4 +213,44 @@ describe('PreviewDesktopBridge', () => {
     expect(reset.metrics.queuedPcmBlocks).toBe(3)
     expect(reset.previewAdapter).toBe(true)
   })
+
+  it('simulates session expiry from a trusted streaming session while retaining the audit record', async () => {
+    const bridge = new PreviewDesktopBridge()
+    await bridge.startStream()
+
+    const expired = await bridge.simulateSessionExpired()
+
+    expect(expired.session).toBe('idle')
+    expect(expired.pairing).toEqual({ state: 'consumed', expiresInSeconds: null })
+  })
+
+  it('simulates session expiry from a trusted ready session', async () => {
+    const bridge = new PreviewDesktopBridge()
+
+    const expired = await bridge.simulateSessionExpired()
+
+    expect(expired.session).toBe('idle')
+    expect(expired.pairing.state).toBe('consumed')
+  })
+
+  it('does not simulate session expiry without a consumed pairing record', async () => {
+    const bridge = new PreviewDesktopBridge()
+    await bridge.revokePairing()
+
+    const snapshot = await bridge.simulateSessionExpired()
+
+    expect(snapshot.session).toBe('idle')
+    expect(snapshot.pairing.state).toBe('revoked')
+  })
+
+  it('does not simulate session expiry from a pairing-in-progress session', async () => {
+    const bridge = new PreviewDesktopBridge()
+    await bridge.revokePairing()
+    await bridge.createPairing()
+
+    const snapshot = await bridge.simulateSessionExpired()
+
+    expect(snapshot.session).toBe('pairing')
+    expect(snapshot.pairing.state).toBe('active')
+  })
 })

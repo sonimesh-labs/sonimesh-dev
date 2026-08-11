@@ -36,6 +36,7 @@ describe('SessionPanel', () => {
     expect(wrapper.findAll('.simulate-actions button').map((button) => button.text())).toEqual([
       'Simulate connection loss',
       'Simulate output loss',
+      'Simulate session expiry',
       'Simulate command rejection',
     ])
 
@@ -69,6 +70,7 @@ describe('SessionPanel', () => {
     })
     expect(reconnecting.findAll('.simulate-actions button').map((button) => button.text())).toEqual([
       'Reconnect',
+      'Simulate session expiry',
       'Simulate command rejection',
     ])
     await reconnecting
@@ -87,6 +89,7 @@ describe('SessionPanel', () => {
     })
     expect(unavailable.findAll('.simulate-actions button').map((button) => button.text())).toEqual([
       'Restore output',
+      'Simulate session expiry',
       'Simulate command rejection',
     ])
     await unavailable
@@ -122,5 +125,40 @@ describe('SessionPanel', () => {
     expect(wrapper.find('.state-badge').text()).toBe('streaming')
     expect(wrapper.get('h2').text()).toBe('Now streaming')
     expect(wrapper.get('.session-copy p').text()).toBe('Audio is moving privately across your local network.')
+  })
+
+  it('emits session expiry from any trusted preview state', async () => {
+    const wrapper = mount(SessionPanel, {
+      props: {
+        state: 'ready',
+        pairingState: 'consumed',
+        preview: true,
+        busy: false,
+      },
+    })
+
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === 'Simulate session expiry')!
+      .trigger('click')
+    expect(wrapper.emitted('simulateSessionExpired')).toHaveLength(1)
+  })
+
+  it('hides session expiry simulation without a consumed pairing record', () => {
+    const wrapper = mount(SessionPanel, {
+      props: {
+        state: 'ready',
+        pairingState: 'inactive',
+        preview: true,
+        busy: false,
+      },
+    })
+
+    expect(
+      wrapper
+        .findAll('.simulate-actions button')
+        .map((button) => button.text())
+        .includes('Simulate session expiry'),
+    ).toBe(false)
   })
 })

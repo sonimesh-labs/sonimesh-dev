@@ -18,6 +18,10 @@ preview also mirrors the session owner's platform events: connection loss and
 output loss can be simulated from the session panel (trusted → `reconnecting`,
 `streaming` → `outputUnavailable`), with reconnect and output restore returning
 to `ready` and `streaming`, so recovery UI is exercisable without hardware. The
+session owner's expiry transition is also simulable from the session panel
+(`Simulate session expiry`): a trusted session (ready, streaming, reconnecting,
+or output unavailable) retires to `idle` while the consumed pairing record stays
+retained for audit, so the revoke path remains reachable. The
 diagnostics panel can simulate a burst of transport and recovery activity
 (`Simulate metrics burst`), so the cumulative-counter formatting and health
 cards can be exercised without live audio. A preview

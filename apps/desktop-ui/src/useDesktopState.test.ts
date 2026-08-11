@@ -17,6 +17,7 @@ const desktopBridgeMock = vi.hoisted(() => ({
   simulateOutputRestored: vi.fn(),
   simulatePairingConsumed: vi.fn(),
   simulateReconnected: vi.fn(),
+  simulateSessionExpired: vi.fn(),
   snapshot: vi.fn(),
   startStream: vi.fn(),
   stopStream: vi.fn(),
@@ -214,6 +215,19 @@ describe('useDesktopState', () => {
 
     expect(desktopBridgeMock.resetPreview).toHaveBeenCalledTimes(1)
     expect(wrapper.vm.snapshot?.session).toBe('ready')
+  })
+
+  it('forwards a preview session-expiry simulation and projects its snapshot', async () => {
+    desktopBridgeMock.snapshot.mockResolvedValueOnce(receiverSnapshot('ready'))
+    const wrapper = mount(StateHarness)
+    await flushPromises()
+
+    desktopBridgeMock.simulateSessionExpired.mockResolvedValueOnce(receiverSnapshot('idle'))
+
+    await wrapper.vm.simulateSessionExpired()
+
+    expect(desktopBridgeMock.simulateSessionExpired).toHaveBeenCalledTimes(1)
+    expect(wrapper.vm.snapshot?.session).toBe('idle')
   })
 
 })

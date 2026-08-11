@@ -20,6 +20,7 @@ const emit = defineEmits<{
   simulateReconnected: []
   simulateOutputLost: []
   simulateOutputRestored: []
+  simulateSessionExpired: []
   simulateCommandRejection: []
 }>()
 
@@ -134,6 +135,9 @@ const displayState = computed(() => (props.preview ? `Preview ${props.state}` : 
       </button>
       <button v-if="state === 'outputUnavailable'" class="preview-action" :disabled="busy" @click="emit('simulateOutputRestored')">
         Restore output
+      </button>
+      <button v-if="pairingState === 'consumed' && ['ready', 'streaming', 'reconnecting', 'outputUnavailable'].includes(state)" class="preview-action" :disabled="busy" @click="emit('simulateSessionExpired')">
+        Simulate session expiry
       </button>
       <button class="preview-action" :disabled="busy" @click="emit('simulateCommandRejection')">
         Simulate command rejection
