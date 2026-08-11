@@ -219,6 +219,28 @@ mod tests {
     }
 
     #[test]
+    fn derived_keys_separate_stream_epoch_and_direction() {
+        let secret = SessionSecret::new([4; 32]);
+        let mut keys = std::collections::HashSet::new();
+
+        let mut epoch_context = context(MediaDirection::AndroidToDesktop);
+        for epoch in 0..=1_024_u16 {
+            epoch_context.key_epoch = epoch;
+            keys.insert(derive_media_key(&secret, epoch_context).unwrap());
+        }
+        for stream in [1_u32, 2, 0x00FF_FFFF, 0x0100_0000, u32::MAX] {
+            let stream_context =
+                MediaKeyContext::new(7, stream, 3, MediaDirection::AndroidToDesktop).unwrap();
+            keys.insert(derive_media_key(&secret, stream_context).unwrap());
+        }
+        keys.insert(derive_media_key(&secret, context(MediaDirection::DesktopToAndroid)).unwrap());
+
+        // Distinct (stream, epoch, direction) inputs derive distinct keys over
+        // this bounded sweep, guarding the domain-separation info encoding.
+        assert_eq!(keys.len(), 1_025 + 5 + 1);
+    }
+
+    #[test]
     fn nonce_changes_for_epoch_stream_direction_and_sequence() {
         let base = context(MediaDirection::AndroidToDesktop);
         let mut changed_stream = base;
