@@ -104,6 +104,9 @@ object CaptureStateStore {
     val state: StateFlow<CaptureUiState> = mutableState.asStateFlow()
     internal val evidence = CaptureEvidence()
 
+    /** Injectable monotonic clock for deterministic host JVM tests. */
+    internal var nowMillis: () -> Long = SystemClock::elapsedRealtime
+
     fun publishAwaitingPermission() {
         evidence.reset()
         publish(CaptureStatus.AwaitingPermission)
@@ -147,13 +150,13 @@ object CaptureStateStore {
         ) {
             return
         }
-        mutableState.value = current.copy(evidence = evidence.snapshot(SystemClock.elapsedRealtime()))
+        mutableState.value = current.copy(evidence = evidence.snapshot(nowMillis()))
     }
 
     private fun publish(status: CaptureStatus) {
         mutableState.value = CaptureUiState(
             status = status,
-            evidence = evidence.snapshot(SystemClock.elapsedRealtime()),
+            evidence = evidence.snapshot(nowMillis()),
         )
     }
 }
