@@ -7,7 +7,7 @@ use sonimesh_app::{
     OutputSelection, ReceiverOutputController, ReceiverOutputLifecycleError,
     ReceiverPcmEndpointFactory, ReceiverStreamPipeline, SourcePcmFormat, UdpReceiverPipeline,
 };
-use sonimesh_audio::{DecodeStep, FrameDecoder, realtime_pcm_queue};
+use sonimesh_audio::{DecodeStep, FrameDecoder, MAX_PCM_QUEUE_BLOCKS, realtime_pcm_queue};
 use sonimesh_diagnostics::StreamCounters;
 use sonimesh_platform::{
     AudioOutput, OutputConfig, OutputDeviceInfo, OutputError, OutputHealth, RenderSource,
@@ -36,6 +36,16 @@ struct TestOutput {
     start_calls: usize,
     stop_calls: usize,
     fail_start: bool,
+    source: Option<Box<dyn RenderSource>>,
+}
+
+impl TestOutput {
+    fn render(&mut self, output: &mut [f32]) {
+        self.source
+            .as_mut()
+            .expect("test output never captured a source")
+            .render(output);
+    }
 }
 
 impl AudioOutput for TestOutput {
@@ -47,12 +57,13 @@ impl AudioOutput for TestOutput {
         &mut self,
         _device: Option<&sonimesh_platform::OutputDeviceId>,
         _config: OutputConfig,
-        _source: Box<dyn RenderSource>,
+        source: Box<dyn RenderSource>,
     ) -> Result<(), OutputError> {
         self.start_calls += 1;
         if self.fail_start {
             return Err(OutputError::Backend("test start failure".to_owned()));
         }
+        self.source = Some(source);
         Ok(())
     }
 
@@ -95,6 +106,7 @@ fn controller(counters: Arc<StreamCounters>) -> ReceiverOutputController<TestOut
             start_calls: 0,
             stop_calls: 0,
             fail_start: false,
+            source: None,
         },
         ReceiverPcmEndpointFactory::new(4, SourcePcmFormat::new(48_000, 1).unwrap(), counters),
     )
@@ -135,6 +147,190 @@ fn enqueue_decoded_block(
         pipeline.decode_next().unwrap(),
         DecodeStep::Decoded { sequence: actual, .. } if actual == sequence
     ));
+}
+
+fn large_controller(counters: Arc<StreamCounters>) -> ReceiverOutputController<TestOutput, 4> {
+    ReceiverOutputController::new(
+        TestOutput {
+            health: OutputHealth::Healthy,
+            start_calls: 0,
+            stop_calls: 0,
+            fail_start: false,
+            source: None,
+        },
+        ReceiverPcmEndpointFactory::new(
+            MAX_PCM_QUEUE_BLOCKS,
+            SourcePcmFormat::new(48_000, 1).unwrap(),
+            counters,
+        ),
+    )
+}
+
+/// Decoder that fills each whole PCM block with constant 1.0 samples.
+///
+/// [`ByteDecoder`] yields one sample per authenticated packet, which cannot
+/// fill the 128-sample bounded gain ramp inside the 128-block queue. This
+/// decoder yields four samples per packet so a full ramp plus a settled tail
+/// fits within one queue lifetime.
+struct FullBlockDecoder;
+
+impl FrameDecoder for FullBlockDecoder {
+    type Error = Infallible;
+
+    fn decode(&mut self, _encoded: &[u8], output: &mut [f32]) -> Result<usize, Self::Error> {
+        output.fill(1.0);
+        Ok(output.len())
+    }
+
+    fn decode_plc(&mut self, output: &mut [f32]) -> Result<usize, Self::Error> {
+        output.fill(0.0);
+        Ok(output.len())
+    }
+}
+
+fn full_block_pipeline(
+    counters: Arc<StreamCounters>,
+) -> ReceiverStreamPipeline<FullBlockDecoder, 4, 8, 4> {
+    let secret = SessionSecret::new([0xA5; 32]);
+    let (producer, _consumer) = realtime_pcm_queue::<4>(4).unwrap();
+    ReceiverStreamPipeline::new(&secret, context(), FullBlockDecoder, producer, counters, 0)
+        .unwrap()
+}
+
+/// Feeds `count` authenticated packets that each decode into one full 1.0 block.
+fn enqueue_full_blocks(
+    pipeline: &mut ReceiverStreamPipeline<FullBlockDecoder, 4, 8, 4>,
+    sealer: &mut MediaSealer,
+    start_sequence: u32,
+    count: usize,
+) {
+    for offset in 0..count {
+        let sequence = start_sequence + u32::try_from(offset).unwrap();
+        let packet = sealer.seal(0, u64::from(sequence) * 960, &[1]).unwrap();
+        let mut plaintext = [0_u8; 8];
+
+        pipeline.receive(&packet.datagram, &mut plaintext).unwrap();
+        assert!(matches!(
+            pipeline.decode_next().unwrap(),
+            DecodeStep::Decoded {
+                sequence: actual,
+                samples: 4,
+                ..
+            } if actual == sequence
+        ));
+    }
+}
+
+#[test]
+fn controller_gain_handle_is_the_factory_handle_shared_with_endpoints() {
+    let counters = Arc::new(StreamCounters::default());
+    let factory = ReceiverPcmEndpointFactory::<4>::new(
+        4,
+        SourcePcmFormat::new(48_000, 1).unwrap(),
+        Arc::clone(&counters),
+    );
+    let factory_handle = factory.gain_handle();
+    let controller = ReceiverOutputController::new(
+        TestOutput {
+            health: OutputHealth::Healthy,
+            start_calls: 0,
+            stop_calls: 0,
+            fail_start: false,
+            source: None,
+        },
+        factory,
+    );
+
+    let controller_handle = controller.gain_handle();
+    factory_handle.set_gain(0.5).unwrap();
+    assert!(
+        (controller_handle.gain() - 0.5).abs() < f32::EPSILON,
+        "controller handle did not share the published gain"
+    );
+    controller_handle.set_muted(true);
+    assert!(factory_handle.is_muted());
+}
+
+#[test]
+fn gain_and_mute_published_through_the_controller_reach_the_active_source() {
+    let counters = Arc::new(StreamCounters::default());
+    let mut pipeline = full_block_pipeline(Arc::clone(&counters));
+    let mut controller = large_controller(Arc::clone(&counters));
+    controller.start(selection(), &mut pipeline).unwrap();
+    let gain = controller.gain_handle();
+
+    let mut sealer = MediaSealer::new(&SessionSecret::new([0xA5; 32]), context()).unwrap();
+    enqueue_full_blocks(&mut pipeline, &mut sealer, 0, MAX_PCM_QUEUE_BLOCKS);
+
+    gain.set_gain(0.5).unwrap();
+    let mut callback = [f32::NAN; 480];
+    controller.output_mut().render(&mut callback);
+    assert!(
+        callback[476..]
+            .iter()
+            .all(|sample| (*sample - 0.5).abs() < f32::EPSILON),
+        "published gain did not reach the active source: {:?}",
+        &callback[476..]
+    );
+
+    enqueue_full_blocks(&mut pipeline, &mut sealer, 128, MAX_PCM_QUEUE_BLOCKS);
+    gain.set_muted(true);
+    controller.output_mut().render(&mut callback);
+    assert!(
+        callback[476..]
+            .iter()
+            .all(|sample| sample.abs() < f32::EPSILON),
+        "published mute did not reach the active source: {:?}",
+        &callback[476..]
+    );
+}
+
+#[test]
+fn gain_and_mute_handle_survive_output_recovery_through_the_controller() {
+    let counters = Arc::new(StreamCounters::default());
+    let mut pipeline = full_block_pipeline(Arc::clone(&counters));
+    let mut controller = large_controller(Arc::clone(&counters));
+    controller.start(selection(), &mut pipeline).unwrap();
+    let gain = controller.gain_handle();
+    let mut sealer = MediaSealer::new(&SessionSecret::new([0xA5; 32]), context()).unwrap();
+
+    enqueue_full_blocks(&mut pipeline, &mut sealer, 0, MAX_PCM_QUEUE_BLOCKS);
+    gain.set_gain(0.5).unwrap();
+    let mut callback = [f32::NAN; 480];
+    controller.output_mut().render(&mut callback);
+    assert!(
+        callback[476..]
+            .iter()
+            .all(|sample| (*sample - 0.5).abs() < f32::EPSILON),
+        "gain did not reach the source before recovery: {:?}",
+        &callback[476..]
+    );
+
+    controller.output_mut().health = OutputHealth::StreamError;
+    assert_eq!(controller.monitor(), Some(OutputHealth::StreamError));
+    controller.recover(&mut pipeline).unwrap();
+
+    // The recreated source keeps the published gain without a replay command.
+    enqueue_full_blocks(&mut pipeline, &mut sealer, 128, MAX_PCM_QUEUE_BLOCKS);
+    controller.output_mut().render(&mut callback);
+    assert!(
+        callback[476..]
+            .iter()
+            .all(|sample| (*sample - 0.5).abs() < f32::EPSILON),
+        "gain did not survive output recovery: {:?}",
+        &callback[476..]
+    );
+
+    gain.set_muted(true);
+    enqueue_full_blocks(&mut pipeline, &mut sealer, 256, MAX_PCM_QUEUE_BLOCKS);
+    controller.output_mut().render(&mut callback);
+    assert!(
+        callback[476..]
+            .iter()
+            .all(|sample| sample.abs() < f32::EPSILON),
+        "mute did not survive output recovery: {:?}",
+        &callback[476..]
+    );
 }
 
 #[test]

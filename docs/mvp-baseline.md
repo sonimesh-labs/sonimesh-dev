@@ -47,7 +47,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   either the direct receiver pipeline or its UDP composition wrapper without
   taking ownership of ingress or socket state. Output-format diagnostics publish
   only after the platform accepts the matching callback source and clear when
-  that source stops.
+  that source stops. The controller exposes the per-stream gain and mute handle,
+  so a desktop owner can publish a local volume choice that reaches the active
+  source and survives output-device recovery.
 - allocation-free gain smoothing, saturating atomic stream and output-status
   counters, endpoint redaction, output adapter contracts, and a tested desktop
   session state machine;

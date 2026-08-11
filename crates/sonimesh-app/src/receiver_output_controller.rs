@@ -4,8 +4,8 @@ use sonimesh_audio::{FrameDecoder, RealtimePcmProducer};
 use sonimesh_platform::{AudioOutput, OutputError, OutputHealth};
 
 use crate::{
-    OutputSelection, ReceiverPcmEndpointError, ReceiverPcmEndpointFactory, ReceiverStreamPipeline,
-    UdpReceiverPipeline,
+    GainControlHandle, OutputSelection, ReceiverPcmEndpointError, ReceiverPcmEndpointFactory,
+    ReceiverStreamPipeline, UdpReceiverPipeline,
 };
 
 /// Control-domain boundary that installs a producer for a newly accepted output source.
@@ -159,6 +159,16 @@ where
     /// Mutably borrows the platform adapter outside the realtime callback.
     pub fn output_mut(&mut self) -> &mut O {
         &mut self.output
+    }
+
+    /// Returns a clone of the per-stream gain and mute handle.
+    ///
+    /// The handle is retained by the endpoint factory and shared with every
+    /// created source, so a desktop owner can publish a local gain or mute
+    /// choice that also survives output-device recovery.
+    #[must_use]
+    pub fn gain_handle(&self) -> GainControlHandle {
+        self.endpoint_factory.gain_handle()
     }
 
     fn install<P>(
