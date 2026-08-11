@@ -195,4 +195,22 @@ describe('PreviewDesktopBridge', () => {
 
     await expect(bridge.simulateCommandRejection()).rejects.toThrow('preview command rejection')
   })
+
+  it('resets the preview to its initial synthetic state after simulations', async () => {
+    const bridge = new PreviewDesktopBridge()
+    await bridge.startStream()
+    await bridge.simulateMetricsBurst()
+    await bridge.revokePairing()
+    await bridge.createPairing()
+    expect((await bridge.snapshot()).session).toBe('pairing')
+
+    const reset = await bridge.resetPreview()
+
+    expect(reset.session).toBe('ready')
+    expect(reset.pairing).toEqual({ state: 'consumed', expiresInSeconds: null })
+    expect(reset.metrics.authenticatedPackets).toBe('12844')
+    expect(reset.metrics.currentJitterMs).toBe(38)
+    expect(reset.metrics.queuedPcmBlocks).toBe(3)
+    expect(reset.previewAdapter).toBe(true)
+  })
 })

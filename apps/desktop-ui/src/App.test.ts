@@ -7,6 +7,7 @@ const desktopBridgeMock = vi.hoisted(() => ({
   createPairing: vi.fn(),
   expirePairing: vi.fn(),
   revokePairing: vi.fn(),
+  resetPreview: vi.fn(),
   selectOutput: vi.fn(),
   simulateCommandRejection: vi.fn(),
   simulateConnectionLost: vi.fn(),
@@ -212,6 +213,24 @@ describe('App', () => {
     await flushPromises()
 
     expect(wrapper.find('.command-error').exists()).toBe(false)
+  })
+
+  it('resets the preview state from the topbar', async () => {
+    desktopBridgeMock.snapshot.mockResolvedValueOnce(previewSnapshot())
+    const wrapper = mount(App)
+    await flushPromises()
+
+    desktopBridgeMock.resetPreview.mockResolvedValueOnce(previewSnapshot())
+
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === 'Reset preview')!
+      .trigger('click')
+    await flushPromises()
+
+    expect(desktopBridgeMock.resetPreview).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('.health-card strong').text()).toBe('38ms')
+    expect(wrapper.text()).toContain('12,844')
   })
 
 })

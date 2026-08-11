@@ -7,7 +7,7 @@ import PairingPanel from './components/PairingPanel.vue'
 import SessionPanel from './components/SessionPanel.vue'
 import { useDesktopState } from './useDesktopState'
 
-const { busy, createPairing, error, expirePairing, refresh, revokePairing, selectOutput, simulateCommandRejection, simulateConnectionLost, simulateMetricsBurst, simulateOutputLost, simulateOutputRestored, simulatePairingConsumed, simulateReconnected, snapshot, start, stop } = useDesktopState()
+const { busy, createPairing, error, expirePairing, refresh, resetPreview, revokePairing, selectOutput, simulateCommandRejection, simulateConnectionLost, simulateMetricsBurst, simulateOutputLost, simulateOutputRestored, simulatePairingConsumed, simulateReconnected, snapshot, start, stop } = useDesktopState()
 </script>
 
 <template>
@@ -59,6 +59,9 @@ const { busy, createPairing, error, expirePairing, refresh, revokePairing, selec
           </span>
           <button class="icon-action refresh" title="Refresh state" aria-label="Refresh state" :disabled="busy" @click="refresh">
             <RefreshCw :size="18" :class="{ spinning: busy }" aria-hidden="true" />
+          </button>
+          <button v-if="snapshot?.previewAdapter" class="preview-action" :disabled="busy" @click="resetPreview">
+            Reset preview
           </button>
         </div>
       </header>

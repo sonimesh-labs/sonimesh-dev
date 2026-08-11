@@ -8,6 +8,7 @@ const desktopBridgeMock = vi.hoisted(() => ({
   createPairing: vi.fn(),
   expirePairing: vi.fn(),
   revokePairing: vi.fn(),
+  resetPreview: vi.fn(),
   selectOutput: vi.fn(),
   simulateCommandRejection: vi.fn(),
   simulateConnectionLost: vi.fn(),
@@ -200,6 +201,19 @@ describe('useDesktopState', () => {
     expect(desktopBridgeMock.simulateCommandRejection).toHaveBeenCalledTimes(1)
     expect(wrapper.vm.error).toBe('The desktop control service did not accept this command.')
     expect(wrapper.vm.busy).toBe(false)
+  })
+
+  it('forwards a preview reset and projects the restored snapshot', async () => {
+    desktopBridgeMock.snapshot.mockResolvedValueOnce(receiverSnapshot('ready'))
+    const wrapper = mount(StateHarness)
+    await flushPromises()
+
+    desktopBridgeMock.resetPreview.mockResolvedValueOnce(receiverSnapshot('ready'))
+
+    await wrapper.vm.resetPreview()
+
+    expect(desktopBridgeMock.resetPreview).toHaveBeenCalledTimes(1)
+    expect(wrapper.vm.snapshot?.session).toBe('ready')
   })
 
 })

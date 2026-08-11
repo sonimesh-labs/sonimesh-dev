@@ -22,6 +22,8 @@ export interface DesktopBridge {
   simulateMetricsBurst(): Promise<DesktopSnapshot>
   /** Preview-only: rejects like a real bridge command so the error banner is exercisable. */
   simulateCommandRejection(): Promise<DesktopSnapshot>
+  /** Preview-only: restores the initial synthetic state after preview simulations. */
+  resetPreview(): Promise<DesktopSnapshot>
 }
 
 const previewOutput: OutputDevice[] = [
@@ -29,39 +31,41 @@ const previewOutput: OutputDevice[] = [
   { id: 'usb', label: 'USB audio output', sampleRateHz: 48_000, channels: 2, isDefault: false },
 ]
 
+const INITIAL_PREVIEW_SNAPSHOT: DesktopSnapshot = {
+  session: 'ready',
+  outputDevices: previewOutput,
+  selectedOutputId: 'default',
+  pairing: { state: 'consumed', expiresInSeconds: null },
+  metrics: {
+    authenticatedPackets: '12844',
+    duplicatePackets: '6',
+    rejectedPackets: '3',
+    latePackets: '9',
+    reorderedPackets: '11',
+    jitterResyncDroppedFrames: '4',
+    plcFrames: '7',
+    decodeErrors: '1',
+    pcmUnderflows: '0',
+    pcmRefillLimitHits: '1',
+    pcmOverflows: '2',
+    pcmDiscontinuities: '2',
+    queuedPcmBlocks: 3,
+    queuedPcmHighWaterBlocks: 5,
+    streamResets: '3',
+    nominalInputSampleRateHz: 48_000,
+    nominalOutputSampleRateHz: 48_000,
+    driftAdjustmentPpm: 110,
+    driftHardResyncs: '1',
+    currentJitterMs: 38,
+    playoutDelayMs: 64,
+  },
+  previewAdapter: true,
+}
+
 export class PreviewDesktopBridge implements DesktopBridge {
   private pairingExpiresAtMillis: number | null = null
 
-  private snapshotState: DesktopSnapshot = {
-    session: 'ready',
-    outputDevices: previewOutput,
-    selectedOutputId: 'default',
-    pairing: { state: 'consumed', expiresInSeconds: null },
-    metrics: {
-      authenticatedPackets: '12844',
-      duplicatePackets: '6',
-      rejectedPackets: '3',
-      latePackets: '9',
-      reorderedPackets: '11',
-      jitterResyncDroppedFrames: '4',
-      plcFrames: '7',
-      decodeErrors: '1',
-      pcmUnderflows: '0',
-      pcmRefillLimitHits: '1',
-      pcmOverflows: '2',
-      pcmDiscontinuities: '2',
-      queuedPcmBlocks: 3,
-      queuedPcmHighWaterBlocks: 5,
-      streamResets: '3',
-      nominalInputSampleRateHz: 48_000,
-      nominalOutputSampleRateHz: 48_000,
-      driftAdjustmentPpm: 110,
-      driftHardResyncs: '1',
-      currentJitterMs: 38,
-      playoutDelayMs: 64,
-    },
-    previewAdapter: true,
-  }
+  private snapshotState: DesktopSnapshot = structuredClone(INITIAL_PREVIEW_SNAPSHOT)
 
   async snapshot(): Promise<DesktopSnapshot> {
     return this.copy()
@@ -180,6 +184,12 @@ export class PreviewDesktopBridge implements DesktopBridge {
 
   simulateCommandRejection(): Promise<DesktopSnapshot> {
     return Promise.reject(new Error('preview command rejection'))
+  }
+
+  async resetPreview(): Promise<DesktopSnapshot> {
+    this.snapshotState = structuredClone(INITIAL_PREVIEW_SNAPSHOT)
+    this.pairingExpiresAtMillis = null
+    return this.copy()
   }
 
   private copy(): DesktopSnapshot {

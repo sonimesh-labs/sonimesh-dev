@@ -22,7 +22,9 @@ diagnostics panel can simulate a burst of transport and recovery activity
 (`Simulate metrics burst`), so the cumulative-counter formatting and health
 cards can be exercised without live audio. A preview
 `Simulate command rejection` action rejects like a real bridge command so the
-control error banner and its recovery can be exercised. It
+control error banner and its recovery can be exercised. A
+`Reset preview` action restores the initial synthetic session and counters so
+the full preview can be replayed without a page reload. It
 must never receive PCM, Opus frames, keys, or realtime callbacks.
 
 The future bridge should project the Rust `DesktopControlSnapshot` after the
