@@ -7,7 +7,7 @@ import PairingPanel from './components/PairingPanel.vue'
 import SessionPanel from './components/SessionPanel.vue'
 import { useDesktopState } from './useDesktopState'
 
-const { busy, createPairing, error, expirePairing, refresh, resetPreview, revokePairing, selectOutput, simulateCommandRejection, simulateConnectionLost, simulateMetricsBurst, simulateOutputLost, simulateOutputRestored, simulatePairingConsumed, simulateReconnected, simulateSessionExpired, snapshot, start, stop } = useDesktopState()
+const { busy, createPairing, error, expirePairing, refresh, resetPreview, revokePairing, selectOutput, setGain, setMuted, simulateCommandRejection, simulateConnectionLost, simulateMetricsBurst, simulateOutputLost, simulateOutputRestored, simulatePairingConsumed, simulateReconnected, simulateSessionExpired, snapshot, start, stop } = useDesktopState()
 </script>
 
 <template>
@@ -84,7 +84,7 @@ const { busy, createPairing, error, expirePairing, refresh, resetPreview, revoke
             @simulate-command-rejection="simulateCommandRejection"
           />
           <div class="secondary-stack">
-            <OutputPanel :devices="snapshot.outputDevices" :selected-id="snapshot.selectedOutputId" :busy="busy" :preview="snapshot.previewAdapter" @select="selectOutput" />
+            <OutputPanel :devices="snapshot.outputDevices" :selected-id="snapshot.selectedOutputId" :gain="snapshot.gain" :muted="snapshot.muted" :busy="busy" :preview="snapshot.previewAdapter" @select="selectOutput" @gain="setGain" @mute="setMuted" />
             <PairingPanel :pairing="snapshot.pairing" :busy="busy" :preview="snapshot.previewAdapter" @create="createPairing" @expire="expirePairing" @refresh="refresh" @revoke="revokePairing" @simulate-pairing-consumed="simulatePairingConsumed" />
           </div>
         </div>

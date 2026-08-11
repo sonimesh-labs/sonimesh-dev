@@ -1,21 +1,26 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Check, Headphones } from '@lucide/vue'
+import { Check, Headphones, Volume2, VolumeX } from '@lucide/vue'
 
 import type { OutputDevice } from '../types'
 
 const props = defineProps<{
   devices: OutputDevice[]
   selectedId: string | null
+  gain: number
+  muted: boolean
   busy: boolean
   preview?: boolean
 }>()
 
 const emit = defineEmits<{
   select: [id: string]
+  gain: [gain: number]
+  mute: [muted: boolean]
 }>()
 
 const selectedDevice = computed(() => props.devices.find((device) => device.id === props.selectedId) ?? null)
+const volumeLabel = computed(() => (props.muted ? 'Muted' : `${Math.round(props.gain * 100)}%`))
 </script>
 
 <template>
@@ -44,6 +49,41 @@ const selectedDevice = computed(() => props.devices.find((device) => device.id =
           {{ device.label }}{{ device.isDefault ? ' (default)' : '' }}
         </option>
       </select>
+    </div>
+
+    <div class="volume-block">
+      <div class="volume-heading">
+        <span class="volume-icon" :class="{ muted }" aria-hidden="true">
+          <VolumeX v-if="muted" :size="16" />
+          <Volume2 v-else :size="16" />
+        </span>
+        <label class="field-label volume-label" for="output-volume">{{ preview ? 'Simulated volume' : 'Volume' }}</label>
+        <span class="volume-value">{{ volumeLabel }}</span>
+      </div>
+      <input
+        id="output-volume"
+        class="volume-slider"
+        type="range"
+        min="0"
+        max="1"
+        step="0.01"
+        :value="gain"
+        :disabled="busy"
+        aria-label="Volume level"
+        @input="emit('gain', Number(($event.target as HTMLInputElement).value))"
+      />
+      <button
+        class="mute-toggle"
+        :class="{ muted }"
+        type="button"
+        :disabled="busy"
+        :aria-pressed="muted"
+        @click="emit('mute', !muted)"
+      >
+        <VolumeX v-if="muted" :size="14" aria-hidden="true" />
+        <Volume2 v-else :size="14" aria-hidden="true" />
+        {{ muted ? 'Unmute' : 'Mute' }}
+      </button>
     </div>
   </section>
 </template>

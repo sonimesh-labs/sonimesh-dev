@@ -5,6 +5,10 @@ export interface DesktopBridge {
   startStream(): Promise<DesktopSnapshot>
   stopStream(): Promise<DesktopSnapshot>
   selectOutput(deviceId: string): Promise<DesktopSnapshot>
+  /** Publishes a bounded linear gain target; out-of-range or non-finite values are ignored. */
+  setGain(gain: number): Promise<DesktopSnapshot>
+  /** Publishes the per-stream mute flag. */
+  setMuted(muted: boolean): Promise<DesktopSnapshot>
   createPairing(): Promise<DesktopSnapshot>
   expirePairing(): Promise<DesktopSnapshot>
   revokePairing(): Promise<DesktopSnapshot>
@@ -37,6 +41,8 @@ const INITIAL_PREVIEW_SNAPSHOT: DesktopSnapshot = {
   session: 'ready',
   outputDevices: previewOutput,
   selectedOutputId: 'default',
+  gain: 1,
+  muted: false,
   pairing: { state: 'consumed', expiresInSeconds: null },
   metrics: {
     authenticatedPackets: '12844',
@@ -91,6 +97,18 @@ export class PreviewDesktopBridge implements DesktopBridge {
     if (this.snapshotState.outputDevices.some((device) => device.id === deviceId)) {
       this.snapshotState.selectedOutputId = deviceId
     }
+    return this.copy()
+  }
+
+  async setGain(gain: number): Promise<DesktopSnapshot> {
+    if (Number.isFinite(gain) && gain >= 0 && gain <= 1) {
+      this.snapshotState.gain = gain
+    }
+    return this.copy()
+  }
+
+  async setMuted(muted: boolean): Promise<DesktopSnapshot> {
+    this.snapshotState.muted = muted
     return this.copy()
   }
 

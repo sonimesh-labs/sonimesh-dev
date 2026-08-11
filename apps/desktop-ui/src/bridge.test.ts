@@ -253,4 +253,41 @@ describe('PreviewDesktopBridge', () => {
     expect(snapshot.session).toBe('pairing')
     expect(snapshot.pairing.state).toBe('active')
   })
+
+  it('publishes a bounded linear gain and mute flag', async () => {
+    const bridge = new PreviewDesktopBridge()
+
+    const louder = await bridge.setGain(0.4)
+    expect(louder.gain).toBe(0.4)
+    expect(louder.muted).toBe(false)
+
+    const muted = await bridge.setMuted(true)
+    expect(muted.muted).toBe(true)
+
+    const restored = await bridge.setMuted(false)
+    expect(restored.muted).toBe(false)
+  })
+
+  it('ignores an invalid gain without changing the published state', async () => {
+    const bridge = new PreviewDesktopBridge()
+    await bridge.setGain(0.6)
+
+    for (const invalid of [Number.NaN, Number.POSITIVE_INFINITY, -0.1, 1.5]) {
+      const snapshot = await bridge.setGain(invalid)
+      expect(snapshot.gain).toBe(0.6)
+      expect(snapshot.muted).toBe(false)
+    }
+  })
+
+  it('resets the preview volume to unity and unmuted', async () => {
+    const bridge = new PreviewDesktopBridge()
+    await bridge.setGain(0.25)
+    await bridge.setMuted(true)
+
+    const reset = await bridge.resetPreview()
+
+    expect(reset.gain).toBe(1)
+    expect(reset.muted).toBe(false)
+  })
+
 })

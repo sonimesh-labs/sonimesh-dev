@@ -46,6 +46,10 @@ export interface DesktopSnapshot {
   session: SessionState
   outputDevices: OutputDevice[]
   selectedOutputId: string | null
+  /** Linear per-stream gain target in 0.0..=1.0, attenuation only. */
+  gain: number
+  /** Mute flag published to the realtime render source. */
+  muted: boolean
   pairing: PairingStatus
   metrics: StreamMetrics
   previewAdapter: boolean

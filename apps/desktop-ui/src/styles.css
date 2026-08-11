@@ -194,6 +194,21 @@ button:focus-visible, select:focus-visible, a:focus-visible { outline: 3px solid
 .select-wrap::after { content: "⌄"; position: absolute; top: 50%; right: 14px; color: var(--muted); font-size: 16px; transform: translateY(-58%); pointer-events: none; }
 .device-select { width: 100%; min-height: 44px; appearance: none; padding: 0 38px 0 13px; border: 1px solid var(--line); border-radius: 13px; color: var(--ink-soft); background: #fff; font-size: 12px; font-weight: 620; cursor: pointer; }
 .device-select:hover:not(:disabled) { border-color: var(--line-strong); }
+.volume-block { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--line); }
+.volume-heading { display: flex; align-items: center; gap: 9px; }
+.volume-icon { width: 30px; height: 30px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 10px; color: var(--signal-ink); background: var(--signal-soft); }
+.volume-icon.muted { color: var(--rose); background: var(--rose-soft); }
+.volume-label { margin: 0 0 0 1px; }
+.volume-value { margin-left: auto; color: var(--muted); font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.volume-slider { width: 100%; margin: 12px 0 0; accent-color: var(--signal); cursor: pointer; }
+.volume-slider:disabled { cursor: default; opacity: 0.55; }
+.mute-toggle {
+  min-height: 34px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; margin-top: 10px; padding: 0 12px;
+  border: 1px solid var(--line); border-radius: 10px; color: var(--ink-soft); background: var(--surface-soft); font-size: 11px; font-weight: 700;
+  transition: color 170ms ease, border-color 170ms ease, background 170ms ease;
+}
+.mute-toggle:hover:not(:disabled) { color: var(--ink); border-color: var(--line-strong); }
+.mute-toggle.muted { color: var(--rose); border-color: rgba(191, 64, 83, 0.28); background: var(--rose-soft); }
 .pairing-callout { min-height: 94px; display: grid; grid-template-columns: auto 1fr auto; align-items: start; gap: 11px; margin-top: 20px; padding: 14px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface-soft); }
 .pairing-callout > div { display: grid; gap: 5px; }
 .pairing-callout strong { color: var(--ink-soft); font-size: 12.5px; font-weight: 720; }

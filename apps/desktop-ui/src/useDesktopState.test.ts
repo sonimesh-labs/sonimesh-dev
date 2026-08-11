@@ -10,6 +10,8 @@ const desktopBridgeMock = vi.hoisted(() => ({
   revokePairing: vi.fn(),
   resetPreview: vi.fn(),
   selectOutput: vi.fn(),
+  setGain: vi.fn(),
+  setMuted: vi.fn(),
   simulateCommandRejection: vi.fn(),
   simulateConnectionLost: vi.fn(),
   simulateMetricsBurst: vi.fn(),
@@ -39,6 +41,8 @@ function receiverSnapshot(session: DesktopSnapshot['session']): DesktopSnapshot 
     session,
     outputDevices: [],
     selectedOutputId: null,
+    gain: 1,
+    muted: false,
     pairing: { state: 'inactive', expiresInSeconds: null },
     metrics: {
       authenticatedPackets: '0',
@@ -228,6 +232,25 @@ describe('useDesktopState', () => {
 
     expect(desktopBridgeMock.simulateSessionExpired).toHaveBeenCalledTimes(1)
     expect(wrapper.vm.snapshot?.session).toBe('idle')
+  })
+
+  it('forwards gain and mute commands and projects the returned snapshot', async () => {
+    desktopBridgeMock.snapshot.mockResolvedValueOnce(receiverSnapshot('ready'))
+    const wrapper = mount(StateHarness)
+    await flushPromises()
+
+    desktopBridgeMock.setGain.mockResolvedValueOnce({ ...receiverSnapshot('ready'), gain: 0.5 })
+    desktopBridgeMock.setMuted.mockResolvedValueOnce({ ...receiverSnapshot('ready'), muted: true })
+
+    await wrapper.vm.setGain(0.5)
+
+    expect(desktopBridgeMock.setGain).toHaveBeenCalledWith(0.5)
+    expect(wrapper.vm.snapshot?.gain).toBe(0.5)
+
+    await wrapper.vm.setMuted(true)
+
+    expect(desktopBridgeMock.setMuted).toHaveBeenCalledWith(true)
+    expect(wrapper.vm.snapshot?.muted).toBe(true)
   })
 
 })

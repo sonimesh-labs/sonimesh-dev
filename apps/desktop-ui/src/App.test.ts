@@ -9,6 +9,8 @@ const desktopBridgeMock = vi.hoisted(() => ({
   revokePairing: vi.fn(),
   resetPreview: vi.fn(),
   selectOutput: vi.fn(),
+  setGain: vi.fn(),
+  setMuted: vi.fn(),
   simulateCommandRejection: vi.fn(),
   simulateConnectionLost: vi.fn(),
   simulateMetricsBurst: vi.fn(),
@@ -46,6 +48,8 @@ function previewSnapshot(): DesktopSnapshot {
       { id: 'default', label: 'Synthetic output', sampleRateHz: 48_000, channels: 2, isDefault: true },
     ],
     selectedOutputId: 'default',
+    gain: 1,
+    muted: false,
     pairing: { state: 'consumed', expiresInSeconds: null },
     metrics: {
       authenticatedPackets: '12844',
@@ -252,6 +256,20 @@ describe('App', () => {
     expect(desktopBridgeMock.resetPreview).toHaveBeenCalledTimes(1)
     expect(wrapper.get('.health-card strong').text()).toBe('38ms')
     expect(wrapper.text()).toContain('12,844')
+  })
+
+  it('publishes a volume change from the output panel', async () => {
+    desktopBridgeMock.snapshot.mockResolvedValueOnce(previewSnapshot())
+    const wrapper = mount(App)
+    await flushPromises()
+
+    desktopBridgeMock.setGain.mockResolvedValueOnce({ ...previewSnapshot(), gain: 0.5 })
+
+    await wrapper.get('input[type="range"]').setValue('0.5')
+    await flushPromises()
+
+    expect(desktopBridgeMock.setGain).toHaveBeenCalledWith(0.5)
+    expect(wrapper.get('.volume-value').text()).toBe('50%')
   })
 
 })
