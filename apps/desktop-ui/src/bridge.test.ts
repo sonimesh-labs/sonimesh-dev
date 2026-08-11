@@ -156,4 +156,37 @@ describe('PreviewDesktopBridge', () => {
     expect(snapshot.session).toBe('ready')
     expect(snapshot.pairing.state).toBe('consumed')
   })
+
+  it('simulates a burst of transport and recovery activity and accumulates on repeat', async () => {
+    const bridge = new PreviewDesktopBridge()
+
+    const before = await bridge.snapshot()
+    const burst = await bridge.simulateMetricsBurst()
+    const again = await bridge.simulateMetricsBurst()
+
+    expect(burst.metrics.authenticatedPackets).toBe('12892')
+    expect(burst.metrics.duplicatePackets).toBe('8')
+    expect(burst.metrics.plcFrames).toBe('13')
+    expect(burst.metrics.currentJitterMs).toBe(52)
+    expect(burst.metrics.playoutDelayMs).toBe(68)
+    expect(burst.metrics.queuedPcmBlocks).toBe(5)
+    expect(burst.metrics.queuedPcmHighWaterBlocks).toBe(5)
+
+    expect(again.metrics.authenticatedPackets).toBe('12940')
+    expect(again.metrics.currentJitterMs).toBe(66)
+
+    expect(burst.metrics.streamResets).toBe(before.metrics.streamResets)
+    expect(burst.metrics.driftHardResyncs).toBe(before.metrics.driftHardResyncs)
+  })
+
+  it('keeps stable counters unchanged across a metrics burst', async () => {
+    const bridge = new PreviewDesktopBridge()
+
+    const burst = await bridge.simulateMetricsBurst()
+
+    expect(burst.metrics.streamResets).toBe('3')
+    expect(burst.metrics.driftHardResyncs).toBe('1')
+    expect(burst.metrics.nominalInputSampleRateHz).toBe(48_000)
+    expect(burst.metrics.nominalOutputSampleRateHz).toBe(48_000)
+  })
 })

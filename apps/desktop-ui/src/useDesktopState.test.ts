@@ -10,6 +10,7 @@ const desktopBridgeMock = vi.hoisted(() => ({
   revokePairing: vi.fn(),
   selectOutput: vi.fn(),
   simulateConnectionLost: vi.fn(),
+  simulateMetricsBurst: vi.fn(),
   simulateOutputLost: vi.fn(),
   simulateOutputRestored: vi.fn(),
   simulatePairingConsumed: vi.fn(),
@@ -171,6 +172,19 @@ describe('useDesktopState', () => {
 
     expect(desktopBridgeMock.simulatePairingConsumed).toHaveBeenCalledTimes(1)
     expect(wrapper.vm.snapshot?.session).toBe('ready')
+  })
+
+  it('forwards a preview metrics burst and projects its snapshot', async () => {
+    desktopBridgeMock.snapshot.mockResolvedValueOnce(receiverSnapshot('ready'))
+    const wrapper = mount(StateHarness)
+    await flushPromises()
+
+    desktopBridgeMock.simulateMetricsBurst.mockResolvedValueOnce(receiverSnapshot('streaming'))
+
+    await wrapper.vm.simulateMetricsBurst()
+
+    expect(desktopBridgeMock.simulateMetricsBurst).toHaveBeenCalledTimes(1)
+    expect(wrapper.vm.snapshot?.session).toBe('streaming')
   })
 
 })

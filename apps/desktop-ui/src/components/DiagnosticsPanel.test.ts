@@ -62,4 +62,29 @@ describe('DiagnosticsPanel', () => {
     expect(authenticated?.get('dd').text()).toBe('18,446,744,073,709,551,615')
     expect(duplicates?.get('dd').text()).toBe('Unavailable')
   })
+
+  it('emits a metrics-burst request from the preview-only action', async () => {
+    const wrapper = mount(DiagnosticsPanel, {
+      props: {
+        metrics: metrics(),
+        preview: true,
+        busy: false,
+      },
+    })
+
+    await wrapper.get('.diagnostics-simulate button').trigger('click')
+
+    expect(wrapper.emitted('simulateMetricsBurst')).toHaveLength(1)
+  })
+
+  it('hides the metrics-burst simulation action outside the preview adapter', () => {
+    const wrapper = mount(DiagnosticsPanel, {
+      props: {
+        metrics: metrics(),
+        preview: false,
+      },
+    })
+
+    expect(wrapper.find('.diagnostics-simulate').exists()).toBe(false)
+  })
 })

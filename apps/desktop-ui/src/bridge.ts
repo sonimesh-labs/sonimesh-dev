@@ -1,4 +1,4 @@
-import type { DesktopSnapshot, OutputDevice } from './types'
+import type { DesktopSnapshot, MetricCounter, OutputDevice } from './types'
 
 export interface DesktopBridge {
   snapshot(): Promise<DesktopSnapshot>
@@ -18,6 +18,8 @@ export interface DesktopBridge {
   simulateOutputRestored(): Promise<DesktopSnapshot>
   /** Preview-only: simulates the sender consuming the open pairing invitation. */
   simulatePairingConsumed(): Promise<DesktopSnapshot>
+  /** Preview-only: simulates a burst of transport and recovery activity so counters visibly move. */
+  simulateMetricsBurst(): Promise<DesktopSnapshot>
 }
 
 const previewOutput: OutputDevice[] = [
@@ -151,6 +153,29 @@ export class PreviewDesktopBridge implements DesktopBridge {
     return this.copy()
   }
 
+  async simulateMetricsBurst(): Promise<DesktopSnapshot> {
+    const metrics = this.snapshotState.metrics
+    metrics.authenticatedPackets = addToCounter(metrics.authenticatedPackets, 48)
+    metrics.duplicatePackets = addToCounter(metrics.duplicatePackets, 2)
+    metrics.rejectedPackets = addToCounter(metrics.rejectedPackets, 1)
+    metrics.latePackets = addToCounter(metrics.latePackets, 5)
+    metrics.reorderedPackets = addToCounter(metrics.reorderedPackets, 3)
+    metrics.jitterResyncDroppedFrames = addToCounter(metrics.jitterResyncDroppedFrames, 2)
+    metrics.plcFrames = addToCounter(metrics.plcFrames, 6)
+    metrics.decodeErrors = addToCounter(metrics.decodeErrors, 1)
+    metrics.pcmUnderflows = addToCounter(metrics.pcmUnderflows, 1)
+    metrics.pcmRefillLimitHits = addToCounter(metrics.pcmRefillLimitHits, 1)
+    metrics.pcmDiscontinuities = addToCounter(metrics.pcmDiscontinuities, 1)
+
+    const nextQueued = metrics.queuedPcmBlocks + 2
+    metrics.queuedPcmHighWaterBlocks = Math.max(metrics.queuedPcmHighWaterBlocks, nextQueued)
+    metrics.queuedPcmBlocks = Math.min(metrics.queuedPcmHighWaterBlocks, nextQueued)
+    metrics.currentJitterMs += 14
+    metrics.playoutDelayMs += 4
+
+    return this.copy()
+  }
+
   private copy(): DesktopSnapshot {
     this.expireInvitationWhenDue(Date.now())
     return structuredClone(this.snapshotState)
@@ -180,3 +205,8 @@ const PAIRING_INVITATION_LIFETIME_SECONDS = 300
 const PAIRING_INVITATION_LIFETIME_MILLIS = PAIRING_INVITATION_LIFETIME_SECONDS * 1_000
 
 export const desktopBridge: DesktopBridge = new PreviewDesktopBridge()
+
+function addToCounter(counter: MetricCounter, delta: number): MetricCounter {
+  if (!/^\d+$/.test(counter)) return counter
+  return (BigInt(counter) + BigInt(delta)).toString()
+}

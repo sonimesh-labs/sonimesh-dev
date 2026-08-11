@@ -6,6 +6,11 @@ import type { StreamMetrics } from '../types'
 const props = defineProps<{
   metrics: StreamMetrics
   preview?: boolean
+  busy?: boolean
+}>()
+
+const emit = defineEmits<{
+  simulateMetricsBurst: []
 }>()
 
 function formatRate(sampleRateHz: number) {
@@ -101,6 +106,10 @@ function formatCounter(counter: string) {
       <div><Gauge :size="17" aria-hidden="true" /><span>Resampling</span><strong>{{ formatRate(metrics.nominalInputSampleRateHz) }} → {{ formatRate(metrics.nominalOutputSampleRateHz) }}</strong></div>
       <div><RefreshCcwDot :size="17" aria-hidden="true" /><span>Effective ratio</span><strong>{{ formatRatio() }}</strong></div>
       <div><Layers :size="17" aria-hidden="true" /><span>Queue policy</span><strong>Bounded</strong></div>
+    </div>
+
+    <div v-if="preview" class="simulate-actions diagnostics-simulate" aria-label="Preview metrics simulation">
+      <button class="preview-action" :disabled="busy" @click="emit('simulateMetricsBurst')">Simulate metrics burst</button>
     </div>
   </section>
 </template>

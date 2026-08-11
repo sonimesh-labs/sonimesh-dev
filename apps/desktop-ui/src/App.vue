@@ -7,7 +7,7 @@ import PairingPanel from './components/PairingPanel.vue'
 import SessionPanel from './components/SessionPanel.vue'
 import { useDesktopState } from './useDesktopState'
 
-const { busy, createPairing, error, expirePairing, refresh, revokePairing, selectOutput, simulateConnectionLost, simulateOutputLost, simulateOutputRestored, simulatePairingConsumed, simulateReconnected, snapshot, start, stop } = useDesktopState()
+const { busy, createPairing, error, expirePairing, refresh, revokePairing, selectOutput, simulateConnectionLost, simulateMetricsBurst, simulateOutputLost, simulateOutputRestored, simulatePairingConsumed, simulateReconnected, snapshot, start, stop } = useDesktopState()
 </script>
 
 <template>
@@ -83,7 +83,7 @@ const { busy, createPairing, error, expirePairing, refresh, revokePairing, selec
             <PairingPanel :pairing="snapshot.pairing" :busy="busy" :preview="snapshot.previewAdapter" @create="createPairing" @expire="expirePairing" @refresh="refresh" @revoke="revokePairing" @simulate-pairing-consumed="simulatePairingConsumed" />
           </div>
         </div>
-        <DiagnosticsPanel id="diagnostics" :metrics="snapshot.metrics" :preview="snapshot.previewAdapter" />
+        <DiagnosticsPanel id="diagnostics" :metrics="snapshot.metrics" :preview="snapshot.previewAdapter" :busy="busy" @simulate-metrics-burst="simulateMetricsBurst" />
       </template>
       <div v-else class="loading-state">
         <span class="loading-orbit" aria-hidden="true"></span>

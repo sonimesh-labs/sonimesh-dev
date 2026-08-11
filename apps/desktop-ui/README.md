@@ -17,7 +17,10 @@ without a page reload. The
 preview also mirrors the session owner's platform events: connection loss and
 output loss can be simulated from the session panel (trusted → `reconnecting`,
 `streaming` → `outputUnavailable`), with reconnect and output restore returning
-to `ready` and `streaming`, so recovery UI is exercisable without hardware. It
+to `ready` and `streaming`, so recovery UI is exercisable without hardware. The
+diagnostics panel can simulate a burst of transport and recovery activity
+(`Simulate metrics burst`), so the cumulative-counter formatting and health
+cards can be exercised without live audio. It
 must never receive PCM, Opus frames, keys, or realtime callbacks.
 
 The future bridge should project the Rust `DesktopControlSnapshot` after the

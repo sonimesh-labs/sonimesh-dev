@@ -9,6 +9,7 @@ const desktopBridgeMock = vi.hoisted(() => ({
   revokePairing: vi.fn(),
   selectOutput: vi.fn(),
   simulateConnectionLost: vi.fn(),
+  simulateMetricsBurst: vi.fn(),
   simulateOutputLost: vi.fn(),
   simulateOutputRestored: vi.fn(),
   simulatePairingConsumed: vi.fn(),
@@ -163,6 +164,31 @@ describe('App', () => {
 
     expect(desktopBridgeMock.simulatePairingConsumed).toHaveBeenCalledTimes(1)
     expect(wrapper.get('.session-chip').text()).toBe('Preview ready')
+  })
+
+  it('simulates a metrics burst from the diagnostics panel', async () => {
+    desktopBridgeMock.snapshot.mockResolvedValueOnce(previewSnapshot())
+    const wrapper = mount(App)
+    await flushPromises()
+
+    desktopBridgeMock.simulateMetricsBurst.mockResolvedValueOnce({
+      ...previewSnapshot(),
+      metrics: {
+        ...previewSnapshot().metrics,
+        authenticatedPackets: '12924',
+        currentJitterMs: 52,
+      },
+    })
+
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === 'Simulate metrics burst')!
+      .trigger('click')
+    await flushPromises()
+
+    expect(desktopBridgeMock.simulateMetricsBurst).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('.health-card strong').text()).toBe('52ms')
+    expect(wrapper.text()).toContain('12,924')
   })
 
 })
