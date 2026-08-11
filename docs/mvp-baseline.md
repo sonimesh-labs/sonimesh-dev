@@ -167,10 +167,10 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   capture and background evidence is recorded in the [Android capture matrix](./measurements/android-capture-matrix.md).
   The remaining lifecycle, power, source-policy, and OEM matrix is still open.
 - a buildable Vue/Vite receiver-control preview with a single low-rate bridge
-  boundary, session controls, output selection, pairing-invitation state, and
-  diagnostics presentation for packet, PCM-queue/refill, and resampling state;
-  it uses
-  in-memory preview data and has no Tauri, audio, key, or realtime integration.
+  boundary, session controls, output selection, per-stream volume and mute,
+  pairing-invitation state, and diagnostics presentation for packet,
+  PCM-queue/refill, and resampling state; it uses in-memory preview data and
+  has no Tauri, audio, key, or realtime integration.
 - a dependency-free `tools/latency-measurement` crate that generates a
   deterministic MLS reference WAVE, reads WAVE recordings (PCM 16/32, IEEE
   float 32/64, and WAVE_FORMAT_EXTENSIBLE), estimates the correlation offset
