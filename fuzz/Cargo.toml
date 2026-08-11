@@ -9,6 +9,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
+sonimesh-audio = { path = "../crates/sonimesh-audio" }
 sonimesh-network = { path = "../crates/sonimesh-network" }
 sonimesh-protocol = { path = "../crates/sonimesh-protocol" }
 
@@ -53,6 +54,13 @@ bench = false
 [[bin]]
 name = "negotiation"
 path = "fuzz_targets/negotiation.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "stream_decode_worker"
+path = "fuzz_targets/stream_decode_worker.rs"
 test = false
 doc = false
 bench = false

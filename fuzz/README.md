@@ -25,6 +25,11 @@ production workspace so `libfuzzer-sys` never becomes a shipping dependency.
   frame through control decoding into the bounded hello validation and
   capability-intersection negotiation, so adversarial version and capability
   lists cannot panic or exceed the negotiated bounds.
+- `stream_decode_worker` admits already-authenticated arbitrary payloads into
+  the fixed-capacity jitter buffer of a per-stream decode worker and drives a
+  bounded number of decode/PLC decisions, proving adversarial post-auth bytes
+  cannot panic the worker, exceed the fixed frame capacity, or grow the PCM
+  queue past its bound.
 - `untrusted_control_stream` feeds arbitrary bytes through the bounded
   length-prefixed control framing state machine in a deterministic per-input
   chunk size, exercising partial length and payload reads, oversize and
@@ -43,6 +48,7 @@ cargo +nightly-2026-07-18 fuzz run protected_media_ingress -- -max_len=1264
 cargo +nightly-2026-07-18 fuzz run pairing_binding -- -max_len=4096
 cargo +nightly-2026-07-18 fuzz run untrusted_control_stream -- -max_len=65540
 cargo +nightly-2026-07-18 fuzz run negotiation -- -max_len=66052
+cargo +nightly-2026-07-18 fuzz run stream_decode_worker -- -max_len=64
 ```
 
 `cargo-fuzz` supports LibFuzzer execution on x86-64 Unix-like systems rather
