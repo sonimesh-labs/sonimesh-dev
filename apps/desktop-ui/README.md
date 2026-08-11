@@ -20,7 +20,9 @@ output loss can be simulated from the session panel (trusted → `reconnecting`,
 to `ready` and `streaming`, so recovery UI is exercisable without hardware. The
 diagnostics panel can simulate a burst of transport and recovery activity
 (`Simulate metrics burst`), so the cumulative-counter formatting and health
-cards can be exercised without live audio. It
+cards can be exercised without live audio. A preview
+`Simulate command rejection` action rejects like a real bridge command so the
+control error banner and its recovery can be exercised. It
 must never receive PCM, Opus frames, keys, or realtime callbacks.
 
 The future bridge should project the Rust `DesktopControlSnapshot` after the

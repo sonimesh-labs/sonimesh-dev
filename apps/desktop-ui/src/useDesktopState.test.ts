@@ -9,6 +9,7 @@ const desktopBridgeMock = vi.hoisted(() => ({
   expirePairing: vi.fn(),
   revokePairing: vi.fn(),
   selectOutput: vi.fn(),
+  simulateCommandRejection: vi.fn(),
   simulateConnectionLost: vi.fn(),
   simulateMetricsBurst: vi.fn(),
   simulateOutputLost: vi.fn(),
@@ -185,6 +186,20 @@ describe('useDesktopState', () => {
 
     expect(desktopBridgeMock.simulateMetricsBurst).toHaveBeenCalledTimes(1)
     expect(wrapper.vm.snapshot?.session).toBe('streaming')
+  })
+
+  it('surfaces a rejected bridge command as the control error banner', async () => {
+    desktopBridgeMock.snapshot.mockResolvedValueOnce(receiverSnapshot('ready'))
+    const wrapper = mount(StateHarness)
+    await flushPromises()
+
+    desktopBridgeMock.simulateCommandRejection.mockRejectedValueOnce(new Error('rejected'))
+
+    await wrapper.vm.simulateCommandRejection()
+
+    expect(desktopBridgeMock.simulateCommandRejection).toHaveBeenCalledTimes(1)
+    expect(wrapper.vm.error).toBe('The desktop control service did not accept this command.')
+    expect(wrapper.vm.busy).toBe(false)
   })
 
 })

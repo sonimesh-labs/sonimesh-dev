@@ -20,6 +20,7 @@ const emit = defineEmits<{
   simulateReconnected: []
   simulateOutputLost: []
   simulateOutputRestored: []
+  simulateCommandRejection: []
 }>()
 
 const labels: Record<SessionState, string> = {
@@ -133,6 +134,9 @@ const displayState = computed(() => (props.preview ? `Preview ${props.state}` : 
       </button>
       <button v-if="state === 'outputUnavailable'" class="preview-action" :disabled="busy" @click="emit('simulateOutputRestored')">
         Restore output
+      </button>
+      <button class="preview-action" :disabled="busy" @click="emit('simulateCommandRejection')">
+        Simulate command rejection
       </button>
     </div>
   </section>

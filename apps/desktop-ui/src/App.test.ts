@@ -8,6 +8,7 @@ const desktopBridgeMock = vi.hoisted(() => ({
   expirePairing: vi.fn(),
   revokePairing: vi.fn(),
   selectOutput: vi.fn(),
+  simulateCommandRejection: vi.fn(),
   simulateConnectionLost: vi.fn(),
   simulateMetricsBurst: vi.fn(),
   simulateOutputLost: vi.fn(),
@@ -189,6 +190,28 @@ describe('App', () => {
     expect(desktopBridgeMock.simulateMetricsBurst).toHaveBeenCalledTimes(1)
     expect(wrapper.get('.health-card strong').text()).toBe('52ms')
     expect(wrapper.text()).toContain('12,924')
+  })
+
+  it('shows the command error banner after a simulated rejection and clears it on the next command', async () => {
+    desktopBridgeMock.snapshot.mockResolvedValueOnce(previewSnapshot())
+    const wrapper = mount(App)
+    await flushPromises()
+
+    desktopBridgeMock.simulateCommandRejection.mockRejectedValueOnce(new Error('rejected'))
+
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === 'Simulate command rejection')!
+      .trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('.command-error').text()).toBe('The desktop control service did not accept this command.')
+
+    desktopBridgeMock.snapshot.mockResolvedValueOnce(previewSnapshot())
+    await wrapper.get('.icon-action.refresh').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('.command-error').exists()).toBe(false)
   })
 
 })

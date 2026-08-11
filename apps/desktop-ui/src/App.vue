@@ -7,7 +7,7 @@ import PairingPanel from './components/PairingPanel.vue'
 import SessionPanel from './components/SessionPanel.vue'
 import { useDesktopState } from './useDesktopState'
 
-const { busy, createPairing, error, expirePairing, refresh, revokePairing, selectOutput, simulateConnectionLost, simulateMetricsBurst, simulateOutputLost, simulateOutputRestored, simulatePairingConsumed, simulateReconnected, snapshot, start, stop } = useDesktopState()
+const { busy, createPairing, error, expirePairing, refresh, revokePairing, selectOutput, simulateCommandRejection, simulateConnectionLost, simulateMetricsBurst, simulateOutputLost, simulateOutputRestored, simulatePairingConsumed, simulateReconnected, snapshot, start, stop } = useDesktopState()
 </script>
 
 <template>
@@ -77,6 +77,7 @@ const { busy, createPairing, error, expirePairing, refresh, revokePairing, selec
             @simulate-reconnected="simulateReconnected"
             @simulate-output-lost="simulateOutputLost"
             @simulate-output-restored="simulateOutputRestored"
+            @simulate-command-rejection="simulateCommandRejection"
           />
           <div class="secondary-stack">
             <OutputPanel :devices="snapshot.outputDevices" :selected-id="snapshot.selectedOutputId" :busy="busy" :preview="snapshot.previewAdapter" @select="selectOutput" />

@@ -189,4 +189,10 @@ describe('PreviewDesktopBridge', () => {
     expect(burst.metrics.nominalInputSampleRateHz).toBe(48_000)
     expect(burst.metrics.nominalOutputSampleRateHz).toBe(48_000)
   })
+
+  it('rejects like a bridge command so the error path is exercisable', async () => {
+    const bridge = new PreviewDesktopBridge()
+
+    await expect(bridge.simulateCommandRejection()).rejects.toThrow('preview command rejection')
+  })
 })

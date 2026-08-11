@@ -20,6 +20,8 @@ export interface DesktopBridge {
   simulatePairingConsumed(): Promise<DesktopSnapshot>
   /** Preview-only: simulates a burst of transport and recovery activity so counters visibly move. */
   simulateMetricsBurst(): Promise<DesktopSnapshot>
+  /** Preview-only: rejects like a real bridge command so the error banner is exercisable. */
+  simulateCommandRejection(): Promise<DesktopSnapshot>
 }
 
 const previewOutput: OutputDevice[] = [
@@ -174,6 +176,10 @@ export class PreviewDesktopBridge implements DesktopBridge {
     metrics.playoutDelayMs += 4
 
     return this.copy()
+  }
+
+  simulateCommandRejection(): Promise<DesktopSnapshot> {
+    return Promise.reject(new Error('preview command rejection'))
   }
 
   private copy(): DesktopSnapshot {

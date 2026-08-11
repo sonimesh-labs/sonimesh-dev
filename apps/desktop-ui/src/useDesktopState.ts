@@ -37,6 +37,7 @@ export function useDesktopState() {
   const simulateOutputRestored = () => run(() => desktopBridge.simulateOutputRestored())
   const simulatePairingConsumed = () => run(() => desktopBridge.simulatePairingConsumed())
   const simulateMetricsBurst = () => run(() => desktopBridge.simulateMetricsBurst())
+  const simulateCommandRejection = () => run(() => desktopBridge.simulateCommandRejection())
 
   onMounted(refresh)
 
@@ -58,5 +59,6 @@ export function useDesktopState() {
     simulateOutputRestored,
     simulatePairingConsumed,
     simulateMetricsBurst,
+    simulateCommandRejection,
   }
 }

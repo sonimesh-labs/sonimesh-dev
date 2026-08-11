@@ -36,6 +36,7 @@ describe('SessionPanel', () => {
     expect(wrapper.findAll('.simulate-actions button').map((button) => button.text())).toEqual([
       'Simulate connection loss',
       'Simulate output loss',
+      'Simulate command rejection',
     ])
 
     await wrapper
@@ -49,6 +50,12 @@ describe('SessionPanel', () => {
       .find((button) => button.text() === 'Simulate output loss')!
       .trigger('click')
     expect(wrapper.emitted('simulateOutputLost')).toHaveLength(1)
+
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === 'Simulate command rejection')!
+      .trigger('click')
+    expect(wrapper.emitted('simulateCommandRejection')).toHaveLength(1)
   })
 
   it('offers reconnect and restore actions for recovery preview states', async () => {
@@ -62,6 +69,7 @@ describe('SessionPanel', () => {
     })
     expect(reconnecting.findAll('.simulate-actions button').map((button) => button.text())).toEqual([
       'Reconnect',
+      'Simulate command rejection',
     ])
     await reconnecting
       .findAll('button')
@@ -79,6 +87,7 @@ describe('SessionPanel', () => {
     })
     expect(unavailable.findAll('.simulate-actions button').map((button) => button.text())).toEqual([
       'Restore output',
+      'Simulate command rejection',
     ])
     await unavailable
       .findAll('button')
