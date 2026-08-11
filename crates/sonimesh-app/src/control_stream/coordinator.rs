@@ -7,7 +7,8 @@ use sonimesh_protocol::{
 
 use crate::{
     PairingAttemptOutcome, PairingId, PairingInvitationController, PairingInvitationError,
-    PairingProofVerification, PairingSource, SessionEvent, SessionState,
+    PairingProofVerification, PairingSource, ReconnectGraceController, ReconnectGraceError,
+    ReconnectGraceObservation, ReconnectGraceState, SessionEvent, SessionState,
 };
 
 use super::error::ControlStreamError;
@@ -34,6 +35,7 @@ pub struct ControlStreamCoordinator {
     active: Option<StreamStartRequest>,
     pending: Option<PendingStreamChange>,
     control_session: Option<ControlSessionToken>,
+    reconnect_grace: ReconnectGraceController,
 }
 
 impl ControlStreamCoordinator {
@@ -63,6 +65,7 @@ impl ControlStreamCoordinator {
             active: None,
             pending: None,
             control_session: None,
+            reconnect_grace: ReconnectGraceController::new(),
         })
     }
 
@@ -83,6 +86,71 @@ impl ControlStreamCoordinator {
         self.active = None;
         self.pending = None;
         self.control_session = None;
+        let _ = self.reconnect_grace.cancel();
+    }
+
+    /// Arms the bounded reconnect window after a connection loss.
+    ///
+    /// The window is clock-driven: the control-session owner polls
+    /// [`Self::observe_reconnect_grace`] with its monotonic clock and must
+    /// expire the session when the deadline elapses.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ControlStreamError::GraceRequiresReconnecting`] unless the
+    /// lifecycle is in [`SessionState::RECONNECTING`], or a
+    /// [`ControlStreamError::ReconnectGrace`] error when the window cannot be
+    /// armed.
+    pub fn begin_reconnect_grace(
+        &mut self,
+        now_ms: u64,
+        duration_ms: u64,
+    ) -> Result<(), ControlStreamError> {
+        if self.state != SessionState::RECONNECTING {
+            return Err(ControlStreamError::GraceRequiresReconnecting(self.state));
+        }
+        self.reconnect_grace
+            .begin(now_ms, duration_ms)
+            .map_err(ControlStreamError::ReconnectGrace)
+    }
+
+    /// Polls the reconnect window and expires the session when it elapses.
+    ///
+    /// On expiry the coordinator retires every session-owned value and returns
+    /// [`ReconnectGraceObservation::Expired`], so the caller cannot observe a
+    /// lingering ready or streaming session after the deadline. A clock
+    /// regression fails closed by expiring the session before returning the
+    /// error.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ControlStreamError::ReconnectGrace`] with
+    /// [`ReconnectGraceError::TimeRegressed`] when the clock regresses.
+    pub fn observe_reconnect_grace(
+        &mut self,
+        now_ms: u64,
+    ) -> Result<ReconnectGraceObservation, ControlStreamError> {
+        let observation = self
+            .reconnect_grace
+            .observe(now_ms)
+            .map_err(ControlStreamError::ReconnectGrace);
+        let expired = matches!(
+            observation,
+            Ok(ReconnectGraceObservation::Expired)
+                | Err(ControlStreamError::ReconnectGrace(
+                    ReconnectGraceError::TimeRegressed
+                ))
+        );
+        if expired {
+            self.expire_control_session();
+        }
+        observation
+    }
+
+    /// Returns the current reconnect-window lifecycle state.
+    #[must_use]
+    pub const fn reconnect_grace_state(&self) -> ReconnectGraceState {
+        self.reconnect_grace.state()
     }
 
     /// Installs one freshly authenticated control transport for the ready session.
@@ -261,6 +329,8 @@ impl ControlStreamCoordinator {
                 self.active = None;
                 self.pending = None;
                 self.control_session = None;
+                // Fresh session material ends any armed reconnect window.
+                let _ = self.reconnect_grace.reconnected();
                 Ok(())
             }
             SessionEvent::StartPairing
@@ -560,6 +630,7 @@ impl ControlStreamCoordinator {
             self.active = None;
             self.pending = None;
             self.control_session = None;
+            let _ = self.reconnect_grace.cancel();
         }
     }
 }

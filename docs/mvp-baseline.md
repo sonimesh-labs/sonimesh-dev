@@ -72,6 +72,11 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   reject stale or cross-coordinator asynchronous completions; reconnection with
   fresh session material
   requires a newly installed transport token and hello.
+- a clock-driven bounded reconnect-grace window that keeps a lost control
+  session in the reconnecting lifecycle only until its armed deadline; the
+  control-session coordinator expires the token, negotiation, media identity,
+  and pending work together when the window elapses or the clock regresses,
+  and reconnection with fresh session material ends the window immediately.
 - a per-stream, non-realtime decode-worker boundary that schedules ordinary
   decode and PLC from authenticated jitter decisions, rejects empty or
   oversized encoded frames before decoder work, then writes bounded PCM blocks

@@ -2,7 +2,7 @@ use core::fmt;
 
 use sonimesh_protocol::{ControlFrameError, ControlNegotiationError};
 
-use crate::{SessionEvent, SessionState, SessionTransitionError};
+use crate::{ReconnectGraceError, SessionEvent, SessionState, SessionTransitionError};
 
 /// Failure while coordinating a validated control command with lifecycle state.
 #[derive(Debug)]
@@ -56,6 +56,10 @@ pub enum ControlStreamError {
     ControlSessionTokenExhausted,
     /// The coordinator cannot issue another non-reusable operation token.
     OperationTokenExhausted,
+    /// Reconnect grace was requested outside the reconnecting lifecycle.
+    GraceRequiresReconnecting(SessionState),
+    /// A reconnect grace window could not be armed or observed.
+    ReconnectGrace(ReconnectGraceError),
 }
 
 impl fmt::Display for ControlStreamError {
@@ -136,6 +140,15 @@ impl fmt::Display for ControlStreamError {
             Self::OperationTokenExhausted => {
                 formatter.write_str("control operation token sequence is exhausted")
             }
+            Self::GraceRequiresReconnecting(state) => {
+                write!(
+                    formatter,
+                    "reconnect grace requires Reconnecting state, found {state:?}"
+                )
+            }
+            Self::ReconnectGrace(error) => {
+                write!(formatter, "reconnect grace rejected the operation: {error}")
+            }
         }
     }
 }
@@ -146,6 +159,7 @@ impl std::error::Error for ControlStreamError {
             Self::Protocol(error) => Some(error),
             Self::Negotiation(error) => Some(error),
             Self::Transition(error) => Some(error),
+            Self::ReconnectGrace(error) => Some(error),
             _ => None,
         }
     }
