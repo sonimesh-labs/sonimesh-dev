@@ -179,6 +179,63 @@ mod tests {
             config.validate(),
             Err(OutputConfigError::RequestedExceedsMaximum)
         );
+
+        config = valid_config();
+        config.sample_rate_hz = MIN_OUTPUT_SAMPLE_RATE_HZ - 1;
+        assert_eq!(config.validate(), Err(OutputConfigError::InvalidSampleRate));
+
+        config = valid_config();
+        config.channels = MAX_OUTPUT_CHANNELS + 1;
+        assert_eq!(
+            config.validate(),
+            Err(OutputConfigError::InvalidChannelCount)
+        );
+
+        config = valid_config();
+        config.maximum_callback_frames = MIN_CALLBACK_FRAMES - 1;
+        assert_eq!(
+            config.validate(),
+            Err(OutputConfigError::InvalidMaximumCallbackFrames)
+        );
+
+        config = valid_config();
+        config.requested_callback_frames = Some(MIN_CALLBACK_FRAMES - 1);
+        assert_eq!(
+            config.validate(),
+            Err(OutputConfigError::InvalidRequestedCallbackFrames)
+        );
+    }
+
+    #[test]
+    fn accepts_the_exact_documented_output_boundaries() {
+        let boundaries = [
+            (
+                MIN_OUTPUT_SAMPLE_RATE_HZ,
+                1,
+                MIN_CALLBACK_FRAMES,
+                Some(MIN_CALLBACK_FRAMES),
+            ),
+            (
+                MAX_OUTPUT_SAMPLE_RATE_HZ,
+                MAX_OUTPUT_CHANNELS,
+                MAX_CALLBACK_FRAMES,
+                Some(MAX_CALLBACK_FRAMES),
+            ),
+            (48_000, MAX_OUTPUT_CHANNELS, 960, Some(960)),
+        ];
+        for (sample_rate_hz, channels, maximum_callback_frames, requested_callback_frames) in
+            boundaries
+        {
+            let config = OutputConfig {
+                sample_rate_hz,
+                channels,
+                sample_format: SampleFormat::Float32,
+                requested_callback_frames,
+                maximum_callback_frames,
+            };
+            assert_eq!(config.validate(), Ok(()), "config: {config:?}");
+            assert!(config.interleaved_samples().is_ok());
+        }
     }
 
     #[test]
