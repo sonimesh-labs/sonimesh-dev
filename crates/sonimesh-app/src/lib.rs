@@ -11,6 +11,7 @@ mod pcm_render_source;
 mod receiver_output_controller;
 mod receiver_pcm_endpoint_factory;
 mod receiver_pipeline;
+mod reconnect_grace;
 mod sample_rate_mapped_render_source;
 mod session;
 mod stream_drift_controller;
@@ -40,6 +41,9 @@ pub use receiver_pcm_endpoint_factory::{
 };
 pub use receiver_pipeline::{
     FreshSessionInstallError, ReceiverPipelineError, ReceiverStreamPipeline,
+};
+pub use reconnect_grace::{
+    ReconnectGraceController, ReconnectGraceError, ReconnectGraceObservation, ReconnectGraceState,
 };
 pub use sample_rate_mapped_render_source::{
     DriftAdjustmentError, DriftAdjustmentHandle, SampleRateMappedRenderSource,
