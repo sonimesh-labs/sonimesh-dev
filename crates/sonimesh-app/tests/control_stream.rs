@@ -989,3 +989,166 @@ fn observed_pairing_failure_retires_the_coordinator_and_rejects_control_frames()
     assert_eq!(coordinator.active(), None);
     assert_eq!(coordinator.negotiation(), None);
 }
+
+#[test]
+fn aborting_a_pending_start_returns_to_ready_and_allows_a_fresh_start() {
+    let capabilities = [Capability::FrameDuration20Ms];
+    let mut coordinator = coordinator(&capabilities);
+
+    let ControlStreamAction::Start { token, request: _ } = coordinator.accept(&start(0)).unwrap()
+    else {
+        panic!("expected a pending start");
+    };
+    assert_eq!(coordinator.active(), None);
+    assert_eq!(
+        coordinator.state().phase(),
+        sonimesh_app::SessionPhase::Ready
+    );
+
+    coordinator.abort_pending(token).unwrap();
+
+    assert_eq!(coordinator.active(), None);
+    assert_eq!(
+        coordinator.state().phase(),
+        sonimesh_app::SessionPhase::Ready
+    );
+    assert!(matches!(
+        coordinator.abort_pending(token),
+        Err(ControlStreamError::CompletionMismatch)
+    ));
+
+    let ControlStreamAction::Start {
+        token: fresh_token,
+        request: fresh_request,
+    } = coordinator.accept(&start(0)).unwrap()
+    else {
+        panic!("expected a fresh start after abort");
+    };
+    assert_ne!(fresh_token, token);
+    coordinator
+        .complete_start(fresh_token, fresh_request)
+        .unwrap();
+    assert_eq!(coordinator.active(), Some(fresh_request.identity));
+    assert_eq!(
+        coordinator.state().phase(),
+        sonimesh_app::SessionPhase::Streaming
+    );
+}
+
+#[test]
+fn aborting_a_pending_rotation_keeps_the_previous_stream_active() {
+    let capabilities = [Capability::FrameDuration10Ms, Capability::FrameDuration20Ms];
+    let mut coordinator = coordinator(&capabilities);
+    activate(&mut coordinator, 2);
+    let previous = coordinator.active().unwrap();
+
+    let ControlStreamAction::Rotate {
+        token,
+        previous: from,
+        next: _,
+    } = coordinator.accept(&start(3)).unwrap()
+    else {
+        panic!("expected a pending rotation");
+    };
+    assert_eq!(from, previous);
+    assert_eq!(coordinator.active(), Some(previous));
+
+    coordinator.abort_pending(token).unwrap();
+
+    assert_eq!(coordinator.active(), Some(previous));
+    assert_eq!(
+        coordinator.state().phase(),
+        sonimesh_app::SessionPhase::Streaming
+    );
+    assert!(matches!(
+        coordinator.abort_pending(token),
+        Err(ControlStreamError::CompletionMismatch)
+    ));
+
+    let ControlStreamAction::Rotate {
+        token: fresh_token,
+        previous: fresh_from,
+        next: fresh_next,
+    } = coordinator.accept(&start(3)).unwrap()
+    else {
+        panic!("expected a fresh rotation after abort");
+    };
+    assert_eq!(fresh_from, previous);
+    assert_ne!(fresh_token, token);
+    coordinator
+        .complete_rotation(fresh_token, fresh_from, fresh_next)
+        .unwrap();
+    assert_eq!(coordinator.active(), Some(fresh_next.identity));
+}
+
+#[test]
+fn aborting_a_pending_stop_keeps_streaming_and_allows_a_later_stop() {
+    let capabilities = [Capability::FrameDuration20Ms];
+    let mut coordinator = coordinator(&capabilities);
+    activate(&mut coordinator, 4);
+    let active = coordinator.active().unwrap();
+
+    let ControlStreamAction::Stop { token, identity } = coordinator.accept(&stop(4)).unwrap()
+    else {
+        panic!("expected a pending stop");
+    };
+    assert_eq!(identity, active);
+
+    coordinator.abort_pending(token).unwrap();
+
+    assert_eq!(coordinator.active(), Some(active));
+    assert_eq!(
+        coordinator.state().phase(),
+        sonimesh_app::SessionPhase::Streaming
+    );
+
+    let ControlStreamAction::Stop {
+        token: fresh_token,
+        identity: fresh_identity,
+    } = coordinator.accept(&stop(4)).unwrap()
+    else {
+        panic!("expected a fresh stop after abort");
+    };
+    assert_eq!(fresh_identity, active);
+    assert_ne!(fresh_token, token);
+    coordinator
+        .complete_stop(fresh_token, fresh_identity)
+        .unwrap();
+    assert_eq!(coordinator.active(), None);
+    assert_eq!(
+        coordinator.state().phase(),
+        sonimesh_app::SessionPhase::Ready
+    );
+}
+
+#[test]
+fn abort_pending_rejects_an_unknown_token_and_preserves_the_pending_work() {
+    let capabilities = [Capability::FrameDuration20Ms];
+    let mut first = coordinator(&capabilities);
+    let mut second = coordinator(&capabilities);
+
+    let ControlStreamAction::Start { token, request } = first.accept(&start(0)).unwrap() else {
+        panic!("expected a pending start");
+    };
+    let ControlStreamAction::Start {
+        token: other_token,
+        request: _,
+    } = second.accept(&start(0)).unwrap()
+    else {
+        panic!("expected a pending start on the other coordinator");
+    };
+
+    assert_ne!(token, other_token);
+    assert!(matches!(
+        first.abort_pending(other_token),
+        Err(ControlStreamError::CompletionMismatch)
+    ));
+
+    // The matching pending work is still intact and can complete normally.
+    first.complete_start(token, request).unwrap();
+    assert_eq!(first.state().phase(), sonimesh_app::SessionPhase::Streaming);
+    assert!(matches!(
+        first.abort_pending(token),
+        Err(ControlStreamError::CompletionMismatch)
+    ));
+}
