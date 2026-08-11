@@ -2,7 +2,9 @@
 
 use std::sync::Arc;
 
-use sonimesh_app::{ChannelMappedRenderSource, ChannelMappedRenderSourceError, PcmRenderSource};
+use sonimesh_app::{
+    ChannelMappedRenderSource, ChannelMappedRenderSourceError, GainControlHandle, PcmRenderSource,
+};
 use sonimesh_audio::{ChannelMappingError, realtime_pcm_queue};
 use sonimesh_diagnostics::StreamCounters;
 use sonimesh_platform::{MAX_CALLBACK_FRAMES, RenderSource};
@@ -14,7 +16,11 @@ fn mapped_source(
 ) -> ChannelMappedRenderSource {
     let (mut producer, consumer) = realtime_pcm_queue::<8>(4).unwrap();
     producer.push(samples);
-    let source = PcmRenderSource::new(consumer, Arc::new(StreamCounters::default()));
+    let source = PcmRenderSource::new(
+        consumer,
+        Arc::new(StreamCounters::default()),
+        GainControlHandle::new(),
+    );
     ChannelMappedRenderSource::new(
         Box::new(source),
         input_channels,

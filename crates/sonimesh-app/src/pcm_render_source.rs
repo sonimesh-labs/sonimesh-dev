@@ -6,7 +6,10 @@ use sonimesh_audio::{
 use sonimesh_diagnostics::StreamCounters;
 use sonimesh_platform::RenderSource;
 
+use crate::GainControlHandle;
+
 const DISCONTINUITY_FADE_SAMPLES: u16 = 128;
+const GAIN_RAMP_SAMPLES: u16 = 128;
 
 /// Realtime output source backed by one stream's decoded PCM queue.
 ///
@@ -19,15 +22,21 @@ pub struct PcmRenderSource<const SAMPLES_PER_BLOCK: usize> {
     scratch_len: usize,
     scratch_offset: usize,
     discontinuity_fade: GainSmoother,
+    gain_smoother: GainSmoother,
+    gain: GainControlHandle,
     counters: Arc<StreamCounters>,
 }
 
 impl<const SAMPLES_PER_BLOCK: usize> PcmRenderSource<SAMPLES_PER_BLOCK> {
     /// Creates a callback source from the sole consumer endpoint of a PCM queue.
+    ///
+    /// The supplied [`GainControlHandle`] is shared with the desktop control
+    /// domain, so a user's gain and mute choice survives output recreation.
     #[must_use]
     pub fn new(
         consumer: RealtimePcmConsumer<SAMPLES_PER_BLOCK>,
         counters: Arc<StreamCounters>,
+        gain: GainControlHandle,
     ) -> Self {
         Self {
             consumer,
@@ -35,8 +44,31 @@ impl<const SAMPLES_PER_BLOCK: usize> PcmRenderSource<SAMPLES_PER_BLOCK> {
             scratch_len: 0,
             scratch_offset: 0,
             discontinuity_fade: GainSmoother::new(1.0),
+            gain_smoother: GainSmoother::new(1.0),
+            gain,
             counters,
         }
+    }
+
+    /// Returns a clone of the gain and mute handle shared with this source.
+    #[must_use]
+    pub fn gain_handle(&self) -> GainControlHandle {
+        self.gain.clone()
+    }
+
+    /// Applies the published gain or mute target with a bounded block ramp.
+    ///
+    /// The ramp restarts only when the target changes, so an unchanged gain
+    /// never resets a partial ramp or prevents convergence.
+    fn apply_gain(&mut self, samples: &mut [f32]) {
+        let state = self.gain.snapshot();
+        let target = if state.muted { 0.0 } else { state.gain };
+        // Both values originate from the handle's atomic bit storage, so a
+        // bit-exact comparison is the same as an exact value comparison.
+        if target.to_bits() != self.gain_smoother.target().to_bits() {
+            self.gain_smoother.set_target(target, GAIN_RAMP_SAMPLES);
+        }
+        self.gain_smoother.apply(samples);
     }
 }
 
@@ -85,6 +117,7 @@ impl<const SAMPLES_PER_BLOCK: usize> RenderSource for PcmRenderSource<SAMPLES_PE
             );
             self.discontinuity_fade
                 .apply(&mut output[written..written + copy_len]);
+            self.apply_gain(&mut output[written..written + copy_len]);
             written += copy_len;
             self.scratch_offset += copy_len;
         }

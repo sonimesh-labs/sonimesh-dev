@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use sonimesh_app::{
-    DriftAdjustmentError, PcmRenderSource, SampleRateMappedRenderSource,
+    DriftAdjustmentError, GainControlHandle, PcmRenderSource, SampleRateMappedRenderSource,
     SampleRateMappedRenderSourceError,
 };
 use sonimesh_audio::{
@@ -20,7 +20,11 @@ fn resampled_source(
 ) -> SampleRateMappedRenderSource {
     let (mut producer, consumer) = realtime_pcm_queue::<32>(4).unwrap();
     producer.push(samples);
-    let source = PcmRenderSource::new(consumer, Arc::new(StreamCounters::default()));
+    let source = PcmRenderSource::new(
+        consumer,
+        Arc::new(StreamCounters::default()),
+        GainControlHandle::new(),
+    );
     SampleRateMappedRenderSource::new(
         Box::new(source),
         input_sample_rate_hz,

@@ -51,6 +51,12 @@ impl GainSmoother {
     pub const fn current(&self) -> f32 {
         self.current
     }
+
+    /// Target gain the current ramp is advancing toward.
+    #[must_use]
+    pub const fn target(&self) -> f32 {
+        self.target
+    }
 }
 
 #[cfg(test)]

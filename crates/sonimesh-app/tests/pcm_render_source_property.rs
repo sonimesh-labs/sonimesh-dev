@@ -12,7 +12,7 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-use sonimesh_app::PcmRenderSource;
+use sonimesh_app::{GainControlHandle, PcmRenderSource};
 use sonimesh_audio::{
     MAX_PCM_QUEUE_BLOCKS, RealtimePcmProducer, RealtimePcmPushOutcome, realtime_pcm_queue,
 };
@@ -349,7 +349,7 @@ fn seeded_render_walk_matches_an_independent_composition_model() {
     let (producer, consumer) = realtime_pcm_queue::<SAMPLES_PER_BLOCK>(QUEUE_CAPACITY).unwrap();
     let mut walk = Walk {
         producer,
-        source: PcmRenderSource::new(consumer, Arc::clone(&counters)),
+        source: PcmRenderSource::new(consumer, Arc::clone(&counters), GainControlHandle::new()),
         model: RenderModel::new(QUEUE_CAPACITY),
         counters,
         rng: XorShift64(0xC0FF_EE00_2026_0042),

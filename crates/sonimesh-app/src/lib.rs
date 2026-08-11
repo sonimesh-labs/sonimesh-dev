@@ -4,6 +4,7 @@ mod channel_mapped_render_source;
 mod control_snapshot;
 mod control_stream;
 mod format_adapted_render_source_factory;
+mod gain_control;
 mod output_controller;
 mod pairing_controller;
 mod pairing_record;
@@ -26,6 +27,7 @@ pub use control_stream::{
 pub use format_adapted_render_source_factory::{
     FormatAdaptedRenderSourceFactory, SourcePcmFormat, SourcePcmFormatError,
 };
+pub use gain_control::{GainControlError, GainControlHandle, GainControlState, MAX_GAIN_LINEAR};
 pub use output_controller::{OutputController, OutputLifecycleError, OutputSelection};
 pub use pairing_controller::{PairingInvitationController, PairingInvitationError};
 pub use pairing_record::{
