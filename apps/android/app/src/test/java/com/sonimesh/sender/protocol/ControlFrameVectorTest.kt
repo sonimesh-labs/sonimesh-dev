@@ -11,19 +11,11 @@ import org.junit.Test
 class ControlFrameVectorTest {
     @Test
     fun helloMatchesPublishedFrameAndDecodesSemanticFields() {
-        val encoded = frame(
-            message(
-                varintField(ENVELOPE_PROTOCOL_VERSION_FIELD, CONTROL_PROTOCOL_VERSION),
-                varintField(ENVELOPE_REQUEST_ID_FIELD, 7u),
-                bytesField(
-                    ENVELOPE_HELLO_FIELD,
-                    message(
-                        bytesField(HELLO_SUPPORTED_VERSIONS_FIELD, varint(CONTROL_PROTOCOL_VERSION)),
-                        bytesField(HELLO_CAPABILITIES_FIELD, varint(FRAME_DURATION_20_MS)),
-                        bytesField(HELLO_DISPLAY_NAME_FIELD, "Lab sender".encodeToByteArray()),
-                    ),
-                ),
-            ),
+        val encoded = helloFrame(
+            requestId = 7u,
+            supportedVersions = listOf(CONTROL_PROTOCOL_VERSION),
+            capabilities = listOf(FRAME_DURATION_20_MS),
+            displayName = "Lab sender",
         )
 
         assertArrayEquals(EXPECTED_HELLO_FRAME, encoded)
@@ -43,6 +35,75 @@ class ControlFrameVectorTest {
         assertEquals(
             "Lab sender",
             hello.requiredBytes(HELLO_DISPLAY_NAME_FIELD).decodeToString(),
+        )
+    }
+
+    @Test
+    fun publishedHelloFrameDecodesAndNegotiatesCanonicalCapabilities() {
+        val hello = decodeMessage(
+            decodeMessage(decodeFrame(EXPECTED_HELLO_FRAME)).requiredBytes(ENVELOPE_HELLO_FIELD),
+        )
+        val negotiated = HelloNegotiation.negotiateHello(
+            peerSupportedVersions = decodePackedVarints(
+                hello.requiredBytes(HELLO_SUPPORTED_VERSIONS_FIELD),
+            ).map { it.toLong() },
+            peerCapabilities = decodePackedVarints(
+                hello.requiredBytes(HELLO_CAPABILITIES_FIELD),
+            ).map { it.toLong() },
+            peerDisplayName = hello.requiredBytes(HELLO_DISPLAY_NAME_FIELD).decodeToString(),
+            localCapabilities = listOf(HelloNegotiation.CAPABILITY_FRAME_DURATION_20_MS),
+        )
+
+        assertEquals(HelloNegotiation.CONTROL_PROTOCOL_VERSION, negotiated.version)
+        assertEquals(
+            listOf(HelloNegotiation.CAPABILITY_FRAME_DURATION_20_MS),
+            negotiated.capabilities,
+        )
+    }
+
+    @Test
+    fun richHelloFrameDecodesAndNegotiatesCanonicalIntersectionIgnoringUnknown() {
+        val encoded = helloFrame(
+            requestId = 7u,
+            supportedVersions = listOf(
+                99uL,
+                CONTROL_PROTOCOL_VERSION,
+                CONTROL_PROTOCOL_VERSION,
+            ),
+            capabilities = listOf(
+                HelloNegotiation.CAPABILITY_NETWORK_DIAGNOSTICS.toULong(),
+                HelloNegotiation.CAPABILITY_FRAME_DURATION_20_MS.toULong(),
+                HelloNegotiation.CAPABILITY_FRAME_DURATION_20_MS.toULong(),
+                9_999uL,
+            ),
+            displayName = "Lab sender",
+        )
+
+        val hello = decodeMessage(
+            decodeMessage(decodeFrame(encoded)).requiredBytes(ENVELOPE_HELLO_FIELD),
+        )
+        val negotiated = HelloNegotiation.negotiateHello(
+            peerSupportedVersions = decodePackedVarints(
+                hello.requiredBytes(HELLO_SUPPORTED_VERSIONS_FIELD),
+            ).map { it.toLong() },
+            peerCapabilities = decodePackedVarints(
+                hello.requiredBytes(HELLO_CAPABILITIES_FIELD),
+            ).map { it.toLong() },
+            peerDisplayName = hello.requiredBytes(HELLO_DISPLAY_NAME_FIELD).decodeToString(),
+            localCapabilities = listOf(
+                HelloNegotiation.CAPABILITY_NETWORK_DIAGNOSTICS,
+                HelloNegotiation.CAPABILITY_FRAME_DURATION_20_MS,
+                HelloNegotiation.CAPABILITY_MANUAL_ADDRESS,
+            ),
+        )
+
+        assertEquals(HelloNegotiation.CONTROL_PROTOCOL_VERSION, negotiated.version)
+        assertEquals(
+            listOf(
+                HelloNegotiation.CAPABILITY_FRAME_DURATION_20_MS,
+                HelloNegotiation.CAPABILITY_NETWORK_DIAGNOSTICS,
+            ),
+            negotiated.capabilities,
         )
     }
 
@@ -181,6 +242,29 @@ class ControlFrameVectorTest {
             }
         }
     }
+
+    private fun helloFrame(
+        requestId: ULong,
+        supportedVersions: List<ULong>,
+        capabilities: List<ULong>,
+        displayName: String,
+    ): ByteArray = frame(
+        message(
+            varintField(ENVELOPE_PROTOCOL_VERSION_FIELD, CONTROL_PROTOCOL_VERSION),
+            varintField(ENVELOPE_REQUEST_ID_FIELD, requestId),
+            bytesField(
+                ENVELOPE_HELLO_FIELD,
+                message(
+                    bytesField(HELLO_SUPPORTED_VERSIONS_FIELD, packedVarints(supportedVersions)),
+                    bytesField(HELLO_CAPABILITIES_FIELD, packedVarints(capabilities)),
+                    bytesField(HELLO_DISPLAY_NAME_FIELD, displayName.encodeToByteArray()),
+                ),
+            ),
+        ),
+    )
+
+    private fun packedVarints(values: List<ULong>): ByteArray =
+        values.flatMap { varint(it).toList() }.toByteArray()
 
     private fun startFrame(epoch: ULong): ByteArray = frame(
         message(
