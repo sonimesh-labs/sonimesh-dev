@@ -3,8 +3,9 @@
 use prost::Message;
 use sonimesh_protocol::{
     CONTROL_PROTOCOL_VERSION, Capability, ControlError, ControlFrameError, Envelope, ErrorCode,
-    Hello, MAX_CONTROL_CAPABILITIES, MAX_CONTROL_DETAIL_BYTES, MAX_CONTROL_DISPLAY_NAME_BYTES,
-    MAX_CONTROL_FRAME_BYTES, MAX_CONTROL_MEDIA_KEY_EPOCH, MAX_CONTROL_SUPPORTED_VERSIONS,
+    Hello, MAX_CONTROL_CAPABILITIES, MAX_CONTROL_CHANNELS, MAX_CONTROL_DETAIL_BYTES,
+    MAX_CONTROL_DISPLAY_NAME_BYTES, MAX_CONTROL_FRAME_BYTES, MAX_CONTROL_MEDIA_KEY_EPOCH,
+    MAX_CONTROL_SAMPLE_RATE_HZ, MAX_CONTROL_SUPPORTED_VERSIONS, MIN_CONTROL_SAMPLE_RATE_HZ,
     StartStream, StopStream, StreamState, StreamStatus, decode_control_frame, encode_control_frame,
     envelope,
 };
@@ -482,53 +483,170 @@ fn preserves_additive_unknown_fields_but_rejects_unknown_commands() {
     ));
 }
 
-#[test]
-fn validates_stream_command_parameters() {
-    let invalid_start = Envelope {
+fn start_envelope(
+    media_session_id: u64,
+    stream_id: u32,
+    sample_rate_hz: u32,
+    channels: u32,
+    frame_duration_ms: u32,
+    media_key_epoch: u32,
+) -> Envelope {
+    Envelope {
         protocol_version: CONTROL_PROTOCOL_VERSION,
-        request_id: 10,
+        request_id: 20,
         payload: Some(envelope::Payload::StartStream(StartStream {
-            media_session_id: 0,
-            stream_id: 1,
-            sample_rate_hz: 48_000,
-            channels: 2,
-            frame_duration_ms: 20,
-            media_key_epoch: 0,
+            media_session_id,
+            stream_id,
+            sample_rate_hz,
+            channels,
+            frame_duration_ms,
+            media_key_epoch,
         })),
-    };
-    assert!(matches!(
-        encode_control_frame(&invalid_start),
-        Err(ControlFrameError::InvalidStartStream)
-    ));
+    }
+}
 
-    let invalid_stop = Envelope {
+fn stop_envelope(media_session_id: u64, stream_id: u32, media_key_epoch: u32) -> Envelope {
+    Envelope {
         protocol_version: CONTROL_PROTOCOL_VERSION,
-        request_id: 11,
+        request_id: 21,
         payload: Some(envelope::Payload::StopStream(StopStream {
-            media_session_id: 5,
-            stream_id: 0,
-            media_key_epoch: 0,
+            media_session_id,
+            stream_id,
+            media_key_epoch,
         })),
-    };
+    }
+}
+
+#[test]
+fn round_trips_stream_commands_at_parameter_boundaries() {
+    for (sample_rate_hz, channels, frame_duration_ms) in [
+        (MIN_CONTROL_SAMPLE_RATE_HZ, 1, 10),
+        (MIN_CONTROL_SAMPLE_RATE_HZ, MAX_CONTROL_CHANNELS, 20),
+        (MAX_CONTROL_SAMPLE_RATE_HZ, MAX_CONTROL_CHANNELS, 10),
+    ] {
+        let start = start_envelope(5, 6, sample_rate_hz, channels, frame_duration_ms, 0);
+        assert_eq!(
+            decode_control_frame(&encode_control_frame(&start).unwrap()).unwrap(),
+            start
+        );
+    }
+
+    let max_epoch_start = start_envelope(5, 6, 48_000, 2, 20, MAX_CONTROL_MEDIA_KEY_EPOCH);
+    assert_eq!(
+        decode_control_frame(&encode_control_frame(&max_epoch_start).unwrap()).unwrap(),
+        max_epoch_start
+    );
+    let max_epoch_stop = stop_envelope(5, 6, MAX_CONTROL_MEDIA_KEY_EPOCH);
+    assert_eq!(
+        decode_control_frame(&encode_control_frame(&max_epoch_stop).unwrap()).unwrap(),
+        max_epoch_stop
+    );
+}
+
+#[test]
+fn rejects_stream_command_parameter_bounds_on_encode_and_decode_paths() {
+    for (media_session_id, stream_id) in [(0, 6), (5, 0)] {
+        let invalid = start_envelope(media_session_id, stream_id, 48_000, 2, 20, 0);
+        assert!(matches!(
+            encode_control_frame(&invalid),
+            Err(ControlFrameError::InvalidStartStream)
+        ));
+        assert!(matches!(
+            decode_control_frame(&raw_frame(&invalid)),
+            Err(ControlFrameError::InvalidStartStream)
+        ));
+    }
+
+    for sample_rate_hz in [
+        MIN_CONTROL_SAMPLE_RATE_HZ - 1,
+        MAX_CONTROL_SAMPLE_RATE_HZ + 1,
+    ] {
+        let invalid = start_envelope(5, 6, sample_rate_hz, 2, 20, 0);
+        assert!(matches!(
+            encode_control_frame(&invalid),
+            Err(ControlFrameError::InvalidStartStream)
+        ));
+        assert!(matches!(
+            decode_control_frame(&raw_frame(&invalid)),
+            Err(ControlFrameError::InvalidStartStream)
+        ));
+    }
+
+    for channels in [0, MAX_CONTROL_CHANNELS + 1] {
+        let invalid = start_envelope(5, 6, 48_000, channels, 20, 0);
+        assert!(matches!(
+            encode_control_frame(&invalid),
+            Err(ControlFrameError::InvalidStartStream)
+        ));
+        assert!(matches!(
+            decode_control_frame(&raw_frame(&invalid)),
+            Err(ControlFrameError::InvalidStartStream)
+        ));
+    }
+
+    for frame_duration_ms in [0, 30] {
+        let invalid = start_envelope(5, 6, 48_000, 2, frame_duration_ms, 0);
+        assert!(matches!(
+            encode_control_frame(&invalid),
+            Err(ControlFrameError::InvalidStartStream)
+        ));
+        assert!(matches!(
+            decode_control_frame(&raw_frame(&invalid)),
+            Err(ControlFrameError::InvalidStartStream)
+        ));
+    }
+
+    for (media_session_id, stream_id) in [(0, 6), (5, 0)] {
+        let invalid = stop_envelope(media_session_id, stream_id, 0);
+        assert!(matches!(
+            encode_control_frame(&invalid),
+            Err(ControlFrameError::InvalidStopStream)
+        ));
+        assert!(matches!(
+            decode_control_frame(&raw_frame(&invalid)),
+            Err(ControlFrameError::InvalidStopStream)
+        ));
+    }
+
+    let invalid_epoch_start = start_envelope(5, 6, 48_000, 2, 20, MAX_CONTROL_MEDIA_KEY_EPOCH + 1);
     assert!(matches!(
-        encode_control_frame(&invalid_stop),
-        Err(ControlFrameError::InvalidStopStream)
+        encode_control_frame(&invalid_epoch_start),
+        Err(ControlFrameError::InvalidMediaKeyEpoch)
+    ));
+    assert!(matches!(
+        decode_control_frame(&raw_frame(&invalid_epoch_start)),
+        Err(ControlFrameError::InvalidMediaKeyEpoch)
     ));
 
-    let invalid_epoch = Envelope {
+    let invalid_epoch_stop = stop_envelope(5, 6, MAX_CONTROL_MEDIA_KEY_EPOCH + 1);
+    assert!(matches!(
+        encode_control_frame(&invalid_epoch_stop),
+        Err(ControlFrameError::InvalidMediaKeyEpoch)
+    ));
+    assert!(matches!(
+        decode_control_frame(&raw_frame(&invalid_epoch_stop)),
+        Err(ControlFrameError::InvalidMediaKeyEpoch)
+    ));
+}
+
+#[test]
+fn rejects_oversized_stream_status_detail_on_both_paths() {
+    let status = Envelope {
         protocol_version: CONTROL_PROTOCOL_VERSION,
-        request_id: 12,
-        payload: Some(envelope::Payload::StartStream(StartStream {
+        request_id: 22,
+        payload: Some(envelope::Payload::StreamStatus(StreamStatus {
             media_session_id: 5,
             stream_id: 6,
-            sample_rate_hz: 48_000,
-            channels: 2,
-            frame_duration_ms: 20,
-            media_key_epoch: MAX_CONTROL_MEDIA_KEY_EPOCH + 1,
+            state: StreamState::Ready as i32,
+            detail: "x".repeat(MAX_CONTROL_DETAIL_BYTES + 1),
         })),
     };
     assert!(matches!(
-        encode_control_frame(&invalid_epoch),
-        Err(ControlFrameError::InvalidMediaKeyEpoch)
+        encode_control_frame(&status),
+        Err(ControlFrameError::DetailTooLong)
+    ));
+    assert!(matches!(
+        decode_control_frame(&raw_frame(&status)),
+        Err(ControlFrameError::DetailTooLong)
     ));
 }
