@@ -22,6 +22,7 @@ cargo test --workspace --all-targets --all-features
 cargo run -p sonimesh-network-simulator
 python tools/check_workspace_boundaries.py
 python tools/check_adr_index.py
+python tools/check_preview_alignment.py
 python tools/check_android_capture_boundary.py
 python tools/check_output_soak_log.py --self-test
 python tools/check_output_realtime_boundary.py
