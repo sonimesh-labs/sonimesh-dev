@@ -6,12 +6,13 @@ use sonimesh_diagnostics::StreamCounters;
 use sonimesh_platform::{OutputConfig, RenderSource, RenderSourceFactoryError};
 
 use crate::format_adapted_render_source_factory::adapt_render_source;
-use crate::{DriftAdjustmentHandle, PcmRenderSource, SourcePcmFormat};
+use crate::{DriftAdjustmentHandle, GainControlHandle, PcmRenderSource, SourcePcmFormat};
 
 /// Paired PCM producer and callback source for one receiver output lifetime.
 pub struct ReceiverPcmEndpoint<const SAMPLES_PER_BLOCK: usize> {
     producer: RealtimePcmProducer<SAMPLES_PER_BLOCK>,
     source: Box<dyn RenderSource>,
+    gain: GainControlHandle,
 }
 
 impl<const SAMPLES_PER_BLOCK: usize> ReceiverPcmEndpoint<SAMPLES_PER_BLOCK> {
@@ -24,6 +25,12 @@ impl<const SAMPLES_PER_BLOCK: usize> ReceiverPcmEndpoint<SAMPLES_PER_BLOCK> {
         Box<dyn RenderSource>,
     ) {
         (self.producer, self.source)
+    }
+
+    /// Returns the gain and mute handle shared with this endpoint's source.
+    #[must_use]
+    pub fn gain_handle(&self) -> GainControlHandle {
+        self.gain.clone()
     }
 }
 
@@ -64,6 +71,7 @@ pub struct ReceiverPcmEndpointFactory<const SAMPLES_PER_BLOCK: usize> {
     source_format: SourcePcmFormat,
     counters: Arc<StreamCounters>,
     adjustment: DriftAdjustmentHandle,
+    gain: GainControlHandle,
 }
 
 impl<const SAMPLES_PER_BLOCK: usize> ReceiverPcmEndpointFactory<SAMPLES_PER_BLOCK> {
@@ -84,7 +92,7 @@ impl<const SAMPLES_PER_BLOCK: usize> ReceiverPcmEndpointFactory<SAMPLES_PER_BLOC
 
     /// Creates a factory that reuses one source-format drift handle.
     #[must_use]
-    pub const fn with_adjustment(
+    pub fn with_adjustment(
         queue_capacity: usize,
         source_format: SourcePcmFormat,
         counters: Arc<StreamCounters>,
@@ -95,6 +103,7 @@ impl<const SAMPLES_PER_BLOCK: usize> ReceiverPcmEndpointFactory<SAMPLES_PER_BLOC
             source_format,
             counters,
             adjustment,
+            gain: GainControlHandle::new(),
         }
     }
 
@@ -102,6 +111,15 @@ impl<const SAMPLES_PER_BLOCK: usize> ReceiverPcmEndpointFactory<SAMPLES_PER_BLOC
     #[must_use]
     pub fn adjustment_handle(&self) -> DriftAdjustmentHandle {
         self.adjustment.clone()
+    }
+
+    /// Returns a clone of the gain and mute handle shared by future sources.
+    ///
+    /// The handle persists across output lifetimes, so a user's gain and mute
+    /// choice survives output-device recreation.
+    #[must_use]
+    pub fn gain_handle(&self) -> GainControlHandle {
+        self.gain.clone()
     }
 
     /// Creates one fresh queue pair and its format-adapted output source.
@@ -152,9 +170,17 @@ impl<const SAMPLES_PER_BLOCK: usize> ReceiverPcmEndpointFactory<SAMPLES_PER_BLOC
             .map_err(ReceiverPcmEndpointError::Source)?;
         let (producer, consumer) =
             realtime_pcm_queue(self.queue_capacity).map_err(ReceiverPcmEndpointError::Queue)?;
-        let source = Box::new(PcmRenderSource::new(consumer, Arc::clone(&self.counters)));
+        let source = Box::new(PcmRenderSource::new(
+            consumer,
+            Arc::clone(&self.counters),
+            self.gain.clone(),
+        ));
         let source = adapt_render_source(source, self.source_format, config, adjustment)
             .map_err(ReceiverPcmEndpointError::Source)?;
-        Ok(ReceiverPcmEndpoint { producer, source })
+        Ok(ReceiverPcmEndpoint {
+            producer,
+            source,
+            gain: self.gain.clone(),
+        })
     }
 }

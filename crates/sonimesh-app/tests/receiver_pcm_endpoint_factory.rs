@@ -71,6 +71,62 @@ fn endpoint_factory_validates_output_before_creating_the_queue() {
     ));
 }
 
+#[test]
+fn gain_and_mute_choices_survive_output_recreation() {
+    let counters = Arc::new(StreamCounters::default());
+    let factory = ReceiverPcmEndpointFactory::<4>::new(
+        128,
+        SourcePcmFormat::new(48_000, 1).unwrap(),
+        Arc::clone(&counters),
+    );
+
+    // First output lifetime: publish a bounded gain through the shared handle.
+    let first = factory.create(&output_config()).unwrap();
+    first.gain_handle().set_gain(0.5).unwrap();
+    let (mut producer, mut source) = first.into_parts();
+    let mut callback = [f32::NAN; 480 * 2];
+    for _ in 0..128 {
+        producer.push(&[1.0; 4]);
+    }
+    // The 128-sample ramp completes inside the first 480-frame callback; the
+    // second callback must be fully scaled by the published gain.
+    source.render(&mut callback);
+    source.render(&mut callback);
+    assert!(
+        callback
+            .iter()
+            .all(|sample| (*sample - 0.5).abs() < f32::EPSILON),
+        "first lifetime callback was not fully scaled: {callback:?}"
+    );
+
+    // A recreated endpoint keeps the same published gain without replay.
+    let second = factory.create(&output_config()).unwrap();
+    let (mut producer, mut source) = second.into_parts();
+    for _ in 0..128 {
+        producer.push(&[1.0; 4]);
+    }
+    source.render(&mut callback);
+    source.render(&mut callback);
+    assert!(
+        callback
+            .iter()
+            .all(|sample| (*sample - 0.5).abs() < f32::EPSILON),
+        "recreated lifetime lost the published gain: {callback:?}"
+    );
+
+    // Mute also survives recreation: the recreated source ramps to silence.
+    factory.gain_handle().set_muted(true);
+    for _ in 0..128 {
+        producer.push(&[1.0; 4]);
+    }
+    source.render(&mut callback);
+    source.render(&mut callback);
+    assert!(
+        callback.iter().all(|sample| sample.abs() < f32::EPSILON),
+        "recreated lifetime lost the muted state: {callback:?}"
+    );
+}
+
 fn assert_samples(actual: &[f32], expected: &[f32]) {
     assert_eq!(actual.len(), expected.len());
     assert!(

@@ -32,9 +32,15 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   blocks, initializes callback underflow to silence, records refill-budget
   exhaustion separately, caps refill attempts, and fades in after queue
   discontinuities;
+- a lock-free atomic gain and mute handle shared by a stream's realtime render
+  source and the desktop control domain; published targets ramp over a fixed
+  128-sample window only when the target changes, apply without allocation or
+  locking, and stay bounded to attenuation in the single-stream MVP;
 - an app-domain receiver PCM endpoint factory that creates a fresh bounded queue
   pair and format-adapted render source together for output recovery; the
   receiver pipeline can install the paired producer without resetting ingress.
+  The factory retains the per-stream gain and mute handle, so a user's choice
+  survives output-device recreation without a replay command.
 - a receiver output lifecycle controller that starts a matching platform source
   before swapping its paired producer into the receiver pipeline; failed output
   starts leave the existing producer intact for retry. The controller accepts
@@ -183,6 +189,7 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
 | Local PCM ring | Compile-time blocks and samples | Drop oldest block; output silence when empty |
 | Cross-thread PCM queue | 1–128 inline blocks | Atomically replace oldest; report sequence gap |
 | Realtime render refills | 128 block pops per callback | Stop refilling, emit silence, and count one limit hit |
+| Per-stream gain control | 0.0–1.0 linear, attenuation-only | Reject non-finite or out-of-range; ramp over 128 samples |
 | Output sample rate | 8–192 kHz | Reject outside platform-neutral bound |
 | Output channels | 1–8 | Reject zero or excessive layouts |
 | Requested callback | default or 16–8192 frames | Fixed request may be unsupported |
