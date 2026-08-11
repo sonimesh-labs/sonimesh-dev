@@ -8,8 +8,9 @@
 local.properties
 .gradle/
 .gradle-sandbox/
+*.tmp
+**/.tmp/
 apps/android/caches/
-apps/android/.tmp/
 apps/android/daemon/
 apps/android/native/
 apps/android/notifications/
@@ -22,4 +23,3 @@ output/
 tools/__pycache__/
 .DS_Store
 Thumbs.db
-/.tmp/
