@@ -9,6 +9,7 @@ local.properties
 .gradle/
 .gradle-sandbox/
 apps/android/caches/
+apps/android/.tmp/
 apps/android/daemon/
 apps/android/native/
 apps/android/notifications/
