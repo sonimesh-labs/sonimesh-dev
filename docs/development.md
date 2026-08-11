@@ -46,6 +46,9 @@ cargo +nightly-2026-07-18 fuzz check
 cargo +nightly-2026-07-18 fuzz run control_frame -- -max_len=66052
 cargo +nightly-2026-07-18 fuzz run media_packet -- -max_len=1264
 cargo +nightly-2026-07-18 fuzz run protected_media_ingress -- -max_len=1264
+cargo +nightly-2026-07-18 fuzz run pairing_binding -- -max_len=4096
+cargo +nightly-2026-07-18 fuzz run untrusted_control_stream -- -max_len=65540
+cargo +nightly-2026-07-18 fuzz run negotiation -- -max_len=66052
 ~~~
 
 `cargo-fuzz` supports LibFuzzer execution on x86-64 Unix-like systems rather

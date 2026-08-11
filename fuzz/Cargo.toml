@@ -49,3 +49,10 @@ path = "fuzz_targets/untrusted_control_stream.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "negotiation"
+path = "fuzz_targets/negotiation.rs"
+test = false
+doc = false
+bench = false
