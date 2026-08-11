@@ -236,6 +236,58 @@ mod tests {
     }
 
     #[test]
+    fn nonce_binds_each_dimension_without_byte_overlap() {
+        let base = context(MediaDirection::AndroidToDesktop);
+
+        // The epoch occupies exactly bytes 0..2; a full sweep stays unique and
+        // leaves every other byte fixed, so the epoch dimension never truncates.
+        let mut epoch_fixed = [0_u8; 10];
+        epoch_fixed.copy_from_slice(&media_nonce(base, 1)[2..]);
+        let mut epochs = std::collections::HashSet::new();
+        for epoch in 0..=u16::MAX {
+            let mut changed = base;
+            changed.key_epoch = epoch;
+            let nonce = media_nonce(changed, 1);
+            assert_eq!(nonce[0..2], epoch.to_be_bytes());
+            assert_eq!(nonce[2..], epoch_fixed);
+            epochs.insert(nonce);
+        }
+        assert_eq!(epochs.len(), usize::from(u16::MAX) + 1);
+
+        // The stream occupies exactly bytes 4..8 without leaking into neighbors.
+        let mut stream_fixed = [0_u8; 8];
+        stream_fixed[0..4].copy_from_slice(&media_nonce(base, 1)[0..4]);
+        stream_fixed[4..8].copy_from_slice(&media_nonce(base, 1)[8..12]);
+        for stream in [1_u32, 2, 0x00FF_FFFF, 0x0100_0000, u32::MAX - 1, u32::MAX] {
+            let mut changed = base;
+            changed.stream_id = stream;
+            let nonce = media_nonce(changed, 1);
+            assert_eq!(nonce[4..8], stream.to_be_bytes());
+            assert_eq!(nonce[0..4], stream_fixed[0..4]);
+            assert_eq!(nonce[8..12], stream_fixed[4..8]);
+        }
+
+        // The sequence occupies exactly bytes 8..12 without leaking into neighbors.
+        let mut sequence_fixed = [0_u8; 8];
+        sequence_fixed.copy_from_slice(&media_nonce(base, 0)[0..8]);
+        for sequence in [0_u32, 1, 0x00FF_FFFF, 0x0100_0000, u32::MAX - 1, u32::MAX] {
+            let nonce = media_nonce(base, sequence);
+            assert_eq!(nonce[8..12], sequence.to_be_bytes());
+            assert_eq!(nonce[0..8], sequence_fixed);
+        }
+
+        // The direction occupies exactly byte 2 with a reserved zero padding byte.
+        let forward = media_nonce(base, 1);
+        let reverse = media_nonce(context(MediaDirection::DesktopToAndroid), 1);
+        assert_eq!(forward[2], MediaDirection::AndroidToDesktop as u8);
+        assert_eq!(reverse[2], MediaDirection::DesktopToAndroid as u8);
+        assert_eq!(forward[3], 0);
+        assert_eq!(reverse[3], 0);
+        assert_eq!(forward[0..2], reverse[0..2]);
+        assert_eq!(forward[4..12], reverse[4..12]);
+    }
+
+    #[test]
     fn sequence_requires_rotation_after_maximum_value() {
         let mut sequence = MediaSequence::new(u32::MAX);
         assert_eq!(sequence.take_next(), Ok(u32::MAX));
