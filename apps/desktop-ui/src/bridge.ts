@@ -203,6 +203,7 @@ export class PreviewDesktopBridge implements DesktopBridge {
     metrics.plcFrames = addToCounter(metrics.plcFrames, 6)
     metrics.decodeErrors = addToCounter(metrics.decodeErrors, 1)
     metrics.pcmUnderflows = addToCounter(metrics.pcmUnderflows, 1)
+    metrics.pcmOverflows = addToCounter(metrics.pcmOverflows, 1)
     metrics.pcmRefillLimitHits = addToCounter(metrics.pcmRefillLimitHits, 1)
     metrics.pcmDiscontinuities = addToCounter(metrics.pcmDiscontinuities, 1)
 

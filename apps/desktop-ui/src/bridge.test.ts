@@ -167,6 +167,7 @@ describe('PreviewDesktopBridge', () => {
     expect(burst.metrics.authenticatedPackets).toBe('12892')
     expect(burst.metrics.duplicatePackets).toBe('8')
     expect(burst.metrics.plcFrames).toBe('13')
+    expect(burst.metrics.pcmOverflows).toBe('3')
     expect(burst.metrics.currentJitterMs).toBe(52)
     expect(burst.metrics.playoutDelayMs).toBe(68)
     expect(burst.metrics.queuedPcmBlocks).toBe(5)
@@ -174,6 +175,7 @@ describe('PreviewDesktopBridge', () => {
 
     expect(again.metrics.authenticatedPackets).toBe('12940')
     expect(again.metrics.currentJitterMs).toBe(66)
+    expect(again.metrics.pcmOverflows).toBe('4')
 
     expect(burst.metrics.streamResets).toBe(before.metrics.streamResets)
     expect(burst.metrics.driftHardResyncs).toBe(before.metrics.driftHardResyncs)
