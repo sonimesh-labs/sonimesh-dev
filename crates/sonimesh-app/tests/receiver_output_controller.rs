@@ -498,3 +498,30 @@ fn controller_accepts_the_udp_receiver_pipeline_boundary() {
     assert_eq!(snapshot.nominal_input_sample_rate_hz, 48_000);
     assert_eq!(snapshot.nominal_output_sample_rate_hz, 48_000);
 }
+
+#[test]
+fn output_snapshot_tracks_idle_streaming_and_reported_faults() {
+    let counters = Arc::new(StreamCounters::default());
+    let mut output = controller(Arc::clone(&counters));
+    let mut pipeline = pipeline(counters);
+
+    let idle = output.snapshot();
+    assert!(!idle.selection_retained());
+    assert!(!idle.stream_active());
+    assert!(!idle.fault_reported());
+    assert_eq!(idle.health(), OutputHealth::Healthy);
+
+    output.start(selection(), &mut pipeline).unwrap();
+    let streaming = output.snapshot();
+    assert!(streaming.selection_retained());
+    assert!(streaming.stream_active());
+    assert!(!streaming.fault_reported());
+
+    output.output_mut().health = OutputHealth::StreamError;
+    assert_eq!(output.monitor(), Some(OutputHealth::StreamError));
+    let failed = output.snapshot();
+    assert!(failed.selection_retained());
+    assert!(!failed.stream_active());
+    assert!(failed.fault_reported());
+    assert_eq!(failed.health(), OutputHealth::StreamError);
+}

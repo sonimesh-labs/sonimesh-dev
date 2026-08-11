@@ -5,7 +5,7 @@ use sonimesh_platform::{
     RenderSourceFactoryError,
 };
 
-use crate::OutputSnapshot;
+use crate::{OutputSnapshot, OutputSnapshotSource};
 
 /// Pinned or default output selection retained for control-domain recovery.
 #[derive(Clone, Eq, PartialEq)]
@@ -203,6 +203,16 @@ impl std::error::Error for OutputLifecycleError {
             Self::SourceFactory(error) => Some(error),
             Self::Output(error) => Some(error),
         }
+    }
+}
+
+impl<O, F> OutputSnapshotSource for OutputController<O, F>
+where
+    O: AudioOutput,
+    F: RenderSourceFactory,
+{
+    fn snapshot(&self) -> OutputSnapshot {
+        OutputController::snapshot(self)
     }
 }
 

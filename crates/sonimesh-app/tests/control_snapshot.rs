@@ -1,10 +1,15 @@
 //! Low-rate control snapshot tests without UI or platform dependencies.
 
+use std::sync::Arc;
+
 use sonimesh_app::{
     OutputController, OutputSelection, PairingAttemptOutcome, PairingId,
     PairingInvitationController, PairingProofVerification, PairingSnapshotState, PairingSource,
-    SessionEvent, SessionPhase, SessionState,
+    ReceiverOutputController, ReceiverPcmEndpointFactory, ReceiverPcmProducerInstaller,
+    SessionEvent, SessionPhase, SessionState, SourcePcmFormat,
 };
+use sonimesh_audio::RealtimePcmProducer;
+use sonimesh_diagnostics::StreamCounters;
 use sonimesh_platform::{
     AudioOutput, OutputConfig, OutputDeviceInfo, OutputError, OutputHealth, RenderSource,
     RenderSourceFactory, RenderSourceFactoryError, SampleFormat,
@@ -74,6 +79,28 @@ fn selection() -> OutputSelection {
             maximum_callback_frames: 1_024,
         },
     }
+}
+
+const SAMPLES_PER_BLOCK: usize = 4;
+
+/// Pipeline double that accepts the paired producer without owning ingress.
+struct CountingPipeline;
+
+impl ReceiverPcmProducerInstaller<SAMPLES_PER_BLOCK> for CountingPipeline {
+    fn replace_pcm_producer(&mut self, _producer: RealtimePcmProducer<SAMPLES_PER_BLOCK>) {}
+}
+
+fn receiver_controller() -> ReceiverOutputController<TestOutput, SAMPLES_PER_BLOCK> {
+    ReceiverOutputController::new(
+        TestOutput {
+            health: OutputHealth::Healthy,
+        },
+        ReceiverPcmEndpointFactory::new(
+            4,
+            SourcePcmFormat::new(48_000, 1).unwrap(),
+            Arc::new(StreamCounters::default()),
+        ),
+    )
 }
 
 #[test]
@@ -211,4 +238,32 @@ fn revoked_pairing_projects_a_redacted_terminal_state() {
     let snapshot = pairing.snapshot_at(&mut session, 102, &output).unwrap();
     assert_eq!(snapshot.session(), SessionPhase::Idle);
     assert_eq!(snapshot.pairing(), PairingSnapshotState::Revoked);
+}
+
+#[test]
+fn receiver_output_owner_feeds_the_desktop_control_snapshot() {
+    let mut pairing = PairingInvitationController::<1>::new();
+    let mut session = SessionState::IDLE;
+    let mut output = receiver_controller();
+
+    let idle = pairing.snapshot_at(&mut session, 100, &output).unwrap();
+    assert_eq!(idle.session(), SessionPhase::Idle);
+    assert!(!idle.output().selection_retained());
+    assert!(!idle.output().stream_active());
+    assert!(!idle.output().fault_reported());
+    assert_eq!(idle.output().health(), OutputHealth::Healthy);
+
+    output.start(selection(), &mut CountingPipeline).unwrap();
+    let streaming = pairing.snapshot_at(&mut session, 101, &output).unwrap();
+    assert!(streaming.output().selection_retained());
+    assert!(streaming.output().stream_active());
+    assert!(!streaming.output().fault_reported());
+
+    output.output_mut().health = OutputHealth::StreamError;
+    assert_eq!(output.monitor(), Some(OutputHealth::StreamError));
+    let failed = pairing.snapshot_at(&mut session, 102, &output).unwrap();
+    assert!(failed.output().selection_retained());
+    assert!(!failed.output().stream_active());
+    assert!(failed.output().fault_reported());
+    assert_eq!(failed.output().health(), OutputHealth::StreamError);
 }

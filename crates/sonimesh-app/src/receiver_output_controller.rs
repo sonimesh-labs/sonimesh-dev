@@ -4,8 +4,9 @@ use sonimesh_audio::{FrameDecoder, RealtimePcmProducer};
 use sonimesh_platform::{AudioOutput, OutputError, OutputHealth};
 
 use crate::{
-    GainControlHandle, OutputSelection, ReceiverPcmEndpointError, ReceiverPcmEndpointFactory,
-    ReceiverStreamPipeline, UdpReceiverPipeline,
+    GainControlHandle, OutputSelection, OutputSnapshot, OutputSnapshotSource,
+    ReceiverPcmEndpointError, ReceiverPcmEndpointFactory, ReceiverStreamPipeline,
+    UdpReceiverPipeline,
 };
 
 /// Control-domain boundary that installs a producer for a newly accepted output source.
@@ -171,6 +172,21 @@ where
         self.endpoint_factory.gain_handle()
     }
 
+    /// Returns a redacted low-rate output lifecycle snapshot.
+    ///
+    /// The projection mirrors [`OutputController::snapshot`], so either output
+    /// owner can feed the desktop control snapshot without exposing device
+    /// handles or audio material.
+    #[must_use]
+    pub fn snapshot(&self) -> OutputSnapshot {
+        OutputSnapshot::from_health(
+            self.selection.is_some(),
+            self.stream_active,
+            self.fault_reported,
+            self.output.health(),
+        )
+    }
+
     fn install<P>(
         &mut self,
         selection: &OutputSelection,
@@ -231,5 +247,15 @@ impl std::error::Error for ReceiverOutputLifecycleError {
             Self::Endpoint(error) => Some(error),
             Self::Output(error) => Some(error),
         }
+    }
+}
+
+impl<O, const PCM_SAMPLES_PER_BLOCK: usize> OutputSnapshotSource
+    for ReceiverOutputController<O, PCM_SAMPLES_PER_BLOCK>
+where
+    O: AudioOutput,
+{
+    fn snapshot(&self) -> OutputSnapshot {
+        ReceiverOutputController::snapshot(self)
     }
 }

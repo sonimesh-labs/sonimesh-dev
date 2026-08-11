@@ -19,7 +19,9 @@ mod stream_drift_controller;
 mod udp_receiver_pipeline;
 
 pub use channel_mapped_render_source::{ChannelMappedRenderSource, ChannelMappedRenderSourceError};
-pub use control_snapshot::{DesktopControlSnapshot, OutputSnapshot, PairingSnapshotState};
+pub use control_snapshot::{
+    DesktopControlSnapshot, OutputSnapshot, OutputSnapshotSource, PairingSnapshotState,
+};
 pub use control_stream::{
     ControlOperationToken, ControlSessionToken, ControlStreamAction, ControlStreamCoordinator,
     ControlStreamError, MediaStreamIdentity, StreamStartRequest,

@@ -126,3 +126,14 @@ impl PairingSnapshotState {
         }
     }
 }
+
+/// Projects a redacted low-rate output snapshot for a control-surface adapter.
+///
+/// Implementors own the real output lifecycle, so a bridge cannot fabricate
+/// output state: the snapshot is read directly from the owner inside the
+/// control-domain entry point.
+pub trait OutputSnapshotSource {
+    /// Returns the owner's current redacted output lifecycle snapshot.
+    #[must_use]
+    fn snapshot(&self) -> OutputSnapshot;
+}

@@ -1,11 +1,10 @@
 use core::fmt;
 
 use crate::{
-    DesktopControlSnapshot, OutputController, PairingAttemptOutcome, PairingId,
+    DesktopControlSnapshot, OutputSnapshotSource, PairingAttemptOutcome, PairingId,
     PairingProofVerification, PairingRecord, PairingRecordError, PairingRecordState, PairingSource,
     SessionEvent, SessionState, SessionTransitionError,
 };
-use sonimesh_platform::{AudioOutput, RenderSourceFactory};
 
 /// Control-domain owner for one short-lived pairing invitation.
 ///
@@ -92,22 +91,20 @@ impl<const MAX_SOURCES: usize> PairingInvitationController<MAX_SOURCES> {
     /// active invitation without first applying the pairing owner's monotonic
     /// clock. No invitation ID, proof, address, credential, or media material is
     /// included in the returned value. The output snapshot is read directly
-    /// from `output`, so a bridge cannot fabricate output lifecycle state.
+    /// from the output owner through [`OutputSnapshotSource`], so a bridge
+    /// cannot fabricate output lifecycle state and either the platform output
+    /// controller or the receiver output lifecycle controller can feed it.
     ///
     /// # Errors
     ///
     /// Returns a pairing observation error after synchronizing the session where
     /// possible. An owner with no retained invitation still returns a snapshot.
-    pub fn snapshot_at<O, F>(
+    pub fn snapshot_at(
         &mut self,
         session: &mut SessionState,
         now_ms: u64,
-        output: &OutputController<O, F>,
-    ) -> Result<DesktopControlSnapshot, PairingInvitationError>
-    where
-        O: AudioOutput,
-        F: RenderSourceFactory,
-    {
+        output: &impl OutputSnapshotSource,
+    ) -> Result<DesktopControlSnapshot, PairingInvitationError> {
         if self.record.is_some() {
             self.observe(session, now_ms)?;
         }

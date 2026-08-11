@@ -49,7 +49,11 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   only after the platform accepts the matching callback source and clear when
   that source stops. The controller exposes the per-stream gain and mute handle,
   so a desktop owner can publish a local volume choice that reaches the active
-  source and survives output-device recovery.
+  source and survives output-device recovery. It also projects the same redacted
+  low-rate output snapshot as the platform output controller through one shared
+  projection trait, and the pairing invitation controller reads the desktop
+  control snapshot directly from either output owner, so a bridge cannot
+  fabricate output lifecycle state.
 - allocation-free gain smoothing, saturating atomic stream and output-status
   counters, endpoint redaction, output adapter contracts, and a tested desktop
   session state machine;
