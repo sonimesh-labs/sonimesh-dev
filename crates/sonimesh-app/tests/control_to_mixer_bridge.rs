@@ -3,13 +3,15 @@
 //! expiry.
 
 use core::convert::Infallible;
+use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use sonimesh_app::{
     ControlSessionToken, ControlStreamAction, ControlToMixerBridge, ControlToMixerError,
-    DiagnosticExportAction, ExportRetentionPolicy, MixerStreamSessionError, PairingAttemptOutcome,
-    PairingId, PairingInvitationController, PairingProofVerification, PairingSource, SessionEvent,
-    SessionPhase, SessionState,
+    DiagnosticExportAction, ExportRetentionPolicy, ExportStore, MixerStreamSessionError,
+    PairingAttemptOutcome, PairingId, PairingInvitationController, PairingProofVerification,
+    PairingSource, SessionEvent, SessionPhase, SessionState,
 };
 use sonimesh_audio::{FrameDecoder, realtime_pcm_queue};
 use sonimesh_diagnostics::{ExportPlatformFormat, ExportSessionPhase, StreamCounters};
@@ -850,4 +852,66 @@ fn export_action_issues_bounded_bundles_and_retains_the_newest() {
         third.receipt.bytes + second.receipt.bytes,
         "retained bytes follow the newest two receipts"
     );
+}
+
+#[test]
+fn export_flow_persists_bundles_to_the_disk_store_and_recovers_them() {
+    let counters = Arc::new(StreamCounters::default());
+    let mut bridge = bridge();
+    let token = authenticated(&mut bridge);
+    let mut pipeline = pipeline_for(1, 1, Arc::clone(&counters));
+    start_one(
+        &mut bridge,
+        token,
+        1,
+        1,
+        Some(Arc::clone(&counters)),
+        &mut pipeline,
+    );
+    assert!(bridge.output_active());
+
+    let dir = export_temp_dir();
+    let policy = ExportRetentionPolicy::bounded(4, 16 * 1024);
+    let mut action = DiagnosticExportAction::new(policy).unwrap();
+    let mut store = ExportStore::open(&dir, policy).unwrap();
+
+    let first = action
+        .export(
+            &bridge,
+            "0.1.0",
+            Some("127.0.0.1:1234".parse().unwrap()),
+            Some("balanced"),
+        )
+        .unwrap();
+    let second = action.export(&bridge, "0.1.0", None, None).unwrap();
+    assert!(!first.bundle.contains("127.0.0.1"));
+
+    for issued in [&first, &second] {
+        let receipt = store.store(&issued.bundle).unwrap();
+        assert_eq!(receipt.sequence, issued.receipt.sequence);
+        assert_eq!(receipt.bytes, issued.receipt.bytes);
+        assert_eq!(store.read(receipt.sequence).unwrap(), issued.bundle);
+    }
+    assert_eq!(store.retained_count(), 2);
+    assert_eq!(store.next_sequence(), 2);
+
+    // The on-disk store survives independently of the in-memory action.
+    drop(store);
+    let recovered = ExportStore::open(&dir, policy).unwrap();
+    assert_eq!(recovered.read(0).unwrap(), first.bundle);
+    assert_eq!(recovered.read(1).unwrap(), second.bundle);
+    assert_eq!(recovered.next_sequence(), 2);
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+static NEXT_EXPORT_DIR: AtomicU64 = AtomicU64::new(0);
+
+fn export_temp_dir() -> PathBuf {
+    let base = std::env::temp_dir().join("sonimesh-export-flow-tests");
+    let id = NEXT_EXPORT_DIR.fetch_add(1, Ordering::Relaxed);
+    let path = base.join(format!("{}-{id}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&path);
+    std::fs::create_dir_all(&path).expect("create temporary directory");
+    path
 }
