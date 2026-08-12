@@ -188,6 +188,15 @@ transport until after the replacement transport installs a fresh local token and
 completes hello negotiation. The old token and stale completion are rejected,
 while the same command through the fresh token is admitted.
 
+A separate deterministic suite feeds the ADR 0016 adaptive jitter target
+from virtual-link arrival jitter and the encoded-frame water level for one
+stream and for two to four streams over one shared link, and a target-gated
+scheduler scenario makes that target the playout decision: the scheduler
+waits while fewer than the target frames are buffered, drains without
+gating once no frames are in flight, and forces a playout when the gate
+deadline expires, so the Phase 2 scheduler loop has deterministic,
+bounded-latency evidence without a physical latency claim.
+
 This is evidence for deterministic core behavior and host loopback composition
 only. It does not yet model socket buffers, real TLS/socket reconnection, real
 ASRC/device clocks, operating-system scheduling, NAT rebinding, or physical

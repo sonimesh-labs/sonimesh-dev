@@ -99,7 +99,14 @@ control. The per-stream encoded-frame water level the controller observes
 is also published as a diagnostics metric: each stream snapshot carries
 the current jitter occupancy and its epoch high-water mark as one coherent
 (frames, high-water) pair, while the playout scheduler that consumes the
-adaptive target remains future Phase 2 work.
+adaptive target remains future Phase 2 work. A deterministic target-gated
+scheduler simulation (`simulate_jitter_scheduler`) now exercises that
+consumption loop in the network simulator: the scheduler waits while fewer
+than the target frames are buffered, drains without gating once no frames
+are in flight, and forces a playout when the gate deadline expires, so the
+controller can gate playout without an unbounded mid-stream stall and every
+configured run completes; the product playout scheduler remains Phase 2
+work.
 
 ## Rollback plan
 

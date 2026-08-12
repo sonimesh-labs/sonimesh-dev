@@ -3,6 +3,7 @@
 mod clock;
 mod control_scenario;
 mod drift_scenario;
+mod jitter_scheduler_scenario;
 mod jitter_target_scenario;
 mod multi_stream_jitter_target_scenario;
 mod multi_stream_scenario;
@@ -18,6 +19,10 @@ pub use control_scenario::{
 };
 pub use drift_scenario::{
     DriftScenarioConfig, DriftScenarioError, DriftSimulationReport, simulate_drift,
+};
+pub use jitter_scheduler_scenario::{
+    JitterSchedulerScenarioConfig, JitterSchedulerScenarioError, JitterSchedulerSimulationReport,
+    simulate_jitter_scheduler,
 };
 pub use jitter_target_scenario::{
     JitterTargetScenarioConfig, JitterTargetScenarioError, JitterTargetSimulationReport,

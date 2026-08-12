@@ -2,9 +2,10 @@
 
 use sonimesh_audio::{DriftConfig, JitterMode, JitterTargetConfig};
 use sonimesh_network_simulator::{
-    DriftScenarioConfig, JitterTargetScenarioConfig, MultiStreamJitterTargetScenarioConfig,
-    MultiStreamScenarioConfig, NetworkProfile, ScenarioConfig, opus_experiment_cases, simulate,
-    simulate_control_reconnect, simulate_drift, simulate_jitter_target, simulate_multi_stream,
+    DriftScenarioConfig, JitterSchedulerScenarioConfig, JitterTargetScenarioConfig,
+    MultiStreamJitterTargetScenarioConfig, MultiStreamScenarioConfig, NetworkProfile,
+    ScenarioConfig, opus_experiment_cases, simulate, simulate_control_reconnect, simulate_drift,
+    simulate_jitter_scheduler, simulate_jitter_target, simulate_multi_stream,
     simulate_multi_stream_jitter_target, simulate_opus_experiment, simulate_opus_worker_experiment,
 };
 
@@ -104,6 +105,7 @@ fn main() {
     run_multi_stream_suite();
     run_jitter_target_suite();
     run_multi_stream_jitter_target_suite();
+    run_jitter_scheduler_suite();
 }
 
 fn run_multi_stream_suite() {
@@ -149,6 +151,34 @@ fn run_jitter_target_suite() {
         report.raised_steps,
         report.lowered_steps,
         report.final_buffered_frames,
+    );
+}
+
+fn run_jitter_scheduler_suite() {
+    println!("SoniMesh target-gated playout scheduler suite");
+    let mut network = NetworkProfile::stable(0x5A17_2026);
+    network.burst_interval_packets = 20;
+    network.burst_length_packets = 3;
+    let report = simulate_jitter_scheduler(JitterSchedulerScenarioConfig {
+        frames: 200,
+        network,
+        ..JitterSchedulerScenarioConfig::default()
+    })
+    .expect("built-in scheduler profile is valid");
+    println!(
+        "scheduler ticks={} consumed={} gated={} forced={} final_target={} (min={} base={} max={}) raised={} lowered={} plc={} excess_latency={}ms",
+        report.observations,
+        report.playout.playout_frames + report.playout.plc_frames,
+        report.gated_ticks,
+        report.forced_playouts,
+        report.final_target_frames,
+        report.min_frames,
+        report.base_frames,
+        report.max_frames,
+        report.raised_steps,
+        report.lowered_steps,
+        report.playout.plc_frames,
+        report.excess_latency_ms,
     );
 }
 

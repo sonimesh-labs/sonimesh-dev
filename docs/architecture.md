@@ -435,8 +435,13 @@ lowering the target, and resets to the mode base on a stream reset. The
 deterministic network simulator feeds the controller from virtual-link
 arrival jitter for one stream and for two to four streams sharing one
 link, with bounded per-stream target trajectories as deterministic
-evidence. A playout scheduler consuming that target remains future
-Phase 2 work.
+evidence. A deterministic target-gated scheduler simulation now makes
+the adaptive target the playout decision: the scheduler waits while fewer
+than the target encoded frames are buffered, drains without gating once no
+frames are in flight, and forces a playout when the gate deadline expires,
+so a mid-stream stall stays bounded and the run always completes. A
+product playout scheduler consuming that target remains future Phase 2
+work.
 
 Recovery policy:
 

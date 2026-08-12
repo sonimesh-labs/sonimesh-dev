@@ -31,6 +31,12 @@ a physical latency claim.
   encoded-frame water level, and reports the bounded target trajectory
   (final target, raised/lowered steps, smoothed jitter) as deterministic
   jitter-control evidence.
+- the target-gated scheduler scenario makes the ADR 0016 target the
+  playout decision: the scheduler waits while fewer than the target
+  encoded frames are buffered, drains without gating once no frames are
+  in flight, and forces a playout when the gate deadline expires, so a
+  mid-stream stall stays bounded; the report carries gated ticks, forced
+  playouts, and added completion latency as Phase 2 scheduler evidence.
 - `DriftScenarioConfig` closes an integerized PCM-occupancy loop around the
   bounded ppm controller; it is not an ASRC or device-clock emulator.
 - the media-pipeline integration test crosses protocol parsing, ChaCha20-
