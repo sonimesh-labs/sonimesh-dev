@@ -1,10 +1,11 @@
 //! Deterministic virtual-network smoke runner for bounded audio buffering.
 
-use sonimesh_audio::DriftConfig;
+use sonimesh_audio::{DriftConfig, JitterMode, JitterTargetConfig};
 use sonimesh_network_simulator::{
-    DriftScenarioConfig, NetworkProfile, ScenarioConfig, opus_experiment_cases, simulate,
-    simulate_control_reconnect, simulate_drift, simulate_opus_experiment,
-    simulate_opus_worker_experiment,
+    DriftScenarioConfig, JitterTargetScenarioConfig, MultiStreamJitterTargetScenarioConfig,
+    MultiStreamScenarioConfig, NetworkProfile, ScenarioConfig, opus_experiment_cases, simulate,
+    simulate_control_reconnect, simulate_drift, simulate_jitter_target, simulate_multi_stream,
+    simulate_multi_stream_jitter_target, simulate_opus_experiment, simulate_opus_worker_experiment,
 };
 
 fn main() {
@@ -99,4 +100,83 @@ fn main() {
         control.retired.command_rejected,
         control.fresh.command_accepted,
     );
+
+    run_multi_stream_suite();
+    run_jitter_target_suite();
+    run_multi_stream_jitter_target_suite();
+}
+
+fn run_multi_stream_suite() {
+    println!("SoniMesh multi-stream shared-link suite");
+    let mut network = NetworkProfile::stable(0x5A17_2026);
+    network.burst_interval_packets = 20;
+    network.burst_length_packets = 3;
+    let report = simulate_multi_stream::<2>(MultiStreamScenarioConfig {
+        frames: 200,
+        network,
+        ..MultiStreamScenarioConfig::default()
+    })
+    .expect("built-in multi-stream profile is valid");
+    println!(
+        "multi_stream streams=2 submitted={} burst_loss={} stream0_plc={} stream1_plc={}",
+        report.network.submitted_packets,
+        report.network.burst_loss_packets,
+        report.streams[0].plc_frames,
+        report.streams[1].plc_frames,
+    );
+}
+
+fn run_jitter_target_suite() {
+    println!("SoniMesh adaptive jitter-target suite");
+    let mut network = NetworkProfile::stable(0x5A17_2026);
+    network.jitter_ms = 8;
+    network.reorder_percent = 5;
+    let report = simulate_jitter_target(JitterTargetScenarioConfig {
+        frames: 300,
+        network,
+        target: JitterTargetConfig::preset(JitterMode::Balanced, 20, 64),
+        ..JitterTargetScenarioConfig::default()
+    })
+    .expect("built-in jitter-target profile is valid");
+    println!(
+        "jitter_target frames={} final_target={} (min={} base={} max={}) smoothed_jitter={}ms raised={} lowered={} buffered={}",
+        report.observations,
+        report.final_target_frames,
+        report.min_frames,
+        report.base_frames,
+        report.max_frames,
+        report.final_smoothed_jitter_ms,
+        report.raised_steps,
+        report.lowered_steps,
+        report.final_buffered_frames,
+    );
+}
+
+fn run_multi_stream_jitter_target_suite() {
+    println!("SoniMesh multi-stream adaptive jitter-target suite");
+    let mut network = NetworkProfile::stable(0x5A17_2026);
+    network.burst_interval_packets = 20;
+    network.burst_length_packets = 3;
+    let report = simulate_multi_stream_jitter_target::<2>(MultiStreamJitterTargetScenarioConfig {
+        frames: 200,
+        network,
+        ..MultiStreamJitterTargetScenarioConfig::default()
+    })
+    .expect("built-in multi-stream jitter-target profile is valid");
+    println!(
+        "multi_stream_jitter_target submitted={} burst_loss={}",
+        report.network.submitted_packets, report.network.burst_loss_packets,
+    );
+    for (index, stream) in report.streams.iter().enumerate() {
+        println!(
+            "multi_stream_jitter_target stream={index} final_target={} (min={} base={} max={}) raised={} lowered={} plc={}",
+            stream.final_target_frames,
+            stream.min_frames,
+            stream.base_frames,
+            stream.max_frames,
+            stream.raised_steps,
+            stream.lowered_steps,
+            stream.playout.plc_frames,
+        );
+    }
 }
