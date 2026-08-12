@@ -221,11 +221,13 @@ Evidence produced so far:
   admitted streams, fail-closed updates after removal, history clearing
   for a recovered stream, and per-stream drift metrics (ppm, hard resyncs,
   queue occupancy) published from each decision;
+- app-side control-plane tests proving multiple concurrently active
+  streams with bounded admission, per-stream stop leaving other streams
+  streaming, Ready/Streaming lifecycle transitions on the first and last
+  stream, fail-closed capacity, and per-stream key rotation;
 
-Still open before Phase 2 can claim multi-source streaming: multi-stream
-control-plane negotiation (the control coordinator currently drives one active
-stream), the roadmap's 24-hour soak, and hardware callback timing on actual
-WASAPI devices.
+Still open before Phase 2 can claim multi-source streaming: the roadmap's 24-hour
+soak and hardware callback timing on actual WASAPI devices.
 
 ## Rollback plan
 

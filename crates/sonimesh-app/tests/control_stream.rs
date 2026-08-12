@@ -4,9 +4,9 @@ use core::ops::{Deref, DerefMut};
 
 use sonimesh_app::{
     ControlSessionToken, ControlStreamAction, ControlStreamCoordinator, ControlStreamError,
-    PairingAttemptOutcome, PairingId, PairingInvitationController, PairingInvitationError,
-    PairingProofVerification, PairingRecordError, PairingRecordState, PairingSource, SessionEvent,
-    SessionState,
+    MAX_ACTIVE_STREAMS, MediaStreamIdentity, PairingAttemptOutcome, PairingId,
+    PairingInvitationController, PairingInvitationError, PairingProofVerification,
+    PairingRecordError, PairingRecordState, PairingSource, SessionEvent, SessionState,
 };
 use sonimesh_protocol::{
     CONTROL_PROTOCOL_VERSION, Capability, ControlFrameError, Envelope, Hello,
@@ -173,6 +173,48 @@ fn activate(coordinator: &mut AuthenticatedCoordinator, epoch: u32) {
         panic!("expected a stream start action");
     };
     coordinator.complete_start(token, request).unwrap();
+}
+
+/// Starts and completes one stream with an explicit identity.
+fn activate_start(
+    coordinator: &mut AuthenticatedCoordinator,
+    envelope: &Envelope,
+) -> MediaStreamIdentity {
+    let ControlStreamAction::Start { token, request } = coordinator.accept(envelope).unwrap()
+    else {
+        panic!("expected a stream start action");
+    };
+    coordinator.complete_start(token, request).unwrap();
+    request.identity
+}
+
+/// Start command for an explicit session and stream identity.
+fn start_for(epoch: u32, session_id: u64, stream_id: u32) -> Envelope {
+    Envelope {
+        protocol_version: CONTROL_PROTOCOL_VERSION,
+        request_id: u64::from(epoch) * 100 + u64::from(stream_id) + 1,
+        payload: Some(envelope::Payload::StartStream(StartStream {
+            media_session_id: session_id,
+            stream_id,
+            sample_rate_hz: 48_000,
+            channels: 2,
+            frame_duration_ms: 20,
+            media_key_epoch: epoch,
+        })),
+    }
+}
+
+/// Stop command for an explicit session and stream identity.
+fn stop_for(epoch: u32, session_id: u64, stream_id: u32) -> Envelope {
+    Envelope {
+        protocol_version: CONTROL_PROTOCOL_VERSION,
+        request_id: u64::from(epoch) * 100 + u64::from(stream_id) + 100,
+        payload: Some(envelope::Payload::StopStream(StopStream {
+            media_session_id: session_id,
+            stream_id,
+            media_key_epoch: epoch,
+        })),
+    }
 }
 
 #[test]
@@ -1151,4 +1193,160 @@ fn abort_pending_rejects_an_unknown_token_and_preserves_the_pending_work() {
         first.abort_pending(token),
         Err(ControlStreamError::CompletionMismatch)
     ));
+}
+#[test]
+fn second_stream_starts_alongside_the_first_and_both_stay_active() {
+    let mut coordinator =
+        coordinator(&[Capability::FrameDuration10Ms, Capability::FrameDuration20Ms]);
+    let first = activate_start(&mut coordinator, &start_for(0, 7, 9));
+    assert_eq!(coordinator.stream_count(), 1);
+
+    let second = activate_start(&mut coordinator, &start_for(0, 7, 10));
+    assert_eq!(coordinator.stream_count(), 2);
+    assert_eq!(
+        coordinator.state().phase(),
+        sonimesh_app::SessionPhase::Streaming
+    );
+    assert_ne!(first, second);
+    // The primary accessor reports the first-admitted stream.
+    assert_eq!(coordinator.active(), Some(first));
+    let identities: Vec<_> = coordinator.active_streams().collect();
+    assert_eq!(identities, vec![first, second]);
+}
+
+#[test]
+fn stopping_one_stream_keeps_the_other_active_and_streaming() {
+    let mut coordinator =
+        coordinator(&[Capability::FrameDuration10Ms, Capability::FrameDuration20Ms]);
+    let first = activate_start(&mut coordinator, &start_for(0, 7, 9));
+    let second = activate_start(&mut coordinator, &start_for(0, 7, 10));
+
+    // Stop only the second stream; the first stays active and Streaming.
+    let ControlStreamAction::Stop { token, identity } =
+        coordinator.accept(&stop_for(0, 7, 10)).unwrap()
+    else {
+        panic!("expected a stream stop action");
+    };
+    assert_eq!(identity, second);
+    coordinator.complete_stop(token, identity).unwrap();
+    assert_eq!(coordinator.stream_count(), 1);
+    assert_eq!(coordinator.active(), Some(first));
+    assert_eq!(
+        coordinator.state().phase(),
+        sonimesh_app::SessionPhase::Streaming
+    );
+
+    // Stopping the last stream returns the session to Ready.
+    let ControlStreamAction::Stop { token, identity } =
+        coordinator.accept(&stop_for(0, 7, 9)).unwrap()
+    else {
+        panic!("expected a stream stop action");
+    };
+    assert_eq!(identity, first);
+    coordinator.complete_stop(token, identity).unwrap();
+    assert_eq!(coordinator.stream_count(), 0);
+    assert_eq!(coordinator.active(), None);
+    assert_eq!(
+        coordinator.state().phase(),
+        sonimesh_app::SessionPhase::Ready
+    );
+}
+
+#[test]
+fn rotating_one_stream_does_not_disturb_the_other_active_stream() {
+    let mut coordinator =
+        coordinator(&[Capability::FrameDuration10Ms, Capability::FrameDuration20Ms]);
+    let first = activate_start(&mut coordinator, &start_for(0, 7, 9));
+    let second = activate_start(&mut coordinator, &start_for(0, 7, 10));
+
+    // Rotate only stream B to a strictly newer key epoch.
+    let ControlStreamAction::Rotate {
+        token,
+        previous,
+        next,
+    } = coordinator.accept(&start_for(1, 7, 10)).unwrap()
+    else {
+        panic!("expected a key rotation action");
+    };
+    assert_eq!(previous, second);
+    coordinator
+        .complete_rotation(token, previous, next)
+        .unwrap();
+
+    // Both streams remain active; A is untouched and B carries the new epoch.
+    assert_eq!(coordinator.stream_count(), 2);
+    assert_eq!(coordinator.active(), Some(first));
+    let rotated = coordinator
+        .active_streams()
+        .find(|identity| *identity == next.identity)
+        .expect("rotated stream must stay active");
+    assert_eq!(rotated.key_epoch, 1);
+}
+
+#[test]
+fn active_stream_limit_fails_closed() {
+    let mut coordinator =
+        coordinator(&[Capability::FrameDuration10Ms, Capability::FrameDuration20Ms]);
+    for stream_id in 1..=u32::try_from(MAX_ACTIVE_STREAMS).unwrap() {
+        activate_start(&mut coordinator, &start_for(0, 7, stream_id));
+    }
+    assert_eq!(coordinator.stream_count(), MAX_ACTIVE_STREAMS);
+
+    // One more stream fails closed without disturbing the active set.
+    assert!(matches!(
+        coordinator.accept(&start_for(
+            0,
+            7,
+            u32::try_from(MAX_ACTIVE_STREAMS).unwrap() + 1
+        )),
+        Err(ControlStreamError::ActiveStreamLimit)
+    ));
+    assert_eq!(coordinator.stream_count(), MAX_ACTIVE_STREAMS);
+    assert_eq!(
+        coordinator.state().phase(),
+        sonimesh_app::SessionPhase::Streaming
+    );
+}
+
+#[test]
+fn additional_start_requires_streaming_state() {
+    let mut coordinator =
+        coordinator(&[Capability::FrameDuration10Ms, Capability::FrameDuration20Ms]);
+    activate_start(&mut coordinator, &start_for(0, 7, 9));
+
+    // Output loss keeps the active stream but leaves Streaming; an additional
+    // stream start must fail closed until the output is restored.
+    coordinator
+        .acknowledge_platform_event(SessionEvent::OutputLost)
+        .unwrap();
+    assert_eq!(
+        coordinator.state().phase(),
+        sonimesh_app::SessionPhase::OutputUnavailable
+    );
+    assert_eq!(coordinator.stream_count(), 1);
+    assert!(matches!(
+        coordinator.accept(&start_for(0, 7, 10)),
+        Err(ControlStreamError::StartRequiresStreaming(state))
+            if state.phase() == sonimesh_app::SessionPhase::OutputUnavailable
+    ));
+    assert_eq!(coordinator.stream_count(), 1);
+}
+
+#[test]
+fn second_start_is_rejected_while_a_start_is_pending() {
+    let mut coordinator =
+        coordinator(&[Capability::FrameDuration10Ms, Capability::FrameDuration20Ms]);
+    let ControlStreamAction::Start { token, request } =
+        coordinator.accept(&start_for(0, 7, 9)).unwrap()
+    else {
+        panic!("expected a stream start action");
+    };
+
+    // A second identity cannot begin while the first start is pending.
+    assert!(matches!(
+        coordinator.accept(&start_for(0, 7, 10)),
+        Err(ControlStreamError::PendingChange)
+    ));
+    coordinator.complete_start(token, request).unwrap();
+    assert_eq!(coordinator.stream_count(), 1);
 }

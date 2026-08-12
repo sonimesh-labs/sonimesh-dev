@@ -20,7 +20,14 @@ use super::types::{
 static NEXT_CONTROL_SESSION_TOKEN: AtomicU64 = AtomicU64::new(0);
 static NEXT_CONTROL_OPERATION_TOKEN: AtomicU64 = AtomicU64::new(0);
 
-/// Control-domain coordinator for one desktop receiver stream.
+/// Maximum concurrently active media streams in one control session.
+///
+/// Provisionally matches the Phase 2 mixer slot bound (ADR 0015): headroom
+/// above the roadmap's four-source maximum, with admission failing closed at
+/// the bound in the control domain before any platform work is prepared.
+pub const MAX_ACTIVE_STREAMS: usize = 8;
+
+/// Control-domain coordinator for the desktop receiver's control plane.
 ///
 /// The coordinator only accepts frames after the transport authenticates its
 /// control session. It never receives media packets, exposes key material, or
@@ -32,7 +39,7 @@ pub struct ControlStreamCoordinator {
     local_capabilities: [Capability; MAX_CONTROL_CAPABILITIES],
     local_capability_count: usize,
     negotiation: Option<sonimesh_protocol::NegotiatedControl>,
-    active: Option<StreamStartRequest>,
+    active: [Option<StreamStartRequest>; MAX_ACTIVE_STREAMS],
     pending: Option<PendingStreamChange>,
     control_session: Option<ControlSessionToken>,
     reconnect_grace: ReconnectGraceController,
@@ -62,7 +69,7 @@ impl ControlStreamCoordinator {
             local_capabilities: capabilities,
             local_capability_count: local_capabilities.len(),
             negotiation: None,
-            active: None,
+            active: [const { None }; MAX_ACTIVE_STREAMS],
             pending: None,
             control_session: None,
             reconnect_grace: ReconnectGraceController::new(),
@@ -83,7 +90,7 @@ impl ControlStreamCoordinator {
     pub fn expire_control_session(&mut self) {
         self.state = SessionState::IDLE;
         self.negotiation = None;
-        self.active = None;
+        self.active = [const { None }; MAX_ACTIVE_STREAMS];
         self.pending = None;
         self.control_session = None;
         let _ = self.reconnect_grace.cancel();
@@ -326,7 +333,7 @@ impl ControlStreamCoordinator {
                 // Reconnect uses fresh transport/session material, so no prior
                 // negotiation, media identity, or platform completion can cross it.
                 self.negotiation = None;
-                self.active = None;
+                self.active = [const { None }; MAX_ACTIVE_STREAMS];
                 self.pending = None;
                 self.control_session = None;
                 // Fresh session material ends any armed reconnect window.
@@ -342,13 +349,33 @@ impl ControlStreamCoordinator {
         }
     }
 
-    /// Returns the exact currently active media identity, if any.
+    /// Returns the primary active media identity, if any.
+    ///
+    /// The primary stream is the first-admitted active stream. Single-stream
+    /// callers keep the historical contract: this is the only active stream.
+    /// Multi-stream callers should use [`Self::active_streams`] and
+    /// [`Self::stream_count`].
     #[must_use]
     pub const fn active(&self) -> Option<MediaStreamIdentity> {
-        match self.active {
-            Some(request) => Some(request.identity),
-            None => None,
+        let mut index = 0;
+        while index < MAX_ACTIVE_STREAMS {
+            if let Some(request) = self.active[index] {
+                return Some(request.identity);
+            }
+            index += 1;
         }
+        None
+    }
+
+    /// Number of concurrently active media streams.
+    #[must_use]
+    pub fn stream_count(&self) -> usize {
+        self.active.iter().flatten().count()
+    }
+
+    /// Iterates every active media identity in admission order.
+    pub fn active_streams(&self) -> impl Iterator<Item = MediaStreamIdentity> + '_ {
+        self.active.iter().flatten().map(|request| request.identity)
     }
 
     /// Returns the one-time negotiated control capability set, if available.
@@ -403,10 +430,17 @@ impl ControlStreamCoordinator {
         if self.pending != Some(PendingStreamChange::Start { token, request }) {
             return Err(ControlStreamError::CompletionMismatch);
         }
-        self.state
-            .apply(SessionEvent::StartStream)
-            .map_err(ControlStreamError::Transition)?;
-        self.active = Some(request);
+        if self.active_count() >= MAX_ACTIVE_STREAMS {
+            return Err(ControlStreamError::ActiveStreamLimit);
+        }
+        // The first admitted stream moves the lifecycle to Streaming; additional
+        // streams keep the already-streaming session.
+        if self.active_count() == 0 {
+            self.state
+                .apply(SessionEvent::StartStream)
+                .map_err(ControlStreamError::Transition)?;
+        }
+        self.insert_active(request)?;
         self.pending = None;
         Ok(())
     }
@@ -429,12 +463,12 @@ impl ControlStreamCoordinator {
                 previous,
                 next,
             })
-            || self.active() != Some(previous)
+            || !self.is_active(previous)
             || self.state != SessionState::STREAMING
         {
             return Err(ControlStreamError::CompletionMismatch);
         }
-        self.active = Some(next);
+        self.replace_active(previous, next);
         self.pending = None;
         Ok(())
     }
@@ -452,14 +486,17 @@ impl ControlStreamCoordinator {
         identity: MediaStreamIdentity,
     ) -> Result<(), ControlStreamError> {
         if self.pending != Some(PendingStreamChange::Stop { token, identity })
-            || self.active() != Some(identity)
+            || !self.is_active(identity)
         {
             return Err(ControlStreamError::CompletionMismatch);
         }
-        self.state
-            .apply(SessionEvent::StopStream)
-            .map_err(ControlStreamError::Transition)?;
-        self.active = None;
+        self.remove_active(identity);
+        // The session returns to Ready only after the last active stream stops.
+        if self.active_count() == 0 {
+            self.state
+                .apply(SessionEvent::StopStream)
+                .map_err(ControlStreamError::Transition)?;
+        }
         self.pending = None;
         Ok(())
     }
@@ -504,49 +541,56 @@ impl ControlStreamCoordinator {
             };
         }
 
-        let Some(active_request) = self.active else {
+        if let Some(active_request) = self.active_request(request.identity) {
+            // The identity is already active: an identical command is a no-op,
+            // a conflicting configuration is rejected, and a strictly newer key
+            // epoch rotates only this stream.
+            let active = active_request.identity;
+            if request.identity.key_epoch == active.key_epoch {
+                return if request == active_request {
+                    Ok(ControlStreamAction::Noop)
+                } else {
+                    Err(ControlStreamError::StreamConfigurationConflict)
+                };
+            }
+            if request.identity.key_epoch < active.key_epoch {
+                return Err(ControlStreamError::StaleEpoch {
+                    active: active.key_epoch,
+                    requested: request.identity.key_epoch,
+                });
+            }
+            if self.state != SessionState::STREAMING {
+                return Err(ControlStreamError::RotationRequiresStreaming(self.state));
+            }
+
+            let token = Self::issue_operation_token()?;
+            self.pending = Some(PendingStreamChange::Rotate {
+                token,
+                previous: active,
+                next: request,
+            });
+            return Ok(ControlStreamAction::Rotate {
+                token,
+                previous: active,
+                next: request,
+            });
+        }
+
+        // New identity: the first stream starts from Ready, additional streams
+        // start while already Streaming. Both fail closed at the slot bound.
+        if self.active_count() == 0 {
             if self.state != SessionState::READY {
                 return Err(ControlStreamError::StartRequiresReady(self.state));
             }
-            let token = Self::issue_operation_token()?;
-            self.pending = Some(PendingStreamChange::Start { token, request });
-            return Ok(ControlStreamAction::Start { token, request });
-        };
-
-        let active = active_request.identity;
-        if active.session_id != request.identity.session_id
-            || active.stream_id != request.identity.stream_id
-        {
-            return Err(ControlStreamError::ActiveStreamConflict);
+        } else if self.state != SessionState::STREAMING {
+            return Err(ControlStreamError::StartRequiresStreaming(self.state));
         }
-        if request.identity.key_epoch == active.key_epoch {
-            return if request == active_request {
-                Ok(ControlStreamAction::Noop)
-            } else {
-                Err(ControlStreamError::StreamConfigurationConflict)
-            };
+        if self.active_count() >= MAX_ACTIVE_STREAMS {
+            return Err(ControlStreamError::ActiveStreamLimit);
         }
-        if request.identity.key_epoch < active.key_epoch {
-            return Err(ControlStreamError::StaleEpoch {
-                active: active.key_epoch,
-                requested: request.identity.key_epoch,
-            });
-        }
-        if self.state != SessionState::STREAMING {
-            return Err(ControlStreamError::RotationRequiresStreaming(self.state));
-        }
-
         let token = Self::issue_operation_token()?;
-        self.pending = Some(PendingStreamChange::Rotate {
-            token,
-            previous: active,
-            next: request,
-        });
-        Ok(ControlStreamAction::Rotate {
-            token,
-            previous: active,
-            next: request,
-        })
+        self.pending = Some(PendingStreamChange::Start { token, request });
+        Ok(ControlStreamAction::Start { token, request })
     }
 
     fn accept_stop(
@@ -563,7 +607,7 @@ impl ControlStreamCoordinator {
                 Err(ControlStreamError::PendingChange)
             };
         }
-        if self.active() == Some(identity) {
+        if self.is_active(identity) {
             let token = Self::issue_operation_token()?;
             self.pending = Some(PendingStreamChange::Stop { token, identity });
             Ok(ControlStreamAction::Stop { token, identity })
@@ -627,12 +671,63 @@ impl ControlStreamCoordinator {
     fn retire_if_idle(&mut self) {
         if self.state == SessionState::IDLE {
             self.negotiation = None;
-            self.active = None;
+            self.active = [const { None }; MAX_ACTIVE_STREAMS];
             self.pending = None;
             self.control_session = None;
             let _ = self.reconnect_grace.cancel();
         }
     }
+
+    fn active_count(&self) -> usize {
+        self.active.iter().flatten().count()
+    }
+
+    fn stream_key_slot(&self, identity: MediaStreamIdentity) -> Option<usize> {
+        self.active.iter().position(|slot| {
+            slot.is_some_and(|request| same_stream_key(request.identity, identity))
+        })
+    }
+
+    fn exact_slot_of(&self, identity: MediaStreamIdentity) -> Option<usize> {
+        self.active
+            .iter()
+            .position(|slot| slot.is_some_and(|request| request.identity == identity))
+    }
+
+    fn is_active(&self, identity: MediaStreamIdentity) -> bool {
+        self.exact_slot_of(identity).is_some()
+    }
+
+    fn active_request(&self, identity: MediaStreamIdentity) -> Option<StreamStartRequest> {
+        self.active
+            .get(self.stream_key_slot(identity)?)
+            .copied()
+            .flatten()
+    }
+
+    fn insert_active(&mut self, request: StreamStartRequest) -> Result<(), ControlStreamError> {
+        let Some(slot) = self.active.iter_mut().find(|slot| slot.is_none()) else {
+            return Err(ControlStreamError::ActiveStreamLimit);
+        };
+        *slot = Some(request);
+        Ok(())
+    }
+
+    fn remove_active(&mut self, identity: MediaStreamIdentity) {
+        if let Some(slot) = self.exact_slot_of(identity) {
+            self.active[slot] = None;
+        }
+    }
+
+    fn replace_active(&mut self, identity: MediaStreamIdentity, next: StreamStartRequest) {
+        if let Some(slot) = self.exact_slot_of(identity) {
+            self.active[slot] = Some(next);
+        }
+    }
+}
+
+fn same_stream_key(left: MediaStreamIdentity, right: MediaStreamIdentity) -> bool {
+    left.session_id == right.session_id && left.stream_id == right.stream_id
 }
 
 fn issue_process_unique_token(

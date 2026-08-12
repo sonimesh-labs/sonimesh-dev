@@ -68,7 +68,7 @@ second successful hello is rejected rather than silently changing active
 capability policy.
 
 When the authenticated control session expires, the receiver retires its
-negotiation, active stream identity, pending operation, and local transport token
+negotiation, active stream identities, pending operation, and local transport token
 together. A later paired session must install a fresh authenticated transport and
 complete a fresh hello; it cannot inherit a retired peer's capabilities.
 
@@ -100,6 +100,15 @@ validated payload match pending or completed work. Reusing a media identity with
 different sample rate, channel count, or frame duration is rejected rather than
 reported as a successful no-op. A start command also cannot alias an in-flight
 stop merely because both name the same media identity.
+
+Version-one `StartStream` commands may establish multiple concurrently active
+media streams up to a fixed control-plane bound (`MAX_ACTIVE_STREAMS`), each
+distinguished by its own media-session and stream identity. The first admitted
+stream advances the session from Ready to Streaming; each additional stream keeps
+Streaming; the session returns to Ready after the last active stream stops. Key
+rotation stays per-stream: a `StartStream` for an already-active identity with a
+strictly newer media key epoch rotates only that stream, and other active streams
+are unaffected. A stop of one active stream never stops the others.
 
 ## Security implications
 

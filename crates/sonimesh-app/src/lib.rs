@@ -29,7 +29,7 @@ pub use control_snapshot::{
 };
 pub use control_stream::{
     ControlOperationToken, ControlSessionToken, ControlStreamAction, ControlStreamCoordinator,
-    ControlStreamError, MediaStreamIdentity, StreamStartRequest,
+    ControlStreamError, MAX_ACTIVE_STREAMS, MediaStreamIdentity, StreamStartRequest,
 };
 pub use format_adapted_render_source_factory::{
     FormatAdaptedRenderSourceFactory, SourcePcmFormat, SourcePcmFormatError,

@@ -503,8 +503,7 @@ every persisted stream against a fresh empty slot table. Per-stream drift
 control (`MixerStreamDriftController`) samples only the bounded adapter
 source queue, publishes bounded ppm corrections to the stream's resampler,
 retires the adapter epoch on an emergency occupancy threshold, and resets
-after recovery. Multi-stream control-plane negotiation, the 24-hour soak,
-and hardware callback timing remain open.
+after recovery. The 24-hour soak and hardware callback timing remain open.
 
 Any lookahead, attack, release, or safety limiter delay must be included in the
 reported playout budget. Disconnect, mute, reconnect, and device switching use

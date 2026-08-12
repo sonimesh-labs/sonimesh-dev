@@ -11,10 +11,12 @@ pub enum ControlStreamError {
     Protocol(ControlFrameError),
     /// A protocol-valid epoch could not convert to the media `u16` type.
     InvalidEpoch,
-    /// A new stream was requested while another session/stream is active.
-    ActiveStreamConflict,
+    /// The fixed control-plane bound of concurrently active streams was reached.
+    ActiveStreamLimit,
     /// A media identity was reused with different validated audio parameters.
     StreamConfigurationConflict,
+    /// An additional stream start arrived outside active streaming.
+    StartRequiresStreaming(SessionState),
     /// A pending platform or media change must finish before another one begins.
     PendingChange,
     /// A start command arrived in a state that cannot prepare output.
@@ -67,9 +69,7 @@ impl fmt::Display for ControlStreamError {
         match self {
             Self::Protocol(error) => write!(formatter, "control command rejected: {error}"),
             Self::InvalidEpoch => formatter.write_str("control epoch cannot fit media key context"),
-            Self::ActiveStreamConflict => {
-                formatter.write_str("a different media stream is already active")
-            }
+            Self::ActiveStreamLimit => formatter.write_str("the active stream table is full"),
             Self::StreamConfigurationConflict => formatter
                 .write_str("media stream identity conflicts with existing audio parameters"),
             Self::PendingChange => formatter.write_str("a stream lifecycle change is pending"),
@@ -83,6 +83,12 @@ impl fmt::Display for ControlStreamError {
                 write!(
                     formatter,
                     "key rotation requires Streaming state, found {state:?}"
+                )
+            }
+            Self::StartRequiresStreaming(state) => {
+                write!(
+                    formatter,
+                    "additional stream start requires Streaming state, found {state:?}"
                 )
             }
             Self::LocalCapabilityPolicyTooLarge => {
