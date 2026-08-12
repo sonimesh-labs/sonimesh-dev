@@ -8,6 +8,7 @@ mod decode;
 mod drift;
 mod fixed_slot_mixer;
 mod gain;
+mod gain_control;
 mod jitter;
 mod limiter;
 mod opus_frame;
@@ -23,6 +24,7 @@ pub use drift::{
 };
 pub use fixed_slot_mixer::{DEFAULT_MIXER_SLOTS, FixedSlotMixer, MixerConfigError, MixerError};
 pub use gain::GainSmoother;
+pub use gain_control::{GainControlError, GainControlHandle, GainControlState, MAX_GAIN_LINEAR};
 pub use jitter::{EncodedFrame, FrameError, InsertOutcome, JitterBuffer, PlayoutOutcome};
 pub use limiter::{
     DEFAULT_CEILING, DEFAULT_RELEASE_COEFFICIENT, LimiterConfig, LimiterConfigError, LimiterError,

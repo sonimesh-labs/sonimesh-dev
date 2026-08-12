@@ -1,14 +1,21 @@
+//! Lock-free bounded gain and mute control for one realtime stream.
+//!
+//! The control domain publishes gain and mute through a cloneable handle; the
+//! realtime render path reads the same atomic state without allocation or
+//! locking. One handle can be shared across output lifetimes so a user's gain
+//! and mute choice survives output-device recreation.
+
 use core::fmt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
-/// Largest linear gain the desktop control domain may request.
+/// Largest linear gain the control domain may request.
 ///
 /// The single-stream MVP is attenuation-only; a future release may extend this
 /// bound together with headroom and limiter evidence.
 pub const MAX_GAIN_LINEAR: f32 = 1.0;
 
-/// Failure while publishing a desktop gain or mute command.
+/// Failure while publishing a gain or mute command.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum GainControlError {
     /// Gain is not finite or is outside the bounded linear range.
@@ -27,7 +34,7 @@ impl fmt::Display for GainControlError {
 
 impl std::error::Error for GainControlError {}
 
-/// Snapshot of one stream's desktop gain state.
+/// Snapshot of one stream's gain state.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GainControlState {
     /// Linear gain target currently published to the realtime source.
@@ -39,9 +46,9 @@ pub struct GainControlState {
 /// Cross-thread handle for one stream's bounded gain and mute control.
 ///
 /// The realtime render source reads this handle without allocation or locking;
-/// the desktop control domain publishes through a clone from a non-realtime
-/// owner. One handle can be shared across output lifetimes so a user's gain
-/// and mute choice survives output-device recreation.
+/// the control domain publishes through a clone from a non-realtime owner. One
+/// handle can be shared across output lifetimes so a user's gain and mute
+/// choice survives output-device recreation.
 #[derive(Clone)]
 pub struct GainControlHandle {
     gain: Arc<AtomicU32>,
