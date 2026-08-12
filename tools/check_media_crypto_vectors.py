@@ -12,17 +12,22 @@ boundaries in pure standard-library Python and independently reseals every
 published datagram, so an AEAD crate, key, nonce, or header change is caught by
 an independent implementation (roadmap Phase 0D: cross-language crypto and
 packet test vectors; testing doc: published vectors for AEAD packet
-authentication).
+authentication). It also cross-checks the documented datagrams in
+docs/protocol/media-crypto-vectors.md and the Rust-pinned datagram arrays in
+crates/sonimesh-protocol/tests/media_crypto.rs against the same recomputation,
+so the doc, the Rust pins, and this verifier cannot drift apart.
 """
 
 from __future__ import annotations
 
 import hashlib
 import hmac
+import re
 import struct
 import sys
 import unittest
 from dataclasses import dataclass
+from pathlib import Path
 
 ROOT_SALT = b"sonimesh media root v1"
 STREAM_KEY_LABEL = b"sonimesh media stream key v1"
@@ -31,6 +36,12 @@ MEDIA_MAGIC = 0x534E_4D53
 MEDIA_HEADER_LEN = 36
 ANDROID_TO_DESKTOP_DIRECTION = 0
 POLY1305_TAG_BYTES = 16
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+DOC_PATH = REPO_ROOT / "docs" / "protocol" / "media-crypto-vectors.md"
+RUST_TEST_PATH = (
+    REPO_ROOT / "crates" / "sonimesh-protocol" / "tests" / "media_crypto.rs"
+)
 
 
 def hkdf_extract(salt: bytes, ikm: bytes) -> bytes:
@@ -245,8 +256,189 @@ def validate_vectors() -> list[str]:
     return errors
 
 
+def doc_vector_sections(source: str) -> list[tuple[str, str]]:
+    """Returns (``"1"``/``"2"``, section) pairs from the vector doc headings."""
+    headings = list(
+        re.finditer(r"^## Vector (?P<name>[12]):[^\r\n]*$", source, re.MULTILINE)
+    )
+    sections: list[tuple[str, str]] = []
+    for index, heading in enumerate(headings):
+        end = headings[index + 1].start() if index + 1 < len(headings) else len(source)
+        sections.append((heading.group("name"), source[heading.end() : end]))
+    return sections
+
+
+def doc_table_value(section: str, label: str) -> str:
+    """Returns the first backtick-quoted value from one markdown table row."""
+    row = re.search(
+        rf"^\|\s*{re.escape(label)}\s*\|\s*([^|\r\n]*)\s*\|",
+        section,
+        re.MULTILINE,
+    )
+    if row is None:
+        raise ValueError(f"media crypto doc is missing table row {label!r}")
+    quoted = re.search(r"`([^`]*)`", row.group(1))
+    if quoted is None:
+        raise ValueError(f"media crypto doc table row {label!r} has no backtick value")
+    return quoted.group(1)
+
+
+def doc_integer(value: str) -> int:
+    """Parses a decimal or ``0x``-prefixed integer from a doc table value."""
+    value = value.strip()
+    return int(value, 16) if value.lower().startswith("0x") else int(value, 10)
+
+
+def doc_datagram(section: str) -> bytes:
+    """Returns the hex datagram from the section's fenced text block."""
+    fence = re.search(
+        r"^```text[^\r\n]*\r?\n(.*?)^```[ \t]*$", section, re.MULTILINE | re.DOTALL
+    )
+    if fence is None:
+        raise ValueError("media crypto doc is missing a ```text datagram block")
+    return bytes.fromhex(re.sub(r"\s+", "", fence.group(1)))
+
+
+def doc_nonce(section: str) -> bytes:
+    """Returns the documented 96-bit nonce hex."""
+    match = re.search(r"The 96-bit nonce is `([0-9a-fA-F]+)`\.", section)
+    if match is None:
+        raise ValueError("media crypto doc is missing a nonce line")
+    return bytes.fromhex(match.group(1))
+
+
+def parse_doc_vector(section: str) -> tuple[PublishedVector, bytes, int, int]:
+    """Rebuilds a vector from the doc section.
+
+    Returns the vector, its documented nonce, the documented protocol version,
+    and the documented direction value so every doc constant is cross-checked.
+    """
+    secret = bytes.fromhex(doc_table_value(section, "Control-session secret"))
+    if len(secret) != 32:
+        raise ValueError("media crypto doc control-session secret is not 32 bytes")
+    vector = PublishedVector(
+        name="",
+        secret=secret,
+        session_id=doc_integer(doc_table_value(section, "Session ID")),
+        stream_id=doc_integer(doc_table_value(section, "Stream ID")),
+        key_epoch=doc_integer(doc_table_value(section, "Key epoch")),
+        flags=doc_integer(doc_table_value(section, "Flags")),
+        sample_timestamp=doc_integer(doc_table_value(section, "Sample timestamp")),
+        plaintext=doc_table_value(section, "Plaintext UTF-8").encode("utf-8"),
+        datagram=doc_datagram(section),
+    )
+    protocol_version = doc_integer(doc_table_value(section, "Protocol version"))
+    direction_value = doc_integer(doc_table_value(section, "Direction"))
+    if doc_integer(doc_table_value(section, "Sequence")) != 0:
+        raise ValueError("media crypto doc sequence must be 0")
+    return vector, doc_nonce(section), protocol_version, direction_value
+
+
+def rust_test_datagrams(source: str) -> dict[str, bytes]:
+    """Extracts each Rust vector test's pinned datagram byte array by number."""
+    datagrams: dict[str, bytes] = {}
+    for test_name, number in (
+        ("matches_published_cross_language_media_vector", "1"),
+        ("matches_published_cross_language_aead_packet_vector", "2"),
+    ):
+        function_start = source.index(f"fn {test_name}(")
+        datagram_start = source.index("protected.datagram,", function_start)
+        bracket_start = source.index("[", datagram_start)
+        bracket_end = source.index("]", bracket_start)
+        body = re.sub(r"//[^\r\n]*", "", source[bracket_start + 1 : bracket_end])
+        hex_tokens = re.findall(r"0x([0-9a-fA-F]{2})", body)
+        datagrams[number] = bytes(int(token, 16) for token in hex_tokens)
+    return datagrams
+
+
+def cross_source_errors(
+    doc_source: str | None = None, rust_source: str | None = None
+) -> list[str]:
+    """Checks the doc and Rust pins against the independent recomputation.
+
+    Reads the two pinned sources when not supplied, so the published doc
+    datagrams, the Rust test datagrams, and the Python pins can never drift
+    apart without failing CI.
+    """
+    errors: list[str] = []
+    if doc_source is None or rust_source is None:
+        try:
+            doc_source = DOC_PATH.read_text(encoding="utf-8")
+            rust_source = RUST_TEST_PATH.read_text(encoding="utf-8")
+        except OSError as exc:
+            return [f"cannot read media crypto vector sources: {exc}"]
+
+    sections = doc_vector_sections(doc_source)
+    if [number for number, _ in sections] != ["1", "2"]:
+        errors.append(
+            "media crypto doc must contain exactly Vector 1 then Vector 2 sections"
+        )
+    rust_datagrams = rust_test_datagrams(rust_source)
+    if set(rust_datagrams) != {"1", "2"}:
+        errors.append("Rust media crypto test must pin both vector datagrams")
+    published = {
+        vector.name.split(":", 1)[0].split()[-1]: vector
+        for vector in PUBLISHED_VECTORS
+    }
+
+    for number, section in sections:
+        try:
+            vector, nonce, protocol_version, direction_value = parse_doc_vector(section)
+        except ValueError as exc:
+            errors.append(f"vector {number}: {exc}")
+            continue
+        expected = published.get(number)
+        if expected is None:
+            errors.append(f"vector {number}: no published Python pin to compare")
+            continue
+        if protocol_version != MEDIA_VERSION:
+            errors.append(
+                f"vector {number}: doc protocol version {protocol_version} "
+                f"!= {MEDIA_VERSION}"
+            )
+        if direction_value != ANDROID_TO_DESKTOP_DIRECTION:
+            errors.append(
+                f"vector {number}: doc direction {direction_value} "
+                f"!= {ANDROID_TO_DESKTOP_DIRECTION}"
+            )
+        if vector.datagram != expected.datagram:
+            errors.append(
+                f"vector {number}: doc datagram differs from the Python pin: "
+                f"doc {vector.datagram.hex().upper()} "
+                f"pin {expected.datagram.hex().upper()}"
+            )
+        rust_datagram = rust_datagrams.get(number)
+        if rust_datagram is None:
+            errors.append(f"vector {number}: Rust test datagram not found")
+        elif vector.datagram != rust_datagram:
+            errors.append(
+                f"vector {number}: doc datagram differs from the Rust pin: "
+                f"doc {vector.datagram.hex().upper()} "
+                f"rust {rust_datagram.hex().upper()}"
+            )
+        if vector.recompute() != vector.datagram:
+            errors.append(
+                f"vector {number}: doc datagram does not match the independent "
+                "recomputation"
+            )
+        recomputed_nonce = media_nonce(vector.stream_id, vector.key_epoch, 0)
+        if recomputed_nonce != nonce:
+            errors.append(
+                f"vector {number}: doc nonce {nonce.hex().upper()} "
+                f"!= {recomputed_nonce.hex().upper()}"
+            )
+        expected_len = MEDIA_HEADER_LEN + len(vector.plaintext) + POLY1305_TAG_BYTES
+        if len(vector.datagram) != expected_len:
+            errors.append(
+                f"vector {number}: doc datagram length {len(vector.datagram)} "
+                f"!= {expected_len}"
+            )
+    return errors
+
+
 def main() -> int:
     errors = validate_vectors()
+    errors.extend(cross_source_errors())
     for error in errors:
         print(error, file=sys.stderr)
     if errors:
@@ -302,6 +494,85 @@ class MediaCryptoVectorTests(unittest.TestCase):
                 MEDIA_HEADER_LEN + len(vector.plaintext) + POLY1305_TAG_BYTES,
                 vector.name,
             )
+
+    @staticmethod
+    def _doc_section(vector: PublishedVector, datagram: bytes) -> str:
+        """Renders one doc vector section from a vector and datagram bytes."""
+        lines = [
+            f"| Control-session secret | `{vector.secret.hex()}` |",
+            f"| Protocol version | `{MEDIA_VERSION}` |",
+            f"| Direction | Android-to-desktop (`{ANDROID_TO_DESKTOP_DIRECTION}`) |",
+            f"| Session ID | `0x{vector.session_id:016x}` |",
+            f"| Stream ID | `0x{vector.stream_id:08x}` |",
+            f"| Key epoch | `0x{vector.key_epoch:04x}` |",
+            "| Sequence | `0` |",
+            f"| Flags | `0x{vector.flags:02x}` |",
+            f"| Sample timestamp | `0x{vector.sample_timestamp:x}` |",
+            f"| Plaintext UTF-8 | `{vector.plaintext.decode('utf-8')}` |",
+        ]
+        hex_text = datagram.hex().upper()
+        hex_lines = [
+            hex_text[offset : offset + 64]
+            for offset in range(0, len(hex_text), 64)
+        ]
+        return (
+            "\n".join(lines)
+            + "\n\nThe 96-bit nonce is `"
+            + media_nonce(vector.stream_id, vector.key_epoch, 0).hex()
+            + "`.\n\n```text\n"
+            + "\n".join(hex_lines)
+            + "\n```\n"
+        )
+
+    def test_doc_parser_round_trips_a_published_vector(self) -> None:
+        for vector in PUBLISHED_VECTORS:
+            section = self._doc_section(vector, vector.datagram)
+            parsed, nonce, protocol_version, direction_value = parse_doc_vector(section)
+            self.assertEqual(parsed.datagram, vector.datagram)
+            self.assertEqual(protocol_version, MEDIA_VERSION)
+            self.assertEqual(direction_value, ANDROID_TO_DESKTOP_DIRECTION)
+            self.assertEqual(nonce, media_nonce(vector.stream_id, vector.key_epoch, 0))
+
+    def test_doc_parser_detects_a_tampered_datagram(self) -> None:
+        vector = PUBLISHED_VECTORS[0]
+        tampered = vector.datagram[:-1] + bytes([vector.datagram[-1] ^ 0x01])
+        section = self._doc_section(vector, tampered)
+        parsed, _, _, _ = parse_doc_vector(section)
+        self.assertNotEqual(parsed.recompute(), parsed.datagram)
+
+    def test_rust_parser_extracts_both_pinned_datagrams(self) -> None:
+        source = RUST_TEST_PATH.read_text(encoding="utf-8")
+        datagrams = rust_test_datagrams(source)
+        self.assertEqual(set(datagrams), {"1", "2"})
+        by_number = {
+            vector.name.split(":", 1)[0].split()[-1]: vector
+            for vector in PUBLISHED_VECTORS
+        }
+        for number, vector in by_number.items():
+            self.assertEqual(datagrams[number], vector.datagram)
+
+    def test_rust_parser_detects_a_tampered_pin(self) -> None:
+        source = RUST_TEST_PATH.read_text(encoding="utf-8")
+        tampered = source.replace("0x53, 0x4E, 0x4D, 0x53", "0x53, 0x4E, 0x4D, 0x54", 1)
+        datagrams = rust_test_datagrams(tampered)
+        self.assertNotEqual(datagrams["1"], PUBLISHED_VECTORS[0].datagram)
+
+    def test_cross_source_detects_doc_and_rust_drift(self) -> None:
+        doc_source = DOC_PATH.read_text(encoding="utf-8")
+        rust_source = RUST_TEST_PATH.read_text(encoding="utf-8")
+        self.assertEqual(cross_source_errors(doc_source, rust_source), [])
+        tampered_doc = doc_source.replace("fd67131", "fd67130", 1)
+        errors = cross_source_errors(tampered_doc, rust_source)
+        self.assertTrue(
+            any("vector 1" in error and "doc datagram" in error for error in errors)
+        )
+        tampered_rust = rust_source.replace(
+            "0x53, 0x4E, 0x4D, 0x53", "0x53, 0x4E, 0x4D, 0x54", 1
+        )
+        errors = cross_source_errors(doc_source, tampered_rust)
+        self.assertTrue(
+            any("vector 1" in error and "Rust pin" in error for error in errors)
+        )
 
 
 if __name__ == "__main__":
