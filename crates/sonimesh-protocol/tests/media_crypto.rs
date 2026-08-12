@@ -162,6 +162,23 @@ fn rejects_plaintext_larger_than_media_capacity() {
 }
 
 #[test]
+fn seals_and_opens_an_empty_plaintext_with_a_tag_only_ciphertext() {
+    let secret = secret();
+    let context = context(7, MediaDirection::AndroidToDesktop);
+    let mut sealer = MediaSealer::new(&secret, context).unwrap();
+    let opener = MediaOpener::new(&secret, context).unwrap();
+    let protected = sealer.seal(0, 0, b"").unwrap();
+
+    // An empty plaintext still carries a full 16-byte Poly1305 tag, which sits
+    // exactly on the truncated-tag threshold and must round-trip as zero bytes.
+    let packet = parse_media_packet(&protected.datagram).unwrap();
+    assert_eq!(packet.ciphertext.len(), 16);
+    let mut plaintext = [0xA5_u8; 16];
+    assert_eq!(opener.open(packet, &mut plaintext).unwrap(), 0);
+    assert_eq!(plaintext, [0xA5_u8; 16]);
+}
+
+#[test]
 fn seals_and_opens_at_the_exact_media_plaintext_capacity() {
     let secret = secret();
     let context = context(7, MediaDirection::AndroidToDesktop);
