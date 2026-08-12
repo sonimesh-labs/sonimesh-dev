@@ -72,7 +72,7 @@ fn random_membership_transitions_keep_render_correct() {
                 if let Some(slot) = slot {
                     let (producer, consumer) = realtime_pcm_queue::<SAMPLES_PER_BLOCK>(16).unwrap();
                     let index = mixer
-                        .insert(consumer, sonimesh_audio::GainControlHandle::new())
+                        .insert(consumer, sonimesh_audio::GainControlHandle::new(), None)
                         .unwrap();
                     assert_eq!(index, slot, "insert should take the first free slot");
                     producers[slot] = Some(producer);
@@ -150,7 +150,7 @@ fn mixed_bus_stays_within_the_limiter_ceiling() {
             push_block(&mut producer, value);
             push_block(&mut producer, value);
             mixer
-                .insert(consumer, sonimesh_audio::GainControlHandle::new())
+                .insert(consumer, sonimesh_audio::GainControlHandle::new(), None)
                 .unwrap();
         }
 

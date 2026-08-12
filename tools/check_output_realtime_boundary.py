@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Reject direct realtime-boundary regressions in reviewed realtime render paths.
 
-The guarded functions are the Windows output adapter callback shells plus the
-app-crate `RenderSource::render` implementations and their render-path helpers.
-All of them run inside the output callback, so they must avoid allocation,
-locking, logging, blocking I/O, and device enumeration.
+The guarded functions are the Windows output adapter callback shells, the
+app-crate `RenderSource::render` implementations and their render-path helpers,
+and the fixed-slot mixer's callback entry points in `sonimesh-audio`. All of
+them run inside the output callback, so they must avoid allocation, locking,
+logging, blocking I/O, and device enumeration.
 """
 
 from __future__ import annotations
@@ -41,6 +42,18 @@ TARGETS = (
     FunctionTarget(
         Path("crates/sonimesh-app/src/pcm_render_source.rs"),
         "apply_gain",
+    ),
+    FunctionTarget(
+        Path("crates/sonimesh-audio/src/fixed_slot_mixer.rs"),
+        "render",
+    ),
+    FunctionTarget(
+        Path("crates/sonimesh-audio/src/fixed_slot_mixer.rs"),
+        "render_into",
+    ),
+    FunctionTarget(
+        Path("crates/sonimesh-audio/src/fixed_slot_mixer.rs"),
+        "apply_slot_gain",
     ),
     FunctionTarget(
         Path("crates/sonimesh-app/src/channel_mapped_render_source.rs"),
@@ -177,6 +190,29 @@ class OutputRealtimeBoundaryTests(unittest.TestCase):
             (
                 Path("crates/sonimesh-app/src/sample_rate_mapped_render_source.rs"),
                 "consume_input",
+            ),
+        }
+
+    def test_audio_mixer_render_path_is_guarded(self) -> None:
+        audio_mixer_targets = {
+            (target.path, target.function)
+            for target in TARGETS
+            if target.path
+            == Path("crates/sonimesh-audio/src/fixed_slot_mixer.rs")
+        }
+
+        assert audio_mixer_targets == {
+            (
+                Path("crates/sonimesh-audio/src/fixed_slot_mixer.rs"),
+                "render",
+            ),
+            (
+                Path("crates/sonimesh-audio/src/fixed_slot_mixer.rs"),
+                "render_into",
+            ),
+            (
+                Path("crates/sonimesh-audio/src/fixed_slot_mixer.rs"),
+                "apply_slot_gain",
             ),
         }
 

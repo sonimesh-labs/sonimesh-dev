@@ -106,7 +106,7 @@ behavior, or physical WLANs.
 ~~~text
 sonimesh-app            -> audio, network, platform contracts, protocol, diagnostics
 sonimesh-network        -> protocol primitives
-sonimesh-audio          -> crossbeam-queue behind its realtime queue boundary
+sonimesh-audio          -> diagnostics per-slot counters; crossbeam-queue behind its realtime queue boundary
 sonimesh-platform       -> platform contracts; optional Windows CPAL feasibility adapter
 sonimesh-diagnostics    -> standard library only
 sonimesh-protocol       -> Prost-generated bounded control schemas

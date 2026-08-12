@@ -1249,6 +1249,7 @@ name = "sonimesh-audio"
 version = "0.1.0"
 dependencies = [
  "crossbeam-queue",
+ "sonimesh-diagnostics",
 ]
 
 [[package]]

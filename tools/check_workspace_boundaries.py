@@ -14,7 +14,7 @@ from typing import Any
 FOUNDATION_DEPENDENCIES: dict[str, frozenset[str]] = {
     "sonimesh-protocol": frozenset(),
     "sonimesh-network": frozenset({"sonimesh-protocol"}),
-    "sonimesh-audio": frozenset(),
+    "sonimesh-audio": frozenset({"sonimesh-diagnostics"}),
     "sonimesh-platform": frozenset(),
     "sonimesh-diagnostics": frozenset(),
     "sonimesh-app": frozenset(

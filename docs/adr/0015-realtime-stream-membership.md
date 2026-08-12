@@ -101,8 +101,11 @@ order during rendering, applies a per-slot discontinuity fade, fails closed at
 admission when the table is full, and returns the consumer on deactivation. Each
 slot also owns its per-stream gain and mute state: the slot holds a
 `GainControlHandle` that the control domain publishes to, and the callback reads
-that state without locking and ramps it through the slot's `GainSmoother`. The
-primitive composes with the bounded-output limiter as the final output stage.
+that state without locking and ramps it through the slot's `GainSmoother`. A
+slot can carry an optional per-slot `StreamCounters` endpoint that the callback
+records underflow, refill-limit, and discontinuity events into without locking,
+so per-stream quality metrics can distinguish the failing slot. The primitive
+composes with the bounded-output limiter as the final output stage.
 
 Evidence produced so far:
 
@@ -110,6 +113,9 @@ Evidence produced so far:
   tests, including a slot whose queue underflows without affecting other slots;
 - per-slot gain and mute unit tests proving the bounded ramp scales or silences
   only the affected slot while other slots stay at unity;
+- per-slot realtime counter unit tests proving underflow, refill-limit, and
+  discontinuity events land only on the affected slot (and that metric-free
+  slots render identically);
 - a deterministic property test over random activate/deactivate/render
   sequences against an independent active-set model, plus a limiter-ceiling
   composition test;

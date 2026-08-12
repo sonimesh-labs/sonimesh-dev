@@ -473,7 +473,9 @@ coefficient. The fixed-slot summing mixer primitive
 ([ADR 0015](./adr/0015-realtime-stream-membership.md)) owns a preallocated slot
 table, iterates active slots in fixed order, and fails closed at admission when
 the table is full. Each slot owns its per-stream gain and mute state, published
-through a lock-free `GainControlHandle` and ramped inside the callback; the
+through a lock-free `GainControlHandle` and ramped inside the callback, and can
+carry an optional per-slot `StreamCounters` endpoint that the callback records
+underflow, refill-limit, and discontinuity events into without locking; the
 app-side multi-stream render path (wiring decoded streams into slots and
 publishing control-domain gain/mute changes) is not wired yet.
 

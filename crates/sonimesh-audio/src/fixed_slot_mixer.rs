@@ -8,6 +8,9 @@
 //! which visits every slot in fixed order and does bounded work per slot.
 
 use std::fmt;
+use std::sync::Arc;
+
+use sonimesh_diagnostics::StreamCounters;
 
 use crate::gain::GainSmoother;
 use crate::gain_control::GainControlHandle;
@@ -71,7 +74,8 @@ impl fmt::Display for MixerError {
 impl std::error::Error for MixerError {}
 
 /// One preallocated stream slot: its consumer endpoint, block scratch,
-/// per-slot discontinuity fade, and per-slot gain and mute state.
+/// per-slot discontinuity fade, per-slot gain and mute state, and optional
+/// per-slot realtime counters that the callback records without locking.
 struct Slot<const SAMPLES_PER_BLOCK: usize> {
     consumer: RealtimePcmConsumer<SAMPLES_PER_BLOCK>,
     scratch: [f32; SAMPLES_PER_BLOCK],
@@ -80,12 +84,14 @@ struct Slot<const SAMPLES_PER_BLOCK: usize> {
     fade: GainSmoother,
     gain_handle: GainControlHandle,
     gain_smoother: GainSmoother,
+    counters: Option<Arc<StreamCounters>>,
 }
 
 impl<const SAMPLES_PER_BLOCK: usize> Slot<SAMPLES_PER_BLOCK> {
     fn new(
         consumer: RealtimePcmConsumer<SAMPLES_PER_BLOCK>,
         gain_handle: GainControlHandle,
+        counters: Option<Arc<StreamCounters>>,
     ) -> Self {
         Self {
             consumer,
@@ -95,6 +101,7 @@ impl<const SAMPLES_PER_BLOCK: usize> Slot<SAMPLES_PER_BLOCK> {
             fade: GainSmoother::new(1.0),
             gain_handle,
             gain_smoother: GainSmoother::new(1.0),
+            counters,
         }
     }
 
@@ -103,12 +110,15 @@ impl<const SAMPLES_PER_BLOCK: usize> Slot<SAMPLES_PER_BLOCK> {
     /// Underflow and the bounded per-chunk refill limit leave the remaining
     /// target samples untouched, so this slot contributes bounded silence
     /// without affecting any other slot. A discontinuity resets this slot's
-    /// fade to zero and ramps it back to unity.
+    /// fade to zero and ramps it back to unity. When the slot carries a
+    /// counters endpoint, underflow, refill-limit, and discontinuity events
+    /// are recorded there so per-stream metrics distinguish the failing slot.
     fn render_into(&mut self, target: &mut [f32], refill_budget: &mut usize) {
         let mut written = 0;
         while written < target.len() {
             if self.scratch_offset == self.scratch_len {
                 if *refill_budget == 0 {
+                    self.record_refill_limit_hit();
                     break;
                 }
                 *refill_budget -= 1;
@@ -119,6 +129,7 @@ impl<const SAMPLES_PER_BLOCK: usize> Slot<SAMPLES_PER_BLOCK> {
                         ..
                     } => {
                         if discontinuity {
+                            self.record_discontinuity();
                             self.fade = GainSmoother::new(0.0);
                             self.fade.set_target(1.0, DISCONTINUITY_FADE_SAMPLES);
                         }
@@ -128,7 +139,10 @@ impl<const SAMPLES_PER_BLOCK: usize> Slot<SAMPLES_PER_BLOCK> {
                             continue;
                         }
                     }
-                    RealtimePcmPopOutcome::Underflow { .. } => break,
+                    RealtimePcmPopOutcome::Underflow { .. } => {
+                        self.record_underflow();
+                        break;
+                    }
                 }
             }
 
@@ -145,6 +159,26 @@ impl<const SAMPLES_PER_BLOCK: usize> Slot<SAMPLES_PER_BLOCK> {
             }
             written += copy_len;
             self.scratch_offset += copy_len;
+        }
+    }
+}
+
+impl<const SAMPLES_PER_BLOCK: usize> Slot<SAMPLES_PER_BLOCK> {
+    fn record_underflow(&self) {
+        if let Some(counters) = &self.counters {
+            counters.pcm_underflow();
+        }
+    }
+
+    fn record_refill_limit_hit(&self) {
+        if let Some(counters) = &self.counters {
+            counters.pcm_refill_limit_hit();
+        }
+    }
+
+    fn record_discontinuity(&self) {
+        if let Some(counters) = &self.counters {
+            counters.pcm_discontinuity();
         }
     }
 }
@@ -211,8 +245,10 @@ impl<const SLOTS: usize, const SAMPLES_PER_BLOCK: usize> FixedSlotMixer<SLOTS, S
     ///
     /// The supplied [`GainControlHandle`] becomes the slot's per-stream gain
     /// and mute state; the control domain keeps a clone to publish changes
-    /// that the callback reads without locking. This is control-domain work;
-    /// it never allocates and never takes a lock.
+    /// that the callback reads without locking. `counters` is an optional
+    /// per-slot metrics endpoint that the callback records into without
+    /// locking; `None` leaves the slot metric-free and otherwise identical.
+    /// This is control-domain work; it never allocates and never takes a lock.
     ///
     /// # Errors
     ///
@@ -222,10 +258,11 @@ impl<const SLOTS: usize, const SAMPLES_PER_BLOCK: usize> FixedSlotMixer<SLOTS, S
         &mut self,
         consumer: RealtimePcmConsumer<SAMPLES_PER_BLOCK>,
         gain: GainControlHandle,
+        counters: Option<Arc<StreamCounters>>,
     ) -> Result<usize, MixerError> {
         for (index, slot) in self.slots.iter_mut().enumerate() {
             if slot.is_none() {
-                *slot = Some(Slot::new(consumer, gain));
+                *slot = Some(Slot::new(consumer, gain, counters));
                 self.active += 1;
                 return Ok(index);
             }
@@ -295,9 +332,13 @@ impl<const SLOTS: usize, const SAMPLES_PER_BLOCK: usize> FixedSlotMixer<SLOTS, S
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use sonimesh_diagnostics::StreamCounters;
+
     use super::{DEFAULT_MIXER_SLOTS, FixedSlotMixer, MixerConfigError, MixerError};
     use crate::gain_control::GainControlHandle;
-    use crate::realtime_queue::realtime_pcm_queue;
+    use crate::realtime_queue::{MAX_PCM_QUEUE_BLOCKS, realtime_pcm_queue};
     use crate::{PeakLimiter, RealtimePcmProducer, RealtimePcmPushOutcome};
 
     const SAMPLES_PER_BLOCK: usize = 8;
@@ -357,7 +398,9 @@ mod tests {
             push_constant(&mut producer, value_for_slot(slot), 2);
             producers.push(producer);
             assert_eq!(
-                mixer.insert(consumer, GainControlHandle::new()).unwrap(),
+                mixer
+                    .insert(consumer, GainControlHandle::new(), None)
+                    .unwrap(),
                 slot
             );
         }
@@ -382,11 +425,15 @@ mod tests {
         let mut mixer: FixedSlotMixer<2, SAMPLES_PER_BLOCK> = FixedSlotMixer::new().unwrap();
         for _ in 0..2 {
             let (_, consumer) = realtime_pcm_queue::<SAMPLES_PER_BLOCK>(2).unwrap();
-            assert!(mixer.insert(consumer, GainControlHandle::new()).is_ok());
+            assert!(
+                mixer
+                    .insert(consumer, GainControlHandle::new(), None)
+                    .is_ok()
+            );
         }
         let (_, consumer) = realtime_pcm_queue::<SAMPLES_PER_BLOCK>(2).unwrap();
         assert_eq!(
-            mixer.insert(consumer, GainControlHandle::new()),
+            mixer.insert(consumer, GainControlHandle::new(), None),
             Err(MixerError::SlotFull)
         );
         assert_eq!(mixer.active(), 2);
@@ -397,7 +444,9 @@ mod tests {
         let mut mixer: FixedSlotMixer<DEFAULT_MIXER_SLOTS, SAMPLES_PER_BLOCK> =
             FixedSlotMixer::new().unwrap();
         let (_, consumer) = realtime_pcm_queue::<SAMPLES_PER_BLOCK>(2).unwrap();
-        let index = mixer.insert(consumer, GainControlHandle::new()).unwrap();
+        let index = mixer
+            .insert(consumer, GainControlHandle::new(), None)
+            .unwrap();
         assert_eq!(index, 0);
 
         let returned = mixer.remove(index).unwrap();
@@ -406,7 +455,9 @@ mod tests {
         assert_eq!(mixer.active(), 0);
 
         let (_, consumer) = realtime_pcm_queue::<SAMPLES_PER_BLOCK>(2).unwrap();
-        let again = mixer.insert(consumer, GainControlHandle::new()).unwrap();
+        let again = mixer
+            .insert(consumer, GainControlHandle::new(), None)
+            .unwrap();
         assert_eq!(again, index);
     }
 
@@ -431,9 +482,15 @@ mod tests {
         let (mut producer_c, consumer_c) = realtime_pcm_queue::<SAMPLES_PER_BLOCK>(4).unwrap();
         push_constant(&mut producer_a, 1.0, 4);
         push_constant(&mut producer_c, 3.0, 4);
-        mixer.insert(consumer_a, GainControlHandle::new()).unwrap();
-        mixer.insert(consumer_b, GainControlHandle::new()).unwrap();
-        mixer.insert(consumer_c, GainControlHandle::new()).unwrap();
+        mixer
+            .insert(consumer_a, GainControlHandle::new(), None)
+            .unwrap();
+        mixer
+            .insert(consumer_b, GainControlHandle::new(), None)
+            .unwrap();
+        mixer
+            .insert(consumer_c, GainControlHandle::new(), None)
+            .unwrap();
 
         let mut output = [0.0; 32];
         mixer.render(&mut output);
@@ -453,8 +510,12 @@ mod tests {
         producer_a.begin_epoch();
         push_constant(&mut producer_a, 1.0, 2);
         push_constant(&mut producer_b, 2.0, 1);
-        mixer.insert(consumer_a, GainControlHandle::new()).unwrap();
-        mixer.insert(consumer_b, GainControlHandle::new()).unwrap();
+        mixer
+            .insert(consumer_a, GainControlHandle::new(), None)
+            .unwrap();
+        mixer
+            .insert(consumer_b, GainControlHandle::new(), None)
+            .unwrap();
 
         let mut output = [0.0; SAMPLES_PER_BLOCK];
         mixer.render(&mut output);
@@ -475,7 +536,9 @@ mod tests {
         let (mut producer, consumer) = realtime_pcm_queue::<SAMPLES_PER_BLOCK>(4).unwrap();
         assert_eq!(producer.push(&[1.0; 6]), RealtimePcmPushOutcome::Inserted);
         assert_eq!(producer.push(&[1.0; 6]), RealtimePcmPushOutcome::Inserted);
-        mixer.insert(consumer, GainControlHandle::new()).unwrap();
+        mixer
+            .insert(consumer, GainControlHandle::new(), None)
+            .unwrap();
 
         let mut first = [0.0; 10];
         mixer.render(&mut first);
@@ -493,7 +556,9 @@ mod tests {
         for _ in 0..DEFAULT_MIXER_SLOTS {
             let (mut producer, consumer) = realtime_pcm_queue::<SAMPLES_PER_BLOCK>(4).unwrap();
             push_constant(&mut producer, 0.3, 4);
-            mixer.insert(consumer, GainControlHandle::new()).unwrap();
+            mixer
+                .insert(consumer, GainControlHandle::new(), None)
+                .unwrap();
         }
 
         let mut output = [0.0; 32];
@@ -521,8 +586,10 @@ mod tests {
         push_constant(&mut producer_b, 1.0, 24);
         let gain_a = GainControlHandle::new();
         gain_a.set_gain(0.25).unwrap();
-        mixer.insert(consumer_a, gain_a.clone()).unwrap();
-        mixer.insert(consumer_b, GainControlHandle::new()).unwrap();
+        mixer.insert(consumer_a, gain_a.clone(), None).unwrap();
+        mixer
+            .insert(consumer_b, GainControlHandle::new(), None)
+            .unwrap();
 
         let mut output = [0.0; 24 * SAMPLES_PER_BLOCK];
         mixer.render(&mut output);
@@ -548,8 +615,10 @@ mod tests {
         push_constant(&mut producer_b, 1.0, 24);
         let gain_a = GainControlHandle::new();
         gain_a.set_muted(true);
-        mixer.insert(consumer_a, gain_a.clone()).unwrap();
-        mixer.insert(consumer_b, GainControlHandle::new()).unwrap();
+        mixer.insert(consumer_a, gain_a.clone(), None).unwrap();
+        mixer
+            .insert(consumer_b, GainControlHandle::new(), None)
+            .unwrap();
 
         let mut output = [0.0; 24 * SAMPLES_PER_BLOCK];
         mixer.render(&mut output);
@@ -562,5 +631,134 @@ mod tests {
             "mute ramp start should be near unity: {}",
             output[0]
         );
+    }
+
+    #[test]
+    fn slot_underflow_records_counters_only_for_that_slot() {
+        let mut mixer: FixedSlotMixer<DEFAULT_MIXER_SLOTS, SAMPLES_PER_BLOCK> =
+            FixedSlotMixer::new().unwrap();
+        let (mut producer_a, consumer_a) = realtime_pcm_queue::<SAMPLES_PER_BLOCK>(4).unwrap();
+        let (_, consumer_b) = realtime_pcm_queue::<SAMPLES_PER_BLOCK>(4).unwrap();
+        push_constant(&mut producer_a, 1.0, 2);
+        let counters_a = Arc::new(StreamCounters::default());
+        let counters_b = Arc::new(StreamCounters::default());
+        mixer
+            .insert(
+                consumer_a,
+                GainControlHandle::new(),
+                Some(Arc::clone(&counters_a)),
+            )
+            .unwrap();
+        mixer
+            .insert(
+                consumer_b,
+                GainControlHandle::new(),
+                Some(Arc::clone(&counters_b)),
+            )
+            .unwrap();
+
+        let mut output = [0.0; 32];
+        mixer.render(&mut output);
+        // Slot a drains its two blocks and then underflows on the final two
+        // chunks; empty slot b underflows on every chunk. Each underflow event
+        // lands only on its own slot.
+        assert!(
+            output[..16]
+                .iter()
+                .all(|sample| (*sample - 1.0).abs() < 1e-6)
+        );
+        assert!(output[16..].iter().all(|sample| sample.abs() < 1e-6));
+        let snapshot_a = counters_a.snapshot();
+        assert_eq!(snapshot_a.pcm_underflows, 2);
+        assert_eq!(snapshot_a.pcm_refill_limit_hits, 0);
+        assert_eq!(snapshot_a.pcm_discontinuities, 0);
+        let snapshot_b = counters_b.snapshot();
+        assert_eq!(snapshot_b.pcm_underflows, 4);
+        assert_eq!(snapshot_b.pcm_refill_limit_hits, 0);
+        assert_eq!(snapshot_b.pcm_discontinuities, 0);
+    }
+
+    #[test]
+    fn slot_refill_limit_records_a_distinct_callback_event() {
+        const WIDE_BLOCK: usize = 256;
+        let mut mixer: FixedSlotMixer<DEFAULT_MIXER_SLOTS, WIDE_BLOCK> =
+            FixedSlotMixer::new().unwrap();
+        let (mut producer_a, consumer_a) =
+            realtime_pcm_queue::<WIDE_BLOCK>(MAX_PCM_QUEUE_BLOCKS).unwrap();
+        for _ in 0..MAX_PCM_QUEUE_BLOCKS {
+            assert_eq!(producer_a.push(&[1.0]), RealtimePcmPushOutcome::Inserted);
+        }
+        let (_, consumer_b) = realtime_pcm_queue::<WIDE_BLOCK>(2).unwrap();
+        let counters_a = Arc::new(StreamCounters::default());
+        let counters_b = Arc::new(StreamCounters::default());
+        mixer
+            .insert(
+                consumer_a,
+                GainControlHandle::new(),
+                Some(Arc::clone(&counters_a)),
+            )
+            .unwrap();
+        mixer
+            .insert(
+                consumer_b,
+                GainControlHandle::new(),
+                Some(Arc::clone(&counters_b)),
+            )
+            .unwrap();
+
+        let mut output = [0.0; MAX_PCM_QUEUE_BLOCKS + 1];
+        mixer.render(&mut output);
+        // One wide output chunk spends the full per-chunk refill budget on
+        // one-sample blocks, so slot a records the distinct limit event while
+        // empty slot b only underflows.
+        assert!(
+            output[..MAX_PCM_QUEUE_BLOCKS]
+                .iter()
+                .all(|sample| (*sample - 1.0).abs() < 1e-6)
+        );
+        assert!(output[MAX_PCM_QUEUE_BLOCKS].abs() < 1e-6);
+        let snapshot_a = counters_a.snapshot();
+        assert_eq!(snapshot_a.pcm_refill_limit_hits, 1);
+        assert_eq!(snapshot_a.pcm_underflows, 0);
+        let snapshot_b = counters_b.snapshot();
+        assert_eq!(snapshot_b.pcm_refill_limit_hits, 0);
+        assert_eq!(snapshot_b.pcm_underflows, 1);
+    }
+
+    #[test]
+    fn slot_discontinuity_records_counters_only_for_that_slot() {
+        let mut mixer: FixedSlotMixer<DEFAULT_MIXER_SLOTS, SAMPLES_PER_BLOCK> =
+            FixedSlotMixer::new().unwrap();
+        let (mut producer_a, consumer_a) = realtime_pcm_queue::<SAMPLES_PER_BLOCK>(4).unwrap();
+        let (mut producer_b, consumer_b) = realtime_pcm_queue::<SAMPLES_PER_BLOCK>(4).unwrap();
+        producer_a.begin_epoch();
+        push_constant(&mut producer_a, 1.0, 2);
+        push_constant(&mut producer_b, 2.0, 1);
+        let counters_a = Arc::new(StreamCounters::default());
+        let counters_b = Arc::new(StreamCounters::default());
+        mixer
+            .insert(
+                consumer_a,
+                GainControlHandle::new(),
+                Some(Arc::clone(&counters_a)),
+            )
+            .unwrap();
+        mixer
+            .insert(
+                consumer_b,
+                GainControlHandle::new(),
+                Some(Arc::clone(&counters_b)),
+            )
+            .unwrap();
+
+        let mut output = [0.0; SAMPLES_PER_BLOCK];
+        mixer.render(&mut output);
+        // Slot a starts a fresh epoch, so only its first pop reports a
+        // discontinuity; slot b's stream is continuous and neither slot
+        // underflows within this block.
+        assert_eq!(counters_a.snapshot().pcm_discontinuities, 1);
+        assert_eq!(counters_b.snapshot().pcm_discontinuities, 0);
+        assert_eq!(counters_a.snapshot().pcm_underflows, 0);
+        assert_eq!(counters_b.snapshot().pcm_underflows, 0);
     }
 }

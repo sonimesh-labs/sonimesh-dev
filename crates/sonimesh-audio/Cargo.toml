@@ -9,6 +9,7 @@ publish.workspace = true
 
 [dependencies]
 crossbeam-queue = "0.3.13"
+sonimesh-diagnostics = { path = "../sonimesh-diagnostics" }
 
 [lints]
 workspace = true
