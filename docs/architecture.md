@@ -116,6 +116,9 @@ single-session consent handling. Android 17 makes local-network protection
 mandatory for applications targeting SDK 37 or later. The discovery design must
 therefore support both a system-mediated NsdManager picker path and an explicit
 ACCESS_LOCAL_NETWORK path where broad local-network access is truly required.
+The provisional decision is recorded in
+[ADR 0014](./adr/0014-android-17-local-network-discovery.md) and remains
+pending Android 17 device evidence.
 
 ### 3.3 Bluetooth boundary
 
