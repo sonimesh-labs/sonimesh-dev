@@ -271,6 +271,139 @@ fn admission_validation_fails_closed() {
 }
 
 #[test]
+fn rotation_replaces_identity_keeps_slot_gain_and_renders() {
+    let counters = Arc::new(StreamCounters::default());
+    let mut session = session();
+    let mut pipeline = pipeline(Arc::clone(&counters));
+    let mut sealer = sealer();
+
+    session.start_output(selection()).unwrap();
+    let started = session
+        .start_stream::<_, BLOCK>(
+            request(1, 1),
+            16,
+            Some(Arc::clone(&counters)),
+            &mut pipeline,
+        )
+        .unwrap();
+    assert_eq!(started.slot, 0);
+
+    let mut rotated_request = request(1, 1);
+    rotated_request.identity.key_epoch = 1;
+    let rotated = session
+        .rotate_stream(request(1, 1).identity, rotated_request)
+        .unwrap();
+    assert_eq!(rotated.slot, 0, "rotation must keep the same slot");
+    assert_eq!(session.stream_count(), 1);
+    assert!(
+        session.gain(rotated_request.identity).is_ok(),
+        "rotation keeps the gain handle for the new identity"
+    );
+    assert!(matches!(
+        session.gain(request(1, 1).identity),
+        Err(MixerStreamSessionError::UnknownStream(_))
+    ));
+
+    let rendered = feed_cycle(&mut session, &mut pipeline, &mut sealer, 0);
+    assert!(
+        rendered.iter().any(|sample| *sample > 0.0),
+        "a rotated stream must keep rendering after the epoch reset"
+    );
+}
+
+#[test]
+fn rotation_with_changed_frame_budget_is_rejected() {
+    let counters = Arc::new(StreamCounters::default());
+    let mut session = session();
+    let mut pipeline = pipeline(Arc::clone(&counters));
+
+    session.start_output(selection()).unwrap();
+    session
+        .start_stream::<_, BLOCK>(request(1, 1), 16, None, &mut pipeline)
+        .unwrap();
+
+    let mut changed = request(1, 1);
+    changed.identity.key_epoch = 1;
+    changed.frame_duration_ms = 2; // 8_000 Hz x 2 ms = 16 frames per block
+    assert_eq!(
+        session.rotate_stream(request(1, 1).identity, changed),
+        Err(MixerStreamSessionError::RotationFormatChange)
+    );
+    assert_eq!(session.stream_count(), 1);
+    assert!(
+        session.gain(request(1, 1).identity).is_ok(),
+        "a rejected rotation must not change the admitted identity"
+    );
+}
+
+#[test]
+fn rotation_with_changed_channel_count_is_rejected() {
+    let counters = Arc::new(StreamCounters::default());
+    let mut session = session();
+    let mut pipeline = pipeline(Arc::clone(&counters));
+
+    session.start_output(selection()).unwrap();
+    session
+        .start_stream::<_, BLOCK>(request(1, 1), 16, None, &mut pipeline)
+        .unwrap();
+
+    let mut changed = request(1, 1);
+    changed.identity.key_epoch = 1;
+    changed.channels = 2;
+    assert_eq!(
+        session.rotate_stream(request(1, 1).identity, changed),
+        Err(MixerStreamSessionError::RotationFormatChange)
+    );
+    assert_eq!(session.stream_count(), 1);
+}
+
+#[test]
+fn rotation_to_an_already_active_identity_is_rejected() {
+    let counters_a = Arc::new(StreamCounters::default());
+    let counters_b = Arc::new(StreamCounters::default());
+    let mut session = session();
+    let mut pipeline_a = pipeline(Arc::clone(&counters_a));
+    let mut pipeline_b = pipeline(Arc::clone(&counters_b));
+
+    session.start_output(selection()).unwrap();
+    session
+        .start_stream::<_, BLOCK>(request(1, 1), 16, None, &mut pipeline_a)
+        .unwrap();
+    session
+        .start_stream::<_, BLOCK>(request(2, 2), 16, None, &mut pipeline_b)
+        .unwrap();
+
+    let duplicate_target = request(2, 2);
+    assert_eq!(
+        session.rotate_stream(request(1, 1).identity, duplicate_target),
+        Err(MixerStreamSessionError::DuplicateStream(
+            duplicate_target.identity
+        ))
+    );
+    assert_eq!(session.stream_count(), 2);
+}
+
+#[test]
+fn rotation_of_an_unknown_stream_is_rejected() {
+    let counters = Arc::new(StreamCounters::default());
+    let mut session = session();
+    let mut pipeline = pipeline(Arc::clone(&counters));
+
+    session.start_output(selection()).unwrap();
+    session
+        .start_stream::<_, BLOCK>(request(1, 1), 16, None, &mut pipeline)
+        .unwrap();
+
+    assert_eq!(
+        session.rotate_stream(request(9, 9).identity, request(9, 9)),
+        Err(MixerStreamSessionError::UnknownStream(
+            request(9, 9).identity
+        ))
+    );
+    assert_eq!(session.stream_count(), 1);
+}
+
+#[test]
 fn output_recovery_readmits_persisted_streams() {
     let counters = Arc::new(StreamCounters::default());
     let mut session = session();

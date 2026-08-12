@@ -15,6 +15,11 @@
 //! through [`Self::recover_stream`] so each pipeline receives a fresh
 //! producer paired with the new mixer. A failure in one stream's adapter pump
 //! is reported without blocking the other streams' pumps.
+//! Per-stream key rotation ([`Self::rotate_stream`]) replaces a stream's
+//! identity in place: the slot, gain handle, and diagnostics counters stay,
+//! partial conversion state is retired, and the audio configuration (frame
+//! budget and source format) must be unchanged because the decode pipeline
+//! and adapter are compiled for those parameters.
 
 use core::fmt;
 use std::sync::Arc;
@@ -77,6 +82,8 @@ struct StreamRecord {
     identity: MediaStreamIdentity,
     source_format: SourcePcmFormat,
     source_queue_capacity: usize,
+    /// Frames per source block the pump was compiled and admitted for.
+    samples_per_block: usize,
     gain: GainControlHandle,
     counters: Option<Arc<StreamCounters>>,
     pump: Box<dyn AdaptedStreamPump>,
@@ -182,11 +189,7 @@ where
         if expected != S {
             return Err(MixerStreamSessionError::SourceBlockMismatch { expected });
         }
-        let channels = u16::try_from(request.channels).map_err(|_| {
-            MixerStreamSessionError::SourceFormat(SourcePcmFormatError::InvalidChannelCount)
-        })?;
-        let source_format = SourcePcmFormat::new(request.sample_rate_hz, channels)
-            .map_err(MixerStreamSessionError::SourceFormat)?;
+        let source_format = source_format_of(request)?;
         if self.slot_for(request.identity).is_some() {
             return Err(MixerStreamSessionError::DuplicateStream(request.identity));
         }
@@ -209,6 +212,7 @@ where
             identity: request.identity,
             source_format,
             source_queue_capacity,
+            samples_per_block: expected,
             gain: gain.clone(),
             counters,
             pump: Box::new(admitted.adapter),
@@ -285,6 +289,46 @@ where
         };
         record.pump.begin_epoch();
         Ok(())
+    }
+
+    /// Replaces one stream's identity and key epoch without changing its slot.
+    ///
+    /// Key rotation keeps the same mixer slot, gain handle, and diagnostics
+    /// counters. The `next` request must keep the stream's audio configuration:
+    /// the source block budget (frame duration and sample rate) and the source
+    /// channel and format layout must match, because the decode pipeline and
+    /// the adapter pump are compiled for those parameters. Partial conversion
+    /// state is retired so the new epoch starts clean.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MixerStreamSessionError::UnknownStream`] when `previous` is
+    /// not admitted, [`MixerStreamSessionError::DuplicateStream`] when `next`
+    /// is already admitted elsewhere, or
+    /// [`MixerStreamSessionError::RotationFormatChange`] when `next` changes
+    /// the frame budget or source format.
+    pub fn rotate_stream(
+        &mut self,
+        previous: MediaStreamIdentity,
+        next: StreamStartRequest,
+    ) -> Result<StartedMixerStream, MixerStreamSessionError> {
+        let next_budget = frames_per_block(next)?;
+        let next_format = source_format_of(next)?;
+        let slot = self
+            .slot_for(previous)
+            .ok_or(MixerStreamSessionError::UnknownStream(previous))?;
+        if self.slot_for(next.identity).is_some() {
+            return Err(MixerStreamSessionError::DuplicateStream(next.identity));
+        }
+        let Some(record) = self.records[slot].as_mut() else {
+            return Err(MixerStreamSessionError::UnknownStream(previous));
+        };
+        if next_budget != record.samples_per_block || next_format != record.source_format {
+            return Err(MixerStreamSessionError::RotationFormatChange);
+        }
+        record.identity = next.identity;
+        record.pump.begin_epoch();
+        Ok(StartedMixerStream { slot })
     }
 
     /// Applies one bounded drift correction to one stream's adapter.
@@ -532,6 +576,8 @@ pub enum MixerStreamSessionError {
     FrameBudgetOverflow,
     /// The frame-duration and sample-rate budget does not divide into whole frames.
     NonIntegralFrameBlock,
+    /// A key rotation changed the stream's frame budget or source format.
+    RotationFormatChange,
     /// A decode-domain adapter pump or reset failed.
     Adapter(StreamFormatAdapterError),
     /// A drift correction was rejected by the shared bound.
@@ -571,6 +617,9 @@ impl fmt::Display for MixerStreamSessionError {
             Self::NonIntegralFrameBlock => {
                 formatter.write_str("mixer session frame budget is not whole frames")
             }
+            Self::RotationFormatChange => {
+                formatter.write_str("key rotation changed the stream's audio configuration")
+            }
             Self::Adapter(error) => write!(formatter, "mixer session adapter failed: {error}"),
             Self::Resampler(error) => {
                 write!(formatter, "mixer session drift correction failed: {error}")
@@ -592,9 +641,20 @@ impl std::error::Error for MixerStreamSessionError {
             | Self::UnknownStream(_)
             | Self::OutputNotActive
             | Self::FrameBudgetOverflow
-            | Self::NonIntegralFrameBlock => None,
+            | Self::NonIntegralFrameBlock
+            | Self::RotationFormatChange => None,
         }
     }
+}
+
+fn source_format_of(
+    request: StreamStartRequest,
+) -> Result<SourcePcmFormat, MixerStreamSessionError> {
+    let channels = u16::try_from(request.channels).map_err(|_| {
+        MixerStreamSessionError::SourceFormat(SourcePcmFormatError::InvalidChannelCount)
+    })?;
+    SourcePcmFormat::new(request.sample_rate_hz, channels)
+        .map_err(MixerStreamSessionError::SourceFormat)
 }
 
 fn frames_per_block(request: StreamStartRequest) -> Result<usize, MixerStreamSessionError> {
