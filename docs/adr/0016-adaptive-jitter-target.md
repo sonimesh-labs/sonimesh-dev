@@ -91,7 +91,11 @@ the deterministic network simulator adds a jitter-target scenario
 arrival jitter and the encoded-frame water level and reports the bounded
 target trajectory (final target, raised/lowered steps, smoothed jitter).
 Measured WLAN/hardware jitter evidence remains pending Phase 2; this
-record stays Provisional until then.
+record stays Provisional until then. A combined multi-stream scenario
+(`simulate_multi_stream_jitter_target`) runs two to four streams over one
+shared link with independent per-stream targets, so correlated loss and
+bandwidth serialization are observed against per-stream adaptive jitter
+control.
 
 ## Rollback plan
 

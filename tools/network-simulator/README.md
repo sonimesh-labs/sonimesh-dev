@@ -20,6 +20,12 @@ a physical latency claim.
   independent jitter buffer, send cadence, and playout deadline; the
   report carries shared link counters plus per-stream jitter and PLC
   counters.
+- the multi-stream jitter-target scenario runs two to four source streams
+  over one shared virtual link and profile while each stream owns an
+  independent ADR 0016 `AdaptiveJitterTarget`; the report carries shared
+  link counters plus a per-stream target trajectory, so correlated
+  shared-link loss and bandwidth serialization can be observed against
+  per-stream adaptive jitter control.
 - the jitter-target scenario feeds the ADR 0016 `AdaptiveJitterTarget`
   per playout decision from virtual-link arrival jitter and the
   encoded-frame water level, and reports the bounded target trajectory

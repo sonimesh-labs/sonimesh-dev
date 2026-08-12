@@ -4,6 +4,7 @@ mod clock;
 mod control_scenario;
 mod drift_scenario;
 mod jitter_target_scenario;
+mod multi_stream_jitter_target_scenario;
 mod multi_stream_scenario;
 mod network;
 mod opus_experiment;
@@ -21,6 +22,10 @@ pub use drift_scenario::{
 pub use jitter_target_scenario::{
     JitterTargetScenarioConfig, JitterTargetScenarioError, JitterTargetSimulationReport,
     simulate_jitter_target,
+};
+pub use multi_stream_jitter_target_scenario::{
+    MultiStreamJitterTargetScenarioConfig, MultiStreamJitterTargetScenarioError,
+    MultiStreamJitterTargetSimulationReport, simulate_multi_stream_jitter_target,
 };
 pub use multi_stream_scenario::{
     MAX_MULTI_STREAM_STREAMS, MIN_MULTI_STREAM_STREAMS, MultiStreamScenarioConfig,

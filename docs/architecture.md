@@ -431,8 +431,12 @@ The bounded adaptive target controller
 `sonimesh-audio`: it converts the mode range to frame targets, moves the
 target by at most one frame per observation with debounce and hysteresis on
 a slow packet-arrival-jitter estimate, requires buffered surplus before
-lowering the target, and resets to the mode base on a stream reset. A
-playout scheduler consuming that target remains future Phase 2 work.
+lowering the target, and resets to the mode base on a stream reset. The
+deterministic network simulator feeds the controller from virtual-link
+arrival jitter for one stream and for two to four streams sharing one
+link, with bounded per-stream target trajectories as deterministic
+evidence. A playout scheduler consuming that target remains future
+Phase 2 work.
 
 Recovery policy:
 
