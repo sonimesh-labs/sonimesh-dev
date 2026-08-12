@@ -13,9 +13,10 @@ published datagram, so an AEAD crate, key, nonce, or header change is caught by
 an independent implementation (roadmap Phase 0D: cross-language crypto and
 packet test vectors; testing doc: published vectors for AEAD packet
 authentication). It also cross-checks the documented datagrams in
-docs/protocol/media-crypto-vectors.md and the Rust-pinned datagram arrays in
-crates/sonimesh-protocol/tests/media_crypto.rs against the same recomputation,
-so the doc, the Rust pins, and this verifier cannot drift apart.
+docs/protocol/media-crypto-vectors.md, the Rust-pinned datagram arrays in
+crates/sonimesh-protocol/tests/media_crypto.rs, and the Kotlin
+`MediaCryptoVectorTest` pin against the same recomputation, so the doc, the
+Rust pins, the Kotlin pin, and this verifier cannot drift apart.
 """
 
 from __future__ import annotations
@@ -41,6 +42,20 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DOC_PATH = REPO_ROOT / "docs" / "protocol" / "media-crypto-vectors.md"
 RUST_TEST_PATH = (
     REPO_ROOT / "crates" / "sonimesh-protocol" / "tests" / "media_crypto.rs"
+)
+KOTLIN_TEST_PATH = (
+    REPO_ROOT
+    / "apps"
+    / "android"
+    / "app"
+    / "src"
+    / "test"
+    / "java"
+    / "com"
+    / "sonimesh"
+    / "sender"
+    / "security"
+    / "MediaCryptoVectorTest.kt"
 )
 
 
@@ -351,22 +366,50 @@ def rust_test_datagrams(source: str) -> dict[str, bytes]:
     return datagrams
 
 
-def cross_source_errors(
-    doc_source: str | None = None, rust_source: str | None = None
-) -> list[str]:
-    """Checks the doc and Rust pins against the independent recomputation.
+def kotlin_expected_datagram(source: str) -> bytes | None:
+    """Extracts the Kotlin vector test's pinned datagram hex literal."""
+    match = re.search(
+        r"val EXPECTED_DATAGRAM = hex\((.*?)\)", source, re.DOTALL
+    )
+    if match is None:
+        return None
+    pieces = re.findall(r'"([0-9a-fA-F]+)"', match.group(1))
+    if not pieces:
+        return None
+    return bytes.fromhex("".join(pieces))
 
-    Reads the two pinned sources when not supplied, so the published doc
-    datagrams, the Rust test datagrams, and the Python pins can never drift
-    apart without failing CI.
+
+def kotlin_expected_nonce(source: str) -> bytes | None:
+    """Extracts the Kotlin vector test's pinned nonce hex literal."""
+    match = re.search(
+        r'val EXPECTED_NONCE = hex\("([0-9a-fA-F]+)"\)', source
+    )
+    if match is None:
+        return None
+    return bytes.fromhex(match.group(1))
+
+
+def cross_source_errors(
+    doc_source: str | None = None,
+    rust_source: str | None = None,
+    kotlin_source: str | None = None,
+) -> list[str]:
+    """Checks the doc, Rust, and Kotlin pins against the recomputation.
+
+    Reads the pinned sources when not supplied, so the published doc
+    datagrams, the Rust test datagrams, the Kotlin vector pin, and the
+    Python pins can never drift apart without failing CI.
     """
     errors: list[str] = []
-    if doc_source is None or rust_source is None:
-        try:
+    try:
+        if doc_source is None:
             doc_source = DOC_PATH.read_text(encoding="utf-8")
+        if rust_source is None:
             rust_source = RUST_TEST_PATH.read_text(encoding="utf-8")
-        except OSError as exc:
-            return [f"cannot read media crypto vector sources: {exc}"]
+        if kotlin_source is None:
+            kotlin_source = KOTLIN_TEST_PATH.read_text(encoding="utf-8")
+    except OSError as exc:
+        return [f"cannot read media crypto vector sources: {exc}"]
 
     sections = doc_vector_sections(doc_source)
     if [number for number, _ in sections] != ["1", "2"]:
@@ -376,6 +419,12 @@ def cross_source_errors(
     rust_datagrams = rust_test_datagrams(rust_source)
     if set(rust_datagrams) != {"1", "2"}:
         errors.append("Rust media crypto test must pin both vector datagrams")
+    kotlin_datagram = kotlin_expected_datagram(kotlin_source)
+    if kotlin_datagram is None:
+        errors.append("Kotlin media crypto test must pin the vector 1 datagram")
+    kotlin_nonce = kotlin_expected_nonce(kotlin_source)
+    if kotlin_nonce is None:
+        errors.append("Kotlin media crypto test must pin the vector 1 nonce")
     published = {
         vector.name.split(":", 1)[0].split()[-1]: vector
         for vector in PUBLISHED_VECTORS
@@ -427,6 +476,19 @@ def cross_source_errors(
                 f"vector {number}: doc nonce {nonce.hex().upper()} "
                 f"!= {recomputed_nonce.hex().upper()}"
             )
+        if number == "1":
+            if kotlin_datagram is not None and vector.datagram != kotlin_datagram:
+                errors.append(
+                    f"vector {number}: doc datagram differs from the Kotlin pin: "
+                    f"doc {vector.datagram.hex().upper()} "
+                    f"kotlin {kotlin_datagram.hex().upper()}"
+                )
+            if kotlin_nonce is not None and nonce != kotlin_nonce:
+                errors.append(
+                    f"vector {number}: doc nonce differs from the Kotlin pin: "
+                    f"doc {nonce.hex().upper()} "
+                    f"kotlin {kotlin_nonce.hex().upper()}"
+                )
         expected_len = MEDIA_HEADER_LEN + len(vector.plaintext) + POLY1305_TAG_BYTES
         if len(vector.datagram) != expected_len:
             errors.append(
@@ -556,6 +618,38 @@ class MediaCryptoVectorTests(unittest.TestCase):
         tampered = source.replace("0x53, 0x4E, 0x4D, 0x53", "0x53, 0x4E, 0x4D, 0x54", 1)
         datagrams = rust_test_datagrams(tampered)
         self.assertNotEqual(datagrams["1"], PUBLISHED_VECTORS[0].datagram)
+
+    def test_kotlin_parser_extracts_the_pinned_datagram_and_nonce(self) -> None:
+        source = KOTLIN_TEST_PATH.read_text(encoding="utf-8")
+        self.assertEqual(
+            kotlin_expected_datagram(source), PUBLISHED_VECTORS[0].datagram
+        )
+        self.assertEqual(
+            kotlin_expected_nonce(source),
+            media_nonce(
+                PUBLISHED_VECTORS[0].stream_id, PUBLISHED_VECTORS[0].key_epoch, 0
+            ),
+        )
+
+    def test_kotlin_parser_detects_a_tampered_pin(self) -> None:
+        source = KOTLIN_TEST_PATH.read_text(encoding="utf-8")
+        tampered = source.replace("fd67131", "fd67130", 1)
+        self.assertNotEqual(
+            kotlin_expected_datagram(tampered), PUBLISHED_VECTORS[0].datagram
+        )
+
+    def test_cross_source_detects_kotlin_drift(self) -> None:
+        doc_source = DOC_PATH.read_text(encoding="utf-8")
+        rust_source = RUST_TEST_PATH.read_text(encoding="utf-8")
+        kotlin_source = KOTLIN_TEST_PATH.read_text(encoding="utf-8")
+        self.assertEqual(
+            cross_source_errors(doc_source, rust_source, kotlin_source), []
+        )
+        tampered_kotlin = kotlin_source.replace("fd67131", "fd67130", 1)
+        errors = cross_source_errors(doc_source, rust_source, tampered_kotlin)
+        self.assertTrue(
+            any("vector 1" in error and "Kotlin pin" in error for error in errors)
+        )
 
     def test_cross_source_detects_doc_and_rust_drift(self) -> None:
         doc_source = DOC_PATH.read_text(encoding="utf-8")

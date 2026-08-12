@@ -117,10 +117,11 @@ derivation and the 96-bit nonce layout), `check_control_frame_vectors.py`
 `check_media_header_vectors.py` (the fixed 36-byte media header), and
 `check_media_crypto_vectors.py` (RFC 8439 ChaCha20-Poly1305 AEAD packet
 sealing for both published vectors: derived media key, nonce, authenticated
-header, ciphertext, and tag). It also re-reads the two datagrams pinned in
-`docs/protocol/media-crypto-vectors.md` and `crates/sonimesh-protocol/tests/
-media_crypto.rs` and verifies that both match the independent recomputation,
-so the documentation, the Rust pins, and the Python verifier cannot drift apart.
+header, ciphertext, and tag). It also re-reads the datagrams pinned in
+`docs/protocol/media-crypto-vectors.md`, `crates/sonimesh-protocol/tests/
+media_crypto.rs`, and the Kotlin `MediaCryptoVectorTest` and verifies that
+each matches the independent recomputation, so the documentation, the Rust
+and Kotlin pins, and the Python verifier cannot drift apart.
 Each script runs a `--self-test` mode and a check mode in CI; a schema
 renumbering, layout reordering, label, salt, or byte-order change on either
 side fails the job.
