@@ -105,7 +105,11 @@ Rust protocol tests and the Android host-JVM `ControlFrameVectorTest`
 independently encode all five published payload shapes and decode their semantic
 fields. The Kotlin test also rejects truncated, mismatched, and oversized length
 prefixes, a `media_key_epoch` above `65535`, zero status identities, and
-unspecified or unknown status/error enums.
+unspecified or unknown status/error enums. The `tools/check_control_frame_vectors.py`
+verifier independently re-encodes all five frames with a pure standard-library
+Protobuf encoder and cross-checks the bytes pinned in this document,
+`crates/sonimesh-protocol/tests/control_frame.rs`, and the Kotlin
+`ControlFrameVectorTest`, so any drift between the four sources fails CI.
 
 The Android host-JVM `HelloNegotiation` mirror, exercised by
 `HelloNegotiationVectorTest` and by `ControlFrameVectorTest`'s wire-decode

@@ -91,7 +91,13 @@ Android host-JVM `PairingTlsBindingVectorTest` reproduce the client proof,
 server proof, and media root above from the public inputs and reject changed
 inputs or a reflected role. The Android test is a host JVM unit test; it is
 derivation evidence only and does not prove Android runtime TLS exporter
-behavior, key storage, or an authenticated pairing source.
+behavior, key storage, or an authenticated pairing source. The
+`tools/check_pairing_vectors.py` verifier independently recomputes all three
+values from the documented inputs with a pure standard-library HKDF-SHA256
+implementation and cross-checks the outputs pinned in this document and in
+`matches_published_role_proof_and_media_root_vector`
+(`crates/sonimesh-protocol/src/pairing_binding.rs`), so the doc, the Rust pin,
+and the Python verifier cannot drift apart.
 
 Implementations must reject a changed pairing ID, pairing secret, exporter,
 protocol version, or peer role. They must not accept a proof from another TLS

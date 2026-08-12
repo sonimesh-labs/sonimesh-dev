@@ -61,6 +61,10 @@ Cover at least:
 - sequence exhaustion at the epoch boundary, duplicate detection, and replay
   windows;
 - nonce uniqueness across streams, directions, epochs, and reconnects;
+- UDP source-endpoint pinning: bind only after a protected packet succeeds,
+  reject a changed endpoint before any processing, keep automatic same-session
+  address migration disabled across key epochs, and reset the pin only for a
+  fresh media session;
 - Protobuf size limits, unknown fields, capability negotiation, typed status/error
   semantics, preserved media receiver, control-plane, and output/render
   error-source chains,
