@@ -218,7 +218,9 @@ fn rate_and_channel_adaptation_compose() {
     );
     let drained = drain_blocks(&mut output, 1);
     // Downsampling selects input frames 0,2,...,14; folding averages each pair.
-    let expected: Vec<f32> = (0..8_u16).map(|index| f32::from(index * 2) + 50.0).collect();
+    let expected: Vec<f32> = (0..8_u16)
+        .map(|index| f32::from(index * 2) + 50.0)
+        .collect();
     assert_samples(&drained, &expected);
 }
 

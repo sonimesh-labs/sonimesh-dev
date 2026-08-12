@@ -12,12 +12,12 @@ use core::fmt;
 use std::sync::Arc;
 
 use sonimesh_audio::{
-    MAX_PCM_QUEUE_BLOCKS, MixerMembershipHandle, RealtimePcmProducer, RealtimeQueueConfigError,
-    realtime_pcm_queue,
+    MAX_PCM_QUEUE_BLOCKS, MixerMembershipHandle, RealtimePcmConsumer, RealtimePcmProducer,
+    RealtimeQueueConfigError, realtime_pcm_queue,
 };
 use sonimesh_diagnostics::StreamCounters;
 
-use crate::{GainControlHandle, SourcePcmFormat};
+use crate::{GainControlHandle, SourcePcmFormat, StreamFormatAdapter, StreamFormatAdapterError};
 
 /// One admitted stream: the slot it occupies after the next render and the
 /// producer the stream pipeline feeds.
@@ -26,6 +26,20 @@ pub struct AdmittedStream<const PCM_SAMPLES_PER_BLOCK: usize> {
     pub slot: usize,
     /// Decoder-side producer paired with the consumer installed in the slot.
     pub producer: RealtimePcmProducer<PCM_SAMPLES_PER_BLOCK>,
+}
+
+/// One admitted stream with per-stream format adaptation before the mixer
+/// queue.
+pub struct AdmittedAdaptedStream<
+    const SOURCE_SAMPLES_PER_BLOCK: usize,
+    const OUTPUT_SAMPLES_PER_BLOCK: usize,
+> {
+    /// Fixed slot the stream occupies after pending commands are applied.
+    pub slot: usize,
+    /// Source-format producer installed into the stream's decode pipeline.
+    pub source_producer: RealtimePcmProducer<SOURCE_SAMPLES_PER_BLOCK>,
+    /// Decode-domain adapter converting source blocks to output-format blocks.
+    pub adapter: StreamFormatAdapter<SOURCE_SAMPLES_PER_BLOCK, OUTPUT_SAMPLES_PER_BLOCK>,
 }
 
 /// Failure while admitting or removing a stream at the mixer boundary.
@@ -41,6 +55,8 @@ pub enum MixerAdmissionError {
     SlotOutOfRange,
     /// The bounded PCM queue configuration was rejected.
     Queue(RealtimeQueueConfigError),
+    /// Per-stream format adaptation could not be constructed.
+    Adapter(StreamFormatAdapterError),
 }
 
 impl fmt::Display for MixerAdmissionError {
@@ -53,6 +69,7 @@ impl fmt::Display for MixerAdmissionError {
             Self::CommandQueueFull => formatter.write_str("mixer membership command queue is full"),
             Self::SlotOutOfRange => formatter.write_str("mixer slot index is out of range"),
             Self::Queue(error) => write!(formatter, "mixer PCM queue setup failed: {error}"),
+            Self::Adapter(error) => write!(formatter, "mixer stream adaptation failed: {error}"),
         }
     }
 }
@@ -61,6 +78,7 @@ impl std::error::Error for MixerAdmissionError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Queue(error) => Some(error),
+            Self::Adapter(error) => Some(error),
             Self::FormatMismatch
             | Self::SlotTableFull
             | Self::CommandQueueFull
@@ -117,11 +135,12 @@ impl<const SLOTS: usize, const PCM_SAMPLES_PER_BLOCK: usize>
 
     /// Publishes one stream activation at the lowest free slot.
     ///
-    /// The Phase 2 mixer is a plain summing bus: each slot's queue must already
-    /// hold output-format interleaved PCM, so `source_format` must equal the
-    /// controller's output format. On success the returned producer is
-    /// installed into the stream's decode pipeline, and the stream occupies the
-    /// returned slot after the next render.
+    /// This fast path is for streams that already produce output-format
+    /// interleaved PCM in the mixer's block size: `source_format` must equal
+    /// the controller's output format. Streams in any other source format use
+    /// [`Self::admit_adapted_stream`]. On success the returned producer is
+    /// installed into the stream's decode pipeline, and the stream occupies
+    /// the returned slot after the next render.
     ///
     /// # Errors
     ///
@@ -137,16 +156,95 @@ impl<const SLOTS: usize, const PCM_SAMPLES_PER_BLOCK: usize>
         if source_format != self.output_format {
             return Err(MixerAdmissionError::FormatMismatch);
         }
-        let slot = (0..SLOTS)
-            .find(|&index| !self.active[index])
-            .ok_or(MixerAdmissionError::SlotTableFull)?;
-        let (producer, consumer) = realtime_pcm_queue::<PCM_SAMPLES_PER_BLOCK>(self.queue_capacity)
-            .map_err(MixerAdmissionError::Queue)?;
+        let (slot, producer, consumer) = self.reserve_slot()?;
         self.membership
             .insert(consumer, gain, counters)
             .map_err(|_| MixerAdmissionError::CommandQueueFull)?;
         self.active[slot] = true;
         Ok(AdmittedStream { slot, producer })
+    }
+
+    /// Publishes one stream activation with per-stream format adaptation.
+    ///
+    /// This is the general admission path: the stream's decoded source-format
+    /// blocks are converted to the mixer's output format by a
+    /// [`StreamFormatAdapter`] owned by the decode/control domain before they
+    /// enter the slot queue. On success the returned source producer is
+    /// installed into the stream's decode pipeline, the adapter is pumped
+    /// alongside decode, and the stream occupies the returned slot after the
+    /// next render. The slot queue is only published after adapter
+    /// construction succeeds, so an invalid source format never reserves a
+    /// slot.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error before publishing when the source queue capacity is
+    /// outside the bounded range, the table is full, or format adaptation
+    /// cannot be constructed, or a retryable error when the bounded command
+    /// queue is full.
+    pub fn admit_adapted_stream<const SOURCE_SAMPLES_PER_BLOCK: usize>(
+        &mut self,
+        source_format: SourcePcmFormat,
+        source_queue_capacity: usize,
+        gain: GainControlHandle,
+        counters: Option<Arc<StreamCounters>>,
+    ) -> Result<
+        AdmittedAdaptedStream<SOURCE_SAMPLES_PER_BLOCK, PCM_SAMPLES_PER_BLOCK>,
+        MixerAdmissionError,
+    > {
+        if source_queue_capacity == 0 {
+            return Err(MixerAdmissionError::Queue(
+                RealtimeQueueConfigError::ZeroCapacity,
+            ));
+        }
+        if source_queue_capacity > MAX_PCM_QUEUE_BLOCKS {
+            return Err(MixerAdmissionError::Queue(
+                RealtimeQueueConfigError::CapacityTooLarge,
+            ));
+        }
+        let (source_producer, source_consumer) =
+            realtime_pcm_queue::<SOURCE_SAMPLES_PER_BLOCK>(source_queue_capacity)
+                .map_err(MixerAdmissionError::Queue)?;
+        let (slot, slot_producer, slot_consumer) = self.reserve_slot()?;
+        let adapter = StreamFormatAdapter::new(
+            source_consumer,
+            slot_producer,
+            source_format,
+            self.output_format,
+        )
+        .map_err(MixerAdmissionError::Adapter)?;
+        self.membership
+            .insert(slot_consumer, gain, counters)
+            .map_err(|_| MixerAdmissionError::CommandQueueFull)?;
+        self.active[slot] = true;
+        Ok(AdmittedAdaptedStream {
+            slot,
+            source_producer,
+            adapter,
+        })
+    }
+
+    /// Reserves the lowest free slot and its bounded output-format queue pair.
+    ///
+    /// The returned consumer is installed by the caller after any per-stream
+    /// adapter has been constructed, so admission fails closed without
+    /// publishing a command when a later construction step fails.
+    fn reserve_slot(
+        &mut self,
+    ) -> Result<
+        (
+            usize,
+            RealtimePcmProducer<PCM_SAMPLES_PER_BLOCK>,
+            RealtimePcmConsumer<PCM_SAMPLES_PER_BLOCK>,
+        ),
+        MixerAdmissionError,
+    > {
+        let slot = (0..SLOTS)
+            .find(|&index| !self.active[index])
+            .ok_or(MixerAdmissionError::SlotTableFull)?;
+        let (producer, consumer) = realtime_pcm_queue::<PCM_SAMPLES_PER_BLOCK>(self.queue_capacity)
+            .map_err(MixerAdmissionError::Queue)?;
+        Ok((slot, producer, consumer))
     }
 
     /// Publishes one stream deactivation for `slot`.

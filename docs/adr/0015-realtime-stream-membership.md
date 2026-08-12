@@ -146,9 +146,13 @@ applies nominal sample-rate conversion
 mapping ([ADR 0012](./0012-channel-layout-mapping.md)), and pushes bounded
 output-format blocks into the stream's mixer slot queue. It runs in the
 decode/control domain, never inside the output callback, so the callback still
-reads only pre-adapted output-format blocks. Wiring the adapter into the mixer
-admission boundary remains open work; until then the controller still requires
-each decoded stream to arrive in the output format.
+reads only pre-adapted output-format blocks. The controller wires the adapter
+into admission: `MixerMembershipController::admit_adapted_stream` accepts any
+valid source format, constructs the per-stream adapter before publishing the
+slot command (so an invalid format never reserves a slot), and returns the
+source-format producer together with the adapter for the decode/control
+domain. The output-format fast path `admit_stream` remains for streams that
+already produce the mixer's output format.
 
 Evidence produced so far:
 
@@ -186,11 +190,15 @@ Evidence produced so far:
   steps, oldest-block replacement on a saturated slot queue, epoch
   discontinuity discarding stale interpolation state, and drift-bound
   enforcement;
+- app-side adapted-admission tests proving a 96 kHz stereo source renders as
+  converted 48 kHz mono through a real mixer render, removal silence and slot
+  reuse, fail-closed admission on invalid source queue capacity or source
+  format without reserving a slot, and per-slot underflow isolation for a
+  starved adapted stream;
 
-Still open before Phase 2 can claim multi-source streaming: wiring the
-per-stream format adapter into the mixer admission boundary and the desktop
-session/stream manager, the roadmap's 24-hour soak, and hardware callback
-timing on actual WASAPI devices.
+Still open before Phase 2 can claim multi-source streaming: integrating the
+adapted mixer admission path with the desktop session and stream manager, the
+roadmap's 24-hour soak, and hardware callback timing on actual WASAPI devices.
 
 ## Rollback plan
 

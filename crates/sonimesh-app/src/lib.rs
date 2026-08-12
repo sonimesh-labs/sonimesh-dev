@@ -32,7 +32,7 @@ pub use format_adapted_render_source_factory::{
     FormatAdaptedRenderSourceFactory, SourcePcmFormat, SourcePcmFormatError,
 };
 pub use mixer_membership_controller::{
-    AdmittedStream, MixerAdmissionError, MixerMembershipController,
+    AdmittedAdaptedStream, AdmittedStream, MixerAdmissionError, MixerMembershipController,
 };
 pub use mixer_render_source::{MixerRenderSource, MixerRenderSourceError};
 pub use output_controller::{OutputController, OutputLifecycleError, OutputSelection};

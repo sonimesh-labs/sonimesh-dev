@@ -488,8 +488,12 @@ source-to-output conversion primitive now exists in `sonimesh-app`
 (`StreamFormatAdapter`): it runs in the decode/control domain, drains decoded
 source-format blocks, applies nominal sample-rate conversion followed by
 channel mapping, and pushes bounded output-format blocks into the stream's
-slot queue. Wiring that adapter into the mixer admission boundary and the
-desktop session remains open work.
+slot queue, and `MixerMembershipController::admit_adapted_stream` installs it
+per stream at admission: it accepts any valid source format, builds the
+adapter before publishing the slot command, and returns the source producer
+together with the adapter for the decode/control domain. Integrating that
+adapted admission path with the desktop session and stream manager remains
+open work.
 
 Any lookahead, attack, release, or safety limiter delay must be included in the
 reported playout budget. Disconnect, mute, reconnect, and device switching use
