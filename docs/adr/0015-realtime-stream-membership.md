@@ -154,6 +154,17 @@ source-format producer together with the adapter for the decode/control
 domain. The output-format fast path `admit_stream` remains for streams that
 already produce the mixer's output format.
 
+The desktop session wiring composes these pieces in `sonimesh-app`:
+`MixerOutputController` owns the platform `AudioOutput` and creates one
+`MixerRenderSource` per output lifetime, exposing a clone of the live
+membership handle; `MixerStreamSession` owns that controller plus the
+membership boundary and the per-stream adapter pumps, starts the output,
+admits streams through `admit_adapted_stream`, installs each stream's source
+producer into its caller-owned pipeline, advances the adapters after every
+decode step, and after output-device recreation re-admits every persisted
+stream against a fresh empty slot table so each pipeline receives a fresh
+producer.
+
 Evidence produced so far:
 
 - fixed-order rendering with a full slot table and per-slot fade/isolation unit
@@ -195,10 +206,16 @@ Evidence produced so far:
   reuse, fail-closed admission on invalid source queue capacity or source
   format without reserving a slot, and per-slot underflow isolation for a
   starved adapted stream;
+- app-side session-wiring tests proving adapted admission through a real
+  decode pipeline, removal silence, fail-closed source-block and duplicate
+  validation, output recovery re-admitting persisted streams with fresh
+  producers, per-slot underflow isolation across two admitted streams, and
+  stop/recreate lifecycle;
 
-Still open before Phase 2 can claim multi-source streaming: integrating the
-adapted mixer admission path with the desktop session and stream manager, the
-roadmap's 24-hour soak, and hardware callback timing on actual WASAPI devices.
+Still open before Phase 2 can claim multi-source streaming: multi-stream
+control-plane negotiation (the control coordinator currently drives one active
+stream), the roadmap's 24-hour soak, and hardware callback timing on actual
+WASAPI devices.
 
 ## Rollback plan
 

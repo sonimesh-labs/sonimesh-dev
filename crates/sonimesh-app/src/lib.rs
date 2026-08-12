@@ -7,6 +7,7 @@ mod format_adapted_render_source_factory;
 mod mixer_membership_controller;
 mod mixer_output_controller;
 mod mixer_render_source;
+mod mixer_stream_session;
 mod output_controller;
 mod pairing_controller;
 mod pairing_record;
@@ -37,6 +38,7 @@ pub use mixer_membership_controller::{
 };
 pub use mixer_output_controller::{MixerOutputController, MixerOutputLifecycleError};
 pub use mixer_render_source::{MixerRenderSource, MixerRenderSourceError};
+pub use mixer_stream_session::{MixerStreamSession, MixerStreamSessionError, StartedMixerStream};
 pub use output_controller::{OutputController, OutputLifecycleError, OutputSelection};
 pub use pairing_controller::{PairingInvitationController, PairingInvitationError};
 pub use pairing_record::{
