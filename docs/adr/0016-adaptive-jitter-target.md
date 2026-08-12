@@ -95,7 +95,11 @@ record stays Provisional until then. A combined multi-stream scenario
 (`simulate_multi_stream_jitter_target`) runs two to four streams over one
 shared link with independent per-stream targets, so correlated loss and
 bandwidth serialization are observed against per-stream adaptive jitter
-control.
+control. The per-stream encoded-frame water level the controller observes
+is also published as a diagnostics metric: each stream snapshot carries
+the current jitter occupancy and its epoch high-water mark as one coherent
+(frames, high-water) pair, while the playout scheduler that consumes the
+adaptive target remains future Phase 2 work.
 
 ## Rollback plan
 

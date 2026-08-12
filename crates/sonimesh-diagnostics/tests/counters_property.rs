@@ -1,11 +1,12 @@
 //! Deterministic property coverage for the stream diagnostics counters.
 //!
 //! `StreamCounters` publishes two distinct state machines: fourteen cumulative
-//! saturating counters and the packed (occupancy, high-water) PCM queue epoch.
-//! This test drives a real counter instance under seeded operation walks
-//! against independent models — a plain saturating `u64` struct for the
-//! cumulative counters and a separate `(blocks, high_water)` pair for the
-//! queue epoch — and compares every published snapshot field after each step.
+//! saturating counters and two packed (occupancy, high-water) epoch pairs —
+//! the PCM queue and the jitter buffer. This test drives a real counter
+//! instance under seeded operation walks against independent models — a plain
+//! saturating `u64` struct for the cumulative counters and separate
+//! `(occupancy, high_water)` pairs for the epochs — and compares every
+//! published snapshot field after each step.
 
 use sonimesh_diagnostics::{StreamCounters, StreamMetricsSnapshot};
 
@@ -270,5 +271,80 @@ fn queued_pcm_epoch_matches_an_independent_high_water_model() {
     assert!(
         observed_reset_after_activity,
         "the walk must reset a populated epoch"
+    );
+}
+
+/// Independent model of the packed jitter-buffer epoch.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct JitterEpochModel {
+    frames: u16,
+    high_water: u16,
+}
+
+/// Drives `set_jitter_frames` and `reset_jitter_epoch` against an independent
+/// `(frames, high_water)` model: the occupancy must reflect the latest
+/// published value, the high-water mark must never decrease within an epoch,
+/// and a reset must retire both to zero.
+#[test]
+fn jitter_epoch_matches_an_independent_high_water_model() {
+    const STEPS: usize = 20_000;
+    let mut rng = XorShift64(0xD1A6_0000_2026_0016);
+    let counters = StreamCounters::default();
+    let mut model = JitterEpochModel::default();
+
+    let mut observed_high_water_increase = false;
+    let mut observed_high_water_unchanged = false;
+    let mut observed_reset_after_activity = false;
+
+    for _ in 0..STEPS {
+        if rng.next_usize(10) == 0 {
+            counters.reset_jitter_epoch();
+            if model.frames != 0 || model.high_water != 0 {
+                observed_reset_after_activity = true;
+            }
+            model = JitterEpochModel::default();
+        } else {
+            let frames = match rng.next_usize(5) {
+                0 => 0,
+                1 => u16::try_from(rng.next_u32() % 16 + 1).expect("small occupancy"),
+                2 => u16::try_from(rng.next_u32() % 65_536).expect("full-range occupancy"),
+                3 => u16::MAX,
+                _ => u16::try_from(rng.next_u32() % 1_024).expect("medium occupancy"),
+            };
+            let previous_high_water = model.high_water;
+            counters.set_jitter_frames(frames);
+            model.high_water = model.high_water.max(frames);
+            model.frames = frames;
+
+            if model.high_water > previous_high_water {
+                observed_high_water_increase = true;
+            } else {
+                observed_high_water_unchanged = true;
+            }
+        }
+
+        let snapshot = counters.snapshot();
+        assert_eq!(snapshot.jitter_frames, model.frames, "jitter frames");
+        assert_eq!(
+            snapshot.jitter_high_water_frames, model.high_water,
+            "jitter high-water"
+        );
+        assert!(
+            model.high_water >= model.frames,
+            "high-water must never fall below the active occupancy"
+        );
+    }
+
+    assert!(
+        observed_high_water_increase,
+        "the walk must raise the jitter high-water mark"
+    );
+    assert!(
+        observed_high_water_unchanged,
+        "the walk must publish at or below the jitter high-water mark"
+    );
+    assert!(
+        observed_reset_after_activity,
+        "the walk must reset a populated jitter epoch"
     );
 }

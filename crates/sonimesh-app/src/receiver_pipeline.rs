@@ -175,8 +175,10 @@ where
                 if matches!(outcome, InsertOutcome::Resynchronized { .. }) {
                     self.decode.reset_after_jitter_resynchronization();
                     self.counters.reset_queued_pcm_epoch();
+                    self.counters.reset_jitter_epoch();
                 }
                 self.record_jitter_outcome(outcome);
+                self.publish_jitter_frames();
                 Ok(outcome)
             }
             Err(error) => {
@@ -211,6 +213,7 @@ where
             DecodeStep::NotReady => {}
         }
         self.publish_queued_pcm_blocks();
+        self.publish_jitter_frames();
         Ok(step)
     }
 
@@ -230,6 +233,7 @@ where
         self.ingress.rotate(secret, next)?;
         self.decode.begin_epoch(initial_sequence);
         self.counters.reset_queued_pcm_epoch();
+        self.counters.reset_jitter_epoch();
         self.counters.stream_reset();
         Ok(())
     }
@@ -259,6 +263,7 @@ where
         self.ingress = replacement;
         self.decode.begin_epoch(initial_sequence);
         self.counters.reset_queued_pcm_epoch();
+        self.counters.reset_jitter_epoch();
         self.counters.stream_reset();
         Ok(())
     }
@@ -271,6 +276,7 @@ where
     pub fn hard_resynchronize(&mut self) {
         self.decode.hard_resynchronize();
         self.counters.reset_queued_pcm_epoch();
+        self.counters.reset_jitter_epoch();
         self.counters.stream_reset();
     }
 
@@ -283,6 +289,7 @@ where
     pub fn replace_pcm_producer(&mut self, producer: RealtimePcmProducer<PCM_SAMPLES_PER_BLOCK>) {
         self.decode.replace_pcm_producer(producer);
         self.counters.reset_queued_pcm_epoch();
+        self.counters.reset_jitter_epoch();
         self.counters.stream_reset();
     }
 
@@ -313,6 +320,12 @@ where
         self.counters
             .set_queued_pcm_blocks(u16::try_from(blocks).unwrap_or(u16::MAX));
         blocks
+    }
+
+    fn publish_jitter_frames(&self) {
+        let frames = self.decode.jitter_len();
+        self.counters
+            .set_jitter_frames(u16::try_from(frames).unwrap_or(u16::MAX));
     }
 
     fn record_jitter_outcome(&self, outcome: InsertOutcome) {

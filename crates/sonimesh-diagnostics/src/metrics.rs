@@ -16,6 +16,7 @@ pub struct StreamCounters {
     pcm_overflows: AtomicU64,
     pcm_discontinuities: AtomicU64,
     queued_pcm_state: AtomicU32,
+    jitter_state: AtomicU32,
     stream_resets: AtomicU64,
     nominal_sample_rates: AtomicU64,
     drift_adjustment_ppm: AtomicI32,
@@ -102,6 +103,27 @@ impl StreamCounters {
         self.queued_pcm_state.store(0, Ordering::Relaxed);
     }
 
+    /// Publishes the current encoded-frame count in the stream jitter buffer.
+    ///
+    /// The high-water mark never decreases within an active jitter epoch.
+    pub fn set_jitter_frames(&self, frames: u16) {
+        let _ = self
+            .jitter_state
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |state| {
+                let (_, high_water) = unpack_jitter_state(state);
+                Some(pack_jitter_state(frames, high_water.max(frames)))
+            });
+    }
+
+    /// Starts a fresh jitter water-level diagnostic epoch after a stream-local
+    /// retirement.
+    ///
+    /// The current occupancy and high-water mark both become zero. Stream-wide
+    /// counters intentionally remain cumulative.
+    pub fn reset_jitter_epoch(&self) {
+        self.jitter_state.store(0, Ordering::Relaxed);
+    }
+
     /// Records a stream-local reset.
     pub fn stream_reset(&self) {
         saturating_increment(&self.stream_resets);
@@ -137,6 +159,8 @@ impl StreamCounters {
             unpack_queued_pcm_state(self.queued_pcm_state.load(Ordering::Relaxed));
         let (nominal_input_sample_rate_hz, nominal_output_sample_rate_hz) =
             unpack_sample_rates(self.nominal_sample_rates.load(Ordering::Relaxed));
+        let (jitter_frames, jitter_high_water_frames) =
+            unpack_jitter_state(self.jitter_state.load(Ordering::Relaxed));
 
         StreamMetricsSnapshot {
             authenticated_packets: self.authenticated_packets.load(Ordering::Relaxed),
@@ -153,6 +177,8 @@ impl StreamCounters {
             pcm_discontinuities: self.pcm_discontinuities.load(Ordering::Relaxed),
             queued_pcm_blocks,
             queued_pcm_high_water_blocks,
+            jitter_frames,
+            jitter_high_water_frames,
             stream_resets: self.stream_resets.load(Ordering::Relaxed),
             nominal_input_sample_rate_hz,
             nominal_output_sample_rate_hz,
@@ -193,6 +219,10 @@ pub struct StreamMetricsSnapshot {
     pub queued_pcm_blocks: u16,
     /// Largest active-epoch PCM block count observed since stream creation.
     pub queued_pcm_high_water_blocks: u16,
+    /// Encoded frames currently buffered in the stream jitter buffer.
+    pub jitter_frames: u16,
+    /// Largest active-epoch jitter-buffer frame count observed since stream creation.
+    pub jitter_high_water_frames: u16,
     /// Stream-local resets.
     pub stream_resets: u64,
     /// Validated nominal input sample rate, or zero before publication.
@@ -263,6 +293,18 @@ fn unpack_queued_pcm_state(state: u32) -> (u16, u16) {
     (blocks, high_water_blocks)
 }
 
+const fn pack_jitter_state(frames: u16, high_water_frames: u16) -> u32 {
+    (frames as u32) | ((high_water_frames as u32) << u16::BITS)
+}
+
+fn unpack_jitter_state(state: u32) -> (u16, u16) {
+    let frames =
+        u16::try_from(state & u32::from(u16::MAX)).expect("masked jitter level fits in u16");
+    let high_water_frames =
+        u16::try_from(state >> u16::BITS).expect("shifted jitter high-water fits in u16");
+    (frames, high_water_frames)
+}
+
 const fn pack_sample_rates(input_sample_rate_hz: u32, output_sample_rate_hz: u32) -> u64 {
     ((input_sample_rate_hz as u64) << u32::BITS) | output_sample_rate_hz as u64
 }
@@ -292,6 +334,8 @@ mod tests {
         counters.pcm_discontinuity();
         counters.set_queued_pcm_blocks(4);
         counters.set_queued_pcm_blocks(2);
+        counters.set_jitter_frames(4);
+        counters.set_jitter_frames(2);
         counters.set_nominal_sample_rates(48_000, 44_100);
         counters.set_drift_adjustment_ppm(125);
         counters.drift_hard_resync();
@@ -307,6 +351,8 @@ mod tests {
         assert_eq!(snapshot.pcm_discontinuities, 1);
         assert_eq!(snapshot.queued_pcm_blocks, 2);
         assert_eq!(snapshot.queued_pcm_high_water_blocks, 4);
+        assert_eq!(snapshot.jitter_frames, 2);
+        assert_eq!(snapshot.jitter_high_water_frames, 4);
         assert_eq!(snapshot.nominal_input_sample_rate_hz, 48_000);
         assert_eq!(snapshot.nominal_output_sample_rate_hz, 44_100);
         assert_eq!(snapshot.drift_adjustment_ppm, 125);
@@ -321,9 +367,12 @@ mod tests {
         );
 
         counters.reset_queued_pcm_epoch();
+        counters.reset_jitter_epoch();
         let reset_snapshot = counters.snapshot();
         assert_eq!(reset_snapshot.queued_pcm_blocks, 0);
         assert_eq!(reset_snapshot.queued_pcm_high_water_blocks, 0);
+        assert_eq!(reset_snapshot.jitter_frames, 0);
+        assert_eq!(reset_snapshot.jitter_high_water_frames, 0);
         assert_eq!(reset_snapshot.authenticated_packets, 1);
     }
 
@@ -468,6 +517,35 @@ mod tests {
             assert!(snapshot.queued_pcm_high_water_blocks >= snapshot.queued_pcm_blocks);
         }
         writer.join().expect("queue metric writer must finish");
+    }
+
+    #[test]
+    fn jitter_level_and_high_water_are_published_as_one_valid_pair() {
+        let counters = StreamCounters::default();
+
+        for frames in [4, 2, 9, 1, u16::MAX] {
+            counters.set_jitter_frames(frames);
+            let snapshot = counters.snapshot();
+            assert_eq!(snapshot.jitter_frames, frames);
+            assert!(snapshot.jitter_high_water_frames >= snapshot.jitter_frames);
+        }
+    }
+
+    #[test]
+    fn concurrent_jitter_publication_never_exposes_an_invalid_pair() {
+        let counters = std::sync::Arc::new(StreamCounters::default());
+        let writer = std::sync::Arc::clone(&counters);
+
+        let writer = std::thread::spawn(move || {
+            for frames in (0..=u16::MAX).cycle().take(100_000) {
+                writer.set_jitter_frames(frames);
+            }
+        });
+        for _ in 0..100_000 {
+            let snapshot = counters.snapshot();
+            assert!(snapshot.jitter_high_water_frames >= snapshot.jitter_frames);
+        }
+        writer.join().expect("jitter metric writer must finish");
     }
 
     #[test]

@@ -280,6 +280,15 @@ where
         self.producer.active_len()
     }
 
+    /// Returns the number of encoded frames currently buffered for playout.
+    ///
+    /// This is an O(1) read of the fixed-capacity jitter buffer, safe to sample
+    /// from the per-stream decode domain after admission or playout decisions.
+    #[must_use]
+    pub fn jitter_len(&self) -> usize {
+        self.jitter.len()
+    }
+
     fn reset_stream_state(&mut self) {
         self.reset_decode_state();
         self.producer.begin_epoch();

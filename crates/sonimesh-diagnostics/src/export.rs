@@ -359,6 +359,14 @@ fn write_stream_object(out: &mut String, snapshot: &StreamMetricsSnapshot) {
             ExportCounterValue::Decimal(snapshot.jitter_resync_dropped_frames),
         ),
         (
+            "jitter_frames",
+            ExportCounterValue::Number(i64::from(snapshot.jitter_frames)),
+        ),
+        (
+            "jitter_high_water_frames",
+            ExportCounterValue::Number(i64::from(snapshot.jitter_high_water_frames)),
+        ),
+        (
             "plc_frames",
             ExportCounterValue::Decimal(snapshot.plc_frames),
         ),
@@ -480,6 +488,8 @@ mod tests {
             pcm_refill_limit_hits: 1,
             queued_pcm_blocks: 7,
             queued_pcm_high_water_blocks: 9,
+            jitter_frames: 3,
+            jitter_high_water_frames: 5,
             drift_adjustment_ppm: -125,
             ..StreamMetricsSnapshot::default()
         }
@@ -504,7 +514,7 @@ mod tests {
         let stream = sample_stream();
         let streams = [stream];
         let snapshot = full_snapshot(&streams);
-        let expected = "{\"format_version\":1,\"software_version\":\"0.1.0\",\"endpoint\":\"[ipv4-address-redacted]:49321\",\"platform_format\":{\"sample_rate_hz\":48000,\"channels\":2},\"buffer_policy\":\"balanced\",\"session_phase\":\"streaming\",\"streams\":[{\"authenticated_packets\":\"12\",\"duplicate_packets\":\"0\",\"rejected_packets\":\"0\",\"late_packets\":\"0\",\"reordered_packets\":\"0\",\"jitter_resync_dropped_frames\":\"0\",\"plc_frames\":\"0\",\"decode_errors\":\"0\",\"pcm_underflows\":\"3\",\"pcm_refill_limit_hits\":\"1\",\"pcm_overflows\":\"0\",\"pcm_discontinuities\":\"0\",\"queued_pcm_blocks\":7,\"queued_pcm_high_water_blocks\":9,\"stream_resets\":\"0\",\"nominal_input_sample_rate_hz\":0,\"nominal_output_sample_rate_hz\":0,\"drift_adjustment_ppm\":-125,\"drift_hard_resyncs\":\"0\"}]}";
+        let expected = "{\"format_version\":1,\"software_version\":\"0.1.0\",\"endpoint\":\"[ipv4-address-redacted]:49321\",\"platform_format\":{\"sample_rate_hz\":48000,\"channels\":2},\"buffer_policy\":\"balanced\",\"session_phase\":\"streaming\",\"streams\":[{\"authenticated_packets\":\"12\",\"duplicate_packets\":\"0\",\"rejected_packets\":\"0\",\"late_packets\":\"0\",\"reordered_packets\":\"0\",\"jitter_resync_dropped_frames\":\"0\",\"jitter_frames\":3,\"jitter_high_water_frames\":5,\"plc_frames\":\"0\",\"decode_errors\":\"0\",\"pcm_underflows\":\"3\",\"pcm_refill_limit_hits\":\"1\",\"pcm_overflows\":\"0\",\"pcm_discontinuities\":\"0\",\"queued_pcm_blocks\":7,\"queued_pcm_high_water_blocks\":9,\"stream_resets\":\"0\",\"nominal_input_sample_rate_hz\":0,\"nominal_output_sample_rate_hz\":0,\"drift_adjustment_ppm\":-125,\"drift_hard_resyncs\":\"0\"}]}";
         let first = build_export_bundle(&snapshot).unwrap();
         let second = build_export_bundle(&snapshot).unwrap();
         assert_eq!(first, expected);
@@ -531,7 +541,9 @@ mod tests {
         assert!(bundle.contains("\"authenticated_packets\":\"18446744073709551615\""));
         assert!(bundle.contains("\"drift_adjustment_ppm\":-2147483648"));
         assert!(bundle.contains("\"nominal_input_sample_rate_hz\":48000"));
+        assert!(bundle.contains("\"jitter_frames\":0"));
         assert!(!bundle.contains("\"queued_pcm_blocks\":\""));
+        assert!(!bundle.contains("\"jitter_frames\":\""));
     }
 
     #[test]
@@ -715,6 +727,8 @@ mod tests {
             pcm_discontinuities: u64::MAX,
             queued_pcm_blocks: u16::MAX,
             queued_pcm_high_water_blocks: u16::MAX,
+            jitter_frames: u16::MAX,
+            jitter_high_water_frames: u16::MAX,
             stream_resets: u64::MAX,
             nominal_input_sample_rate_hz: 192_000,
             nominal_output_sample_rate_hz: 8_000,
