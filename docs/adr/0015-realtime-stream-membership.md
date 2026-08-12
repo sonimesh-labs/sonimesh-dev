@@ -117,8 +117,9 @@ Evidence produced so far:
   discontinuity events land only on the affected slot (and that metric-free
   slots render identically);
 - a deterministic property test over random activate/deactivate/render
-  sequences against an independent active-set model, plus a limiter-ceiling
-  composition test;
+  sequences against an independent active-set model that also verifies each
+  slot's underflow counter against the model under over-run renders, plus a
+  limiter-ceiling composition test;
 - admission overflow fails closed at the fixed bound.
 
 Still open before Phase 2 can claim multi-source streaming: app-side control

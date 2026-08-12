@@ -5,13 +5,16 @@
 //! visits every slot in fixed order and inactive slots render silence. This
 //! test drives a fixed pseudo-random sequence of insert/remove/render
 //! operations against an independent active-set model and asserts the mixed
-//! output and the observable membership state agree at every step. A second
-//! test composes the mixer with the bounded-output limiter, which is the Phase
-//! 2 output stage.
+//! output, the observable membership state, and the per-slot realtime counter
+//! events agree at every step. A second test composes the mixer with the
+//! bounded-output limiter, which is the Phase 2 output stage.
+
+use std::sync::Arc;
 
 use sonimesh_audio::{
     FixedSlotMixer, RealtimePcmProducer, RealtimePcmPushOutcome, realtime_pcm_queue,
 };
+use sonimesh_diagnostics::StreamCounters;
 
 const SLOTS: usize = 4;
 const SAMPLES_PER_BLOCK: usize = 8;
@@ -53,8 +56,10 @@ fn push_block(producer: &mut RealtimePcmProducer<SAMPLES_PER_BLOCK>, value: f32)
 }
 
 /// Drives random membership transitions against an independent active-set
-/// model. Renders always consume an exact whole-block count, so the expected
-/// output is the sum of the active slots' constant values at every sample.
+/// model. Renders consume a whole-block count and, half the time, one extra
+/// chunk, so every active slot underflows once on that tail chunk. The model
+/// tracks each slot's expected underflow events, and the per-slot counters
+/// must agree with it while the mixed output stays the active-slot sum.
 #[allow(clippy::similar_names, clippy::too_many_lines)]
 #[test]
 fn random_membership_transitions_keep_render_correct() {
@@ -62,6 +67,8 @@ fn random_membership_transitions_keep_render_correct() {
     let mut mixer: FixedSlotMixer<SLOTS, SAMPLES_PER_BLOCK> = FixedSlotMixer::new().unwrap();
     let mut producers: [Option<RealtimePcmProducer<SAMPLES_PER_BLOCK>>; SLOTS] =
         std::array::from_fn(|_| None);
+    let mut counters: [Option<Arc<StreamCounters>>; SLOTS] = std::array::from_fn(|_| None);
+    let mut expected_underflows: [u64; SLOTS] = [0; SLOTS];
     let mut active: [bool; SLOTS] = [false; SLOTS];
 
     for step in 0..20_000 {
@@ -71,11 +78,18 @@ fn random_membership_transitions_keep_render_correct() {
                 let slot = (0..SLOTS).find(|&index| !active[index]);
                 if let Some(slot) = slot {
                     let (producer, consumer) = realtime_pcm_queue::<SAMPLES_PER_BLOCK>(16).unwrap();
+                    let slot_counters = Arc::new(StreamCounters::default());
                     let index = mixer
-                        .insert(consumer, sonimesh_audio::GainControlHandle::new(), None)
+                        .insert(
+                            consumer,
+                            sonimesh_audio::GainControlHandle::new(),
+                            Some(Arc::clone(&slot_counters)),
+                        )
                         .unwrap();
                     assert_eq!(index, slot, "insert should take the first free slot");
                     producers[slot] = Some(producer);
+                    counters[slot] = Some(slot_counters);
+                    expected_underflows[slot] = 0;
                     active[slot] = true;
                 } else {
                     assert_eq!(mixer.active(), SLOTS);
@@ -87,12 +101,16 @@ fn random_membership_transitions_keep_render_correct() {
                 if let Some(&slot) = candidates.get(rng.next_usize(candidates.len())) {
                     mixer.remove(slot).unwrap();
                     producers[slot] = None;
+                    counters[slot] = None;
                     active[slot] = false;
                 }
             }
             _ => {
-                // Feed every active slot and render a whole-block output.
+                // Feed every active slot and render a whole-block output plus,
+                // half the time, one over-run chunk that makes each active
+                // slot underflow once.
                 let blocks = 1 + rng.next_usize(3);
+                let over_run = rng.next_u32() % 2 == 0;
                 let mut expected: f32 = 0.0;
                 for (slot, present) in active.iter().enumerate() {
                     if *present {
@@ -102,15 +120,36 @@ fn random_membership_transitions_keep_render_correct() {
                         for _ in 0..blocks {
                             push_block(producer, value);
                         }
+                        if over_run {
+                            expected_underflows[slot] += 1;
+                        }
                     }
                 }
-                let mut output = vec![0.0; blocks * SAMPLES_PER_BLOCK];
+                let rendered_blocks = blocks + usize::from(over_run);
+                let mut output = vec![0.0; rendered_blocks * SAMPLES_PER_BLOCK];
                 mixer.render(&mut output);
-                for sample in &output {
+                let expected_blocks = blocks * SAMPLES_PER_BLOCK;
+                for (index, sample) in output.iter().enumerate() {
+                    let block_expected = if index < expected_blocks {
+                        expected
+                    } else {
+                        0.0
+                    };
                     assert!(
-                        (*sample - expected).abs() <= TOLERANCE,
-                        "step {step}: mixed sample {sample} != expected {expected}"
+                        (*sample - block_expected).abs() <= TOLERANCE,
+                        "step {step}: sample {index} = {sample}, expected {block_expected}"
                     );
+                }
+                for slot in 0..SLOTS {
+                    if active[slot] {
+                        let snapshot = counters[slot].as_ref().unwrap().snapshot();
+                        assert_eq!(
+                            snapshot.pcm_underflows, expected_underflows[slot],
+                            "step {step}: slot {slot} underflow count diverged"
+                        );
+                        assert_eq!(snapshot.pcm_refill_limit_hits, 0);
+                        assert_eq!(snapshot.pcm_discontinuities, 0);
+                    }
                 }
             }
         }
