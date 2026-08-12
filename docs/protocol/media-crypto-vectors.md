@@ -89,6 +89,12 @@ standard-library implementation of RFC 8439 ChaCha20-Poly1305 that is itself
 validated against the RFC vectors, so a label, salt, key, nonce, or header
 change on either side fails CI.
 
+The Rust integration suite additionally pins the rejection matrix at the
+protected-media boundary: a datagram that still parses with fewer than 16
+ciphertext bytes is rejected as a truncated tag before any plaintext copy, an
+empty plaintext round-trips as a tag-only ciphertext exactly on that threshold,
+and oversized plaintext or caller-owned output is rejected before decode.
+
 The Kotlin test runs as a host JVM unit test with the configured JDK security
 provider. It does not prove Android runtime provider behavior, device support,
 ABI packaging, production key handling, or an authenticated pairing source. The
