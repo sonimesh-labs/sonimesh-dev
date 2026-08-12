@@ -121,10 +121,11 @@ audio quality.
 
 `tools/check_output_realtime_boundary.py` rejects direct allocation, locking,
 logging, IPC, device-enumeration, and blocking markers in the CPAL adapter's
-callback shells and the direct-WASAPI tool's post-wait render shell. It is a
-source-level regression guard for the reviewed adapter-owned code, not a proof
-of allocation behavior in CPAL, Windows APIs, or arbitrary `RenderSource`
-implementations; those still require code review and hardware evidence.
+callback shells, the direct-WASAPI tool's post-wait render shell, and the
+app-crate `RenderSource::render` implementations plus their render-path
+helpers. It is a source-level regression guard for reviewed SoniMesh-owned
+realtime code, not a proof of allocation behavior in CPAL, Windows APIs, or
+third-party code; those still require code review and hardware evidence.
 
 `tools/check_output_lifecycle_log.py` validates a retained completed CPAL or
 direct-WASAPI lifecycle transcript against its declared bounded cycle count and

@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Reject direct realtime-boundary regressions in Windows output adapter shells."""
+"""Reject direct realtime-boundary regressions in reviewed realtime render paths.
+
+The guarded functions are the Windows output adapter callback shells plus the
+app-crate `RenderSource::render` implementations and their render-path helpers.
+All of them run inside the output callback, so they must avoid allocation,
+locking, logging, blocking I/O, and device enumeration.
+"""
 
 from __future__ import annotations
 
@@ -27,6 +33,30 @@ TARGETS = (
     FunctionTarget(
         Path("tools/windows-wasapi-prototype/src/wasapi.rs"),
         "render_available",
+    ),
+    FunctionTarget(
+        Path("crates/sonimesh-app/src/pcm_render_source.rs"),
+        "render",
+    ),
+    FunctionTarget(
+        Path("crates/sonimesh-app/src/pcm_render_source.rs"),
+        "apply_gain",
+    ),
+    FunctionTarget(
+        Path("crates/sonimesh-app/src/channel_mapped_render_source.rs"),
+        "render",
+    ),
+    FunctionTarget(
+        Path("crates/sonimesh-app/src/sample_rate_mapped_render_source.rs"),
+        "render",
+    ),
+    FunctionTarget(
+        Path("crates/sonimesh-app/src/sample_rate_mapped_render_source.rs"),
+        "ensure_input",
+    ),
+    FunctionTarget(
+        Path("crates/sonimesh-app/src/sample_rate_mapped_render_source.rs"),
+        "consume_input",
     ),
 )
 
@@ -115,6 +145,40 @@ class OutputRealtimeBoundaryTests(unittest.TestCase):
     def test_rejects_direct_allocation_and_logging(self) -> None:
         source = "fn render() { let samples = vec![0.0; 8]; println!(\"{samples:?}\"); }"
         self.assertEqual(validate_target(source, "render"), ["println!", "vec!"])
+
+    def test_app_crate_render_path_is_guarded(self) -> None:
+        app_crate_targets = {
+            (target.path, target.function)
+            for target in TARGETS
+            if target.path.parts[:2] == ("crates", "sonimesh-app")
+        }
+
+        assert app_crate_targets == {
+            (
+                Path("crates/sonimesh-app/src/pcm_render_source.rs"),
+                "render",
+            ),
+            (
+                Path("crates/sonimesh-app/src/pcm_render_source.rs"),
+                "apply_gain",
+            ),
+            (
+                Path("crates/sonimesh-app/src/channel_mapped_render_source.rs"),
+                "render",
+            ),
+            (
+                Path("crates/sonimesh-app/src/sample_rate_mapped_render_source.rs"),
+                "render",
+            ),
+            (
+                Path("crates/sonimesh-app/src/sample_rate_mapped_render_source.rs"),
+                "ensure_input",
+            ),
+            (
+                Path("crates/sonimesh-app/src/sample_rate_mapped_render_source.rs"),
+                "consume_input",
+            ),
+        }
 
     def test_rejects_missing_or_ambiguous_function(self) -> None:
         with self.assertRaisesRegex(ValueError, "missing function"):
