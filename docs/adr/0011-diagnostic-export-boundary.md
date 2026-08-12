@@ -1,6 +1,6 @@
 # ADR 0011: Diagnostic export boundary
 
-- Status: Accepted design; implementation deferred to Phase 2
+- Status: Accepted design; bundle writer implemented (Phase 2)
 - Date: 2026-07-17
 
 ## Context
@@ -34,11 +34,24 @@ retention require fixed limits; failed redaction aborts the write. No shared
 diagnostics crate may depend on a UI, filesystem, Tauri, or platform credential
 API.
 
+The bundle writer lives in `sonimesh-diagnostics` (crate-private writer,
+public snapshot schema) and serializes exactly the allowlisted fields above
+to a bounded, deterministic, versioned JSON document. The desktop control
+domain owns the export action: it fills the snapshot from its low-rate state
+and is responsible for retention policy. The app-side export command and
+retention limits remain open.
+
 ## Validation evidence
 
 Implementation must prove deterministic field allowlisting, endpoint redaction,
 size limits, write-failure handling, and absence of forbidden byte sequences in
 test bundles. Hardware reports remain separate from user diagnostic exports.
+
+Implemented evidence (Phase 2): the `export` module's unit tests assert the
+exact emitted bundle for a fixed snapshot (deterministic allowlisting), redacted
+endpoint output for IPv4 and IPv6, the fixed byte and stream bounds, fail-closed
+rejection of malformed or oversized input, and the absence of forbidden byte
+sequences in test bundles.
 
 ## Rollback plan
 
