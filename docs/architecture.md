@@ -499,9 +499,12 @@ controller plus the membership boundary and the per-stream adapter pumps,
 starts the output, admits streams through `admit_adapted_stream`, installs
 each stream's source producer into its caller-owned pipeline, advances the
 adapters after every decode step, and after output-device recreation re-admits
-every persisted stream against a fresh empty slot table. Multi-stream
-control-plane negotiation, the 24-hour soak, and hardware callback timing
-remain open.
+every persisted stream against a fresh empty slot table. Per-stream drift
+control (`MixerStreamDriftController`) samples only the bounded adapter
+source queue, publishes bounded ppm corrections to the stream's resampler,
+retires the adapter epoch on an emergency occupancy threshold, and resets
+after recovery. Multi-stream control-plane negotiation, the 24-hour soak,
+and hardware callback timing remain open.
 
 Any lookahead, attack, release, or safety limiter delay must be included in the
 reported playout budget. Disconnect, mute, reconnect, and device switching use

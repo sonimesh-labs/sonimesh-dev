@@ -163,7 +163,11 @@ admits streams through `admit_adapted_stream`, installs each stream's source
 producer into its caller-owned pipeline, advances the adapters after every
 decode step, and after output-device recreation re-admits every persisted
 stream against a fresh empty slot table so each pipeline receives a fresh
-producer.
+producer. Per-stream drift control (`MixerStreamDriftController`) samples
+only the bounded adapter source queue, publishes bounded ppm corrections to
+the stream's resampler, retires the adapter epoch on an emergency occupancy
+threshold, and resets after recovery so a stale correction is not
+re-applied.
 
 Evidence produced so far:
 
@@ -211,6 +215,11 @@ Evidence produced so far:
   validation, output recovery re-admitting persisted streams with fresh
   producers, per-slot underflow isolation across two admitted streams, and
   stop/recreate lifecycle;
+- app-side per-stream drift tests proving bounded ppm publication through
+  the session adapter, high/low emergency resyncs retiring the adapter
+  epoch and clearing the correction, per-stream drift isolation across two
+  admitted streams, fail-closed updates after removal, and history clearing
+  for a recovered stream;
 
 Still open before Phase 2 can claim multi-source streaming: multi-stream
 control-plane negotiation (the control coordinator currently drives one active
