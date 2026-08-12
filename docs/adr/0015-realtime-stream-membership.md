@@ -92,6 +92,29 @@ Before Phase 2 can claim multi-source streaming:
 These are membership and mixing-boundary tests. They do not qualify pairing,
 capture behavior, or physical latency.
 
+## Implementation status
+
+The fixed-slot mixer primitive exists in `sonimesh-audio`
+(`FixedSlotMixer<SLOTS, SAMPLES_PER_BLOCK>`): it owns a preallocated slot table
+of per-stream consumer endpoints, iterates active slots in ascending fixed
+order during rendering, applies a per-slot discontinuity fade, fails closed at
+admission when the table is full, and returns the consumer on deactivation. The
+primitive composes with the bounded-output limiter as the final output stage.
+
+Evidence produced so far:
+
+- fixed-order rendering with a full slot table and per-slot fade/isolation unit
+  tests, including a slot whose queue underflows without affecting other slots;
+- a deterministic property test over random activate/deactivate/render
+  sequences against an independent active-set model, plus a limiter-ceiling
+  composition test;
+- admission overflow fails closed at the fixed bound.
+
+Still open before Phase 2 can claim multi-source streaming: app-side control
+domain wiring (activating slots from decoded streams), per-stream gain and mute
+integration, cross-slot failure injection at the app level, the roadmap's
+24-hour soak, and hardware callback timing on actual WASAPI devices.
+
 ## Rollback plan
 
 The membership boundary lives behind a small realtime module. Switching from

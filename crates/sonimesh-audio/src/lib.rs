@@ -6,6 +6,7 @@
 mod channel_map;
 mod decode;
 mod drift;
+mod fixed_slot_mixer;
 mod gain;
 mod jitter;
 mod limiter;
@@ -20,6 +21,7 @@ pub use drift::{
     DriftConfig, DriftConfigError, DriftController, DriftDecision, DriftResyncDirection,
     MAX_DRIFT_ADJUSTMENT_PPM, MAX_DRIFT_INTEGRAL_BLOCK_TICKS,
 };
+pub use fixed_slot_mixer::{DEFAULT_MIXER_SLOTS, FixedSlotMixer, MixerConfigError, MixerError};
 pub use gain::GainSmoother;
 pub use jitter::{EncodedFrame, FrameError, InsertOutcome, JitterBuffer, PlayoutOutcome};
 pub use limiter::{

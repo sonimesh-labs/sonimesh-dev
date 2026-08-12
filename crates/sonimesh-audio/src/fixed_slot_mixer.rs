@@ -1,0 +1,470 @@
+//! Allocation-free fixed-slot realtime mixer.
+//!
+//! This module implements the Phase 2 stream-membership boundary recorded in
+//! ADR 0015: a preallocated slot table that the output callback iterates in
+//! fixed order, with inactive slots rendering silence. Membership transitions
+//! (activate, deactivate, replace) are control-domain work that never allocates
+//! and never takes a lock; the callback only calls [`FixedSlotMixer::render`],
+//! which visits every slot in fixed order and does bounded work per slot.
+
+use std::fmt;
+
+use crate::gain::GainSmoother;
+use crate::realtime_queue::{MAX_PCM_QUEUE_BLOCKS, RealtimePcmConsumer, RealtimePcmPopOutcome};
+
+/// Recommended slot count: headroom above the roadmap's four-source maximum.
+///
+/// The mixer itself takes the slot count as a construction-time constant; this
+/// is the value the Phase 2 control domain should use.
+pub const DEFAULT_MIXER_SLOTS: usize = 8;
+
+/// Samples used for the per-slot discontinuity fade.
+const DISCONTINUITY_FADE_SAMPLES: u16 = 128;
+
+/// Failure while constructing a [`FixedSlotMixer`].
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MixerConfigError {
+    /// The slot count must be at least one.
+    ZeroSlots,
+    /// Each slot's PCM block must hold at least one sample.
+    ZeroSamplesPerBlock,
+}
+
+impl fmt::Display for MixerConfigError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let message = match self {
+            Self::ZeroSlots => "mixer slot count must be non-zero",
+            Self::ZeroSamplesPerBlock => "mixer PCM blocks must hold at least one sample",
+        };
+        formatter.write_str(message)
+    }
+}
+
+impl std::error::Error for MixerConfigError {}
+
+/// Failure while changing fixed-slot membership.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MixerError {
+    /// Every slot is occupied; admission failed closed.
+    SlotFull,
+    /// The slot index is outside the fixed slot table.
+    SlotOutOfRange,
+    /// The slot index is valid but the slot is currently inactive.
+    SlotInactive,
+}
+
+impl fmt::Display for MixerError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let message = match self {
+            Self::SlotFull => "every mixer slot is occupied",
+            Self::SlotOutOfRange => "mixer slot index is out of range",
+            Self::SlotInactive => "mixer slot is not active",
+        };
+        formatter.write_str(message)
+    }
+}
+
+impl std::error::Error for MixerError {}
+
+/// One preallocated stream slot: its consumer endpoint, block scratch, and
+/// per-slot discontinuity fade.
+struct Slot<const SAMPLES_PER_BLOCK: usize> {
+    consumer: RealtimePcmConsumer<SAMPLES_PER_BLOCK>,
+    scratch: [f32; SAMPLES_PER_BLOCK],
+    scratch_len: usize,
+    scratch_offset: usize,
+    fade: GainSmoother,
+}
+
+impl<const SAMPLES_PER_BLOCK: usize> Slot<SAMPLES_PER_BLOCK> {
+    fn new(consumer: RealtimePcmConsumer<SAMPLES_PER_BLOCK>) -> Self {
+        Self {
+            consumer,
+            scratch: [0.0; SAMPLES_PER_BLOCK],
+            scratch_len: 0,
+            scratch_offset: 0,
+            fade: GainSmoother::new(1.0),
+        }
+    }
+
+    /// Accumulates this slot's next samples into `target`.
+    ///
+    /// Underflow and the bounded per-chunk refill limit leave the remaining
+    /// target samples untouched, so this slot contributes bounded silence
+    /// without affecting any other slot. A discontinuity resets this slot's
+    /// fade to zero and ramps it back to unity.
+    fn render_into(&mut self, target: &mut [f32], refill_budget: &mut usize) {
+        let mut written = 0;
+        while written < target.len() {
+            if self.scratch_offset == self.scratch_len {
+                if *refill_budget == 0 {
+                    break;
+                }
+                *refill_budget -= 1;
+                match self.consumer.pop_into(&mut self.scratch) {
+                    RealtimePcmPopOutcome::Filled {
+                        samples,
+                        discontinuity,
+                        ..
+                    } => {
+                        if discontinuity {
+                            self.fade = GainSmoother::new(0.0);
+                            self.fade.set_target(1.0, DISCONTINUITY_FADE_SAMPLES);
+                        }
+                        self.scratch_len = samples;
+                        self.scratch_offset = 0;
+                        if samples == 0 {
+                            continue;
+                        }
+                    }
+                    RealtimePcmPopOutcome::Underflow { .. } => break,
+                }
+            }
+
+            let available = self.scratch_len - self.scratch_offset;
+            let copy_len = available.min(target.len() - written);
+            self.fade
+                .apply(&mut self.scratch[self.scratch_offset..self.scratch_offset + copy_len]);
+            for (target_sample, scratch_sample) in target[written..written + copy_len]
+                .iter_mut()
+                .zip(&self.scratch[self.scratch_offset..self.scratch_offset + copy_len])
+            {
+                *target_sample += scratch_sample;
+            }
+            written += copy_len;
+            self.scratch_offset += copy_len;
+        }
+    }
+}
+
+/// Fixed preallocated slot mixer for the realtime output callback.
+///
+/// The mixer owns `SLOTS` fixed slots, each holding one stream's bounded PCM
+/// consumer endpoint ([ADR 0002](./0002-realtime-pcm-queue.md)). The callback
+/// calls [`FixedSlotMixer::render`], which zeroes the output and then, for each
+/// output chunk, visits every slot in ascending fixed order and accumulates
+/// that slot's next samples. Inactive or underflowing slots contribute silence.
+/// All slots share one common Float32 bus; interleaved channel layouts are
+/// summed sample-wise, and the caller applies the bounded-output limiter after
+/// rendering.
+///
+/// Membership changes ([`FixedSlotMixer::insert`], [`FixedSlotMixer::remove`])
+/// are control-domain operations and must never run inside the output callback.
+pub struct FixedSlotMixer<const SLOTS: usize, const SAMPLES_PER_BLOCK: usize> {
+    slots: [Option<Slot<SAMPLES_PER_BLOCK>>; SLOTS],
+    active: usize,
+}
+
+impl<const SLOTS: usize, const SAMPLES_PER_BLOCK: usize> FixedSlotMixer<SLOTS, SAMPLES_PER_BLOCK> {
+    /// Creates an empty mixer with all slots inactive.
+    ///
+    /// # Errors
+    ///
+    /// Returns a configuration error when `SLOTS` or `SAMPLES_PER_BLOCK` is
+    /// zero.
+    pub fn new() -> Result<Self, MixerConfigError> {
+        if SLOTS == 0 {
+            return Err(MixerConfigError::ZeroSlots);
+        }
+        if SAMPLES_PER_BLOCK == 0 {
+            return Err(MixerConfigError::ZeroSamplesPerBlock);
+        }
+        Ok(Self {
+            slots: std::array::from_fn(|_| None),
+            active: 0,
+        })
+    }
+
+    /// Activates one stream at the lowest free slot, returning its index.
+    ///
+    /// This is control-domain work; it never allocates and never takes a lock.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MixerError::SlotFull`] when every slot is occupied, leaving
+    /// the mixer unchanged (admission fails closed at the fixed bound).
+    pub fn insert(
+        &mut self,
+        consumer: RealtimePcmConsumer<SAMPLES_PER_BLOCK>,
+    ) -> Result<usize, MixerError> {
+        for (index, slot) in self.slots.iter_mut().enumerate() {
+            if slot.is_none() {
+                *slot = Some(Slot::new(consumer));
+                self.active += 1;
+                return Ok(index);
+            }
+        }
+        Err(MixerError::SlotFull)
+    }
+
+    /// Deactivates one slot and returns its consumer endpoint.
+    ///
+    /// This is control-domain work; it never allocates and never takes a lock.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MixerError::SlotOutOfRange`] when `slot` is outside the fixed
+    /// table, or [`MixerError::SlotInactive`] when the slot is already
+    /// inactive. The mixer is unchanged in both cases.
+    pub fn remove(
+        &mut self,
+        slot: usize,
+    ) -> Result<RealtimePcmConsumer<SAMPLES_PER_BLOCK>, MixerError> {
+        let entry = self.slots.get_mut(slot).ok_or(MixerError::SlotOutOfRange)?;
+        let present = entry.take().ok_or(MixerError::SlotInactive)?;
+        self.active -= 1;
+        Ok(present.consumer)
+    }
+
+    /// Renders one mixed bus block into `output`.
+    ///
+    /// `output` is first zeroed, then the active slots contribute their next
+    /// samples in fixed ascending order; inactive slots contribute zero. Per
+    /// slot, at most [`MAX_PCM_QUEUE_BLOCKS`] blocks are refilled per output
+    /// chunk, so worst-case callback work is `SLOTS` times a per-slot constant
+    /// with no allocation and no lock. This method is the only realtime entry
+    /// point.
+    pub fn render(&mut self, output: &mut [f32]) {
+        output.fill(0.0);
+        let mut written = 0;
+        while written < output.len() {
+            let chunk_len = (output.len() - written).min(SAMPLES_PER_BLOCK);
+            let chunk = &mut output[written..written + chunk_len];
+            for slot in self.slots.iter_mut().flatten() {
+                let mut budget = MAX_PCM_QUEUE_BLOCKS;
+                slot.render_into(chunk, &mut budget);
+            }
+            written += chunk_len;
+        }
+    }
+
+    /// Total number of slots in the fixed table.
+    #[must_use]
+    pub const fn slots(&self) -> usize {
+        SLOTS
+    }
+
+    /// Number of currently active slots.
+    #[must_use]
+    pub const fn active(&self) -> usize {
+        self.active
+    }
+
+    /// Returns whether the given slot is currently active.
+    #[must_use]
+    pub fn is_active(&self, slot: usize) -> bool {
+        self.slots.get(slot).is_some_and(Option::is_some)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DEFAULT_MIXER_SLOTS, FixedSlotMixer, MixerConfigError, MixerError};
+    use crate::realtime_queue::realtime_pcm_queue;
+    use crate::{PeakLimiter, RealtimePcmProducer, RealtimePcmPushOutcome};
+
+    const SAMPLES_PER_BLOCK: usize = 8;
+
+    #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
+    fn value_for_slot(slot: usize) -> f32 {
+        (slot + 1) as f32
+    }
+
+    fn push_constant(
+        producer: &mut RealtimePcmProducer<SAMPLES_PER_BLOCK>,
+        value: f32,
+        blocks: usize,
+    ) {
+        for _ in 0..blocks {
+            assert_eq!(
+                producer.push(&[value; SAMPLES_PER_BLOCK]),
+                RealtimePcmPushOutcome::Inserted
+            );
+        }
+    }
+
+    #[test]
+    fn new_rejects_zero_slots_and_zero_samples_per_block() {
+        assert!(matches!(
+            FixedSlotMixer::<0, SAMPLES_PER_BLOCK>::new(),
+            Err(MixerConfigError::ZeroSlots)
+        ));
+        assert!(matches!(
+            FixedSlotMixer::<DEFAULT_MIXER_SLOTS, 0>::new(),
+            Err(MixerConfigError::ZeroSamplesPerBlock)
+        ));
+    }
+
+    #[test]
+    fn empty_mixer_renders_bounded_silence() {
+        let mut mixer: FixedSlotMixer<DEFAULT_MIXER_SLOTS, SAMPLES_PER_BLOCK> =
+            FixedSlotMixer::new().unwrap();
+        assert_eq!(mixer.active(), 0);
+        assert_eq!(mixer.slots(), DEFAULT_MIXER_SLOTS);
+        let mut output = [0.5; 32];
+        mixer.render(&mut output);
+        assert!(
+            output
+                .iter()
+                .all(|sample| sample.to_bits() == 0.0_f32.to_bits())
+        );
+    }
+
+    #[test]
+    fn insert_returns_the_lowest_free_slot_and_render_sums() {
+        let mut mixer: FixedSlotMixer<DEFAULT_MIXER_SLOTS, SAMPLES_PER_BLOCK> =
+            FixedSlotMixer::new().unwrap();
+        let mut producers = Vec::new();
+        for slot in 0..3 {
+            let (mut producer, consumer) = realtime_pcm_queue::<SAMPLES_PER_BLOCK>(4).unwrap();
+            push_constant(&mut producer, value_for_slot(slot), 2);
+            producers.push(producer);
+            assert_eq!(mixer.insert(consumer).unwrap(), slot);
+        }
+        assert_eq!(mixer.active(), 3);
+        for (index, producer) in producers.iter_mut().enumerate() {
+            assert!(mixer.is_active(index));
+            push_constant(producer, value_for_slot(index), 2);
+        }
+
+        let expected = value_for_slot(0) + value_for_slot(1) + value_for_slot(2);
+        let mut output = [0.0; 32];
+        mixer.render(&mut output);
+        assert!(
+            output
+                .iter()
+                .all(|sample| (*sample - expected).abs() < 1e-6)
+        );
+    }
+
+    #[test]
+    fn insert_fails_closed_when_full() {
+        let mut mixer: FixedSlotMixer<2, SAMPLES_PER_BLOCK> = FixedSlotMixer::new().unwrap();
+        for _ in 0..2 {
+            let (_, consumer) = realtime_pcm_queue::<SAMPLES_PER_BLOCK>(2).unwrap();
+            assert!(mixer.insert(consumer).is_ok());
+        }
+        let (_, consumer) = realtime_pcm_queue::<SAMPLES_PER_BLOCK>(2).unwrap();
+        assert_eq!(mixer.insert(consumer), Err(MixerError::SlotFull));
+        assert_eq!(mixer.active(), 2);
+    }
+
+    #[test]
+    fn remove_returns_the_consumer_and_frees_the_slot() {
+        let mut mixer: FixedSlotMixer<DEFAULT_MIXER_SLOTS, SAMPLES_PER_BLOCK> =
+            FixedSlotMixer::new().unwrap();
+        let (_, consumer) = realtime_pcm_queue::<SAMPLES_PER_BLOCK>(2).unwrap();
+        let index = mixer.insert(consumer).unwrap();
+        assert_eq!(index, 0);
+
+        let returned = mixer.remove(index).unwrap();
+        drop(returned);
+        assert!(!mixer.is_active(index));
+        assert_eq!(mixer.active(), 0);
+
+        let (_, consumer) = realtime_pcm_queue::<SAMPLES_PER_BLOCK>(2).unwrap();
+        let again = mixer.insert(consumer).unwrap();
+        assert_eq!(again, index);
+    }
+
+    #[test]
+    fn remove_rejects_out_of_range_and_inactive_slots_without_mutation() {
+        let mut mixer: FixedSlotMixer<DEFAULT_MIXER_SLOTS, SAMPLES_PER_BLOCK> =
+            FixedSlotMixer::new().unwrap();
+        assert!(matches!(
+            mixer.remove(DEFAULT_MIXER_SLOTS),
+            Err(MixerError::SlotOutOfRange)
+        ));
+        assert!(matches!(mixer.remove(0), Err(MixerError::SlotInactive)));
+        assert_eq!(mixer.active(), 0);
+    }
+
+    #[test]
+    fn one_slot_underflow_does_not_block_other_slots() {
+        let mut mixer: FixedSlotMixer<DEFAULT_MIXER_SLOTS, SAMPLES_PER_BLOCK> =
+            FixedSlotMixer::new().unwrap();
+        let (mut producer_a, consumer_a) = realtime_pcm_queue::<SAMPLES_PER_BLOCK>(4).unwrap();
+        let (_, consumer_b) = realtime_pcm_queue::<SAMPLES_PER_BLOCK>(4).unwrap();
+        let (mut producer_c, consumer_c) = realtime_pcm_queue::<SAMPLES_PER_BLOCK>(4).unwrap();
+        push_constant(&mut producer_a, 1.0, 4);
+        push_constant(&mut producer_c, 3.0, 4);
+        mixer.insert(consumer_a).unwrap();
+        mixer.insert(consumer_b).unwrap();
+        mixer.insert(consumer_c).unwrap();
+
+        let mut output = [0.0; 32];
+        mixer.render(&mut output);
+        // Slot b underflows (no queued data) and contributes silence only.
+        assert!(output.iter().all(|sample| (*sample - 4.0).abs() < 1e-6));
+    }
+
+    #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
+    #[test]
+    fn discontinuity_fades_only_the_affected_slot() {
+        let mut mixer: FixedSlotMixer<DEFAULT_MIXER_SLOTS, SAMPLES_PER_BLOCK> =
+            FixedSlotMixer::new().unwrap();
+        let (mut producer_a, consumer_a) = realtime_pcm_queue::<SAMPLES_PER_BLOCK>(4).unwrap();
+        let (mut producer_b, consumer_b) = realtime_pcm_queue::<SAMPLES_PER_BLOCK>(4).unwrap();
+        // Slot a starts a fresh epoch before its first push, so its consumer
+        // observes a discontinuity on the first pop.
+        producer_a.begin_epoch();
+        push_constant(&mut producer_a, 1.0, 2);
+        push_constant(&mut producer_b, 2.0, 1);
+        mixer.insert(consumer_a).unwrap();
+        mixer.insert(consumer_b).unwrap();
+
+        let mut output = [0.0; SAMPLES_PER_BLOCK];
+        mixer.render(&mut output);
+        // Slot b contributes a steady 2.0; slot a fades from zero toward unity.
+        for (index, sample) in output.iter().enumerate() {
+            let expected = 2.0 + f32::from((index + 1) as u16) / 128.0;
+            assert!(
+                (*sample - expected).abs() < 0.02,
+                "sample {index} not on the expected fade curve: {sample} vs {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn partial_blocks_carry_across_render_calls() {
+        let mut mixer: FixedSlotMixer<DEFAULT_MIXER_SLOTS, SAMPLES_PER_BLOCK> =
+            FixedSlotMixer::new().unwrap();
+        let (mut producer, consumer) = realtime_pcm_queue::<SAMPLES_PER_BLOCK>(4).unwrap();
+        assert_eq!(producer.push(&[1.0; 6]), RealtimePcmPushOutcome::Inserted);
+        assert_eq!(producer.push(&[1.0; 6]), RealtimePcmPushOutcome::Inserted);
+        mixer.insert(consumer).unwrap();
+
+        let mut first = [0.0; 10];
+        mixer.render(&mut first);
+        assert!(first.iter().all(|sample| (*sample - 1.0).abs() < 1e-6));
+
+        let mut second = [0.0; 2];
+        mixer.render(&mut second);
+        assert!(second.iter().all(|sample| (*sample - 1.0).abs() < 1e-6));
+    }
+
+    #[test]
+    fn mixed_bus_passes_through_the_limiter_without_exceeding_the_ceiling() {
+        let mut mixer: FixedSlotMixer<DEFAULT_MIXER_SLOTS, SAMPLES_PER_BLOCK> =
+            FixedSlotMixer::new().unwrap();
+        for _ in 0..DEFAULT_MIXER_SLOTS {
+            let (mut producer, consumer) = realtime_pcm_queue::<SAMPLES_PER_BLOCK>(4).unwrap();
+            push_constant(&mut producer, 0.3, 4);
+            mixer.insert(consumer).unwrap();
+        }
+
+        let mut output = [0.0; 32];
+        mixer.render(&mut output);
+        // Unbounded sum: 8 * 0.3 = 2.4 exceeds full scale.
+        assert!(output.iter().all(|sample| (*sample - 2.4).abs() < 1e-6));
+
+        let mut limiter = PeakLimiter::default();
+        limiter.apply_interleaved(&mut output, 2).unwrap();
+        assert!(
+            output
+                .iter()
+                .all(|sample| sample.is_finite() && sample.abs() <= 1.0 + 1e-6)
+        );
+        assert!(output.iter().all(|sample| (*sample - 1.0).abs() < 1e-6));
+    }
+}

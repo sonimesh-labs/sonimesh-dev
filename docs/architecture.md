@@ -469,9 +469,11 @@ The realtime limiter primitive in `sonimesh-audio` provides the bounded-output
 stage: it is allocation-free and lock-free, guarantees that no output sample
 exceeds its ceiling (protecting downstream fixed-point conversion), attacks
 sample-instantly with zero lookahead, and releases smoothly with a fixed
-coefficient. It is a building block for the Phase 2 mixer sum
-([ADR 0015](./adr/0015-realtime-stream-membership.md)); the multi-stream mixer
-itself is not implemented yet.
+coefficient. The fixed-slot summing mixer primitive
+([ADR 0015](./adr/0015-realtime-stream-membership.md)) owns a preallocated slot
+table, iterates active slots in fixed order, and fails closed at admission when
+the table is full; the app-side multi-stream render path (wiring streams into
+slots and driving per-stream gain and mute) is not wired yet.
 
 Any lookahead, attack, release, or safety limiter delay must be included in the
 reported playout budget. Disconnect, mute, reconnect, and device switching use
