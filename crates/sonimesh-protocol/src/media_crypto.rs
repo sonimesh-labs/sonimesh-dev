@@ -210,3 +210,35 @@ mod debug_tests {
         assert!(!debug.contains("99, 111, 109"));
     }
 }
+
+#[cfg(test)]
+mod sequence_exhaustion_tests {
+    use super::*;
+    use crate::MediaDirection;
+
+    /// Pins the mandatory epoch-boundary refusal on the real sender path: the
+    /// final two sequence values are issuable and every later call fails closed
+    /// with [`MediaCryptoError::SequenceExhausted`] instead of wrapping.
+    #[test]
+    fn sealer_refuses_to_issue_a_sequence_beyond_u32_max() {
+        let secret = SessionSecret::new([7; 32]);
+        let context = MediaKeyContext::new(1, 1, 1, MediaDirection::AndroidToDesktop).unwrap();
+        let mut sealer = MediaSealer::new(&secret, context).unwrap();
+        // The sender sequence is private and starts at zero, so the boundary is
+        // forced directly to exercise the sealer-level exhaustion path.
+        sealer.sequence = MediaSequence::new(u32::MAX - 1);
+
+        let penultimate = sealer.seal(0, 0, b"audio").unwrap();
+        assert_eq!(penultimate.header.sequence, u32::MAX - 1);
+        let final_sequence = sealer.seal(0, 0, b"audio").unwrap();
+        assert_eq!(final_sequence.header.sequence, u32::MAX);
+        assert_eq!(
+            sealer.seal(0, 0, b"audio"),
+            Err(MediaCryptoError::SequenceExhausted)
+        );
+        assert_eq!(
+            sealer.seal(0, 0, b"audio"),
+            Err(MediaCryptoError::SequenceExhausted)
+        );
+    }
+}
