@@ -113,13 +113,13 @@ Rust vectors from the documented labels, constants, and byte layouts using only
 the Python standard library: `check_pairing_vectors.py` (HMAC/HKDF-SHA256
 pairing proofs and media root), `check_media_key_vectors.py` (media key
 derivation and the 96-bit nonce layout), `check_control_frame_vectors.py`
-(Protobuf wire encoding of all five control payloads), and
-`check_media_header_vectors.py` (the fixed 36-byte media header). Each script
-runs a `--self-test` mode and a check mode in CI; a schema renumbering, layout
-reordering, label, salt, or byte-order change on either side fails the job. The
-AEAD packet-authentication vector is not yet cross-verified because
-ChaCha20-Poly1305 is unavailable in the Python standard library; that vector
-remains Rust-pinned until a Kotlin or other independent implementation exists.
+(Protobuf wire encoding of all five control payloads),
+`check_media_header_vectors.py` (the fixed 36-byte media header), and
+`check_media_crypto_vectors.py` (RFC 8439 ChaCha20-Poly1305 AEAD packet
+sealing: derived media key, nonce, authenticated header, ciphertext, and tag).
+Each script runs a `--self-test` mode and a check mode in CI; a schema
+renumbering, layout reordering, label, salt, or byte-order change on either
+side fails the job.
 
 Deterministic audio tests also cover the provisional bounded channel mapper and
 its callback source adapter. They do not qualify physical speaker positions or
