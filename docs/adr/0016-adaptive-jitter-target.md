@@ -84,6 +84,15 @@ reset semantics. A deterministic property test over seeded random jitter
 sequences must assert the target stays within `[min, max]`, moves at most one
 frame per observation, and returns to base after reset.
 
+The required unit and property tests now exist in `sonimesh-audio`
+(`jitter_target.rs` unit tests and `tests/jitter_target_property.rs`), and
+the deterministic network simulator adds a jitter-target scenario
+(`simulate_jitter_target`) that feeds the controller from virtual-link
+arrival jitter and the encoded-frame water level and reports the bounded
+target trajectory (final target, raised/lowered steps, smoothed jitter).
+Measured WLAN/hardware jitter evidence remains pending Phase 2; this
+record stays Provisional until then.
+
 ## Rollback plan
 
 The controller exports a small configuration and decision type rather than a
