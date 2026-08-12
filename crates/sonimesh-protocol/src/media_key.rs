@@ -318,4 +318,29 @@ mod tests {
             Err(MediaCryptoError::SequenceExhausted)
         );
     }
+
+    #[test]
+    fn matches_published_media_key_derivation_vector() {
+        let secret = SessionSecret::new([4; 32]);
+        let context = context(MediaDirection::AndroidToDesktop);
+        assert_eq!(
+            derive_media_key(&secret, context).unwrap(),
+            [
+                0x0B, 0x82, 0x16, 0x44, 0xF0, 0x59, 0x8E, 0x95, 0x08, 0x0E, 0x49, 0x59, 0xE2, 0x76,
+                0xFF, 0xCD, 0x5E, 0xCF, 0xFF, 0x53, 0x77, 0x5B, 0xCF, 0xC8, 0x04, 0xCC, 0x17, 0xB2,
+                0x33, 0x44, 0xD5, 0x46,
+            ]
+        );
+    }
+
+    #[test]
+    fn matches_published_media_nonce_vector() {
+        let context = context(MediaDirection::AndroidToDesktop);
+        assert_eq!(
+            media_nonce(context, 1),
+            [
+                0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x09, 0x00, 0x00, 0x00, 0x01
+            ]
+        );
+    }
 }
