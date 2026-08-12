@@ -67,3 +67,5 @@ documented.
   provisional picker-first discovery design pending Android 17 device evidence.
 - [ADR 0015: Realtime stream membership](./0015-realtime-stream-membership.md) —
   provisional fixed-slot membership boundary pending Phase 2 mixer evidence.
+- [ADR 0016: Adaptive jitter target](./0016-adaptive-jitter-target.md) —
+  provisional slow bounded target control pending Phase 2 jitter evidence.

@@ -10,6 +10,7 @@ mod fixed_slot_mixer;
 mod gain;
 mod gain_control;
 mod jitter;
+mod jitter_target;
 mod limiter;
 mod mixer_membership;
 mod opus_frame;
@@ -27,6 +28,11 @@ pub use fixed_slot_mixer::{DEFAULT_MIXER_SLOTS, FixedSlotMixer, MixerConfigError
 pub use gain::GainSmoother;
 pub use gain_control::{GainControlError, GainControlHandle, GainControlState, MAX_GAIN_LINEAR};
 pub use jitter::{EncodedFrame, FrameError, InsertOutcome, JitterBuffer, PlayoutOutcome};
+pub use jitter_target::{
+    AdaptiveJitterTarget, JitterMode, JitterTargetConfig, JitterTargetConfigError,
+    JitterTargetStep, MAX_JITTER_FRAME_DURATION_MS, MAX_JITTER_TARGET_FRAMES,
+    MIN_JITTER_FRAME_DURATION_MS,
+};
 pub use limiter::{
     DEFAULT_CEILING, DEFAULT_RELEASE_COEFFICIENT, LimiterConfig, LimiterConfigError, LimiterError,
     PeakLimiter,

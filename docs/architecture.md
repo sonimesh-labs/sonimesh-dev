@@ -426,6 +426,14 @@ The adaptive controller must change slowly, expose minimum/target/maximum water
 levels, and reset its integral state after a stream reset. Packet arrival jitter
 and clock drift must not be treated as the same signal.
 
+The bounded adaptive target controller
+([ADR 0016](./adr/0016-adaptive-jitter-target.md)) now exists in
+`sonimesh-audio`: it converts the mode range to frame targets, moves the
+target by at most one frame per observation with debounce and hysteresis on
+a slow packet-arrival-jitter estimate, requires buffered surplus before
+lowering the target, and resets to the mode base on a stream reset. A
+playout scheduler consuming that target remains future Phase 2 work.
+
 Recovery policy:
 
 - single missing frame: Opus PLC where the decoder mode supports it;
