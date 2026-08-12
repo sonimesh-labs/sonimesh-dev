@@ -43,6 +43,8 @@ jobs:
           python tools/check_pairing_vectors.py
           python tools/check_control_frame_vectors.py --self-test
           python tools/check_control_frame_vectors.py
+          python tools/check_media_header_vectors.py --self-test
+          python tools/check_media_header_vectors.py
           python tools/check_android_capture_boundary.py --self-test
           python tools/check_android_capture_boundary.py
           python tools/check_output_soak_log.py --self-test
