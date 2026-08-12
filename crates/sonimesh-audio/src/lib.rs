@@ -8,6 +8,7 @@ mod decode;
 mod drift;
 mod gain;
 mod jitter;
+mod limiter;
 mod opus_frame;
 mod pcm_ring;
 mod realtime_queue;
@@ -21,6 +22,10 @@ pub use drift::{
 };
 pub use gain::GainSmoother;
 pub use jitter::{EncodedFrame, FrameError, InsertOutcome, JitterBuffer, PlayoutOutcome};
+pub use limiter::{
+    DEFAULT_CEILING, DEFAULT_RELEASE_COEFFICIENT, LimiterConfig, LimiterConfigError, LimiterError,
+    PeakLimiter,
+};
 pub use opus_frame::{
     MAX_OPUS_FRAME_DURATION_MS, MIN_OPUS_FRAME_DURATION_MS, OPUS_CHANNELS, OPUS_SAMPLE_RATE_HZ,
     OpusFrameConfig, OpusFrameConfigError,

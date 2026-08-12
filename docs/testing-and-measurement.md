@@ -78,7 +78,9 @@ Cover at least:
 - jitter ordering, late packets, overflow, resynchronization, and bounded memory;
 - PLC/FEC scheduling and frame-duration transitions;
 - drift-controller convergence, limits, anti-windup, and reset;
-- channel mapping, gain ramps, fades, clipping protection, and limiter behavior;
+- channel mapping, gain ramps, fades, clipping protection, and limiter behavior
+  (exact-ceiling peak limiter with sample-instant attack, smooth release, and
+  linked interleaved frames);
 - capacity-clamped PCM queue occupancy, bounded callback refill exhaustion,
   coherent level/high-water snapshots, and saturating cumulative diagnostics
   counters under concurrent publication;

@@ -465,6 +465,14 @@ lookahead limiting; a multi-source release may add:
 per-stream gain -> fade/mute -> Float32 sum -> headroom -> optional limiter
 ~~~
 
+The realtime limiter primitive in `sonimesh-audio` provides the bounded-output
+stage: it is allocation-free and lock-free, guarantees that no output sample
+exceeds its ceiling (protecting downstream fixed-point conversion), attacks
+sample-instantly with zero lookahead, and releases smoothly with a fixed
+coefficient. It is a building block for the Phase 2 mixer sum
+([ADR 0015](./adr/0015-realtime-stream-membership.md)); the multi-stream mixer
+itself is not implemented yet.
+
 Any lookahead, attack, release, or safety limiter delay must be included in the
 reported playout budget. Disconnect, mute, reconnect, and device switching use
 short fades to prevent clicks.
