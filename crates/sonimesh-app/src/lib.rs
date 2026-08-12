@@ -3,6 +3,7 @@
 mod channel_mapped_render_source;
 mod control_snapshot;
 mod control_stream;
+mod control_to_mixer;
 mod format_adapted_render_source_factory;
 mod mixer_membership_controller;
 mod mixer_output_controller;
@@ -31,6 +32,7 @@ pub use control_stream::{
     ControlOperationToken, ControlSessionToken, ControlStreamAction, ControlStreamCoordinator,
     ControlStreamError, MAX_ACTIVE_STREAMS, MediaStreamIdentity, StreamStartRequest,
 };
+pub use control_to_mixer::{ControlToMixerBridge, ControlToMixerError};
 pub use format_adapted_render_source_factory::{
     FormatAdaptedRenderSourceFactory, SourcePcmFormat, SourcePcmFormatError,
 };

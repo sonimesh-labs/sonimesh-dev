@@ -169,6 +169,22 @@ the stream's resampler, retires the adapter epoch on an emergency occupancy
 threshold, and resets after recovery so a stale correction is not
 re-applied.
 
+The app-side composition layer also exists in `sonimesh-app`:
+`ControlToMixerBridge` owns the `ControlStreamCoordinator` and the
+`MixerStreamSession` together, so stream lifecycle passes through one object.
+The bridge starts the platform output with the first stream, admits and
+removes per-stream pipelines, commits the coordinator's tokenized
+start/rotation/stop completions, and rolls back partial work when a start,
+rotation, or stop fails so the coordinator and mixer membership stay in sync.
+A platform fault observed by `monitor` retires the membership boundary and
+moves the lifecycle to `OutputUnavailable`; `recover_output` recreates the
+mixer source and returns every persisted stream identity, and `recover_stream`
+re-admits each one against the fresh empty slot table. The output stops and
+the lifecycle returns to `Ready` when the last stream stops. The bridge is
+control-domain code and is not part of the realtime scheduling path: the
+caller still advances adapter pumps and renders through the owned mixer
+session. The UI/Tauri command layer is not yet wired to the bridge.
+
 Evidence produced so far:
 
 - fixed-order rendering with a full slot table and per-slot fade/isolation unit
@@ -225,6 +241,14 @@ Evidence produced so far:
   streams with bounded admission, per-stream stop leaving other streams
   streaming, Ready/Streaming lifecycle transitions on the first and last
   stream, fail-closed capacity, and per-stream key rotation;
+- app-side bridge tests proving the coordinator and mixer session compose
+  through one object: the output starts with the first stream and stops
+  with the last, a second stream admits without restarting the output,
+  per-stream stop keeps the other stream and the output alive, in-place
+  rotation preserves slot, gain, and rendering while a format change is
+  rejected, output-start and admission failures roll back without
+  partial changes, output fault and recovery re-admit persisted streams,
+  and connection loss with reconnect or control expiry stops the mixer;
 
 Still open before Phase 2 can claim multi-source streaming: the roadmap's 24-hour
 soak and hardware callback timing on actual WASAPI devices.
