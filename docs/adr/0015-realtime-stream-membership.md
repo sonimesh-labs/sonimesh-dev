@@ -129,6 +129,19 @@ fixed-slot table and shares a bounded lock-free command queue with a
 the callback drains them at the start of each render and applies them without
 allocating or locking, so membership advances at callback granularity.
 
+The app-side Phase 2 boundary is wired in `sonimesh-app`:
+`MixerRenderSource` owns a `CommandDrivenMixer` plus the bounded-output limiter
+as the realtime `RenderSource`, and `MixerMembershipController` is the
+control-domain admission boundary. The controller publishes insert/remove
+commands through a `MixerMembershipHandle`, keeps a deterministic projection of
+the fixed slot table (mirroring the callback's lowest-free-slot FIFO policy),
+validates each stream's format against the mixer's output format, and carries
+each stream's gain/mute handle so the control domain can publish per-stream
+changes across the callback boundary. The Phase 2 mixer path currently requires
+each decoded stream to arrive in the output format (same sample rate and
+channel layout); per-stream sample-rate and channel adaptation before the mixer
+queue remains open work.
+
 Evidence produced so far:
 
 - fixed-order rendering with a full slot table and per-slot fade/isolation unit
@@ -147,12 +160,17 @@ Evidence produced so far:
   once-per-callback application, fail-closed on a full command queue, fast
   rejection of out-of-range removes, tolerance of stale removes, and a
   concurrent-insert smoke test.
+- app-side wiring tests proving admission and mixing on the next render,
+  removal silence, slot reuse after a remove-before-render, fail-closed format
+  and table-full admission, retryable command-queue-full, limiter-ceiling on
+  the mixed sum, control-domain gain/mute affecting only the target stream, and
+  per-slot underflow counters;
 
-Still open before Phase 2 can claim multi-source streaming: app-side control
-domain wiring (activating slots from decoded streams and publishing gain/mute
-changes from the control domain), cross-slot failure injection at the app level,
-the roadmap's 24-hour soak, and hardware callback timing on actual WASAPI
-devices.
+Still open before Phase 2 can claim multi-source streaming: per-stream
+sample-rate and channel adaptation before the mixer queue, full integration of
+the mixer controller with the desktop session and stream manager, cross-slot
+failure injection at the app level, the roadmap's 24-hour soak, and hardware
+callback timing on actual WASAPI devices.
 
 ## Rollback plan
 

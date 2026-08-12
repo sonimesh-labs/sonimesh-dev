@@ -65,6 +65,10 @@ TARGETS = (
         "drain_pending",
     ),
     FunctionTarget(
+        Path("crates/sonimesh-app/src/mixer_render_source.rs"),
+        "render",
+    ),
+    FunctionTarget(
         Path("crates/sonimesh-app/src/channel_mapped_render_source.rs"),
         "render",
     ),
@@ -195,6 +199,10 @@ class OutputRealtimeBoundaryTests(unittest.TestCase):
             (
                 Path("crates/sonimesh-app/src/sample_rate_mapped_render_source.rs"),
                 "ensure_input",
+            ),
+            (
+                Path("crates/sonimesh-app/src/mixer_render_source.rs"),
+                "render",
             ),
             (
                 Path("crates/sonimesh-app/src/sample_rate_mapped_render_source.rs"),

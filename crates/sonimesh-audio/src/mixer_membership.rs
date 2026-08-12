@@ -96,6 +96,15 @@ impl<const SAMPLES_PER_BLOCK: usize> MixerMembershipHandle<SAMPLES_PER_BLOCK> {
             .map_err(|_| MixerMembershipError::CommandQueueFull)
     }
 
+    /// Number of membership commands waiting to be applied by the callback.
+    ///
+    /// The control domain can poll this to learn whether the callback has
+    /// caught up with its published membership changes: zero means every
+    /// published command was applied by the most recent render.
+    #[must_use]
+    pub fn pending_commands(&self) -> usize {
+        self.commands.len()
+    }
     /// Publishes one stream deactivation for `slot`.
     ///
     /// The callback applies the command on its next render and drops the
@@ -358,6 +367,21 @@ mod tests {
         mixer.render(&mut [0.0; SAMPLES_PER_BLOCK]);
         assert_eq!(mixer.active(), 1);
         assert_eq!(mixer.pending_commands(), 0);
+    }
+
+    #[test]
+    fn handle_reports_pending_commands_until_the_callback_applies_them() {
+        let mut mixer: CommandDrivenMixer<SLOTS, SAMPLES_PER_BLOCK> =
+            CommandDrivenMixer::new().unwrap();
+        let membership = mixer.membership();
+        let (_, consumer) = realtime_pcm_queue::<SAMPLES_PER_BLOCK>(2).unwrap();
+        membership
+            .insert(consumer, GainControlHandle::new(), None)
+            .unwrap();
+        assert_eq!(membership.pending_commands(), 1);
+
+        mixer.render(&mut [0.0; SAMPLES_PER_BLOCK]);
+        assert_eq!(membership.pending_commands(), 0);
     }
 
     #[test]

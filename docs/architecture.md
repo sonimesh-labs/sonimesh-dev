@@ -478,9 +478,13 @@ carry an optional per-slot `StreamCounters` endpoint that the callback records
 underflow, refill-limit, and discontinuity events into without locking.
 Membership changes publish through a bounded lock-free command queue
 (`CommandDrivenMixer` + `MixerMembershipHandle`): the callback drains and
-applies them at the start of each render without allocating or locking; the
-app-side multi-stream render path (wiring decoded streams into slots and
-publishing control-domain gain/mute changes) is not wired yet.
+applies them at the start of each render without allocating or locking. The
+app-side Phase 2 boundary is wired in `sonimesh-app`: `MixerRenderSource` owns
+the command-driven mixer and the bounded limiter as the realtime source, and
+`MixerMembershipController` publishes stream admission/removal and carries each
+stream's gain/mute handle from the control domain. The mixer path currently
+requires decoded streams to arrive in the output format; per-stream
+sample-rate and channel adaptation before the mixer queue remains open work.
 
 Any lookahead, attack, release, or safety limiter delay must be included in the
 reported playout budget. Disconnect, mute, reconnect, and device switching use
