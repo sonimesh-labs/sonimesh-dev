@@ -58,9 +58,15 @@ fills the allowlisted snapshot from the live bridge, serializes exactly one
 bounded bundle through `build_export_bundle`, and records a receipt
 (sequence and byte size) under a fixed policy — at most N retained exports
 and at most M retained bytes, evicting the oldest record first and rejecting
-a single bundle that cannot fit the byte bound. The UI or Tauri command
-that triggers an export and the on-disk file retention implementation
-remain open.
+a single bundle that cannot fit the byte bound. The on-disk file retention
+is now implemented in `sonimesh-app` (`ExportStore`): one store owns a
+directory and applies the same retention policy to files on disk. Writing
+is atomic (write to a pending file, then rename), filenames derive only
+from the export sequence, opening the store scans the directory and
+removes stale pending files, and retention evicts the oldest file first
+until the count and byte bounds hold. A bundle that cannot fit the byte
+bound is rejected before any file is written. The UI or Tauri command
+that triggers an export remains open.
 
 ## Validation evidence
 
@@ -83,7 +89,10 @@ The app-side export action tests assert the retention journal keeps the
 newest exports within fixed count and byte bounds by evicting the oldest,
 rejects a bundle that cannot fit the byte bound, fails closed on sequence
 exhaustion, and issues a bundle from live bridge state with redacted
-endpoint bytes.
+endpoint bytes. The on-disk store tests assert atomic writes leave no
+pending file, recovery resumes the sequence from the newest retained
+file, a shrunk policy evicts oldest files on open, stale pending files
+are removed, and foreign files in the directory are ignored.
 
 ## Rollback plan
 

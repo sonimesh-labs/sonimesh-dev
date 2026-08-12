@@ -3,9 +3,9 @@
 //! The desktop control domain owns the export action: it fills the allowlisted
 //! snapshot from live control and mixer state, serializes exactly one bounded
 //! bundle through [`build_export_bundle`], and records a receipt under a fixed
-//! retention policy. This module never writes files; the UI/Tauri command that
-//! triggers an export and the on-disk file retention implementation remain
-//! open. Nothing here may be called from the realtime callback.
+//! retention policy. This module never writes files; the bounded on-disk store
+//! lives in [`crate::export_store`], and the UI/Tauri command that triggers an
+//! export remains open. Nothing here may be called from the realtime callback.
 
 use std::collections::VecDeque;
 use std::fmt;

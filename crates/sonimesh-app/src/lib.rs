@@ -5,6 +5,7 @@ mod control_snapshot;
 mod control_stream;
 mod control_to_mixer;
 mod diagnostic_export_action;
+mod export_store;
 mod format_adapted_render_source_factory;
 mod mixer_membership_controller;
 mod mixer_output_controller;
@@ -39,6 +40,7 @@ pub use diagnostic_export_action::{
     DiagnosticExportActionError, ExportReceipt, ExportRetentionJournal, ExportRetentionPolicy,
     IssuedDiagnosticExport,
 };
+pub use export_store::{ExportStore, ExportStoreError};
 pub use format_adapted_render_source_factory::{
     FormatAdaptedRenderSourceFactory, SourcePcmFormat, SourcePcmFormatError,
 };
