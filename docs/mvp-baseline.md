@@ -1,7 +1,7 @@
 # MVP implementation baseline
 
 > Status: foundation implemented; platform feasibility remains open
-> Updated: 2026-08-11
+> Updated: 2026-08-12
 
 This baseline turns the architecture documents into a buildable core without
 claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
@@ -121,6 +121,11 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   reviewed nonce layout, sender sequence exhaustion, authentication before
   replay admission, and matching Rust/Kotlin-JVM public vectors; Android runtime
   provider and pairing/TLS root-secret creation remain unimplemented.
+- dependency-free Python verifiers independently recompute the published
+  pairing, control-frame, media-header, media-key, and media-AEAD vectors from
+  RFC 8439 ChaCha20-Poly1305, HKDF-SHA256, and the documented wire layouts, so
+  vector drift is caught without a second compiler; sealed media packets are
+  resealed from constants, not replayed through the Rust code.
 - a pure TLS-exporter pairing-binding boundary with fixed Rust/Kotlin test
   vectors for role-separated proofs and the one-time media root. It accepts only
   an externally supplied 32-byte exporter result after the future pinned TLS
