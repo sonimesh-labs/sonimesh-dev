@@ -7,8 +7,9 @@ use std::sync::Arc;
 
 use sonimesh_app::{
     ControlSessionToken, ControlStreamAction, ControlToMixerBridge, ControlToMixerError,
-    MixerStreamSessionError, PairingAttemptOutcome, PairingId, PairingInvitationController,
-    PairingProofVerification, PairingSource, SessionEvent, SessionPhase, SessionState,
+    DiagnosticExportAction, ExportRetentionPolicy, MixerStreamSessionError, PairingAttemptOutcome,
+    PairingId, PairingInvitationController, PairingProofVerification, PairingSource, SessionEvent,
+    SessionPhase, SessionState,
 };
 use sonimesh_audio::{FrameDecoder, realtime_pcm_queue};
 use sonimesh_diagnostics::{ExportPlatformFormat, ExportSessionPhase, StreamCounters};
@@ -784,4 +785,69 @@ fn bridge_projects_output_lifecycle_for_existing_sources() {
     let output = sonimesh_app::OutputSnapshotSource::snapshot(&bridge);
     assert!(output.stream_active());
     assert_eq!(output.health(), OutputHealth::Healthy);
+}
+
+#[test]
+fn export_action_issues_bounded_bundles_and_retains_the_newest() {
+    let counters = Arc::new(StreamCounters::default());
+    let mut bridge = bridge();
+    let token = authenticated(&mut bridge);
+    let mut pipeline = pipeline_for(1, 1, Arc::clone(&counters));
+    let _request = start_one(
+        &mut bridge,
+        token,
+        1,
+        1,
+        Some(Arc::clone(&counters)),
+        &mut pipeline,
+    );
+    assert!(bridge.output_active());
+
+    let mut action =
+        DiagnosticExportAction::new(ExportRetentionPolicy::bounded(2, 16 * 1024)).unwrap();
+
+    let first = action
+        .export(
+            &bridge,
+            "0.1.0",
+            Some("127.0.0.1:1234".parse().unwrap()),
+            Some("balanced"),
+        )
+        .unwrap();
+    assert_eq!(first.receipt.sequence, 0);
+    assert_eq!(first.receipt.bytes, first.bundle.len());
+    assert!(first.bundle.contains("\"software_version\":\"0.1.0\""));
+    assert!(first.bundle.contains("\"buffer_policy\":\"balanced\""));
+    assert!(first.bundle.contains("\"session_phase\":\"streaming\""));
+    assert!(
+        first
+            .bundle
+            .contains("\"streams\":[{\"authenticated_packets\"")
+    );
+    assert!(!first.bundle.contains("127.0.0.1"));
+    assert_eq!(action.retained_count(), 1);
+
+    let second = action
+        .export(
+            &bridge,
+            "0.1.0",
+            Some("127.0.0.1:1234".parse().unwrap()),
+            None,
+        )
+        .unwrap();
+    assert_eq!(second.receipt.sequence, 1);
+    assert_eq!(action.retained_count(), 2);
+
+    let third = action.export(&bridge, "0.1.0", None, None).unwrap();
+    assert_eq!(third.receipt.sequence, 2);
+    assert_eq!(
+        action.retained_count(),
+        2,
+        "the oldest receipt is evicted past the count bound"
+    );
+    assert_eq!(
+        action.retained_bytes(),
+        third.receipt.bytes + second.receipt.bytes,
+        "retained bytes follow the newest two receipts"
+    );
 }

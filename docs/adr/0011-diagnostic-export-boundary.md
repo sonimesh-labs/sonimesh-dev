@@ -51,6 +51,16 @@ retained per-stream endpoints. The bundle writer remains the single serializer
 in `sonimesh-diagnostics`; the desktop control domain still owns the export
 action, and the UI/Tauri command that triggers an export and the file
 retention policy remain open.
+The app-side export action and retention limits are now implemented in
+`sonimesh-app` (`DiagnosticExportAction`): one action owns the reusable
+metrics buffer and a bounded `ExportRetentionJournal`. Issuing an export
+fills the allowlisted snapshot from the live bridge, serializes exactly one
+bounded bundle through `build_export_bundle`, and records a receipt
+(sequence and byte size) under a fixed policy — at most N retained exports
+and at most M retained bytes, evicting the oldest record first and rejecting
+a single bundle that cannot fit the byte bound. The UI or Tauri command
+that triggers an export and the on-disk file retention implementation
+remain open.
 
 ## Validation evidence
 
@@ -69,6 +79,11 @@ from live state: session phase maps onto the closed export phase set, platform
 format appears only while the output is active, per-stream metrics follow slot
 order with zeroed entries for streams without a counters endpoint, and a built
 bundle redacts the endpoint address while retaining the allowlisted fields.
+The app-side export action tests assert the retention journal keeps the
+newest exports within fixed count and byte bounds by evicting the oldest,
+rejects a bundle that cannot fit the byte bound, fails closed on sequence
+exhaustion, and issues a bundle from live bridge state with redacted
+endpoint bytes.
 
 ## Rollback plan
 

@@ -4,6 +4,7 @@ mod channel_mapped_render_source;
 mod control_snapshot;
 mod control_stream;
 mod control_to_mixer;
+mod diagnostic_export_action;
 mod format_adapted_render_source_factory;
 mod mixer_membership_controller;
 mod mixer_output_controller;
@@ -33,6 +34,11 @@ pub use control_stream::{
     ControlStreamError, MAX_ACTIVE_STREAMS, MediaStreamIdentity, StreamStartRequest,
 };
 pub use control_to_mixer::{BridgeSnapshot, ControlToMixerBridge, ControlToMixerError};
+pub use diagnostic_export_action::{
+    DEFAULT_MAX_RETAINED_EXPORT_BYTES, DEFAULT_MAX_RETAINED_EXPORTS, DiagnosticExportAction,
+    DiagnosticExportActionError, ExportReceipt, ExportRetentionJournal, ExportRetentionPolicy,
+    IssuedDiagnosticExport,
+};
 pub use format_adapted_render_source_factory::{
     FormatAdaptedRenderSourceFactory, SourcePcmFormat, SourcePcmFormatError,
 };
