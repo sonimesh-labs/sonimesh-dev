@@ -8,15 +8,20 @@
 //! slot queues, and renders must reflect membership, format, admission, and
 //! limiter guarantees.
 
+use core::convert::Infallible;
 use std::sync::Arc;
 
 use sonimesh_app::{
     GainControlHandle, MixerAdmissionError, MixerMembershipController, MixerRenderSource,
-    SourcePcmFormat,
+    ReceiverStreamPipeline, SourcePcmFormat,
 };
-use sonimesh_audio::{MAX_MIXER_COMMAND_QUEUE, RealtimePcmProducer, RealtimePcmPushOutcome};
+use sonimesh_audio::{
+    DecodeStep, FrameDecoder, MAX_MIXER_COMMAND_QUEUE, RealtimePcmProducer, RealtimePcmPushOutcome,
+    realtime_pcm_queue,
+};
 use sonimesh_diagnostics::StreamCounters;
 use sonimesh_platform::{OutputConfig, RenderSource, SampleFormat};
+use sonimesh_protocol::{MediaDirection, MediaKeyContext, MediaSealer, SessionSecret};
 
 const SLOTS: usize = 4;
 const SAMPLES_PER_BLOCK: usize = 8;
@@ -318,5 +323,117 @@ fn per_slot_counters_record_underflow_on_the_affected_slot() {
     assert_eq!(counters_a.snapshot().pcm_underflows, 1);
     assert_eq!(counters_b.snapshot().pcm_underflows, 1);
     assert_eq!(counters_a.snapshot().pcm_refill_limit_hits, 0);
+    assert_eq!(counters_b.snapshot().pcm_discontinuities, 0);
+}
+
+/// Decoder that fills each whole PCM block with constant 1.0 samples.
+struct FullBlockDecoder;
+
+impl FrameDecoder for FullBlockDecoder {
+    type Error = Infallible;
+
+    fn decode(&mut self, _encoded: &[u8], output: &mut [f32]) -> Result<usize, Self::Error> {
+        output.fill(1.0);
+        Ok(output.len())
+    }
+
+    fn decode_plc(&mut self, output: &mut [f32]) -> Result<usize, Self::Error> {
+        output.fill(0.0);
+        Ok(output.len())
+    }
+}
+
+fn context() -> MediaKeyContext {
+    MediaKeyContext::new(
+        0x0102_0304_0506_0708,
+        9,
+        1,
+        MediaDirection::AndroidToDesktop,
+    )
+    .unwrap()
+}
+
+fn full_block_pipeline(
+    counters: Arc<StreamCounters>,
+) -> ReceiverStreamPipeline<FullBlockDecoder, 4, 8, SAMPLES_PER_BLOCK> {
+    let secret = SessionSecret::new([0xA5; 32]);
+    let (producer, _consumer) = realtime_pcm_queue::<SAMPLES_PER_BLOCK>(4).unwrap();
+    ReceiverStreamPipeline::new(&secret, context(), FullBlockDecoder, producer, counters, 0)
+        .unwrap()
+}
+
+#[test]
+fn one_stream_failure_leaves_other_slots_rendering() {
+    let mut source = MixerRenderSource::new(&output_config()).unwrap();
+    let mut membership: MixerMembershipController<SLOTS, SAMPLES_PER_BLOCK> =
+        MixerMembershipController::new(source.membership(), 64, output_format()).unwrap();
+    let counters_a = Arc::new(StreamCounters::default());
+    let counters_b = Arc::new(StreamCounters::default());
+    let mut pipeline_a = full_block_pipeline(Arc::clone(&counters_a));
+    let mut pipeline_b = full_block_pipeline(Arc::clone(&counters_b));
+
+    let stream_a = membership
+        .admit_stream(
+            output_format(),
+            GainControlHandle::new(),
+            Some(Arc::clone(&counters_a)),
+        )
+        .unwrap();
+    let stream_b = membership
+        .admit_stream(
+            output_format(),
+            GainControlHandle::new(),
+            Some(Arc::clone(&counters_b)),
+        )
+        .unwrap();
+    pipeline_a.replace_pcm_producer(stream_a.producer);
+    pipeline_b.replace_pcm_producer(stream_b.producer);
+
+    // Stream A decodes one authenticated full block of 1.0 into its slot.
+    let mut sealer_a = MediaSealer::new(&SessionSecret::new([0xA5; 32]), context()).unwrap();
+    let packet = sealer_a.seal(0, 0, &[1]).unwrap();
+    let mut plaintext = [0_u8; 8];
+    pipeline_a
+        .receive(&packet.datagram, &mut plaintext)
+        .unwrap();
+    assert!(matches!(
+        pipeline_a.decode_next().unwrap(),
+        DecodeStep::Decoded {
+            sequence: 0,
+            samples: SAMPLES_PER_BLOCK,
+            ..
+        }
+    ));
+
+    // Stream B's network path fails: a packet sealed under a different secret
+    // cannot authenticate, so nothing reaches its slot.
+    let mut wrong_sealer = MediaSealer::new(&SessionSecret::new([0xB5; 32]), context()).unwrap();
+    let packet = wrong_sealer.seal(0, 0, &[1]).unwrap();
+    assert!(
+        pipeline_b
+            .receive(&packet.datagram, &mut plaintext)
+            .is_err()
+    );
+
+    // The first render applies both admissions, then mixes: A contributes one
+    // 1.0 block and underflows the tail chunk, while B underflows every chunk.
+    // B's failure never blocks or resets A.
+    let output = render(&mut source, 2);
+    assert!(
+        output[..SAMPLES_PER_BLOCK]
+            .iter()
+            .all(|sample| (*sample - 1.0).abs() <= TOLERANCE),
+        "healthy stream must keep rendering after the other stream fails"
+    );
+    assert!(
+        output[SAMPLES_PER_BLOCK..]
+            .iter()
+            .all(|sample| sample.abs() <= TOLERANCE)
+    );
+
+    assert_eq!(counters_a.snapshot().pcm_underflows, 1);
+    assert_eq!(counters_b.snapshot().pcm_underflows, 2);
+    assert!(counters_b.snapshot().rejected_packets >= 1);
+    assert_eq!(counters_a.snapshot().pcm_discontinuities, 0);
     assert_eq!(counters_b.snapshot().pcm_discontinuities, 0);
 }
