@@ -1,8 +1,8 @@
 //! AEAD, context, and caller-owned-output tests for protected media packets.
 
 use sonimesh_protocol::{
-    MAX_MEDIA_DATAGRAM_LEN, MAX_MEDIA_PLAINTEXT_LEN, MediaCryptoError, MediaDirection,
-    MediaKeyContext, MediaOpener, MediaSealer, SessionSecret, parse_media_packet,
+    MAX_MEDIA_DATAGRAM_LEN, MAX_MEDIA_PLAINTEXT_LEN, MEDIA_HEADER_LEN, MediaCryptoError,
+    MediaDirection, MediaKeyContext, MediaOpener, MediaSealer, SessionSecret, parse_media_packet,
 };
 
 fn context(stream_id: u32, direction: MediaDirection) -> MediaKeyContext {
@@ -113,6 +113,31 @@ fn rejects_wrong_context_and_insufficient_output_before_decode() {
         Err(MediaCryptoError::OutputTooSmall)
     );
     assert_eq!(too_small, [0xBB; 2]);
+}
+
+#[test]
+fn rejects_a_truncated_authentication_tag_before_plaintext() {
+    let secret = secret();
+    let context = context(7, MediaDirection::AndroidToDesktop);
+    let mut sealer = MediaSealer::new(&secret, context).unwrap();
+    let opener = MediaOpener::new(&secret, context).unwrap();
+    let protected = sealer.seal(0, 0, b"secret audio").unwrap();
+
+    // A peer can declare a short payload that still parses: the fixed header
+    // plus five ciphertext bytes, with the length field rewritten to match.
+    // The opener must reject with TruncatedTag before copying anything into
+    // caller-owned plaintext.
+    let mut datagram = protected.datagram;
+    datagram.truncate(MEDIA_HEADER_LEN + 5);
+    let short_payload_len = u16::try_from(datagram.len() - MEDIA_HEADER_LEN).unwrap();
+    datagram[32..34].copy_from_slice(&short_payload_len.to_be_bytes());
+
+    let mut plaintext = [0xA5_u8; 32];
+    assert_eq!(
+        opener.open(parse_media_packet(&datagram).unwrap(), &mut plaintext),
+        Err(MediaCryptoError::TruncatedTag)
+    );
+    assert_eq!(plaintext, [0xA5_u8; 32]);
 }
 
 #[test]
