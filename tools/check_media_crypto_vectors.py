@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
-"""Cross-language check of the protected media AEAD packet vector.
+"""Cross-language check of the published protected media AEAD packet vectors.
 
 The Rust media plane seals packets with ChaCha20-Poly1305 (RFC 8439) using the
-HKDF media key and the 96-bit media nonce. The test
-`matches_published_cross_language_aead_packet_vector` in
-crates/sonimesh-protocol/tests/media_crypto.rs pins the canonical datagram.
-This script reimplements ChaCha20, Poly1305, and the AEAD construction plus the
-media key/nonce/header boundaries in pure standard-library Python and verifies
-the same published datagram, so an AEAD crate, key, nonce, or header change is
-caught by an independent implementation (roadmap Phase 0D: cross-language
-crypto and packet test vectors; testing doc: published vectors for AEAD packet
+HKDF media key and the 96-bit media nonce. Both published vectors are pinned in
+crates/sonimesh-protocol/tests/media_crypto.rs
+(`matches_published_cross_language_media_vector` and
+`matches_published_cross_language_aead_packet_vector`), and vector 1 is also
+pinned by the Kotlin/JVM `MediaCryptoVectorTest`. This script reimplements
+ChaCha20, Poly1305, and the AEAD construction plus the media key/nonce/header
+boundaries in pure standard-library Python and independently reseals every
+published datagram, so an AEAD crate, key, nonce, or header change is caught by
+an independent implementation (roadmap Phase 0D: cross-language crypto and
+packet test vectors; testing doc: published vectors for AEAD packet
 authentication).
 """
 
@@ -20,6 +22,7 @@ import hmac
 import struct
 import sys
 import unittest
+from dataclasses import dataclass
 
 ROOT_SALT = b"sonimesh media root v1"
 STREAM_KEY_LABEL = b"sonimesh media stream key v1"
@@ -156,44 +159,90 @@ def aead_encrypt(key: bytes, nonce: bytes, aad: bytes, plaintext: bytes) -> tupl
     return ciphertext, poly1305(mac_data, poly_key)
 
 
-def published_datagram() -> bytes:
-    """The golden datagram pinned by the Rust AEAD vector test."""
-    return bytes.fromhex(
-        "534E4D53012A0024000000000000000700000009000000001122334455667788002C0003"
-        "337E8052F30B4E20479A0E4080A74511AA39C2DEABAFA132DBFD6B85"
-        "C7C85145360F62F4361EFE335F16149A"
-    )
+@dataclass(frozen=True)
+class PublishedVector:
+    """One published sealed media datagram plus the constants that fix it."""
+
+    name: str
+    secret: bytes
+    session_id: int
+    stream_id: int
+    key_epoch: int
+    flags: int
+    sample_timestamp: int
+    plaintext: bytes
+    datagram: bytes
+
+    def recompute(self) -> bytes:
+        """Independently reseals this vector from its documented constants."""
+        key = derive_media_key(self.secret, self.session_id, self.stream_id, self.key_epoch)
+        nonce = media_nonce(self.stream_id, self.key_epoch, 0)
+        header = encode_media_header(
+            flags=self.flags,
+            session_id=self.session_id,
+            stream_id=self.stream_id,
+            sequence=0,
+            sample_timestamp=self.sample_timestamp,
+            key_epoch=self.key_epoch,
+            payload_len=len(self.plaintext) + POLY1305_TAG_BYTES,
+        )
+        ciphertext, tag = aead_encrypt(key, nonce, header, self.plaintext)
+        return header + ciphertext + tag
 
 
-def recomputed_datagram() -> bytes:
-    """Independent recomputation of the published sealed datagram."""
-    secret = bytes([4]) * 32
-    key = derive_media_key(secret, 7, 9, 3)
-    nonce = media_nonce(9, 3, 0)
-    plaintext = b"cross-language packet vector"
-    header = encode_media_header(
-        flags=0x2A,
+PUBLISHED_VECTORS: tuple[PublishedVector, ...] = (
+    PublishedVector(
+        name="vector 1: documented pairing-style constants",
+        secret=bytes.fromhex(
+            "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+        ),
+        session_id=0x0102030405060708,
+        stream_id=0x0A0B0C0D,
+        key_epoch=0x0E0F,
+        flags=0x02,
+        sample_timestamp=960,
+        plaintext=b"SoniMesh media vector",
+        datagram=bytes.fromhex(
+            "534e4d530102002401020304050607080a0b0c0d0000000000000000000003c0"
+            "00250e0f7cce62ea960fc27cf5a6ffce2aa59343a5f12997791396ca10bdfc7c"
+            "c060c9dfe49fd67131"
+        ),
+    ),
+    PublishedVector(
+        name="vector 2: canonical cross-language packet vector",
+        secret=bytes([4]) * 32,
         session_id=7,
         stream_id=9,
-        sequence=0,
-        sample_timestamp=0x1122_3344_5566_7788,
         key_epoch=3,
-        payload_len=len(plaintext) + POLY1305_TAG_BYTES,
-    )
-    ciphertext, tag = aead_encrypt(key, nonce, header, plaintext)
-    return header + ciphertext + tag
+        flags=0x2A,
+        sample_timestamp=0x1122334455667788,
+        plaintext=b"cross-language packet vector",
+        datagram=bytes.fromhex(
+            "534E4D53012A0024000000000000000700000009000000001122334455667788"
+            "002C0003337E8052F30B4E20479A0E4080A74511AA39C2DEABAFA132DBFD6B85"
+            "C7C85145360F62F4361EFE335F16149A"
+        ),
+    ),
+)
 
 
 def validate_vectors() -> list[str]:
-    """Returns deterministic mismatches between recomputation and the pin."""
-    recomputed = recomputed_datagram()
-    published = published_datagram()
-    if recomputed != published:
-        return [
-            "media AEAD datagram does not match the published vector: "
-            f"recomputed {recomputed.hex().upper()} published {published.hex().upper()}"
-        ]
-    return []
+    """Returns deterministic mismatches between recomputation and the pins."""
+    errors: list[str] = []
+    for vector in PUBLISHED_VECTORS:
+        recomputed = vector.recompute()
+        if recomputed != vector.datagram:
+            errors.append(
+                f"{vector.name} does not match the published datagram: "
+                f"recomputed {recomputed.hex().upper()} "
+                f"published {vector.datagram.hex().upper()}"
+            )
+        expected_len = MEDIA_HEADER_LEN + len(vector.plaintext) + POLY1305_TAG_BYTES
+        if len(vector.datagram) != expected_len:
+            errors.append(
+                f"{vector.name} has length {len(vector.datagram)}, expected {expected_len}"
+            )
+    return errors
 
 
 def main() -> int:
@@ -244,9 +293,15 @@ class MediaCryptoVectorTests(unittest.TestCase):
         self.assertEqual(ciphertext, expected_ciphertext)
         self.assertEqual(tag, expected_tag)
 
-    def test_published_datagram_recomputes(self) -> None:
-        self.assertEqual(recomputed_datagram(), published_datagram())
-        self.assertEqual(len(published_datagram()), MEDIA_HEADER_LEN + 44)
+    def test_both_published_datagrams_recompute(self) -> None:
+        self.assertEqual(len(PUBLISHED_VECTORS), 2)
+        for vector in PUBLISHED_VECTORS:
+            self.assertEqual(vector.recompute(), vector.datagram, vector.name)
+            self.assertEqual(
+                len(vector.datagram),
+                MEDIA_HEADER_LEN + len(vector.plaintext) + POLY1305_TAG_BYTES,
+                vector.name,
+            )
 
 
 if __name__ == "__main__":
