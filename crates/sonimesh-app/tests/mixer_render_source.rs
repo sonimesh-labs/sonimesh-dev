@@ -437,3 +437,112 @@ fn one_stream_failure_leaves_other_slots_rendering() {
     assert_eq!(counters_a.snapshot().pcm_discontinuities, 0);
     assert_eq!(counters_b.snapshot().pcm_discontinuities, 0);
 }
+
+/// Decoder whose authenticated payload always fails to decode.
+struct FailingDecoder;
+
+/// Injected decoder failure for cross-slot isolation tests.
+#[derive(Debug, Clone, Copy)]
+struct DecodeFailure;
+
+impl std::fmt::Display for DecodeFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("injected decode failure")
+    }
+}
+
+impl std::error::Error for DecodeFailure {}
+
+impl FrameDecoder for FailingDecoder {
+    type Error = DecodeFailure;
+
+    fn decode(&mut self, _encoded: &[u8], output: &mut [f32]) -> Result<usize, Self::Error> {
+        output.fill(0.0);
+        Err(DecodeFailure)
+    }
+
+    fn decode_plc(&mut self, output: &mut [f32]) -> Result<usize, Self::Error> {
+        output.fill(0.0);
+        Ok(output.len())
+    }
+}
+
+fn failing_pipeline(
+    counters: Arc<StreamCounters>,
+) -> ReceiverStreamPipeline<FailingDecoder, 4, 8, SAMPLES_PER_BLOCK> {
+    let secret = SessionSecret::new([0xA5; 32]);
+    let (producer, _consumer) = realtime_pcm_queue::<SAMPLES_PER_BLOCK>(4).unwrap();
+    ReceiverStreamPipeline::new(&secret, context(), FailingDecoder, producer, counters, 0).unwrap()
+}
+
+#[test]
+fn one_stream_decode_failure_leaves_other_slots_rendering() {
+    let mut source = MixerRenderSource::new(&output_config()).unwrap();
+    let mut membership: MixerMembershipController<SLOTS, SAMPLES_PER_BLOCK> =
+        MixerMembershipController::new(source.membership(), 64, output_format()).unwrap();
+    let counters_a = Arc::new(StreamCounters::default());
+    let counters_b = Arc::new(StreamCounters::default());
+    let mut pipeline_a = full_block_pipeline(Arc::clone(&counters_a));
+    let mut pipeline_b = failing_pipeline(Arc::clone(&counters_b));
+
+    let stream_a = membership
+        .admit_stream(
+            output_format(),
+            GainControlHandle::new(),
+            Some(Arc::clone(&counters_a)),
+        )
+        .unwrap();
+    let stream_b = membership
+        .admit_stream(
+            output_format(),
+            GainControlHandle::new(),
+            Some(Arc::clone(&counters_b)),
+        )
+        .unwrap();
+    pipeline_a.replace_pcm_producer(stream_a.producer);
+    pipeline_b.replace_pcm_producer(stream_b.producer);
+
+    // Stream A decodes one authenticated full block of 1.0 into its slot.
+    let mut sealer_a = MediaSealer::new(&SessionSecret::new([0xA5; 32]), context()).unwrap();
+    let packet = sealer_a.seal(0, 0, &[1]).unwrap();
+    let mut plaintext = [0_u8; 8];
+    pipeline_a
+        .receive(&packet.datagram, &mut plaintext)
+        .unwrap();
+    assert!(matches!(
+        pipeline_a.decode_next().unwrap(),
+        DecodeStep::Decoded {
+            sequence: 0,
+            samples: SAMPLES_PER_BLOCK,
+            ..
+        }
+    ));
+
+    // Stream B authenticates a packet but its decoder rejects the payload, so
+    // only B's decode path resets; nothing reaches B's mixer slot.
+    let mut sealer_b = MediaSealer::new(&SessionSecret::new([0xA5; 32]), context()).unwrap();
+    let packet = sealer_b.seal(0, 0, &[1]).unwrap();
+    pipeline_b
+        .receive(&packet.datagram, &mut plaintext)
+        .unwrap();
+    assert!(pipeline_b.decode_next().is_err());
+
+    let output = render(&mut source, 2);
+    assert!(
+        output[..SAMPLES_PER_BLOCK]
+            .iter()
+            .all(|sample| (*sample - 1.0).abs() <= TOLERANCE),
+        "healthy stream must keep rendering after the other stream's decoder fails"
+    );
+    assert!(
+        output[SAMPLES_PER_BLOCK..]
+            .iter()
+            .all(|sample| sample.abs() <= TOLERANCE)
+    );
+
+    assert_eq!(counters_a.snapshot().pcm_underflows, 1);
+    assert_eq!(counters_b.snapshot().pcm_underflows, 2);
+    assert!(counters_b.snapshot().decode_errors >= 1);
+    assert!(counters_b.snapshot().stream_resets >= 1);
+    assert_eq!(counters_a.snapshot().pcm_discontinuities, 0);
+}

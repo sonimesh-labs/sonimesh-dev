@@ -168,12 +168,16 @@ Evidence produced so far:
 - app-level network-path failure injection: a rejected (unauthenticated) packet
   for one stream leaves the other slot's decoded audio rendering, with per-slot
   metrics distinguishing the failing stream;
+- app-level decoder-path failure injection: an authenticated payload that the
+  decoder rejects resets only that stream's decode path and leaves the other
+  slot's decoded audio rendering, with per-slot metrics distinguishing the
+  failing stream;
 
 Still open before Phase 2 can claim multi-source streaming: per-stream
 sample-rate and channel adaptation before the mixer queue, full integration of
-the mixer controller with the desktop session and stream manager,
-decoder-path failure injection at the app level, the roadmap's 24-hour soak,
-and hardware callback timing on actual WASAPI devices.
+the mixer controller with the desktop session and stream manager, the
+roadmap's 24-hour soak, and hardware callback timing on actual WASAPI
+devices.
 
 ## Rollback plan
 
