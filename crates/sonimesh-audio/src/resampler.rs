@@ -118,6 +118,18 @@ impl LinearResampler {
         Ok(())
     }
 
+    /// Clears interpolation phase and returns the ratio to nominal.
+    ///
+    /// A stream boundary (epoch change or hard resynchronization) invalidates
+    /// previously retained input frames; callers apply this before appending
+    /// frames from the new epoch so no stale samples are interpolated across
+    /// the boundary. Any applied ppm correction is dropped; the control domain
+    /// re-publishes it after a reset.
+    pub fn reset(&mut self) {
+        self.phase = 0.0;
+        self.ratio = self.nominal_ratio;
+    }
+
     /// Returns the input-frame capacity needed for a bounded output chunk.
     ///
     /// Two extra frames are reserved for the interpolation pair at the end of
@@ -302,6 +314,25 @@ mod tests {
 
         assert_eq!(resampler.input_frames_for_output(1), Some(27));
         assert_eq!(resampler.input_frames_for_output(usize::MAX), None);
+    }
+
+    #[test]
+    fn reset_clears_phase_and_drops_drift_correction() {
+        let mut resampler = LinearResampler::new(48_000, 48_000, 1).unwrap();
+        resampler
+            .set_rate_adjustment_ppm(MAX_DRIFT_ADJUSTMENT_PPM)
+            .unwrap();
+        let mut output = [f32::NAN; 3];
+        let _ = resampler.process(&[0.0, 1.0, 2.0, 3.0, 4.0], &mut output);
+        assert_eq!(resampler.input_frames_for_output(8), Some(11));
+
+        resampler.reset();
+
+        assert_eq!(resampler.input_frames_for_output(8), Some(10));
+        let mut output = [f32::NAN; 3];
+        let outcome = resampler.process(&[5.0, 6.0, 7.0, 8.0, 9.0], &mut output);
+        assert_eq!(outcome.unwrap().produced_output_frames, 3);
+        assert_samples(&output, &[5.0, 6.0, 7.0]);
     }
 
     fn assert_samples(actual: &[f32], expected: &[f32]) {

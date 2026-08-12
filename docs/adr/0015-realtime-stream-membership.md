@@ -137,10 +137,18 @@ commands through a `MixerMembershipHandle`, keeps a deterministic projection of
 the fixed slot table (mirroring the callback's lowest-free-slot FIFO policy),
 validates each stream's format against the mixer's output format, and carries
 each stream's gain/mute handle so the control domain can publish per-stream
-changes across the callback boundary. The Phase 2 mixer path currently requires
-each decoded stream to arrive in the output format (same sample rate and
-channel layout); per-stream sample-rate and channel adaptation before the mixer
-queue remains open work.
+changes across the callback boundary.
+
+The per-stream source-to-output conversion primitive also exists in
+`sonimesh-app`: `StreamFormatAdapter` drains decoded source-format blocks,
+applies nominal sample-rate conversion
+([ADR 0013](./0013-nominal-sample-rate-conversion.md)) followed by channel
+mapping ([ADR 0012](./0012-channel-layout-mapping.md)), and pushes bounded
+output-format blocks into the stream's mixer slot queue. It runs in the
+decode/control domain, never inside the output callback, so the callback still
+reads only pre-adapted output-format blocks. Wiring the adapter into the mixer
+admission boundary remains open work; until then the controller still requires
+each decoded stream to arrive in the output format.
 
 Evidence produced so far:
 
@@ -172,12 +180,17 @@ Evidence produced so far:
   decoder rejects resets only that stream's decode path and leaves the other
   slot's decoded audio rendering, with per-slot metrics distinguishing the
   failing stream;
+- decode-domain format adapter tests proving equal-rate passthrough,
+  upsampling and downsampling interpolation, mono/stereo channel mapping,
+  combined rate-and-channel conversion, partial-source retention across pump
+  steps, oldest-block replacement on a saturated slot queue, epoch
+  discontinuity discarding stale interpolation state, and drift-bound
+  enforcement;
 
-Still open before Phase 2 can claim multi-source streaming: per-stream
-sample-rate and channel adaptation before the mixer queue, full integration of
-the mixer controller with the desktop session and stream manager, the
-roadmap's 24-hour soak, and hardware callback timing on actual WASAPI
-devices.
+Still open before Phase 2 can claim multi-source streaming: wiring the
+per-stream format adapter into the mixer admission boundary and the desktop
+session/stream manager, the roadmap's 24-hour soak, and hardware callback
+timing on actual WASAPI devices.
 
 ## Rollback plan
 

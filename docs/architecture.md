@@ -483,8 +483,13 @@ app-side Phase 2 boundary is wired in `sonimesh-app`: `MixerRenderSource` owns
 the command-driven mixer and the bounded limiter as the realtime source, and
 `MixerMembershipController` publishes stream admission/removal and carries each
 stream's gain/mute handle from the control domain. The mixer path currently
-requires decoded streams to arrive in the output format; per-stream
-sample-rate and channel adaptation before the mixer queue remains open work.
+requires decoded streams to arrive in the output format. The per-stream
+source-to-output conversion primitive now exists in `sonimesh-app`
+(`StreamFormatAdapter`): it runs in the decode/control domain, drains decoded
+source-format blocks, applies nominal sample-rate conversion followed by
+channel mapping, and pushes bounded output-format blocks into the stream's
+slot queue. Wiring that adapter into the mixer admission boundary and the
+desktop session remains open work.
 
 Any lookahead, attack, release, or safety limiter delay must be included in the
 reported playout budget. Disconnect, mute, reconnect, and device switching use

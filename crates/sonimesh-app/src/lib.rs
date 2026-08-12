@@ -17,6 +17,7 @@ mod reconnect_grace;
 mod sample_rate_mapped_render_source;
 mod session;
 mod stream_drift_controller;
+mod stream_format_adapter;
 mod udp_receiver_pipeline;
 
 pub use channel_mapped_render_source::{ChannelMappedRenderSource, ChannelMappedRenderSourceError};
@@ -60,6 +61,7 @@ pub use sample_rate_mapped_render_source::{
 pub use session::{SessionEvent, SessionPhase, SessionState, SessionTransitionError};
 pub use sonimesh_audio::{GainControlError, GainControlHandle, GainControlState, MAX_GAIN_LINEAR};
 pub use stream_drift_controller::StreamDriftController;
+pub use stream_format_adapter::{PumpOutcome, StreamFormatAdapter, StreamFormatAdapterError};
 pub use udp_receiver_pipeline::{
     UdpPollOutcome, UdpReceiverError, UdpReceiverPipeline, UdpReceiverSetupError,
 };
