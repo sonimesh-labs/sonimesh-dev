@@ -32,7 +32,7 @@ pub use control_stream::{
     ControlOperationToken, ControlSessionToken, ControlStreamAction, ControlStreamCoordinator,
     ControlStreamError, MAX_ACTIVE_STREAMS, MediaStreamIdentity, StreamStartRequest,
 };
-pub use control_to_mixer::{ControlToMixerBridge, ControlToMixerError};
+pub use control_to_mixer::{BridgeSnapshot, ControlToMixerBridge, ControlToMixerError};
 pub use format_adapted_render_source_factory::{
     FormatAdaptedRenderSourceFactory, SourcePcmFormat, SourcePcmFormatError,
 };

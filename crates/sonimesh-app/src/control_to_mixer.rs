@@ -24,9 +24,9 @@ use sonimesh_protocol::{Capability, Envelope};
 use crate::{
     ControlOperationToken, ControlSessionToken, ControlStreamAction, ControlStreamCoordinator,
     ControlStreamError, MediaStreamIdentity, MixerAdmissionError, MixerStreamSession,
-    MixerStreamSessionError, OutputSelection, ReceiverPcmProducerInstaller,
-    ReconnectGraceObservation, SessionEvent, SessionPhase, SessionState, StartedMixerStream,
-    StreamStartRequest,
+    MixerStreamSessionError, OutputSelection, OutputSnapshot, OutputSnapshotSource,
+    ReceiverPcmProducerInstaller, ReconnectGraceObservation, SessionEvent, SessionPhase,
+    SessionState, StartedMixerStream, StreamStartRequest,
 };
 
 /// Control or mixer failure surfaced by the bridge.
@@ -53,6 +53,53 @@ impl std::error::Error for ControlToMixerError {
             Self::Control(error) => Some(error),
             Self::Mixer(error) => Some(error),
         }
+    }
+}
+
+/// Redacted low-rate bridge state safe to project into a control-surface
+/// adapter.
+///
+/// This value deliberately excludes pairing identifiers, stream identities,
+/// keys, addresses, audio frames, and diagnostics counters; it carries only
+/// the lifecycle phase, the output lifecycle, and membership counts.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct BridgeSnapshot {
+    session: SessionPhase,
+    output: OutputSnapshot,
+    output_active: bool,
+    active_streams: usize,
+    pending_mixer_commands: usize,
+}
+
+impl BridgeSnapshot {
+    /// Returns the current control-domain lifecycle phase.
+    #[must_use]
+    pub const fn session(&self) -> SessionPhase {
+        self.session
+    }
+
+    /// Returns the redacted platform output lifecycle.
+    #[must_use]
+    pub const fn output(&self) -> OutputSnapshot {
+        self.output
+    }
+
+    /// Returns whether the platform output is currently started.
+    #[must_use]
+    pub const fn output_active(&self) -> bool {
+        self.output_active
+    }
+
+    /// Returns the number of admitted mixer streams.
+    #[must_use]
+    pub const fn active_streams(&self) -> usize {
+        self.active_streams
+    }
+
+    /// Returns membership commands waiting for the next callback boundary.
+    #[must_use]
+    pub const fn pending_mixer_commands(&self) -> usize {
+        self.pending_mixer_commands
     }
 }
 
@@ -130,6 +177,18 @@ where
     #[must_use]
     pub const fn output_active(&self) -> bool {
         self.output_active
+    }
+
+    /// Returns a redacted low-rate snapshot for a control-surface adapter.
+    #[must_use]
+    pub fn snapshot(&self) -> BridgeSnapshot {
+        BridgeSnapshot {
+            session: self.state().phase(),
+            output: self.mixer.snapshot(),
+            output_active: self.output_active,
+            active_streams: self.mixer.stream_count(),
+            pending_mixer_commands: self.mixer.pending_commands(),
+        }
     }
 
     /// Borrows the control coordinator for read-only access.
@@ -464,5 +523,15 @@ const fn export_session_phase(phase: SessionPhase) -> ExportSessionPhase {
         SessionPhase::Streaming => ExportSessionPhase::Streaming,
         SessionPhase::Reconnecting => ExportSessionPhase::Reconnecting,
         SessionPhase::OutputUnavailable => ExportSessionPhase::OutputUnavailable,
+    }
+}
+
+impl<O, const SLOTS: usize, const OUTPUT_SAMPLES_PER_BLOCK: usize> OutputSnapshotSource
+    for ControlToMixerBridge<O, SLOTS, OUTPUT_SAMPLES_PER_BLOCK>
+where
+    O: AudioOutput,
+{
+    fn snapshot(&self) -> OutputSnapshot {
+        self.mixer.snapshot()
     }
 }

@@ -183,7 +183,11 @@ re-admits each one against the fresh empty slot table. The output stops and
 the lifecycle returns to `Ready` when the last stream stops. The bridge is
 control-domain code and is not part of the realtime scheduling path: the
 caller still advances adapter pumps and renders through the owned mixer
-session. The UI/Tauri command layer is not yet wired to the bridge.
+session. The UI/Tauri command layer is not yet wired to the bridge. The bridge
+also projects a redacted low-rate snapshot for a future control-surface
+adapter — lifecycle phase, output lifecycle, output-active flag, active stream
+count, and pending membership commands — and implements `OutputSnapshotSource`
+so existing UI projection code can read its output lifecycle.
 
 Evidence produced so far:
 

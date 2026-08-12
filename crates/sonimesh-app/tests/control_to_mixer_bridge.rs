@@ -736,3 +736,52 @@ fn built_bundle_redacts_endpoint_and_forbidden_bytes() {
         "session key bytes must never reach a bundle"
     );
 }
+
+#[test]
+fn snapshot_projects_low_rate_bridge_state() {
+    let counters = Arc::new(StreamCounters::default());
+    let mut bridge = bridge();
+    let token = authenticated(&mut bridge);
+    let mut pipeline = pipeline_for(1, 1, Arc::clone(&counters));
+
+    let before = bridge.snapshot();
+    assert_eq!(before.session(), SessionPhase::Ready);
+    assert!(!before.output_active());
+    assert_eq!(before.active_streams(), 0);
+    assert!(!before.output().stream_active());
+
+    start_one(&mut bridge, token, 1, 1, None, &mut pipeline);
+
+    let after = bridge.snapshot();
+    assert_eq!(after.session(), SessionPhase::Streaming);
+    assert!(after.output_active());
+    assert_eq!(after.active_streams(), 1);
+    assert!(after.output().stream_active());
+
+    let ControlStreamAction::Stop { token, identity } =
+        bridge.accept(token, &stop_for(0, 1, 1)).unwrap()
+    else {
+        panic!("expected a stream stop action");
+    };
+    bridge.execute_stop(token, identity).unwrap();
+
+    let stopped = bridge.snapshot();
+    assert_eq!(stopped.session(), SessionPhase::Ready);
+    assert!(!stopped.output_active());
+    assert_eq!(stopped.active_streams(), 0);
+    assert!(!stopped.output().stream_active());
+}
+
+#[test]
+fn bridge_projects_output_lifecycle_for_existing_sources() {
+    let counters = Arc::new(StreamCounters::default());
+    let mut bridge = bridge();
+    let token = authenticated(&mut bridge);
+    let mut pipeline = pipeline_for(1, 1, Arc::clone(&counters));
+
+    start_one(&mut bridge, token, 1, 1, None, &mut pipeline);
+
+    let output = sonimesh_app::OutputSnapshotSource::snapshot(&bridge);
+    assert!(output.stream_active());
+    assert_eq!(output.health(), OutputHealth::Healthy);
+}
