@@ -9,15 +9,21 @@ This script reimplements the derivation from the documented labels and
 boundaries in pure standard-library Python and verifies the same published
 vectors, so a Rust implementation change is caught by an independent
 implementation before it becomes a release boundary (roadmap Phase 0D:
-cross-language crypto and packet test vectors).
+cross-language crypto and packet test vectors). It also re-reads the outputs
+pinned in docs/protocol/pairing-tls-binding-vectors.md and
+`matches_published_role_proof_and_media_root_vector` in
+crates/sonimesh-protocol/src/pairing_binding.rs and verifies that the doc,
+the Rust pins, and this verifier cannot drift apart.
 """
 
 from __future__ import annotations
 
 import hashlib
 import hmac
+import re
 import sys
 import unittest
+from pathlib import Path
 
 CONTROL_PROTOCOL_VERSION = 1
 PAIRING_ID_LEN = 16
@@ -28,6 +34,12 @@ MEDIA_ROOT_LABEL = b"sonimesh pairing media root v1"
 
 ANDROID_CLIENT_ROLE = 0
 DESKTOP_SERVER_ROLE = 1
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+DOC_PATH = REPO_ROOT / "docs" / "protocol" / "pairing-tls-binding-vectors.md"
+RUST_TEST_PATH = (
+    REPO_ROOT / "crates" / "sonimesh-protocol" / "src" / "pairing_binding.rs"
+)
 
 
 def hkdf_extract(salt: bytes, ikm: bytes) -> bytes:
@@ -126,8 +138,99 @@ def validate_vectors() -> list[str]:
     return errors
 
 
+VECTOR_NAMES = ("client_proof", "server_proof", "media_root")
+
+DOC_LABEL_TO_VECTOR = {
+    "Client proof": "client_proof",
+    "Server proof": "server_proof",
+    "Media root": "media_root",
+}
+
+RUST_MARKER_TO_VECTOR = {
+    "local_proof(PairingRole::AndroidClient)": "client_proof",
+    "local_proof(PairingRole::DesktopServer)": "server_proof",
+    "media_root().unwrap().as_bytes()": "media_root",
+}
+
+
+def doc_vectors(source: str) -> dict[str, bytes]:
+    """Extracts the three expected outputs from the vector doc table."""
+    outputs_start = source.index("## Expected outputs")
+    vectors: dict[str, bytes] = {}
+    for match in re.finditer(
+        r"^\|\s*([^|\r\n]*?)\s*\|\s*`([0-9a-fA-F]+)`\s*\|",
+        source[outputs_start:],
+        re.MULTILINE,
+    ):
+        vector = DOC_LABEL_TO_VECTOR.get(match.group(1))
+        if vector is not None:
+            vectors[vector] = bytes.fromhex(match.group(2))
+    return vectors
+
+
+def rust_test_vectors(source: str) -> dict[str, bytes]:
+    """Extracts the three pinned byte arrays from the Rust unit test."""
+    function_start = source.index(
+        "fn matches_published_role_proof_and_media_root_vector("
+    )
+    function_end = source.index("}", source.index("assert_eq!", function_start))
+    vectors: dict[str, bytes] = {}
+    for marker, vector in RUST_MARKER_TO_VECTOR.items():
+        marker_start = source.index(marker, function_start)
+        bracket_start = source.index("[", marker_start)
+        bracket_end = source.index("]", bracket_start)
+        body = re.sub(r"//[^\r\n]*", "", source[bracket_start + 1 : bracket_end])
+        hex_tokens = re.findall(r"0x([0-9a-fA-F]{2})", body)
+        vectors[vector] = bytes(int(token, 16) for token in hex_tokens)
+    return vectors
+
+
+def cross_source_errors(
+    doc_source: str | None = None, rust_source: str | None = None
+) -> list[str]:
+    """Checks the doc and Rust pins against the Python pins.
+
+    Reads the pinned sources when not supplied, so the published doc
+    outputs, the Rust unit-test pins, and the Python pins can never drift
+    apart without failing CI.
+    """
+    errors: list[str] = []
+    try:
+        if doc_source is None:
+            doc_source = DOC_PATH.read_text(encoding="utf-8")
+        if rust_source is None:
+            rust_source = RUST_TEST_PATH.read_text(encoding="utf-8")
+    except OSError as exc:
+        return [f"cannot read pairing vector sources: {exc}"]
+
+    doc = doc_vectors(doc_source)
+    rust = rust_test_vectors(rust_source)
+    if set(doc) != set(VECTOR_NAMES):
+        errors.append("pairing vector doc must pin all three expected outputs")
+    if set(rust) != set(VECTOR_NAMES):
+        errors.append("Rust pairing test must pin all three vectors")
+    for vector in VECTOR_NAMES:
+        expected = published_vectors()[vector]
+        doc_value = doc.get(vector)
+        if doc_value is not None and doc_value != expected:
+            errors.append(
+                f"pairing {vector} doc value differs from the Python pin: "
+                f"doc {doc_value.hex().upper()} "
+                f"pin {expected.hex().upper()}"
+            )
+        rust_value = rust.get(vector)
+        if rust_value is not None and rust_value != expected:
+            errors.append(
+                f"pairing {vector} Rust pin differs from the Python pin: "
+                f"rust {rust_value.hex().upper()} "
+                f"pin {expected.hex().upper()}"
+            )
+    return errors
+
+
 def main() -> int:
     errors = validate_vectors()
+    errors.extend(cross_source_errors())
     for error in errors:
         print(error, file=sys.stderr)
     if errors:
@@ -183,6 +286,55 @@ class PairingVectorTests(unittest.TestCase):
                 prk, CONTROL_PROTOCOL_VERSION, bytes(range(PAIRING_ID_LEN)), ANDROID_CLIENT_ROLE
             )
             self.assertNotEqual(proof, base, f"pairing id byte {index}")
+
+    def test_doc_parser_round_trips_all_expected_outputs(self) -> None:
+        source = DOC_PATH.read_text(encoding="utf-8")
+        vectors = doc_vectors(source)
+        self.assertEqual(set(vectors), set(published_vectors()))
+        for name, expected in published_vectors().items():
+            self.assertEqual(vectors[name], expected, name)
+
+    def test_doc_parser_detects_a_tampered_value(self) -> None:
+        source = DOC_PATH.read_text(encoding="utf-8")
+        tampered = source.replace("c274dfe7", "c274dfe6", 1)
+        vectors = doc_vectors(tampered)
+        self.assertNotEqual(
+            vectors["client_proof"], published_vectors()["client_proof"]
+        )
+
+    def test_rust_parser_extracts_all_three_pins(self) -> None:
+        source = RUST_TEST_PATH.read_text(encoding="utf-8")
+        vectors = rust_test_vectors(source)
+        self.assertEqual(set(vectors), set(published_vectors()))
+        for name, expected in published_vectors().items():
+            self.assertEqual(vectors[name], expected, name)
+
+    def test_rust_parser_detects_a_tampered_pin(self) -> None:
+        source = RUST_TEST_PATH.read_text(encoding="utf-8")
+        tampered = source.replace(
+            "0xC2, 0x74, 0xDF, 0xE7", "0xC2, 0x74, 0xDF, 0xE6", 1
+        )
+        vectors = rust_test_vectors(tampered)
+        self.assertNotEqual(
+            vectors["client_proof"], published_vectors()["client_proof"]
+        )
+
+    def test_cross_source_detects_doc_and_rust_drift(self) -> None:
+        doc_source = DOC_PATH.read_text(encoding="utf-8")
+        rust_source = RUST_TEST_PATH.read_text(encoding="utf-8")
+        self.assertEqual(cross_source_errors(doc_source, rust_source), [])
+        tampered_doc = doc_source.replace("c274dfe7", "c274dfe6", 1)
+        errors = cross_source_errors(tampered_doc, rust_source)
+        self.assertTrue(
+            any("client_proof" in error and "Python pin" in error for error in errors)
+        )
+        tampered_rust = rust_source.replace(
+            "0xC2, 0x74, 0xDF, 0xE7", "0xC2, 0x74, 0xDF, 0xE6", 1
+        )
+        errors = cross_source_errors(doc_source, tampered_rust)
+        self.assertTrue(
+            any("client_proof" in error and "Rust pin" in error for error in errors)
+        )
 
 
 if __name__ == "__main__":
