@@ -3,6 +3,7 @@
 mod clock;
 mod control_scenario;
 mod drift_scenario;
+mod multi_stream_scenario;
 mod network;
 mod opus_experiment;
 mod profile;
@@ -15,6 +16,10 @@ pub use control_scenario::{
 };
 pub use drift_scenario::{
     DriftScenarioConfig, DriftScenarioError, DriftSimulationReport, simulate_drift,
+};
+pub use multi_stream_scenario::{
+    MAX_MULTI_STREAM_STREAMS, MIN_MULTI_STREAM_STREAMS, MultiStreamScenarioConfig,
+    MultiStreamScenarioError, MultiStreamSimulationReport, simulate_multi_stream,
 };
 pub use network::{Delivery, NetworkStats, SendOutcome, VirtualNetwork};
 pub use opus_experiment::{

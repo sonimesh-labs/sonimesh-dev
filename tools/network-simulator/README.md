@@ -14,6 +14,12 @@ a physical latency claim.
   payload byte counts explicitly.
 - `ScenarioConfig` drives sender and playout deadlines independently with a
   protocol-bounded complete media datagram size and negotiated 10/20 ms frames.
+- the multi-stream scenario drives two to four source streams over one
+  shared virtual link with one profile: burst loss and bandwidth
+  serialization correlate across streams, while each stream keeps an
+  independent jitter buffer, send cadence, and playout deadline; the
+  report carries shared link counters plus per-stream jitter and PLC
+  counters.
 - `DriftScenarioConfig` closes an integerized PCM-occupancy loop around the
   bounded ppm controller; it is not an ASRC or device-clock emulator.
 - the media-pipeline integration test crosses protocol parsing, ChaCha20-
