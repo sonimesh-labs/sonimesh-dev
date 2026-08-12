@@ -1,11 +1,19 @@
-# Media Crypto Test Vector
+# Media Crypto Test Vectors
 
-This vector fixes the version-one media key derivation, nonce layout, header
+These vectors fix the version-one media key derivation, nonce layout, header
 encoding, associated data, ChaCha20-Poly1305 ciphertext, and tag in one
-cross-language assertion. It uses an intentionally public test secret only.
-It is not a pairing transcript, production key, or evidence of Android support.
+cross-language assertion. Each vector uses an intentionally public test secret
+only. They are not pairing transcripts, production keys, or evidence of Android
+support.
 
-## Inputs
+HKDF uses the salt and info label defined by
+[ADR 0005](../adr/0005-udp-media-protection.md). The resulting 96-bit nonce and
+the fixed 36-byte header, which is the AEAD associated data, are listed for each
+vector below.
+
+## Vector 1: documented pairing-style constants
+
+### Inputs
 
 | Field | Value |
 | --- | --- |
@@ -20,11 +28,9 @@ It is not a pairing transcript, production key, or evidence of Android support.
 | Sample timestamp | `960` |
 | Plaintext UTF-8 | `SoniMesh media vector` |
 
-HKDF uses the salt and info label defined by
-[ADR 0005](../adr/0005-udp-media-protection.md). The resulting 96-bit nonce is
-`0e0f00000a0b0c0d00000000`. The fixed header is the AEAD associated data.
+The 96-bit nonce is `0e0f00000a0b0c0d00000000`.
 
-## Expected protected datagram
+### Expected protected datagram
 
 ```text
 534e4d530102002401020304050607080a0b0c0d0000000000000000000003c0
@@ -33,17 +39,55 @@ c060c9dfe49fd67131
 ```
 
 The first 36 bytes are the header; the final 37 bytes are the 21-byte encrypted
-plaintext followed by the 16-byte Poly1305 tag. Implementations must reject a
-modified byte in either part and must not pass any plaintext to an Opus decoder
-until authentication succeeds.
+plaintext followed by the 16-byte Poly1305 tag.
+
+## Vector 2: canonical cross-language packet vector
+
+### Inputs
+
+| Field | Value |
+| --- | --- |
+| Control-session secret | `0404040404040404040404040404040404040404040404040404040404040404` |
+| Protocol version | `1` |
+| Direction | Android-to-desktop (`0`) |
+| Session ID | `7` |
+| Stream ID | `9` |
+| Key epoch | `3` |
+| Sequence | `0` |
+| Flags | `0x2a` |
+| Sample timestamp | `0x1122334455667788` |
+| Plaintext UTF-8 | `cross-language packet vector` |
+
+The 96-bit nonce is `000300000000000900000000`.
+
+### Expected protected datagram
+
+```text
+534e4d53012a0024000000000000000700000009000000001122334455667788
+002c0003337e8052f30b4e20479a0e4080a74511aa39c2deabafa132dbfd6b85
+c7c85145360f62f4361efe335f16149a
+```
+
+The first 36 bytes are the header; the final 44 bytes are the 28-byte encrypted
+plaintext followed by the 16-byte Poly1305 tag.
 
 ## Verification status
 
-The Rust `matches_published_cross_language_media_vector` integration test and
-the Kotlin/JVM `MediaCryptoVectorTest` both reproduce the HKDF info layout,
-nonce, fixed header, associated data, ciphertext, and Poly1305 tag above. The
-Kotlin/JVM test also decrypts the published datagram and rejects independently
-tampered header and ciphertext bytes.
+Implementations must reject a modified byte in either part of either datagram
+and must not pass any plaintext to an Opus decoder until authentication
+succeeds.
+
+The Rust integration tests `matches_published_cross_language_media_vector`
+(vector 1) and `matches_published_cross_language_aead_packet_vector` (vector 2)
+in `crates/sonimesh-protocol/tests/media_crypto.rs` reproduce the HKDF info
+layout, nonce, fixed header, associated data, ciphertext, and Poly1305 tag of
+both vectors. The Kotlin/JVM `MediaCryptoVectorTest` pins vector 1 and also
+decrypts the published datagram and rejects independently tampered header and
+ciphertext bytes. The `tools/check_media_crypto_vectors.py` verifier
+independently reseals both vectors from the documented constants using a pure
+standard-library implementation of RFC 8439 ChaCha20-Poly1305 that is itself
+validated against the RFC vectors, so a label, salt, key, nonce, or header
+change on either side fails CI.
 
 The Kotlin test runs as a host JVM unit test with the configured JDK security
 provider. It does not prove Android runtime provider behavior, device support,

@@ -116,7 +116,8 @@ derivation and the 96-bit nonce layout), `check_control_frame_vectors.py`
 (Protobuf wire encoding of all five control payloads),
 `check_media_header_vectors.py` (the fixed 36-byte media header), and
 `check_media_crypto_vectors.py` (RFC 8439 ChaCha20-Poly1305 AEAD packet
-sealing: derived media key, nonce, authenticated header, ciphertext, and tag).
+sealing for both published vectors: derived media key, nonce, authenticated
+header, ciphertext, and tag).
 Each script runs a `--self-test` mode and a check mode in CI; a schema
 renumbering, layout reordering, label, salt, or byte-order change on either
 side fails the job.
