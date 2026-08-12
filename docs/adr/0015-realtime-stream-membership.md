@@ -46,6 +46,19 @@ two-to-four source scope.
 - **No unsafe code is required.** Fixed slots are plain preallocated arrays;
   the callback holds no interior-mutable custom structure.
 
+### Membership handoff boundary
+
+The callback owns the fixed slot table; the control domain publishes bounded
+membership changes through a lock-free command queue. `CommandDrivenMixer`
+(sonimesh-audio) drains the queue at the start of each render — at most
+`MAX_MIXER_COMMAND_QUEUE` lock-free pops — applies inserts and removes to its
+slots without allocating or locking, then mixes. A published change takes
+effect on the next output callback; the ADR 0002 epoch markers still retire
+stale blocks before the callback reads a newly inserted consumer. The control
+domain fails closed when the queue is full and must retry with a fresh
+endpoint. Removing a slot returns no consumer to the control domain: the
+control domain drops its producer and the callback drops the slot's consumer.
+
 ### Alternatives considered
 
 - **Preallocated snapshot/RCU:** an atomic pointer to an immutable snapshot of
@@ -110,6 +123,12 @@ records underflow, refill-limit, and discontinuity events into without locking,
 so per-stream quality metrics can distinguish the failing slot. The primitive
 composes with the bounded-output limiter as the final output stage.
 
+The membership handoff boundary also exists: `CommandDrivenMixer` owns a
+fixed-slot table and shares a bounded lock-free command queue with a
+`MixerMembershipHandle`. The control domain publishes insert/remove commands;
+the callback drains them at the start of each render and applies them without
+allocating or locking, so membership advances at callback granularity.
+
 Evidence produced so far:
 
 - fixed-order rendering with a full slot table and per-slot fade/isolation unit
@@ -123,7 +142,11 @@ Evidence produced so far:
   sequences against an independent active-set model that also verifies each
   slot's underflow counter against the model under over-run renders, plus a
   limiter-ceiling composition test;
-- admission overflow fails closed at the fixed bound.
+- admission overflow fails closed at the fixed bound;
+- command-boundary unit tests proving FIFO drain within one render,
+  once-per-callback application, fail-closed on a full command queue, fast
+  rejection of out-of-range removes, tolerance of stale removes, and a
+  concurrent-insert smoke test.
 
 Still open before Phase 2 can claim multi-source streaming: app-side control
 domain wiring (activating slots from decoded streams and publishing gain/mute

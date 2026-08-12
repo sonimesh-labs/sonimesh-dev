@@ -475,7 +475,10 @@ table, iterates active slots in fixed order, and fails closed at admission when
 the table is full. Each slot owns its per-stream gain and mute state, published
 through a lock-free `GainControlHandle` and ramped inside the callback, and can
 carry an optional per-slot `StreamCounters` endpoint that the callback records
-underflow, refill-limit, and discontinuity events into without locking; the
+underflow, refill-limit, and discontinuity events into without locking.
+Membership changes publish through a bounded lock-free command queue
+(`CommandDrivenMixer` + `MixerMembershipHandle`): the callback drains and
+applies them at the start of each render without allocating or locking; the
 app-side multi-stream render path (wiring decoded streams into slots and
 publishing control-domain gain/mute changes) is not wired yet.
 

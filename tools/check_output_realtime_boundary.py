@@ -3,7 +3,8 @@
 
 The guarded functions are the Windows output adapter callback shells, the
 app-crate `RenderSource::render` implementations and their render-path helpers,
-and the fixed-slot mixer's callback entry points in `sonimesh-audio`. All of
+and the fixed-slot mixer's callback entry points in `sonimesh-audio` (including
+the membership command drain that runs at the start of each render). All of
 them run inside the output callback, so they must avoid allocation, locking,
 logging, blocking I/O, and device enumeration.
 """
@@ -54,6 +55,14 @@ TARGETS = (
     FunctionTarget(
         Path("crates/sonimesh-audio/src/fixed_slot_mixer.rs"),
         "apply_slot_gain",
+    ),
+    FunctionTarget(
+        Path("crates/sonimesh-audio/src/mixer_membership.rs"),
+        "render",
+    ),
+    FunctionTarget(
+        Path("crates/sonimesh-audio/src/mixer_membership.rs"),
+        "drain_pending",
     ),
     FunctionTarget(
         Path("crates/sonimesh-app/src/channel_mapped_render_source.rs"),
@@ -213,6 +222,25 @@ class OutputRealtimeBoundaryTests(unittest.TestCase):
             (
                 Path("crates/sonimesh-audio/src/fixed_slot_mixer.rs"),
                 "apply_slot_gain",
+            ),
+        }
+
+    def test_membership_boundary_render_path_is_guarded(self) -> None:
+        membership_targets = {
+            (target.path, target.function)
+            for target in TARGETS
+            if target.path
+            == Path("crates/sonimesh-audio/src/mixer_membership.rs")
+        }
+
+        assert membership_targets == {
+            (
+                Path("crates/sonimesh-audio/src/mixer_membership.rs"),
+                "render",
+            ),
+            (
+                Path("crates/sonimesh-audio/src/mixer_membership.rs"),
+                "drain_pending",
             ),
         }
 
