@@ -243,6 +243,112 @@ fn rejects_empty_decoder_output_without_queuing_a_block() {
     assert!(output.iter().all(|sample| sample.abs() < f32::EPSILON));
 }
 
+struct FailFirstDecoder {
+    fail_decode: bool,
+    fail_plc: bool,
+}
+
+impl FrameDecoder for FailFirstDecoder {
+    type Error = TestDecodeError;
+
+    fn decode(&mut self, encoded: &[u8], output: &mut [f32]) -> Result<usize, Self::Error> {
+        if self.fail_decode {
+            self.fail_decode = false;
+            return Err(TestDecodeError);
+        }
+        output[..2].copy_from_slice(&[f32::from(encoded[0]), 0.5]);
+        Ok(2)
+    }
+
+    fn decode_plc(&mut self, output: &mut [f32]) -> Result<usize, Self::Error> {
+        if self.fail_plc {
+            self.fail_plc = false;
+            return Err(TestDecodeError);
+        }
+        output[..2].copy_from_slice(&[-1.0, -1.0]);
+        Ok(2)
+    }
+}
+
+#[test]
+fn decoder_failure_does_not_queue_pcm_and_the_worker_recovers() {
+    let (producer, mut consumer) = realtime_pcm_queue::<4>(4).unwrap();
+    let mut worker = StreamDecodeWorker::<FailFirstDecoder, 4, 8, 4>::new(
+        FailFirstDecoder {
+            fail_decode: true,
+            fail_plc: false,
+        },
+        producer,
+        10,
+    );
+    worker.admit(10, 9_600, &[3]).unwrap();
+    worker.admit(11, 10_560, &[4]).unwrap();
+
+    assert_eq!(
+        worker.decode_next(),
+        Err(DecodeWorkerError::Decoder(TestDecodeError))
+    );
+    assert_eq!(worker.queued_blocks(), 0);
+
+    let mut output = [f32::NAN; 4];
+    assert!(matches!(
+        consumer.pop_into(&mut output),
+        RealtimePcmPopOutcome::Underflow { .. }
+    ));
+    assert!(output.iter().all(|sample| sample.abs() < f32::EPSILON));
+
+    assert!(matches!(
+        worker.decode_next().unwrap(),
+        DecodeStep::Decoded { sequence: 11, .. }
+    ));
+    assert!(matches!(
+        consumer.pop_into(&mut output),
+        RealtimePcmPopOutcome::Filled { samples: 2, .. }
+    ));
+    assert_eq!(&output[..2], &[4.0, 0.5]);
+}
+
+#[test]
+fn plc_failure_does_not_queue_pcm_and_the_worker_recovers() {
+    let (producer, mut consumer) = realtime_pcm_queue::<4>(4).unwrap();
+    let mut worker = StreamDecodeWorker::<FailFirstDecoder, 4, 8, 4>::new(
+        FailFirstDecoder {
+            fail_decode: false,
+            fail_plc: true,
+        },
+        producer,
+        10,
+    );
+    worker.admit(10, 9_600, &[3]).unwrap();
+    worker.admit(12, 11_520, &[5]).unwrap();
+
+    assert!(matches!(
+        worker.decode_next().unwrap(),
+        DecodeStep::Decoded { sequence: 10, .. }
+    ));
+    assert_eq!(
+        worker.decode_next(),
+        Err(DecodeWorkerError::Decoder(TestDecodeError))
+    );
+    assert_eq!(worker.queued_blocks(), 1);
+    assert!(matches!(
+        worker.decode_next().unwrap(),
+        DecodeStep::Decoded { sequence: 12, .. }
+    ));
+
+    let mut output = [f32::NAN; 4];
+    assert!(matches!(
+        consumer.pop_into(&mut output),
+        RealtimePcmPopOutcome::Filled { samples: 2, .. }
+    ));
+    assert_eq!(&output[..2], &[3.0, 0.5]);
+    assert!(matches!(
+        consumer.pop_into(&mut output),
+        RealtimePcmPopOutcome::Filled { samples: 2, .. }
+    ));
+    assert_eq!(&output[..2], &[5.0, 0.5]);
+}
+
 #[test]
 fn new_decode_epoch_discards_retired_jitter_and_pcm() {
     let (producer, mut consumer) = realtime_pcm_queue::<4>(4).unwrap();
@@ -383,6 +489,55 @@ fn jitter_resync_preserves_the_new_frame_and_retires_previous_pcm() {
         }
     ));
     assert!((output[0] - 3.0).abs() < f32::EPSILON);
+}
+
+#[test]
+fn replace_pcm_producer_clears_decode_state_and_uses_the_new_queue() {
+    let resets = Arc::new(AtomicUsize::new(0));
+    let (producer_a, mut consumer_a) = realtime_pcm_queue::<4>(4).unwrap();
+    let mut worker = StreamDecodeWorker::<ResetTrackingDecoder, 4, 8, 4>::new(
+        ResetTrackingDecoder {
+            resets: Arc::clone(&resets),
+        },
+        producer_a,
+        10,
+    );
+    worker.admit(10, 9_600, &[1]).unwrap();
+    worker.admit(11, 10_560, &[2]).unwrap();
+    assert!(matches!(
+        worker.decode_next().unwrap(),
+        DecodeStep::Decoded { sequence: 10, .. }
+    ));
+    assert_eq!(worker.queued_blocks(), 1);
+
+    let (producer_b, mut consumer_b) = realtime_pcm_queue::<4>(4).unwrap();
+    worker.replace_pcm_producer(producer_b);
+
+    assert_eq!(worker.queued_blocks(), 0);
+    assert_eq!(resets.load(Ordering::Relaxed), 1);
+    assert_eq!(worker.decode_next().unwrap(), DecodeStep::NotReady);
+
+    worker.admit(20, 19_200, &[3]).unwrap();
+    assert!(matches!(
+        worker.decode_next().unwrap(),
+        DecodeStep::Decoded { sequence: 20, .. }
+    ));
+    let mut output = [f32::NAN; 4];
+    assert!(matches!(
+        consumer_b.pop_into(&mut output),
+        RealtimePcmPopOutcome::Filled { samples: 1, .. }
+    ));
+    assert!((output[0] - 3.0).abs() < f32::EPSILON);
+
+    assert!(matches!(
+        consumer_a.pop_into(&mut output),
+        RealtimePcmPopOutcome::Filled { samples: 1, .. }
+    ));
+    assert!((output[0] - 1.0).abs() < f32::EPSILON);
+    assert!(matches!(
+        consumer_a.pop_into(&mut output),
+        RealtimePcmPopOutcome::Underflow { .. }
+    ));
 }
 
 #[test]
