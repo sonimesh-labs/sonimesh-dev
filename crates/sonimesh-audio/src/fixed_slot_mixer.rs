@@ -10,6 +10,7 @@
 use std::fmt;
 
 use crate::gain::GainSmoother;
+use crate::gain_control::GainControlHandle;
 use crate::realtime_queue::{MAX_PCM_QUEUE_BLOCKS, RealtimePcmConsumer, RealtimePcmPopOutcome};
 
 /// Recommended slot count: headroom above the roadmap's four-source maximum.
@@ -20,6 +21,9 @@ pub const DEFAULT_MIXER_SLOTS: usize = 8;
 
 /// Samples used for the per-slot discontinuity fade.
 const DISCONTINUITY_FADE_SAMPLES: u16 = 128;
+
+/// Samples used for a per-slot gain or mute ramp.
+const GAIN_RAMP_SAMPLES: u16 = 128;
 
 /// Failure while constructing a [`FixedSlotMixer`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -66,24 +70,31 @@ impl fmt::Display for MixerError {
 
 impl std::error::Error for MixerError {}
 
-/// One preallocated stream slot: its consumer endpoint, block scratch, and
-/// per-slot discontinuity fade.
+/// One preallocated stream slot: its consumer endpoint, block scratch,
+/// per-slot discontinuity fade, and per-slot gain and mute state.
 struct Slot<const SAMPLES_PER_BLOCK: usize> {
     consumer: RealtimePcmConsumer<SAMPLES_PER_BLOCK>,
     scratch: [f32; SAMPLES_PER_BLOCK],
     scratch_len: usize,
     scratch_offset: usize,
     fade: GainSmoother,
+    gain_handle: GainControlHandle,
+    gain_smoother: GainSmoother,
 }
 
 impl<const SAMPLES_PER_BLOCK: usize> Slot<SAMPLES_PER_BLOCK> {
-    fn new(consumer: RealtimePcmConsumer<SAMPLES_PER_BLOCK>) -> Self {
+    fn new(
+        consumer: RealtimePcmConsumer<SAMPLES_PER_BLOCK>,
+        gain_handle: GainControlHandle,
+    ) -> Self {
         Self {
             consumer,
             scratch: [0.0; SAMPLES_PER_BLOCK],
             scratch_len: 0,
             scratch_offset: 0,
             fade: GainSmoother::new(1.0),
+            gain_handle,
+            gain_smoother: GainSmoother::new(1.0),
         }
     }
 
@@ -123,18 +134,39 @@ impl<const SAMPLES_PER_BLOCK: usize> Slot<SAMPLES_PER_BLOCK> {
 
             let available = self.scratch_len - self.scratch_offset;
             let copy_len = available.min(target.len() - written);
-            self.fade
-                .apply(&mut self.scratch[self.scratch_offset..self.scratch_offset + copy_len]);
+            let chunk = &mut self.scratch[self.scratch_offset..self.scratch_offset + copy_len];
+            self.fade.apply(chunk);
+            apply_slot_gain(&self.gain_handle, &mut self.gain_smoother, chunk);
             for (target_sample, scratch_sample) in target[written..written + copy_len]
                 .iter_mut()
-                .zip(&self.scratch[self.scratch_offset..self.scratch_offset + copy_len])
+                .zip(chunk.iter())
             {
-                *target_sample += scratch_sample;
+                *target_sample += *scratch_sample;
             }
             written += copy_len;
             self.scratch_offset += copy_len;
         }
     }
+}
+
+/// Applies the published per-slot gain or mute target with a bounded block
+/// ramp. The ramp restarts only when the target changes, so an unchanged
+/// gain never resets a partial ramp or prevents convergence. The handle and
+/// smoother come from the same slot, so the callback applies gain with
+/// disjoint borrows and never takes a lock.
+fn apply_slot_gain(
+    gain_handle: &GainControlHandle,
+    gain_smoother: &mut GainSmoother,
+    samples: &mut [f32],
+) {
+    let state = gain_handle.snapshot();
+    let target = if state.muted { 0.0 } else { state.gain };
+    // Both values originate from the handle's atomic bit storage, so a
+    // bit-exact comparison is the same as an exact value comparison.
+    if target.to_bits() != gain_smoother.target().to_bits() {
+        gain_smoother.set_target(target, GAIN_RAMP_SAMPLES);
+    }
+    gain_smoother.apply(samples);
 }
 
 /// Fixed preallocated slot mixer for the realtime output callback.
@@ -177,7 +209,10 @@ impl<const SLOTS: usize, const SAMPLES_PER_BLOCK: usize> FixedSlotMixer<SLOTS, S
 
     /// Activates one stream at the lowest free slot, returning its index.
     ///
-    /// This is control-domain work; it never allocates and never takes a lock.
+    /// The supplied [`GainControlHandle`] becomes the slot's per-stream gain
+    /// and mute state; the control domain keeps a clone to publish changes
+    /// that the callback reads without locking. This is control-domain work;
+    /// it never allocates and never takes a lock.
     ///
     /// # Errors
     ///
@@ -186,10 +221,11 @@ impl<const SLOTS: usize, const SAMPLES_PER_BLOCK: usize> FixedSlotMixer<SLOTS, S
     pub fn insert(
         &mut self,
         consumer: RealtimePcmConsumer<SAMPLES_PER_BLOCK>,
+        gain: GainControlHandle,
     ) -> Result<usize, MixerError> {
         for (index, slot) in self.slots.iter_mut().enumerate() {
             if slot.is_none() {
-                *slot = Some(Slot::new(consumer));
+                *slot = Some(Slot::new(consumer, gain));
                 self.active += 1;
                 return Ok(index);
             }
@@ -260,6 +296,7 @@ impl<const SLOTS: usize, const SAMPLES_PER_BLOCK: usize> FixedSlotMixer<SLOTS, S
 #[cfg(test)]
 mod tests {
     use super::{DEFAULT_MIXER_SLOTS, FixedSlotMixer, MixerConfigError, MixerError};
+    use crate::gain_control::GainControlHandle;
     use crate::realtime_queue::realtime_pcm_queue;
     use crate::{PeakLimiter, RealtimePcmProducer, RealtimePcmPushOutcome};
 
@@ -319,7 +356,10 @@ mod tests {
             let (mut producer, consumer) = realtime_pcm_queue::<SAMPLES_PER_BLOCK>(4).unwrap();
             push_constant(&mut producer, value_for_slot(slot), 2);
             producers.push(producer);
-            assert_eq!(mixer.insert(consumer).unwrap(), slot);
+            assert_eq!(
+                mixer.insert(consumer, GainControlHandle::new()).unwrap(),
+                slot
+            );
         }
         assert_eq!(mixer.active(), 3);
         for (index, producer) in producers.iter_mut().enumerate() {
@@ -342,10 +382,13 @@ mod tests {
         let mut mixer: FixedSlotMixer<2, SAMPLES_PER_BLOCK> = FixedSlotMixer::new().unwrap();
         for _ in 0..2 {
             let (_, consumer) = realtime_pcm_queue::<SAMPLES_PER_BLOCK>(2).unwrap();
-            assert!(mixer.insert(consumer).is_ok());
+            assert!(mixer.insert(consumer, GainControlHandle::new()).is_ok());
         }
         let (_, consumer) = realtime_pcm_queue::<SAMPLES_PER_BLOCK>(2).unwrap();
-        assert_eq!(mixer.insert(consumer), Err(MixerError::SlotFull));
+        assert_eq!(
+            mixer.insert(consumer, GainControlHandle::new()),
+            Err(MixerError::SlotFull)
+        );
         assert_eq!(mixer.active(), 2);
     }
 
@@ -354,7 +397,7 @@ mod tests {
         let mut mixer: FixedSlotMixer<DEFAULT_MIXER_SLOTS, SAMPLES_PER_BLOCK> =
             FixedSlotMixer::new().unwrap();
         let (_, consumer) = realtime_pcm_queue::<SAMPLES_PER_BLOCK>(2).unwrap();
-        let index = mixer.insert(consumer).unwrap();
+        let index = mixer.insert(consumer, GainControlHandle::new()).unwrap();
         assert_eq!(index, 0);
 
         let returned = mixer.remove(index).unwrap();
@@ -363,7 +406,7 @@ mod tests {
         assert_eq!(mixer.active(), 0);
 
         let (_, consumer) = realtime_pcm_queue::<SAMPLES_PER_BLOCK>(2).unwrap();
-        let again = mixer.insert(consumer).unwrap();
+        let again = mixer.insert(consumer, GainControlHandle::new()).unwrap();
         assert_eq!(again, index);
     }
 
@@ -388,9 +431,9 @@ mod tests {
         let (mut producer_c, consumer_c) = realtime_pcm_queue::<SAMPLES_PER_BLOCK>(4).unwrap();
         push_constant(&mut producer_a, 1.0, 4);
         push_constant(&mut producer_c, 3.0, 4);
-        mixer.insert(consumer_a).unwrap();
-        mixer.insert(consumer_b).unwrap();
-        mixer.insert(consumer_c).unwrap();
+        mixer.insert(consumer_a, GainControlHandle::new()).unwrap();
+        mixer.insert(consumer_b, GainControlHandle::new()).unwrap();
+        mixer.insert(consumer_c, GainControlHandle::new()).unwrap();
 
         let mut output = [0.0; 32];
         mixer.render(&mut output);
@@ -410,8 +453,8 @@ mod tests {
         producer_a.begin_epoch();
         push_constant(&mut producer_a, 1.0, 2);
         push_constant(&mut producer_b, 2.0, 1);
-        mixer.insert(consumer_a).unwrap();
-        mixer.insert(consumer_b).unwrap();
+        mixer.insert(consumer_a, GainControlHandle::new()).unwrap();
+        mixer.insert(consumer_b, GainControlHandle::new()).unwrap();
 
         let mut output = [0.0; SAMPLES_PER_BLOCK];
         mixer.render(&mut output);
@@ -432,7 +475,7 @@ mod tests {
         let (mut producer, consumer) = realtime_pcm_queue::<SAMPLES_PER_BLOCK>(4).unwrap();
         assert_eq!(producer.push(&[1.0; 6]), RealtimePcmPushOutcome::Inserted);
         assert_eq!(producer.push(&[1.0; 6]), RealtimePcmPushOutcome::Inserted);
-        mixer.insert(consumer).unwrap();
+        mixer.insert(consumer, GainControlHandle::new()).unwrap();
 
         let mut first = [0.0; 10];
         mixer.render(&mut first);
@@ -450,7 +493,7 @@ mod tests {
         for _ in 0..DEFAULT_MIXER_SLOTS {
             let (mut producer, consumer) = realtime_pcm_queue::<SAMPLES_PER_BLOCK>(4).unwrap();
             push_constant(&mut producer, 0.3, 4);
-            mixer.insert(consumer).unwrap();
+            mixer.insert(consumer, GainControlHandle::new()).unwrap();
         }
 
         let mut output = [0.0; 32];
@@ -466,5 +509,58 @@ mod tests {
                 .all(|sample| sample.is_finite() && sample.abs() <= 1.0 + 1e-6)
         );
         assert!(output.iter().all(|sample| (*sample - 1.0).abs() < 1e-6));
+    }
+
+    #[test]
+    fn per_slot_gain_scales_only_that_slot() {
+        let mut mixer: FixedSlotMixer<DEFAULT_MIXER_SLOTS, SAMPLES_PER_BLOCK> =
+            FixedSlotMixer::new().unwrap();
+        let (mut producer_a, consumer_a) = realtime_pcm_queue::<SAMPLES_PER_BLOCK>(24).unwrap();
+        let (mut producer_b, consumer_b) = realtime_pcm_queue::<SAMPLES_PER_BLOCK>(24).unwrap();
+        push_constant(&mut producer_a, 1.0, 24);
+        push_constant(&mut producer_b, 1.0, 24);
+        let gain_a = GainControlHandle::new();
+        gain_a.set_gain(0.25).unwrap();
+        mixer.insert(consumer_a, gain_a.clone()).unwrap();
+        mixer.insert(consumer_b, GainControlHandle::new()).unwrap();
+
+        let mut output = [0.0; 24 * SAMPLES_PER_BLOCK];
+        mixer.render(&mut output);
+        // The first samples ride the bounded ramp; after it completes the mix
+        // holds at 0.25 (slot a) plus 1.0 (slot b).
+        for sample in &output[128..] {
+            assert!((*sample - 1.25).abs() < 1e-5);
+        }
+        assert!(
+            output[0] > 1.9,
+            "ramp start should be near unity: {}",
+            output[0]
+        );
+    }
+
+    #[test]
+    fn per_slot_mute_silences_only_that_slot() {
+        let mut mixer: FixedSlotMixer<DEFAULT_MIXER_SLOTS, SAMPLES_PER_BLOCK> =
+            FixedSlotMixer::new().unwrap();
+        let (mut producer_a, consumer_a) = realtime_pcm_queue::<SAMPLES_PER_BLOCK>(24).unwrap();
+        let (mut producer_b, consumer_b) = realtime_pcm_queue::<SAMPLES_PER_BLOCK>(24).unwrap();
+        push_constant(&mut producer_a, 1.0, 24);
+        push_constant(&mut producer_b, 1.0, 24);
+        let gain_a = GainControlHandle::new();
+        gain_a.set_muted(true);
+        mixer.insert(consumer_a, gain_a.clone()).unwrap();
+        mixer.insert(consumer_b, GainControlHandle::new()).unwrap();
+
+        let mut output = [0.0; 24 * SAMPLES_PER_BLOCK];
+        mixer.render(&mut output);
+        // Slot a ramps to silence; slot b keeps its full 1.0 contribution.
+        for sample in &output[128..] {
+            assert!((*sample - 1.0).abs() < 1e-5);
+        }
+        assert!(
+            output[0] > 1.9,
+            "mute ramp start should be near unity: {}",
+            output[0]
+        );
     }
 }

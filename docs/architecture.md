@@ -472,8 +472,10 @@ sample-instantly with zero lookahead, and releases smoothly with a fixed
 coefficient. The fixed-slot summing mixer primitive
 ([ADR 0015](./adr/0015-realtime-stream-membership.md)) owns a preallocated slot
 table, iterates active slots in fixed order, and fails closed at admission when
-the table is full; the app-side multi-stream render path (wiring streams into
-slots and driving per-stream gain and mute) is not wired yet.
+the table is full. Each slot owns its per-stream gain and mute state, published
+through a lock-free `GainControlHandle` and ramped inside the callback; the
+app-side multi-stream render path (wiring decoded streams into slots and
+publishing control-domain gain/mute changes) is not wired yet.
 
 Any lookahead, attack, release, or safety limiter delay must be included in the
 reported playout budget. Disconnect, mute, reconnect, and device switching use
