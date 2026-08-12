@@ -107,19 +107,22 @@ impl<const SAMPLES_PER_BLOCK: usize> Slot<SAMPLES_PER_BLOCK> {
 
     /// Accumulates this slot's next samples into `target`.
     ///
-    /// Underflow and the bounded per-chunk refill limit leave the remaining
+    /// Underflow and the bounded per-callback refill limit leave the remaining
     /// target samples untouched, so this slot contributes bounded silence
     /// without affecting any other slot. A discontinuity resets this slot's
     /// fade to zero and ramps it back to unity. When the slot carries a
-    /// counters endpoint, underflow, refill-limit, and discontinuity events
-    /// are recorded there so per-stream metrics distinguish the failing slot.
-    fn render_into(&mut self, target: &mut [f32], refill_budget: &mut usize) {
+    /// counters endpoint, underflow and discontinuity events are recorded
+    /// here; the refill-limit event is recorded once per callback by
+    /// [`FixedSlotMixer::render`] when this method reports exhaustion.
+    ///
+    /// Returns `true` when the shared per-callback refill budget ran out while
+    /// this slot still needed samples.
+    fn render_into(&mut self, target: &mut [f32], refill_budget: &mut usize) -> bool {
         let mut written = 0;
         while written < target.len() {
             if self.scratch_offset == self.scratch_len {
                 if *refill_budget == 0 {
-                    self.record_refill_limit_hit();
-                    break;
+                    return true;
                 }
                 *refill_budget -= 1;
                 match self.consumer.pop_into(&mut self.scratch) {
@@ -160,6 +163,7 @@ impl<const SAMPLES_PER_BLOCK: usize> Slot<SAMPLES_PER_BLOCK> {
             written += copy_len;
             self.scratch_offset += copy_len;
         }
+        false
     }
 }
 
@@ -293,19 +297,28 @@ impl<const SLOTS: usize, const SAMPLES_PER_BLOCK: usize> FixedSlotMixer<SLOTS, S
     ///
     /// `output` is first zeroed, then the active slots contribute their next
     /// samples in fixed ascending order; inactive slots contribute zero. Per
-    /// slot, at most [`MAX_PCM_QUEUE_BLOCKS`] blocks are refilled per output
-    /// chunk, so worst-case callback work is `SLOTS` times a per-slot constant
-    /// with no allocation and no lock. This method is the only realtime entry
-    /// point.
+    /// slot, at most [`MAX_PCM_QUEUE_BLOCKS`] blocks are refilled per render
+    /// call (one output callback); a slot that exhausts that shared budget
+    /// records one refill-limit event and contributes bounded silence to the
+    /// rest of the callback. Worst-case callback work is `SLOTS` times a
+    /// per-slot constant with no allocation and no lock. This method is the
+    /// only realtime entry point.
     pub fn render(&mut self, output: &mut [f32]) {
         output.fill(0.0);
+        let mut budgets = [MAX_PCM_QUEUE_BLOCKS; SLOTS];
+        let mut refill_limit_reported = [false; SLOTS];
         let mut written = 0;
         while written < output.len() {
             let chunk_len = (output.len() - written).min(SAMPLES_PER_BLOCK);
             let chunk = &mut output[written..written + chunk_len];
-            for slot in self.slots.iter_mut().flatten() {
-                let mut budget = MAX_PCM_QUEUE_BLOCKS;
-                slot.render_into(chunk, &mut budget);
+            for (index, slot) in self.slots.iter_mut().enumerate() {
+                if let Some(slot) = slot {
+                    if slot.render_into(chunk, &mut budgets[index]) && !refill_limit_reported[index]
+                    {
+                        refill_limit_reported[index] = true;
+                        slot.record_refill_limit_hit();
+                    }
+                }
             }
             written += chunk_len;
         }
@@ -708,7 +721,7 @@ mod tests {
 
         let mut output = [0.0; MAX_PCM_QUEUE_BLOCKS + 1];
         mixer.render(&mut output);
-        // One wide output chunk spends the full per-chunk refill budget on
+        // One wide output chunk spends the full per-callback refill budget on
         // one-sample blocks, so slot a records the distinct limit event while
         // empty slot b only underflows.
         assert!(
@@ -723,6 +736,39 @@ mod tests {
         let snapshot_b = counters_b.snapshot();
         assert_eq!(snapshot_b.pcm_refill_limit_hits, 0);
         assert_eq!(snapshot_b.pcm_underflows, 1);
+    }
+
+    #[test]
+    fn refill_limit_is_one_event_per_callback() {
+        let mut mixer: FixedSlotMixer<1, 1> = FixedSlotMixer::new().unwrap();
+        let (mut producer, consumer) = realtime_pcm_queue::<1>(MAX_PCM_QUEUE_BLOCKS).unwrap();
+        for _ in 0..MAX_PCM_QUEUE_BLOCKS {
+            assert_eq!(producer.push(&[1.0]), RealtimePcmPushOutcome::Inserted);
+        }
+        let counters = Arc::new(StreamCounters::default());
+        mixer
+            .insert(
+                consumer,
+                GainControlHandle::new(),
+                Some(Arc::clone(&counters)),
+            )
+            .unwrap();
+
+        // One callback spans MAX_PCM_QUEUE_BLOCKS + 1 one-sample chunks. The
+        // shared per-callback refill budget is spent on the 128 queued blocks,
+        // so the final chunk records the limit event exactly once and emits
+        // silence instead of a second underflow.
+        let mut output = [0.0; MAX_PCM_QUEUE_BLOCKS + 1];
+        mixer.render(&mut output);
+        assert!(
+            output[..MAX_PCM_QUEUE_BLOCKS]
+                .iter()
+                .all(|sample| (*sample - 1.0).abs() < 1e-6)
+        );
+        assert!(output[MAX_PCM_QUEUE_BLOCKS].abs() < 1e-6);
+        let snapshot = counters.snapshot();
+        assert_eq!(snapshot.pcm_refill_limit_hits, 1);
+        assert_eq!(snapshot.pcm_underflows, 0);
     }
 
     #[test]

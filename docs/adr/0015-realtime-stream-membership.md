@@ -99,7 +99,10 @@ The fixed-slot mixer primitive exists in `sonimesh-audio`
 of per-stream consumer endpoints, iterates active slots in ascending fixed
 order during rendering, applies a per-slot discontinuity fade, fails closed at
 admission when the table is full, and returns the consumer on deactivation. Each
-slot also owns its per-stream gain and mute state: the slot holds a
+render call (one output callback) refills at most `MAX_PCM_QUEUE_BLOCKS` blocks
+per slot and records a single refill-limit event when that shared budget is
+exhausted, matching the single-stream render path. Each slot also owns its
+per-stream gain and mute state: the slot holds a
 `GainControlHandle` that the control domain publishes to, and the callback reads
 that state without locking and ramps it through the slot's `GainSmoother`. A
 slot can carry an optional per-slot `StreamCounters` endpoint that the callback
