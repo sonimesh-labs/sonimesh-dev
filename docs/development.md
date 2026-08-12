@@ -24,6 +24,11 @@ python tools/check_workspace_boundaries.py
 python tools/check_fuzz_targets.py
 python tools/check_adr_index.py
 python tools/check_preview_alignment.py
+python tools/check_pairing_vectors.py
+python tools/check_control_frame_vectors.py
+python tools/check_media_header_vectors.py
+python tools/check_media_key_vectors.py
+python tools/check_media_crypto_vectors.py
 python tools/check_android_capture_boundary.py
 python tools/check_output_soak_log.py --self-test
 python tools/check_output_realtime_boundary.py
@@ -31,11 +36,19 @@ python tools/check_output_lifecycle_log.py --self-test
 python tools/check_output_recovery_log.py --self-test
 python tools/android_capture_preflight.py --self-test
 python tools/check_android_capture_record.py --self-test
+python tools/check_ci_wiring.py
 Push-Location apps/android
 .\gradlew.bat testDebugUnitTest --no-daemon
 .\gradlew.bat :tls-provider-spike:assembleDebugAndroidTest --no-daemon
 Pop-Location
 ~~~
+
+The vector pin checkers (`check_pairing_vectors.py`, `check_control_frame_vectors.py`,
+`check_media_header_vectors.py`, `check_media_key_vectors.py`, and
+`check_media_crypto_vectors.py`) reimplement each documented version-one protocol
+boundary in pure standard-library Python and cross-check the pins published in the
+protocol docs, the Rust tests, and the Kotlin tests. `check_ci_wiring.py` verifies
+that every `tools/` checker is wired into CI with its required mode.
 
 ## Fuzz checks
 
