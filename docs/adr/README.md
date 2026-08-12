@@ -63,3 +63,5 @@ documented.
   provisional index-based mapping between decoded PCM and output layouts.
 - [ADR 0013: Bounded nominal sample-rate conversion](./0013-nominal-sample-rate-conversion.md) —
   provisional linear conversion separated from drift control and quality claims.
+- [ADR 0014: Android 17 local-network discovery](./0014-android-17-local-network-discovery.md) —
+  provisional picker-first discovery design pending Android 17 device evidence.
