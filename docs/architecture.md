@@ -234,6 +234,10 @@ Dynamic stream membership must use fixed slots or a preallocated snapshot/RCU
 boundary. Adding a source must not require allocating or taking a long-lived
 mutex in the output callback.
 
+The realtime stream membership decision is recorded in
+[ADR 0015](./adr/0015-realtime-stream-membership.md) and remains provisional
+until Phase 2 mixer evidence exists.
+
 ## 7. Android sender
 
 ### 7.1 UI and service boundary

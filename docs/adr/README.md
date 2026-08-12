@@ -65,3 +65,5 @@ documented.
   provisional linear conversion separated from drift control and quality claims.
 - [ADR 0014: Android 17 local-network discovery](./0014-android-17-local-network-discovery.md) —
   provisional picker-first discovery design pending Android 17 device evidence.
+- [ADR 0015: Realtime stream membership](./0015-realtime-stream-membership.md) —
+  provisional fixed-slot membership boundary pending Phase 2 mixer evidence.
