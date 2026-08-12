@@ -41,6 +41,17 @@ domain owns the export action: it fills the snapshot from its low-rate state
 and is responsible for retention policy. The app-side export command and
 retention limits remain open.
 
+The app-side collector now exists in `sonimesh-app`:
+`ControlToMixerBridge::export_snapshot` fills an allowlisted
+`ExportSessionSnapshot` from live control and mixer state — the coordinator's
+lifecycle phase, the platform output format once the output is active, and one
+redacted `StreamMetricsSnapshot` per active mixer stream in slot order — and
+`MixerStreamSession::stream_metrics` reads those counters from the session's
+retained per-stream endpoints. The bundle writer remains the single serializer
+in `sonimesh-diagnostics`; the desktop control domain still owns the export
+action, and the UI/Tauri command that triggers an export and the file
+retention policy remain open.
+
 ## Validation evidence
 
 Implementation must prove deterministic field allowlisting, endpoint redaction,
@@ -52,6 +63,12 @@ exact emitted bundle for a fixed snapshot (deterministic allowlisting), redacted
 endpoint output for IPv4 and IPv6, the fixed byte and stream bounds, fail-closed
 rejection of malformed or oversized input, and the absence of forbidden byte
 sequences in test bundles.
+
+The app-side collector tests assert that the bridge fills the export snapshot
+from live state: session phase maps onto the closed export phase set, platform
+format appears only while the output is active, per-stream metrics follow slot
+order with zeroed entries for streams without a counters endpoint, and a built
+bundle redacts the endpoint address while retaining the allowlisted fields.
 
 ## Rollback plan
 

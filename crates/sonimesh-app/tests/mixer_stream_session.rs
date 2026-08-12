@@ -9,7 +9,7 @@ use sonimesh_app::{
     MediaStreamIdentity, MixerStreamSession, MixerStreamSessionError, StreamStartRequest,
 };
 use sonimesh_audio::{FrameDecoder, realtime_pcm_queue};
-use sonimesh_diagnostics::StreamCounters;
+use sonimesh_diagnostics::{StreamCounters, StreamMetricsSnapshot};
 use sonimesh_platform::{
     AudioOutput, OutputConfig, OutputDeviceInfo, OutputError, OutputHealth, RenderSource,
     SampleFormat,
@@ -548,5 +548,73 @@ fn session_exposes_queue_diagnostics() {
     assert!(
         session.queued_output_blocks(identity).unwrap() >= 1,
         "converted output blocks must be visible after the pump"
+    );
+}
+
+#[test]
+fn stream_metrics_are_empty_before_admission() {
+    let mut session = session();
+    session.start_output(selection()).unwrap();
+    assert!(session.stream_metrics().is_empty());
+}
+
+#[test]
+fn stream_metrics_follow_slot_order_and_removal() {
+    let counters_a = Arc::new(StreamCounters::default());
+    let counters_b = Arc::new(StreamCounters::default());
+    let mut session = session();
+    let mut pipeline_a = pipeline(Arc::clone(&counters_a));
+    let mut pipeline_b = pipeline(Arc::clone(&counters_b));
+
+    session.start_output(selection()).unwrap();
+    session
+        .start_stream::<_, BLOCK>(
+            request(1, 1),
+            16,
+            Some(Arc::clone(&counters_a)),
+            &mut pipeline_a,
+        )
+        .unwrap();
+    session
+        .start_stream::<_, BLOCK>(
+            request(2, 2),
+            16,
+            Some(Arc::clone(&counters_b)),
+            &mut pipeline_b,
+        )
+        .unwrap();
+
+    counters_b.authenticated();
+
+    let metrics = session.stream_metrics();
+    assert_eq!(metrics.len(), 2);
+    assert_eq!(metrics[0].authenticated_packets, 0);
+    assert_eq!(metrics[1].authenticated_packets, 1);
+
+    session.remove_stream(request(1, 1).identity).unwrap();
+    let metrics = session.stream_metrics();
+    assert_eq!(metrics.len(), 1);
+    assert_eq!(metrics[0].authenticated_packets, 1);
+}
+
+#[test]
+fn stream_without_counters_exports_zeroed_metrics() {
+    let counters = Arc::new(StreamCounters::default());
+    let mut session = session();
+    let mut pipeline = pipeline(Arc::clone(&counters));
+    let mut sealer = sealer();
+
+    session.start_output(selection()).unwrap();
+    session
+        .start_stream::<_, BLOCK>(request(1, 1), 16, None, &mut pipeline)
+        .unwrap();
+    feed_cycle(&mut session, &mut pipeline, &mut sealer, 0);
+
+    let metrics = session.stream_metrics();
+    assert_eq!(metrics.len(), 1);
+    assert_eq!(
+        metrics[0],
+        StreamMetricsSnapshot::default(),
+        "a stream without a counters endpoint exports a zeroed entry"
     );
 }

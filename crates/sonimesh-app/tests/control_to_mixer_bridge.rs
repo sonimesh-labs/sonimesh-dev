@@ -7,12 +7,11 @@ use std::sync::Arc;
 
 use sonimesh_app::{
     ControlSessionToken, ControlStreamAction, ControlToMixerBridge, ControlToMixerError,
-    MixerStreamSessionError, PairingAttemptOutcome, PairingId,
-    PairingInvitationController, PairingProofVerification, PairingSource, SessionEvent,
-    SessionPhase, SessionState,
+    MixerStreamSessionError, PairingAttemptOutcome, PairingId, PairingInvitationController,
+    PairingProofVerification, PairingSource, SessionEvent, SessionPhase, SessionState,
 };
 use sonimesh_audio::{FrameDecoder, realtime_pcm_queue};
-use sonimesh_diagnostics::StreamCounters;
+use sonimesh_diagnostics::{ExportPlatformFormat, ExportSessionPhase, StreamCounters};
 use sonimesh_platform::{
     AudioOutput, OutputConfig, OutputDeviceInfo, OutputError, OutputHealth, RenderSource,
     SampleFormat,
@@ -611,4 +610,129 @@ fn expire_control_session_stops_the_mixer() {
     assert_eq!(bridge.mixer().stream_count(), 0);
     assert!(!bridge.output_active());
     assert_eq!(bridge.mixer().output().stop_calls, 1);
+}
+
+#[test]
+fn export_snapshot_before_start_omits_format_and_streams() {
+    let bridge = bridge();
+    let mut metrics = Vec::new();
+    let snapshot = bridge.export_snapshot("0.1.0", None, None, &mut metrics);
+    assert_eq!(snapshot.software_version, "0.1.0");
+    assert_eq!(snapshot.session_phase, Some(ExportSessionPhase::Ready));
+    assert_eq!(snapshot.platform_format, None);
+    assert!(snapshot.streams.is_empty());
+}
+
+#[test]
+fn export_snapshot_after_start_includes_format_and_metrics() {
+    let counters = Arc::new(StreamCounters::default());
+    let mut bridge = bridge();
+    let token = authenticated(&mut bridge);
+    let mut pipeline = pipeline_for(1, 1, Arc::clone(&counters));
+    let mut sealer = sealer();
+
+    start_one(
+        &mut bridge,
+        token,
+        1,
+        1,
+        Some(Arc::clone(&counters)),
+        &mut pipeline,
+    );
+    feed_cycle(&mut bridge, &mut pipeline, &mut sealer, 0);
+
+    let mut metrics = Vec::new();
+    let snapshot = bridge.export_snapshot("0.1.0", None, None, &mut metrics);
+    assert_eq!(snapshot.session_phase, Some(ExportSessionPhase::Streaming));
+    assert_eq!(
+        snapshot.platform_format,
+        Some(ExportPlatformFormat {
+            sample_rate_hz: 48_000,
+            channels: 1
+        })
+    );
+    assert_eq!(snapshot.streams.len(), 1);
+    assert_eq!(snapshot.streams[0].authenticated_packets, 1);
+}
+
+#[test]
+fn export_stream_metrics_follow_slot_order() {
+    let counters_a = Arc::new(StreamCounters::default());
+    let counters_b = Arc::new(StreamCounters::default());
+    let mut bridge = bridge();
+    let token = authenticated(&mut bridge);
+    let mut pipeline_a = pipeline_for(1, 1, Arc::clone(&counters_a));
+    let mut pipeline_b = pipeline_for(2, 2, Arc::clone(&counters_b));
+
+    start_one(
+        &mut bridge,
+        token,
+        1,
+        1,
+        Some(Arc::clone(&counters_a)),
+        &mut pipeline_a,
+    );
+    start_one(
+        &mut bridge,
+        token,
+        2,
+        2,
+        Some(Arc::clone(&counters_b)),
+        &mut pipeline_b,
+    );
+
+    counters_b.authenticated();
+
+    let mut metrics = Vec::new();
+    let snapshot = bridge.export_snapshot("0.1.0", None, None, &mut metrics);
+    assert_eq!(snapshot.streams.len(), 2);
+    assert_eq!(snapshot.streams[0].authenticated_packets, 0);
+    assert_eq!(snapshot.streams[1].authenticated_packets, 1);
+}
+
+#[test]
+fn built_bundle_redacts_endpoint_and_forbidden_bytes() {
+    let counters = Arc::new(StreamCounters::default());
+    let mut bridge = bridge();
+    let token = authenticated(&mut bridge);
+    let mut pipeline = pipeline_for(1, 1, Arc::clone(&counters));
+    let mut sealer = sealer();
+
+    start_one(
+        &mut bridge,
+        token,
+        1,
+        1,
+        Some(Arc::clone(&counters)),
+        &mut pipeline,
+    );
+    feed_cycle(&mut bridge, &mut pipeline, &mut sealer, 0);
+
+    let endpoint = "10.0.0.5:1234".parse().unwrap();
+    let mut metrics = Vec::new();
+    let snapshot = bridge.export_snapshot("0.1.0", Some(endpoint), None, &mut metrics);
+    let bundle = sonimesh_diagnostics::build_export_bundle(&snapshot).unwrap();
+
+    assert!(bundle.contains("\"software_version\":\"0.1.0\""));
+    assert!(bundle.contains("\"session_phase\":\"streaming\""));
+    assert!(bundle.contains("\"sample_rate_hz\":48000"));
+    assert!(
+        !bundle.contains("10.0.0.5"),
+        "raw endpoint must be redacted"
+    );
+    assert!(bundle.contains("1234"), "redacted endpoint keeps the port");
+    assert!(
+        !bundle
+            .as_bytes()
+            .windows(8)
+            .any(|window| window == [0x2A; 8]),
+        "audio payload bytes must never reach a bundle"
+    );
+    assert!(
+        !bundle
+            .as_bytes()
+            .windows(32)
+            .any(|window| window == [0xA5; 32]),
+        "session key bytes must never reach a bundle"
+    );
 }

@@ -10,10 +10,14 @@
 //! caller still advances adapter pumps and renders through the owned mixer
 //! session.
 
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 use sonimesh_audio::{MAX_PCM_QUEUE_BLOCKS, RealtimeQueueConfigError};
-use sonimesh_diagnostics::StreamCounters;
+use sonimesh_diagnostics::{
+    ExportPlatformFormat, ExportSessionPhase, ExportSessionSnapshot, StreamCounters,
+    StreamMetricsSnapshot,
+};
 use sonimesh_platform::{AudioOutput, OutputHealth};
 use sonimesh_protocol::{Capability, Envelope};
 
@@ -21,7 +25,8 @@ use crate::{
     ControlOperationToken, ControlSessionToken, ControlStreamAction, ControlStreamCoordinator,
     ControlStreamError, MediaStreamIdentity, MixerAdmissionError, MixerStreamSession,
     MixerStreamSessionError, OutputSelection, ReceiverPcmProducerInstaller,
-    ReconnectGraceObservation, SessionEvent, SessionState, StartedMixerStream, StreamStartRequest,
+    ReconnectGraceObservation, SessionEvent, SessionPhase, SessionState, StartedMixerStream,
+    StreamStartRequest,
 };
 
 /// Control or mixer failure surfaced by the bridge.
@@ -411,5 +416,53 @@ where
         self.mixer
             .recover_stream(identity, pipeline)
             .map_err(ControlToMixerError::Mixer)
+    }
+
+    /// Fills an allowlisted diagnostic export snapshot from live bridge state.
+    ///
+    /// The lifecycle phase maps onto the closed export phase set
+    /// (ADR 0011), the
+    /// platform output format is included only while the output is active, and
+    /// one redacted metrics snapshot per active mixer stream is written into
+    /// the caller-provided buffer in slot order. The caller owns serialization
+    /// and retention; `sonimesh_diagnostics::build_export_bundle` remains the
+    /// single bundle writer.
+    #[must_use]
+    pub fn export_snapshot<'a>(
+        &'a self,
+        software_version: &'a str,
+        endpoint: Option<SocketAddr>,
+        buffer_policy: Option<&'a str>,
+        metrics: &'a mut Vec<StreamMetricsSnapshot>,
+    ) -> ExportSessionSnapshot<'a> {
+        metrics.clear();
+        metrics.extend(self.mixer.stream_metrics());
+        ExportSessionSnapshot {
+            software_version,
+            endpoint,
+            platform_format: self.output_active.then_some(ExportPlatformFormat {
+                sample_rate_hz: self.selection.config.sample_rate_hz,
+                channels: self.selection.config.channels,
+            }),
+            buffer_policy,
+            session_phase: Some(export_session_phase(self.state().phase())),
+            streams: metrics,
+        }
+    }
+}
+
+/// Maps the app lifecycle phase onto the closed export phase set.
+///
+/// The current phase sets match one-to-one; a future phase outside the export
+/// schema must be omitted rather than guessed so older bundles never carry an
+/// unknown token.
+const fn export_session_phase(phase: SessionPhase) -> ExportSessionPhase {
+    match phase {
+        SessionPhase::Idle => ExportSessionPhase::Idle,
+        SessionPhase::Pairing => ExportSessionPhase::Pairing,
+        SessionPhase::Ready => ExportSessionPhase::Ready,
+        SessionPhase::Streaming => ExportSessionPhase::Streaming,
+        SessionPhase::Reconnecting => ExportSessionPhase::Reconnecting,
+        SessionPhase::OutputUnavailable => ExportSessionPhase::OutputUnavailable,
     }
 }

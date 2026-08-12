@@ -25,7 +25,7 @@ use core::fmt;
 use std::sync::Arc;
 
 use sonimesh_audio::{MAX_PCM_QUEUE_BLOCKS, RealtimeQueueConfigError, ResamplerError};
-use sonimesh_diagnostics::StreamCounters;
+use sonimesh_diagnostics::{StreamCounters, StreamMetricsSnapshot};
 use sonimesh_platform::{AudioOutput, OutputHealth};
 
 use crate::{
@@ -530,6 +530,25 @@ where
     #[must_use]
     pub fn snapshot(&self) -> OutputSnapshot {
         self.output.snapshot()
+    }
+
+    /// Collects one redacted metrics snapshot per active stream, in slot order.
+    ///
+    /// A stream admitted without a counters endpoint exports a zeroed entry so
+    /// bundle ordinals stay stable. Reads relaxed atomic counters; a concurrent
+    /// event may appear in the next snapshot.
+    #[must_use]
+    pub fn stream_metrics(&self) -> Vec<StreamMetricsSnapshot> {
+        self.records
+            .iter()
+            .flatten()
+            .map(|record| {
+                record.counters.as_ref().map_or_else(
+                    || StreamCounters::default().snapshot(),
+                    |counters| counters.snapshot(),
+                )
+            })
+            .collect()
     }
 
     /// Borrows the platform adapter for control-domain device operations.
