@@ -10,7 +10,10 @@
 //! [`Self::reset`] after [`MixerStreamSession::recover_stream`] installs a
 //! fresh nominal adapter so a stale pre-recovery correction is not re-applied.
 
+use std::sync::Arc;
+
 use sonimesh_audio::{DriftConfig, DriftConfigError, DriftController, DriftDecision};
+use sonimesh_diagnostics::StreamCounters;
 
 use crate::{MediaStreamIdentity, MixerStreamSession, MixerStreamSessionError};
 
@@ -18,10 +21,14 @@ use crate::{MediaStreamIdentity, MixerStreamSession, MixerStreamSessionError};
 pub struct MixerStreamDriftController {
     identity: MediaStreamIdentity,
     controller: DriftController,
+    counters: Option<Arc<StreamCounters>>,
 }
 
 impl MixerStreamDriftController {
     /// Creates a controller bound to one admitted mixer stream.
+    ///
+    /// Pass the same [`StreamCounters`] endpoint that the session's stream
+    /// records so drift decisions publish truthful per-stream diagnostics.
     ///
     /// # Errors
     ///
@@ -30,10 +37,12 @@ impl MixerStreamDriftController {
     pub fn new(
         identity: MediaStreamIdentity,
         config: DriftConfig,
+        counters: Option<Arc<StreamCounters>>,
     ) -> Result<Self, DriftConfigError> {
         Ok(Self {
             identity,
             controller: DriftController::new(config)?,
+            counters,
         })
     }
 
@@ -41,7 +50,9 @@ impl MixerStreamDriftController {
     ///
     /// Ordinary adjustments publish to the stream's format adapter through the
     /// session; an emergency threshold retires the adapter's partial
-    /// conversion state so stale samples cannot cross the resync boundary.
+    /// conversion state so stale samples cannot cross the resync boundary. Each
+    /// decision also publishes the sampled occupancy and the drift-specific
+    /// metrics into the stream's counters endpoint.
     ///
     /// # Errors
     ///
@@ -67,6 +78,16 @@ impl MixerStreamDriftController {
                 session.begin_epoch(self.identity)?;
             }
         }
+        if let Some(counters) = self.counters.as_ref() {
+            counters.set_queued_pcm_blocks(occupancy_blocks);
+            match decision {
+                DriftDecision::Adjust { ppm } => counters.set_drift_adjustment_ppm(ppm),
+                DriftDecision::HardResync { .. } => {
+                    counters.set_drift_adjustment_ppm(0);
+                    counters.drift_hard_resync();
+                }
+            }
+        }
         Ok(decision)
     }
 
@@ -80,9 +101,13 @@ impl MixerStreamDriftController {
     ///
     /// Call this after [`MixerStreamSession::recover_stream`] installs a fresh
     /// nominal adapter so the stale pre-recovery correction and integral
-    /// history are not re-applied by the next update.
+    /// history are not re-applied by the next update. The published drift
+    /// correction returns to nominal so diagnostics match the fresh adapter.
     pub fn reset(&mut self) {
         self.controller.reset();
+        if let Some(counters) = self.counters.as_ref() {
+            counters.set_drift_adjustment_ppm(0);
+        }
     }
 
     /// Returns the stream identity this controller addresses.

@@ -3,8 +3,9 @@
 //! These tests drive `MixerStreamDriftController` through a real
 //! `MixerStreamSession`: ordinary occupancy errors publish bounded ppm
 //! corrections to the stream's format adapter, emergency thresholds retire the
-//! adapter epoch and clear the correction, and each stream's controller stays
-//! isolated from the others.
+//! adapter epoch and clear the correction, each stream's controller stays
+//! isolated from the others, and decisions publish truthful per-stream drift
+//! metrics.
 
 use core::convert::Infallible;
 use std::sync::Arc;
@@ -195,7 +196,7 @@ fn control_tick_publishes_ppm_through_the_session_adapter() {
             &mut pipeline,
         )
         .unwrap();
-    let mut controller = MixerStreamDriftController::new(identity, CONFIG).unwrap();
+    let mut controller = MixerStreamDriftController::new(identity, CONFIG, None).unwrap();
     assert_eq!(controller.identity(), identity);
 
     feed_blocks(&mut pipeline, &mut sealer, 0, 3);
@@ -229,7 +230,7 @@ fn high_emergency_resync_retires_the_adapter_epoch_and_clears_ppm() {
     session
         .start_stream::<_, BLOCK>(request(1, 1), 16, None, &mut pipeline)
         .unwrap();
-    let mut controller = MixerStreamDriftController::new(identity, CONFIG).unwrap();
+    let mut controller = MixerStreamDriftController::new(identity, CONFIG, None).unwrap();
 
     feed_blocks(&mut pipeline, &mut sealer, 0, 4);
     assert_eq!(session.queued_source_blocks(identity).unwrap(), 4);
@@ -269,7 +270,7 @@ fn low_emergency_resync_clears_ppm_and_adjustment_resumes() {
     session
         .start_stream::<_, BLOCK>(request(1, 1), 16, None, &mut pipeline)
         .unwrap();
-    let mut controller = MixerStreamDriftController::new(identity, CONFIG).unwrap();
+    let mut controller = MixerStreamDriftController::new(identity, CONFIG, None).unwrap();
 
     assert_eq!(session.queued_source_blocks(identity).unwrap(), 0);
     assert_eq!(
@@ -317,8 +318,8 @@ fn one_stream_resync_does_not_disturb_another_streams_drift() {
             &mut pipeline_b,
         )
         .unwrap();
-    let mut controller_a = MixerStreamDriftController::new(identity_a, CONFIG).unwrap();
-    let mut controller_b = MixerStreamDriftController::new(identity_b, CONFIG).unwrap();
+    let mut controller_a = MixerStreamDriftController::new(identity_a, CONFIG, None).unwrap();
+    let mut controller_b = MixerStreamDriftController::new(identity_b, CONFIG, None).unwrap();
 
     feed_blocks(&mut pipeline_a, &mut sealer_a, 0, 3);
     feed_blocks(&mut pipeline_b, &mut sealer_b, 0, 3);
@@ -365,7 +366,7 @@ fn update_after_removal_returns_unknown_stream() {
     session
         .start_stream::<_, BLOCK>(request(1, 1), 16, None, &mut pipeline)
         .unwrap();
-    let mut controller = MixerStreamDriftController::new(identity, CONFIG).unwrap();
+    let mut controller = MixerStreamDriftController::new(identity, CONFIG, None).unwrap();
 
     session.remove_stream(identity).unwrap();
     assert_eq!(
@@ -386,7 +387,7 @@ fn reset_clears_history_for_a_recovered_stream() {
     session
         .start_stream::<_, BLOCK>(request(1, 1), 16, None, &mut pipeline)
         .unwrap();
-    let mut controller = MixerStreamDriftController::new(identity, CONFIG).unwrap();
+    let mut controller = MixerStreamDriftController::new(identity, CONFIG, None).unwrap();
 
     feed_blocks(&mut pipeline, &mut sealer, 0, 3);
     assert_eq!(
@@ -405,12 +406,64 @@ fn reset_clears_history_for_a_recovered_stream() {
 }
 
 #[test]
+fn control_ticks_publish_per_stream_drift_metrics() {
+    let counters = Arc::new(StreamCounters::default());
+    let mut session = session();
+    let mut pipeline = pipeline(Arc::clone(&counters));
+    let mut sealer = sealer();
+    let identity = request(1, 1).identity;
+
+    session.start_output(selection()).unwrap();
+    session
+        .start_stream::<_, BLOCK>(
+            request(1, 1),
+            16,
+            Some(Arc::clone(&counters)),
+            &mut pipeline,
+        )
+        .unwrap();
+    let mut controller =
+        MixerStreamDriftController::new(identity, CONFIG, Some(Arc::clone(&counters))).unwrap();
+
+    feed_blocks(&mut pipeline, &mut sealer, 0, 3);
+    assert_eq!(
+        controller.update(&mut session).unwrap(),
+        DriftDecision::Adjust { ppm: 110 }
+    );
+    let adjusted = counters.snapshot();
+    assert_eq!(adjusted.drift_adjustment_ppm, 110);
+    assert_eq!(adjusted.drift_hard_resyncs, 0);
+    assert_eq!(adjusted.queued_pcm_blocks, 3);
+    assert_eq!(adjusted.queued_pcm_high_water_blocks, 3);
+
+    // reset() publishes the nominal correction so diagnostics match recovery.
+    controller.reset();
+    assert_eq!(counters.snapshot().drift_adjustment_ppm, 0);
+
+    feed_blocks(&mut pipeline, &mut sealer, 3, 1);
+    assert_eq!(
+        controller.update(&mut session).unwrap(),
+        DriftDecision::HardResync {
+            direction: DriftResyncDirection::High,
+        }
+    );
+    let resynced = counters.snapshot();
+    assert_eq!(resynced.drift_adjustment_ppm, 0);
+    assert_eq!(resynced.drift_hard_resyncs, 1);
+    assert_eq!(
+        resynced.queued_pcm_blocks, 4,
+        "the adapter source queue still holds the sampled occupancy"
+    );
+    assert_eq!(resynced.queued_pcm_high_water_blocks, 4);
+}
+
+#[test]
 fn invalid_config_is_rejected_at_construction() {
     let identity = request(1, 1).identity;
     let mut config = CONFIG;
     config.low_resync_blocks = config.target_blocks;
     assert!(matches!(
-        MixerStreamDriftController::new(identity, config),
+        MixerStreamDriftController::new(identity, config, None),
         Err(DriftConfigError::InvalidOccupancyThresholds)
     ));
 }

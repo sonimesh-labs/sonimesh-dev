@@ -218,8 +218,9 @@ Evidence produced so far:
 - app-side per-stream drift tests proving bounded ppm publication through
   the session adapter, high/low emergency resyncs retiring the adapter
   epoch and clearing the correction, per-stream drift isolation across two
-  admitted streams, fail-closed updates after removal, and history clearing
-  for a recovered stream;
+  admitted streams, fail-closed updates after removal, history clearing
+  for a recovered stream, and per-stream drift metrics (ppm, hard resyncs,
+  queue occupancy) published from each decision;
 
 Still open before Phase 2 can claim multi-source streaming: multi-stream
 control-plane negotiation (the control coordinator currently drives one active
