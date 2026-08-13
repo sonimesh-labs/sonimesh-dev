@@ -31,6 +31,29 @@ export interface OutputSnapshot {
   health: OutputHealth
 }
 
+/** Structured protocol error code from the receiver's control plane. */
+export type ControlErrorCode =
+  | 'invalidRequest'
+  | 'retryLater'
+  | 'unsupportedCapability'
+  | 'incompatibleVersion'
+  | 'streamNotFound'
+
+/** One receiver-generated control-plane reply mirroring the Rust ControlReply contract. */
+export interface ControlReply {
+  kind: 'streamStatus' | 'error'
+  /** Echoes the answered command's request identifier. */
+  requestId: number
+  /** Bounded human-readable detail from the receiver. */
+  detail: string
+  /** Observed lifecycle state for a stream-status reply. */
+  state?: SessionState
+  /** Structured protocol error code for an error reply. */
+  code?: ControlErrorCode
+  /** Whether the sender may retry the same command unchanged. */
+  retryable?: boolean
+}
+
 export interface StreamMetrics {
   authenticatedPackets: MetricCounter
   duplicatePackets: MetricCounter
@@ -76,5 +99,7 @@ export interface DesktopSnapshot {
   output: OutputSnapshot
   pairing: PairingStatus
   metrics: StreamMetrics
+  /** Bounded, most-recent-first receiver-generated control-plane replies. */
+  replies: ControlReply[]
   previewAdapter: boolean
 }

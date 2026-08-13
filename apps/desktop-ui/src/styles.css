@@ -276,6 +276,22 @@ button:focus-visible, select:focus-visible, a:focus-visible { outline: 3px solid
 @keyframes rotate { to { transform: rotate(360deg); } }
 @keyframes signal-pulse { from { transform: scaleY(0.52); opacity: 0.55; } to { transform: scaleY(1); opacity: 1; } }
 
+
+/* Recent control replies */
+.replies { margin-top: 18px; padding: clamp(20px, 2.6vw, 28px); }
+.replies-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+.replies-heading h2 { margin-top: 7px; color: var(--ink); font-size: clamp(18px, 2vw, 24px); font-weight: 680; letter-spacing: -0.035em; }
+.replies-heading p:not(.eyebrow) { max-width: 600px; margin-top: 8px; color: var(--muted); font-size: 12.5px; line-height: 1.55; }
+.reply-list { margin: 18px 0 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.reply-row { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 11px 14px; border: 1px solid var(--line); border-radius: 14px; background: #fff; }
+.reply-kind { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 9px; }
+.reply-streamStatus .reply-kind { color: var(--signal-ink); background: var(--signal-soft); }
+.reply-error .reply-kind { color: var(--rose); background: var(--rose-soft); }
+.reply-body { min-width: 0; }
+.reply-detail { color: var(--ink-soft); font-size: 13px; font-weight: 650; line-height: 1.4; }
+.reply-meta { margin-top: 3px; color: var(--muted); font-size: 11px; line-height: 1.4; }
+.reply-request { color: var(--muted-quiet); font-size: 10.5px; font-variant-numeric: tabular-nums; }
+.reply-empty { margin-top: 18px; color: var(--muted); font-size: 12.5px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }

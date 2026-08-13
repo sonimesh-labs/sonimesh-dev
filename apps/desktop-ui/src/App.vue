@@ -4,6 +4,7 @@ import { Activity, AudioLines, RefreshCw, SlidersHorizontal } from '@lucide/vue'
 import DiagnosticsPanel from './components/DiagnosticsPanel.vue'
 import OutputPanel from './components/OutputPanel.vue'
 import PairingPanel from './components/PairingPanel.vue'
+import RepliesPanel from './components/RepliesPanel.vue'
 import SessionPanel from './components/SessionPanel.vue'
 import { useDesktopState } from './useDesktopState'
 
@@ -88,6 +89,7 @@ const { busy, createPairing, error, expirePairing, refresh, resetPreview, revoke
             <PairingPanel :pairing="snapshot.pairing" :busy="busy" :preview="snapshot.previewAdapter" @create="createPairing" @expire="expirePairing" @refresh="refresh" @revoke="revokePairing" @simulate-pairing-consumed="simulatePairingConsumed" />
           </div>
         </div>
+        <RepliesPanel :replies="snapshot.replies" :preview="snapshot.previewAdapter" />
         <DiagnosticsPanel id="diagnostics" :metrics="snapshot.metrics" :preview="snapshot.previewAdapter" :busy="busy" @simulate-metrics-burst="simulateMetricsBurst" />
       </template>
       <div v-else class="loading-state">

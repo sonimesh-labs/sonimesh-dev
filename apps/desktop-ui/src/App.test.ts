@@ -88,6 +88,7 @@ function previewSnapshot(): DesktopSnapshot {
       currentJitterMs: 38,
       playoutDelayMs: 64,
     },
+    replies: [],
     previewAdapter: true,
   }
 }
@@ -307,5 +308,22 @@ describe('App', () => {
     expect(wrapper.get('.output-status').text()).toContain('Stream error')
     expect(wrapper.get('.output-status').text()).toContain('stream fault was reported')
   })
+
+  it('renders the recent control replies from the preview snapshot', async () => {
+    desktopBridgeMock.snapshot.mockResolvedValueOnce({
+      ...previewSnapshot(),
+      replies: [
+        { kind: 'streamStatus', requestId: 1, state: 'streaming', detail: 'stream started' },
+        { kind: 'error', requestId: 2, code: 'retryLater', retryable: true, detail: 'preview command rejection' },
+      ],
+    })
+    const wrapper = mount(App)
+    await flushPromises()
+
+    expect(wrapper.get('#replies-heading').text()).toContain('Recent control replies')
+    expect(wrapper.text()).toContain('stream started')
+    expect(wrapper.text()).toContain('retryLater · retryable')
+  })
+
 
 })

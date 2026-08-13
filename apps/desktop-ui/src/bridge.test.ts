@@ -364,4 +364,99 @@ describe('PreviewDesktopBridge', () => {
     expect(reset.muted).toBe(false)
   })
 
+  it('records a stream-status reply after a successful start and stop', async () => {
+    const bridge = new PreviewDesktopBridge()
+
+    const started = await bridge.startStream()
+    expect(started.replies[0]).toEqual({
+      kind: 'streamStatus',
+      requestId: 1,
+      state: 'streaming',
+      detail: 'stream started',
+    })
+
+    const stopped = await bridge.stopStream()
+    expect(stopped.replies[0]).toEqual({
+      kind: 'streamStatus',
+      requestId: 2,
+      state: 'ready',
+      detail: 'stream stopped',
+    })
+    expect(stopped.replies[1]).toEqual({
+      kind: 'streamStatus',
+      requestId: 1,
+      state: 'streaming',
+      detail: 'stream started',
+    })
+  })
+
+  it('records an error reply when a lifecycle guard rejects the command', async () => {
+    const bridge = new PreviewDesktopBridge()
+    await bridge.revokePairing()
+
+    const rejected = await bridge.startStream()
+
+    expect(rejected.replies[0]).toEqual({
+      kind: 'error',
+      requestId: 2,
+      code: 'invalidRequest',
+      retryable: false,
+      detail: 'start requires a trusted ready session',
+    })
+    expect(rejected.replies[1].kind).toBe('streamStatus')
+  })
+
+  it('keeps the reply log bounded to the most recent replies', async () => {
+    const bridge = new PreviewDesktopBridge()
+    for (let index = 0; index < 8; index += 1) {
+      await bridge.simulateMetricsBurst()
+    }
+
+    const snapshot = await bridge.snapshot()
+
+    expect(snapshot.replies).toHaveLength(6)
+    expect(snapshot.replies[0].requestId).toBe(8)
+    expect(snapshot.replies[5].requestId).toBe(3)
+  })
+
+  it('does not record replies for read-only snapshots or local settings', async () => {
+    const bridge = new PreviewDesktopBridge()
+
+    await bridge.snapshot()
+    await bridge.selectOutput('usb')
+    await bridge.setGain(0.5)
+    await bridge.setMuted(true)
+
+    const snapshot = await bridge.snapshot()
+    expect(snapshot.replies).toEqual([])
+  })
+
+  it('records a retryable error reply before rejecting like a bridge command', async () => {
+    const bridge = new PreviewDesktopBridge()
+
+    await expect(bridge.simulateCommandRejection()).rejects.toThrow('preview command rejection')
+
+    const snapshot = await bridge.snapshot()
+    expect(snapshot.replies[0]).toEqual({
+      kind: 'error',
+      requestId: 1,
+      code: 'retryLater',
+      retryable: true,
+      detail: 'preview command rejection',
+    })
+  })
+
+  it('clears the reply log and request counter on reset', async () => {
+    const bridge = new PreviewDesktopBridge()
+    await bridge.startStream()
+    await bridge.simulateMetricsBurst()
+
+    const reset = await bridge.resetPreview()
+    expect(reset.replies).toEqual([])
+
+    const started = await bridge.startStream()
+    expect(started.replies[0].requestId).toBe(1)
+  })
+
+
 })

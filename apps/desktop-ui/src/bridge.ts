@@ -1,4 +1,4 @@
-import type { DesktopSnapshot, MetricCounter, OutputDevice, SessionState } from './types'
+import type { ControlErrorCode, ControlReply, DesktopSnapshot, MetricCounter, OutputDevice, SessionState } from './types'
 
 export interface DesktopBridge {
   snapshot(): Promise<DesktopSnapshot>
@@ -36,6 +36,9 @@ const previewOutput: OutputDevice[] = [
   { id: 'default', label: 'System default output', sampleRateHz: 48_000, channels: 2, isDefault: true },
   { id: 'usb', label: 'USB audio output', sampleRateHz: 48_000, channels: 2, isDefault: false },
 ]
+
+/** Hard bound on the retained receiver-generated reply log. */
+const MAX_PREVIEW_REPLIES = 6
 
 const INITIAL_PREVIEW_SNAPSHOT: DesktopSnapshot = {
   session: 'ready',
@@ -81,11 +84,14 @@ const INITIAL_PREVIEW_SNAPSHOT: DesktopSnapshot = {
     currentJitterMs: 38,
     playoutDelayMs: 64,
   },
+  replies: [],
   previewAdapter: true,
 }
 
 export class PreviewDesktopBridge implements DesktopBridge {
   private pairingExpiresAtMillis: number | null = null
+
+  private nextRequestId = 1
 
   private snapshotState: DesktopSnapshot = structuredClone(INITIAL_PREVIEW_SNAPSHOT)
 
@@ -98,6 +104,9 @@ export class PreviewDesktopBridge implements DesktopBridge {
       this.setSession('streaming')
       this.snapshotState.output.faultReported = false
       this.snapshotState.output.health = 'healthy'
+      this.recordStatus('streaming', 'stream started')
+    } else {
+      this.recordError('start requires a trusted ready session')
     }
     return this.copy()
   }
@@ -107,6 +116,9 @@ export class PreviewDesktopBridge implements DesktopBridge {
       this.setSession('ready')
       this.snapshotState.output.faultReported = false
       this.snapshotState.output.health = 'healthy'
+      this.recordStatus('ready', 'stream stopped')
+    } else {
+      this.recordError('no active stream to stop')
     }
     return this.copy()
   }
@@ -136,6 +148,9 @@ export class PreviewDesktopBridge implements DesktopBridge {
       this.pairingExpiresAtMillis = Date.now() + PAIRING_INVITATION_LIFETIME_MILLIS
       this.snapshotState.pairing = { state: 'active', expiresInSeconds: PAIRING_INVITATION_LIFETIME_SECONDS }
       this.setSession('pairing')
+      this.recordStatus('pairing', 'pairing invitation opened')
+    } else {
+      this.recordError('pairing already in progress')
     }
     return this.copy()
   }
@@ -145,6 +160,9 @@ export class PreviewDesktopBridge implements DesktopBridge {
       this.pairingExpiresAtMillis = null
       this.snapshotState.pairing = { state: 'expired', expiresInSeconds: 0 }
       this.setSession('idle')
+      this.recordStatus('idle', 'pairing invitation expired')
+    } else {
+      this.recordError('no active invitation to expire')
     }
     return this.copy()
   }
@@ -154,6 +172,9 @@ export class PreviewDesktopBridge implements DesktopBridge {
       this.pairingExpiresAtMillis = null
       this.snapshotState.pairing = { state: 'revoked', expiresInSeconds: null }
       this.setSession('idle')
+      this.recordStatus('idle', 'trusted session revoked')
+    } else {
+      this.recordError('no trusted session to revoke')
     }
     return this.copy()
   }
@@ -164,6 +185,9 @@ export class PreviewDesktopBridge implements DesktopBridge {
       this.snapshotState.pairing.state === 'consumed'
     ) {
       this.setSession('reconnecting')
+      this.recordStatus('reconnecting', 'control connection lost')
+    } else {
+      this.recordError('connection loss requires a trusted session')
     }
     return this.copy()
   }
@@ -171,6 +195,9 @@ export class PreviewDesktopBridge implements DesktopBridge {
   async simulateReconnected(): Promise<DesktopSnapshot> {
     if (this.snapshotState.session === 'reconnecting') {
       this.setSession('ready')
+      this.recordStatus('ready', 'control connection restored')
+    } else {
+      this.recordError('no reconnecting session to restore')
     }
     return this.copy()
   }
@@ -184,6 +211,9 @@ export class PreviewDesktopBridge implements DesktopBridge {
       // consumed pairing record stays retained for audit; revoke clears it.
       this.pairingExpiresAtMillis = null
       this.setSession('idle')
+      this.recordStatus('idle', 'trusted session expired')
+    } else {
+      this.recordError('session expiry requires a trusted session')
     }
     return this.copy()
   }
@@ -193,6 +223,9 @@ export class PreviewDesktopBridge implements DesktopBridge {
       this.setSession('outputUnavailable')
       this.snapshotState.output.faultReported = true
       this.snapshotState.output.health = 'streamError'
+      this.recordStatus('outputUnavailable', 'output device lost')
+    } else {
+      this.recordError('output loss requires a streaming session')
     }
     return this.copy()
   }
@@ -202,6 +235,9 @@ export class PreviewDesktopBridge implements DesktopBridge {
       this.setSession('streaming')
       this.snapshotState.output.faultReported = false
       this.snapshotState.output.health = 'healthy'
+      this.recordStatus('streaming', 'output device restored')
+    } else {
+      this.recordError('output restore requires an unavailable output')
     }
     return this.copy()
   }
@@ -211,6 +247,9 @@ export class PreviewDesktopBridge implements DesktopBridge {
       this.pairingExpiresAtMillis = null
       this.snapshotState.pairing = { state: 'consumed', expiresInSeconds: null }
       this.setSession('ready')
+      this.recordStatus('ready', 'sender consumed the pairing invitation')
+    } else {
+      this.recordError('no active invitation to consume')
     }
     return this.copy()
   }
@@ -244,22 +283,41 @@ export class PreviewDesktopBridge implements DesktopBridge {
     metrics.currentJitterMs += 14
     metrics.playoutDelayMs += 4
 
+    this.recordStatus(this.snapshotState.session, 'metrics burst applied')
     return this.copy()
   }
 
   simulateCommandRejection(): Promise<DesktopSnapshot> {
+    this.recordError('preview command rejection', 'retryLater', true)
     return Promise.reject(new Error('preview command rejection'))
   }
 
   async resetPreview(): Promise<DesktopSnapshot> {
     this.snapshotState = structuredClone(INITIAL_PREVIEW_SNAPSHOT)
     this.pairingExpiresAtMillis = null
+    this.nextRequestId = 1
     return this.copy()
   }
 
   private setSession(session: SessionState) {
     this.snapshotState.session = session
     this.snapshotState.output.streamActive = session === 'streaming'
+  }
+
+  private recordReply(reply: Omit<ControlReply, 'requestId'>): void {
+    this.snapshotState.replies = [
+      { ...reply, requestId: this.nextRequestId },
+      ...this.snapshotState.replies,
+    ].slice(0, MAX_PREVIEW_REPLIES)
+    this.nextRequestId += 1
+  }
+
+  private recordStatus(state: SessionState, detail: string): void {
+    this.recordReply({ kind: 'streamStatus', state, detail })
+  }
+
+  private recordError(detail: string, code: ControlErrorCode = 'invalidRequest', retryable = false): void {
+    this.recordReply({ kind: 'error', code, retryable, detail })
   }
 
   private copy(): DesktopSnapshot {

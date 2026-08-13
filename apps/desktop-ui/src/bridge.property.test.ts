@@ -298,7 +298,7 @@ class PreviewBridgeModel {
     }
   }
 
-  snapshot(): DesktopSnapshot {
+  snapshot(): Omit<DesktopSnapshot, 'replies'> {
     this.expireInvitationWhenDue()
     const s = this.state
     return {
@@ -432,6 +432,7 @@ describe('PreviewDesktopBridge property', () => {
     ]
 
     let nowMillis = startMillis
+    let maxRepliesSeen = 0
     const observedSessions = new Set<SessionState>()
     const observedPairings = new Set<PairingState>()
     const observedKinds = new Set<Command['kind']>()
@@ -455,7 +456,33 @@ describe('PreviewDesktopBridge property', () => {
       model.apply(command)
       const expected = model.snapshot()
 
-      expect(observed).toEqual(expected)
+      // The reply log is an append-only diagnostic surface derived from command
+      // outcomes, not part of the reachable lifecycle contract. The independent
+      // model pins the state machine while dedicated bridge tests pin the exact
+      // reply content; here we verify the log stays bounded and ordered.
+      const { replies: _observedReplies, ...observedState } = observed
+      void _observedReplies
+      expect(observedState).toEqual(expected)
+      expect(observed.replies.length).toBeLessThanOrEqual(6)
+      for (let index = 1; index < observed.replies.length; index += 1) {
+        expect(observed.replies[index - 1].requestId).toBeGreaterThan(
+          observed.replies[index].requestId,
+        )
+      }
+      for (const reply of observed.replies) {
+        expect(typeof reply.detail).toBe('string')
+        expect(reply.detail.length).toBeGreaterThan(0)
+        if (reply.kind === 'streamStatus') {
+          expect(typeof reply.state).toBe('string')
+          expect(reply.code).toBeUndefined()
+          expect(reply.retryable).toBeUndefined()
+        } else {
+          expect(typeof reply.code).toBe('string')
+          expect(typeof reply.retryable).toBe('boolean')
+          expect(reply.state).toBeUndefined()
+        }
+      }
+      maxRepliesSeen = Math.max(maxRepliesSeen, observed.replies.length)
 
       observedSessions.add(observed.session)
       observedPairings.add(observed.pairing.state)
@@ -501,5 +528,6 @@ describe('PreviewDesktopBridge property', () => {
     expect(observedPairings.has('revoked')).toBe(true)
     expect(observedActiveWithCountdown).toBe(true)
     expect(observedAutoExpiry).toBe(true)
+    expect(maxRepliesSeen).toBe(6)
   })
 })

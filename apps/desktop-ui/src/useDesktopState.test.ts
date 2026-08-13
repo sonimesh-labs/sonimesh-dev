@@ -81,6 +81,7 @@ function receiverSnapshot(session: DesktopSnapshot['session']): DesktopSnapshot 
       currentJitterMs: 0,
       playoutDelayMs: 0,
     },
+    replies: [],
     previewAdapter: true,
   }
 }
