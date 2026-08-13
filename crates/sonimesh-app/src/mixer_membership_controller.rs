@@ -286,3 +286,239 @@ impl<const SLOTS: usize, const PCM_SAMPLES_PER_BLOCK: usize>
         matches!(self.active.get(slot), Some(true))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use sonimesh_audio::{
+        CommandDrivenMixer, GainControlHandle, MAX_PCM_QUEUE_BLOCKS, RealtimeQueueConfigError,
+    };
+
+    use super::{MixerAdmissionError, MixerMembershipController, SourcePcmFormat};
+
+    const SLOTS: usize = 2;
+    const SAMPLES: usize = 256;
+
+    fn output_format() -> SourcePcmFormat {
+        SourcePcmFormat::new(48_000, 2).expect("fixed test output format is valid")
+    }
+
+    fn mixer() -> CommandDrivenMixer<SLOTS, SAMPLES> {
+        CommandDrivenMixer::new().expect("fixed test mixer configuration is valid")
+    }
+
+    fn controller(
+        membership: sonimesh_audio::MixerMembershipHandle<SAMPLES>,
+    ) -> MixerMembershipController<SLOTS, SAMPLES> {
+        MixerMembershipController::new(membership, 8, output_format())
+            .expect("fixed test controller configuration is valid")
+    }
+
+    #[test]
+    fn new_rejects_zero_and_oversized_queue_capacity() {
+        let mixer = mixer();
+        let membership = mixer.membership();
+        assert!(matches!(
+            MixerMembershipController::<SLOTS, SAMPLES>::new(
+                membership.clone(),
+                0,
+                output_format()
+            ),
+            Err(MixerAdmissionError::Queue(
+                RealtimeQueueConfigError::ZeroCapacity
+            ))
+        ));
+        assert!(matches!(
+            MixerMembershipController::<SLOTS, SAMPLES>::new(
+                membership,
+                MAX_PCM_QUEUE_BLOCKS + 1,
+                output_format()
+            ),
+            Err(MixerAdmissionError::Queue(
+                RealtimeQueueConfigError::CapacityTooLarge
+            ))
+        ));
+    }
+
+    #[test]
+    fn admit_stream_rejects_a_format_mismatch() {
+        let mixer = mixer();
+        let mut controller = controller(mixer.membership());
+        let mismatched = SourcePcmFormat::new(44_100, 2).expect("fixed mismatch format is valid");
+
+        assert!(matches!(
+            controller.admit_stream(mismatched, GainControlHandle::new(), None),
+            Err(MixerAdmissionError::FormatMismatch)
+        ));
+        assert_eq!(controller.active(), 0);
+        assert_eq!(controller.pending_commands(), 0);
+    }
+
+    #[test]
+    fn admit_stream_occupies_the_lowest_free_slot() {
+        let mut mixer = mixer();
+        let mut controller = controller(mixer.membership());
+
+        let first = controller
+            .admit_stream(output_format(), GainControlHandle::new(), None)
+            .unwrap();
+        assert_eq!(first.slot, 0);
+        assert_eq!(controller.active(), 1);
+        assert!(controller.is_active(0));
+        assert!(!controller.is_active(1));
+        assert_eq!(controller.pending_commands(), 1);
+
+        let second = controller
+            .admit_stream(output_format(), GainControlHandle::new(), None)
+            .unwrap();
+        assert_eq!(second.slot, 1);
+        assert_eq!(controller.active(), 2);
+        assert_eq!(controller.pending_commands(), 2);
+
+        // The callback applies both queued commands when it drains.
+        mixer.drain_pending();
+        assert_eq!(controller.pending_commands(), 0);
+    }
+
+    #[test]
+    fn admit_stream_fails_closed_when_the_slot_table_is_full() {
+        let mixer = mixer();
+        let mut controller = controller(mixer.membership());
+        controller
+            .admit_stream(output_format(), GainControlHandle::new(), None)
+            .unwrap();
+        controller
+            .admit_stream(output_format(), GainControlHandle::new(), None)
+            .unwrap();
+
+        assert!(matches!(
+            controller.admit_stream(output_format(), GainControlHandle::new(), None),
+            Err(MixerAdmissionError::SlotTableFull)
+        ));
+        assert_eq!(controller.active(), 2);
+        assert_eq!(controller.pending_commands(), 2);
+    }
+
+    #[test]
+    fn remove_stream_rejects_an_out_of_range_slot() {
+        let mixer = mixer();
+        let mut controller = controller(mixer.membership());
+
+        assert_eq!(
+            controller.remove_stream(SLOTS),
+            Err(MixerAdmissionError::SlotOutOfRange)
+        );
+    }
+
+    #[test]
+    fn remove_stream_releases_the_slot_for_reuse() {
+        let mixer = mixer();
+        let mut controller = controller(mixer.membership());
+        controller
+            .admit_stream(output_format(), GainControlHandle::new(), None)
+            .unwrap();
+        controller
+            .admit_stream(output_format(), GainControlHandle::new(), None)
+            .unwrap();
+
+        controller.remove_stream(0).unwrap();
+        assert!(!controller.is_active(0));
+        assert_eq!(controller.active(), 1);
+
+        // The next admission reuses the lowest free slot.
+        let readmitted = controller
+            .admit_stream(output_format(), GainControlHandle::new(), None)
+            .unwrap();
+        assert_eq!(readmitted.slot, 0);
+        assert_eq!(controller.active(), 2);
+    }
+
+    #[test]
+    fn remove_stream_tolerates_a_stale_inactive_slot() {
+        let mixer = mixer();
+        let mut controller = controller(mixer.membership());
+
+        controller.remove_stream(1).unwrap();
+        assert!(!controller.is_active(1));
+        assert_eq!(controller.active(), 0);
+    }
+
+    #[test]
+    fn admit_adapted_stream_rejects_invalid_source_queue_capacity() {
+        let mixer = mixer();
+        let mut controller = controller(mixer.membership());
+
+        assert!(matches!(
+            controller.admit_adapted_stream::<SAMPLES>(
+                output_format(),
+                0,
+                GainControlHandle::new(),
+                None
+            ),
+            Err(MixerAdmissionError::Queue(
+                RealtimeQueueConfigError::ZeroCapacity
+            ))
+        ));
+        assert!(matches!(
+            controller.admit_adapted_stream::<SAMPLES>(
+                output_format(),
+                MAX_PCM_QUEUE_BLOCKS + 1,
+                GainControlHandle::new(),
+                None
+            ),
+            Err(MixerAdmissionError::Queue(
+                RealtimeQueueConfigError::CapacityTooLarge
+            ))
+        ));
+        assert_eq!(controller.active(), 0);
+        assert_eq!(controller.pending_commands(), 0);
+    }
+
+    #[test]
+    fn admit_adapted_stream_installs_an_adapter_at_the_lowest_free_slot() {
+        let mixer = mixer();
+        let mut controller = controller(mixer.membership());
+        let source_format = SourcePcmFormat::new(48_000, 1).expect("mono source format is valid");
+
+        let admitted = controller
+            .admit_adapted_stream::<128>(source_format, 4, GainControlHandle::new(), None)
+            .unwrap();
+        assert_eq!(admitted.slot, 0);
+        assert_eq!(controller.active(), 1);
+        assert_eq!(controller.pending_commands(), 1);
+        assert_eq!(admitted.adapter.source_channels(), 1);
+        assert_eq!(admitted.adapter.output_channels(), 2);
+    }
+
+    #[test]
+    fn admit_adapted_stream_fails_closed_when_adaptation_cannot_be_constructed() {
+        let mixer = mixer();
+        let mut controller = controller(mixer.membership());
+        let invalid = SourcePcmFormat {
+            sample_rate_hz: 48_000,
+            channels: 0,
+        };
+
+        assert!(matches!(
+            controller.admit_adapted_stream::<128>(invalid, 4, GainControlHandle::new(), None),
+            Err(MixerAdmissionError::Adapter(_))
+        ));
+        assert_eq!(controller.active(), 0);
+        assert_eq!(controller.pending_commands(), 0);
+    }
+
+    #[test]
+    fn error_display_is_actionable() {
+        assert_eq!(
+            MixerAdmissionError::SlotTableFull.to_string(),
+            "mixer slot table is full"
+        );
+        assert_eq!(
+            MixerAdmissionError::CommandQueueFull.to_string(),
+            "mixer membership command queue is full"
+        );
+        assert_eq!(
+            MixerAdmissionError::SlotOutOfRange.to_string(),
+            "mixer slot index is out of range"
+        );
+    }
+}
