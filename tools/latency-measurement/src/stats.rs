@@ -47,10 +47,11 @@ pub fn percentile(sorted: &[f64], percentile: f64) -> f64 {
 
 /// Summarizes unsorted per-run offsets in milliseconds.
 ///
-/// Returns `None` when no offsets were provided.
+/// Returns `None` when no offsets were provided or when any offset is not a
+/// finite number, so a failed run cannot silently produce a NaN quantile.
 #[must_use]
 pub fn summarize_ms(offsets_ms: &[f64]) -> Option<LatencySummary> {
-    if offsets_ms.is_empty() {
+    if offsets_ms.is_empty() || offsets_ms.iter().any(|offset| !offset.is_finite()) {
         return None;
     }
     let mut sorted = offsets_ms.to_vec();
@@ -99,5 +100,13 @@ mod tests {
     #[test]
     fn empty_input_has_no_summary() {
         assert!(summarize_ms(&[]).is_none());
+    }
+
+    #[test]
+    fn non_finite_inputs_have_no_summary() {
+        assert!(summarize_ms(&[f64::NAN, 1.0]).is_none());
+        assert!(summarize_ms(&[f64::INFINITY]).is_none());
+        assert!(summarize_ms(&[f64::NEG_INFINITY, -1.0]).is_none());
+        assert!(summarize_ms(&[2.0, f64::NAN, 1.0]).is_none());
     }
 }
