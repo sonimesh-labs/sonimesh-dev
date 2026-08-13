@@ -277,8 +277,7 @@ fn cli_measure_rejects_sample_rate_mismatch() {
     assert!(output.status.success(), "generate failed");
 
     let recording = test_signal(44_100, 1, 7);
-    write_mono(&recording_path, 44_100, &recording, SampleFormat::Pcm16)
-        .expect("recording writes");
+    write_mono(&recording_path, 44_100, &recording, SampleFormat::Pcm16).expect("recording writes");
 
     let output = Command::new(bin)
         .args(["measure"])
