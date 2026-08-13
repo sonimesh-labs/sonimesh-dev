@@ -20,6 +20,14 @@ function metrics(overrides: Partial<StreamMetrics> = {}): StreamMetrics {
     pcmDiscontinuities: '0',
     queuedPcmBlocks: 0,
     queuedPcmHighWaterBlocks: 0,
+    jitterFrames: 0,
+    jitterHighWaterFrames: 0,
+    targetMinFrames: 0,
+    targetMaxFrames: 0,
+    targetFrames: 0,
+    targetSmoothedJitterMs: 0,
+    targetRaisedSteps: 0,
+    targetLoweredSteps: 0,
     streamResets: '0',
     nominalInputSampleRateHz: 48_000,
     nominalOutputSampleRateHz: 48_000,
@@ -86,5 +94,36 @@ describe('DiagnosticsPanel', () => {
     })
 
     expect(wrapper.find('.diagnostics-simulate').exists()).toBe(false)
+  })
+
+  it('presents the adaptive jitter target state in its own group', () => {
+    const wrapper = mount(DiagnosticsPanel, {
+      props: {
+        metrics: metrics({
+          jitterFrames: 3,
+          jitterHighWaterFrames: 5,
+          targetMinFrames: 2,
+          targetMaxFrames: 4,
+          targetFrames: 3,
+          targetSmoothedJitterMs: 36,
+          targetRaisedSteps: 1,
+          targetLoweredSteps: 2,
+        }),
+      },
+    })
+
+    const group = wrapper.get('section[aria-labelledby="jitter-target-heading"]')
+    const rows = group.findAll('.metric-list > div')
+    const value = (label: string) =>
+      rows.find((row) => row.get('dt').text() === label)?.get('dd').text()
+
+    expect(group.get('h3').text()).toBe('Jitter scheduling')
+    expect(value('Buffered frames')).toBe('3')
+    expect(value('High water')).toBe('5')
+    expect(value('Target window')).toBe('2–4')
+    expect(value('Current target')).toBe('3')
+    expect(value('Smoothed jitter')).toBe('36 ms')
+    expect(value('Target raised')).toBe('1')
+    expect(value('Target lowered')).toBe('2')
   })
 })

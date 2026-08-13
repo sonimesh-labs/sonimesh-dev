@@ -88,6 +88,14 @@ function initialMetrics(): StreamMetrics {
     pcmDiscontinuities: '2',
     queuedPcmBlocks: 3,
     queuedPcmHighWaterBlocks: 5,
+    jitterFrames: 3,
+    jitterHighWaterFrames: 5,
+    targetMinFrames: 2,
+    targetMaxFrames: 4,
+    targetFrames: 3,
+    targetSmoothedJitterMs: 36,
+    targetRaisedSteps: 0,
+    targetLoweredSteps: 2,
     streamResets: '3',
     nominalInputSampleRateHz: 48_000,
     nominalOutputSampleRateHz: 48_000,
@@ -257,6 +265,12 @@ class PreviewBridgeModel {
         const nextQueued = m.queuedPcmBlocks + 2
         m.queuedPcmHighWaterBlocks = Math.max(m.queuedPcmHighWaterBlocks, nextQueued)
         m.queuedPcmBlocks = nextQueued
+        const nextJitterFrames = m.jitterFrames + 2
+        m.jitterHighWaterFrames = Math.max(m.jitterHighWaterFrames, nextJitterFrames)
+        m.jitterFrames = nextJitterFrames
+        m.targetSmoothedJitterMs += 6
+        m.targetFrames = Math.min(m.targetFrames + 1, m.targetMaxFrames)
+        m.targetRaisedSteps += 1
         m.currentJitterMs += 14
         m.playoutDelayMs += 4
         return

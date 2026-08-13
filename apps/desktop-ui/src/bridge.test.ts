@@ -172,10 +172,20 @@ describe('PreviewDesktopBridge', () => {
     expect(burst.metrics.playoutDelayMs).toBe(68)
     expect(burst.metrics.queuedPcmBlocks).toBe(5)
     expect(burst.metrics.queuedPcmHighWaterBlocks).toBe(5)
+    expect(burst.metrics.jitterFrames).toBe(5)
+    expect(burst.metrics.jitterHighWaterFrames).toBe(5)
+    expect(burst.metrics.targetFrames).toBe(4)
+    expect(burst.metrics.targetMaxFrames).toBe(4)
+    expect(burst.metrics.targetSmoothedJitterMs).toBe(42)
+    expect(burst.metrics.targetRaisedSteps).toBe(1)
 
     expect(again.metrics.authenticatedPackets).toBe('12940')
     expect(again.metrics.currentJitterMs).toBe(66)
     expect(again.metrics.pcmOverflows).toBe('4')
+    expect(again.metrics.jitterFrames).toBe(7)
+    expect(again.metrics.jitterHighWaterFrames).toBe(7)
+    expect(again.metrics.targetFrames).toBe(4)
+    expect(again.metrics.targetRaisedSteps).toBe(2)
 
     expect(burst.metrics.streamResets).toBe(before.metrics.streamResets)
     expect(burst.metrics.driftHardResyncs).toBe(before.metrics.driftHardResyncs)
@@ -190,6 +200,9 @@ describe('PreviewDesktopBridge', () => {
     expect(burst.metrics.driftHardResyncs).toBe('1')
     expect(burst.metrics.nominalInputSampleRateHz).toBe(48_000)
     expect(burst.metrics.nominalOutputSampleRateHz).toBe(48_000)
+    expect(burst.metrics.targetMinFrames).toBe(2)
+    expect(burst.metrics.targetMaxFrames).toBe(4)
+    expect(burst.metrics.targetLoweredSteps).toBe(2)
   })
 
   it('rejects like a bridge command so the error path is exercisable', async () => {
@@ -213,6 +226,8 @@ describe('PreviewDesktopBridge', () => {
     expect(reset.metrics.authenticatedPackets).toBe('12844')
     expect(reset.metrics.currentJitterMs).toBe(38)
     expect(reset.metrics.queuedPcmBlocks).toBe(3)
+    expect(reset.metrics.jitterFrames).toBe(3)
+    expect(reset.metrics.targetFrames).toBe(3)
     expect(reset.previewAdapter).toBe(true)
   })
 

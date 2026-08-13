@@ -241,6 +241,7 @@ button:focus-visible, select:focus-visible, a:focus-visible { outline: 3px solid
 .health-primary strong { color: #fff; }
 .diagnostic-groups { display: grid; grid-template-columns: minmax(250px, 0.75fr) minmax(0, 1.25fr); gap: 12px; margin-top: 12px; }
 .metric-group { min-width: 0; padding: 18px; border: 1px solid var(--line); border-radius: 18px; background: #fff; }
+.metric-group-wide { grid-column: 1 / -1; }
 .group-heading { display: flex; align-items: center; gap: 11px; padding-bottom: 15px; border-bottom: 1px solid var(--line); }
 .group-icon { width: 36px; height: 36px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 12px; color: var(--signal-ink); background: var(--signal-soft); }
 .group-heading h3 { color: var(--ink-soft); font-size: 13px; font-weight: 720; }

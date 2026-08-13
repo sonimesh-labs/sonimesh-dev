@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Activity, Gauge, Layers, RefreshCcwDot, ShieldCheck, Waves } from '@lucide/vue'
+import { Activity, Gauge, Layers, RefreshCcwDot, ShieldCheck, Target, Waves } from '@lucide/vue'
 
 import type { StreamMetrics } from '../types'
 
@@ -98,6 +98,22 @@ function formatCounter(counter: string) {
           <div><dt>Discontinuities</dt><dd>{{ formatCounter(metrics.pcmDiscontinuities) }}</dd></div>
           <div><dt>Hard resyncs</dt><dd>{{ formatCounter(metrics.driftHardResyncs) }}</dd></div>
           <div><dt>Stream resets</dt><dd>{{ formatCounter(metrics.streamResets) }}</dd></div>
+        </dl>
+      </section>
+
+      <section class="metric-group metric-group-wide" aria-labelledby="jitter-target-heading">
+        <div class="group-heading">
+          <span class="group-icon"><Target :size="18" aria-hidden="true" /></span>
+          <div><h3 id="jitter-target-heading">Jitter scheduling</h3><p>Bounded adaptive target water levels</p></div>
+        </div>
+        <dl class="metric-list metric-list-wide">
+          <div><dt>Buffered frames</dt><dd>{{ metrics.jitterFrames }}</dd></div>
+          <div><dt>High water</dt><dd>{{ metrics.jitterHighWaterFrames }}</dd></div>
+          <div><dt>Target window</dt><dd>{{ metrics.targetMinFrames }}–{{ metrics.targetMaxFrames }}</dd></div>
+          <div><dt>Current target</dt><dd>{{ metrics.targetFrames }}</dd></div>
+          <div><dt>Smoothed jitter</dt><dd>{{ metrics.targetSmoothedJitterMs }} ms</dd></div>
+          <div><dt>Target raised</dt><dd>{{ metrics.targetRaisedSteps }}</dd></div>
+          <div><dt>Target lowered</dt><dd>{{ metrics.targetLoweredSteps }}</dd></div>
         </dl>
       </section>
     </div>

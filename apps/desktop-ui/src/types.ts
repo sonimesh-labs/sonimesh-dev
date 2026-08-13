@@ -33,6 +33,15 @@ export interface StreamMetrics {
   pcmDiscontinuities: MetricCounter
   queuedPcmBlocks: number
   queuedPcmHighWaterBlocks: number
+  /** Adaptive jitter target state published by the stream snapshot (ADR 0016). */
+  jitterFrames: number
+  jitterHighWaterFrames: number
+  targetMinFrames: number
+  targetMaxFrames: number
+  targetFrames: number
+  targetSmoothedJitterMs: number
+  targetRaisedSteps: number
+  targetLoweredSteps: number
   streamResets: MetricCounter
   nominalInputSampleRateHz: number
   nominalOutputSampleRateHz: number

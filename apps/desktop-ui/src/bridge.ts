@@ -59,6 +59,14 @@ const INITIAL_PREVIEW_SNAPSHOT: DesktopSnapshot = {
     pcmDiscontinuities: '2',
     queuedPcmBlocks: 3,
     queuedPcmHighWaterBlocks: 5,
+    jitterFrames: 3,
+    jitterHighWaterFrames: 5,
+    targetMinFrames: 2,
+    targetMaxFrames: 4,
+    targetFrames: 3,
+    targetSmoothedJitterMs: 36,
+    targetRaisedSteps: 0,
+    targetLoweredSteps: 2,
     streamResets: '3',
     nominalInputSampleRateHz: 48_000,
     nominalOutputSampleRateHz: 48_000,
@@ -210,6 +218,14 @@ export class PreviewDesktopBridge implements DesktopBridge {
     const nextQueued = metrics.queuedPcmBlocks + 2
     metrics.queuedPcmHighWaterBlocks = Math.max(metrics.queuedPcmHighWaterBlocks, nextQueued)
     metrics.queuedPcmBlocks = Math.min(metrics.queuedPcmHighWaterBlocks, nextQueued)
+
+    const nextJitterFrames = metrics.jitterFrames + 2
+    metrics.jitterHighWaterFrames = Math.max(metrics.jitterHighWaterFrames, nextJitterFrames)
+    metrics.jitterFrames = nextJitterFrames
+    metrics.targetSmoothedJitterMs += 6
+    metrics.targetFrames = Math.min(metrics.targetFrames + 1, metrics.targetMaxFrames)
+    metrics.targetRaisedSteps += 1
+
     metrics.currentJitterMs += 14
     metrics.playoutDelayMs += 4
 

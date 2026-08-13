@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Keep the desktop preview state unions aligned with the Rust control plane."""
+"""Keep the desktop preview state and metrics aligned with the Rust control plane."""
 
 from __future__ import annotations
 
@@ -17,6 +17,15 @@ IDENTIFIER_PATTERN = re.compile(r"^[A-Z][A-Za-z0-9_]*$")
 ALIGNMENTS = (
     ("SessionState", "SessionPhase", "crates/sonimesh-app/src/session.rs"),
     ("PairingState", "PairingSnapshotState", "crates/sonimesh-app/src/control_snapshot.rs"),
+)
+
+# StreamMetrics fields the desktop preview synthesizes for derived UI values;
+# they are not part of the Rust stream snapshot until the control plane
+# publishes them.
+PREVIEW_ONLY_STREAM_FIELDS = frozenset({"currentJitterMs", "playoutDelayMs"})
+
+STRUCT_ALIGNMENTS = (
+    ("StreamMetrics", "StreamMetricsSnapshot", "crates/sonimesh-diagnostics/src/metrics.rs"),
 )
 
 
@@ -65,6 +74,64 @@ def camel(variant: str) -> str:
     return variant[0].lower() + variant[1:]
 
 
+def rust_struct_fields(source: str, struct_name: str) -> list[str]:
+    """Returns field names of one Rust struct, in declaration order."""
+    match = re.search(rf"pub struct {re.escape(struct_name)}\s*\{{", source)
+    if match is None:
+        raise ValueError(f"Rust struct {struct_name} is not declared")
+
+    depth = 1
+    body_start = match.end()
+    body_end = len(source)
+    for index in range(body_start, len(source)):
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+            if depth == 0:
+                body_end = index
+                break
+
+    fields: list[str] = []
+    for line in source[body_start:body_end].splitlines():
+        field_match = re.match(r"^\s*pub\s+([a-z_][a-z0-9_]*)\s*:", line)
+        if field_match is not None:
+            fields.append(field_match.group(1))
+    return fields
+
+
+def ts_interface_fields(source: str, interface_name: str) -> list[str]:
+    """Returns field names of one TypeScript interface, in declaration order."""
+    match = re.search(rf"export interface {re.escape(interface_name)}\s*\{{", source)
+    if match is None:
+        raise ValueError(f"TypeScript interface {interface_name} is not declared")
+
+    depth = 1
+    body_start = match.end()
+    body_end = len(source)
+    for index in range(body_start, len(source)):
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+            if depth == 0:
+                body_end = index
+                break
+
+    fields: list[str] = []
+    for line in source[body_start:body_end].splitlines():
+        field_match = re.match(r"^\s*([a-z][A-Za-z0-9_]*)\s*:", line)
+        if field_match is not None:
+            fields.append(field_match.group(1))
+    return fields
+
+
+def snake_to_camel(field: str) -> str:
+    """Converts a Rust snake_case field name to its preview camelCase form."""
+    parts = field.split("_")
+    return parts[0] + "".join(part.capitalize() for part in parts[1:])
+
+
 def validate_sources(rust_source: str, ts_source: str) -> list[str]:
     """Returns deterministic alignment errors across every declared mapping."""
     errors: list[str] = []
@@ -86,14 +153,32 @@ def validate_sources(rust_source: str, ts_source: str) -> list[str]:
             errors.append(f"{ts_type} is missing values: {', '.join(missing)}")
         if unexpected:
             errors.append(f"{ts_type} has undeclared values: {', '.join(unexpected)}")
+
+    for ts_interface, rust_struct, _ in STRUCT_ALIGNMENTS:
+        try:
+            fields = rust_struct_fields(rust_source, rust_struct)
+            observed = set(ts_interface_fields(ts_source, ts_interface))
+        except ValueError as error:
+            errors.append(f"preview alignment is invalid: {error}")
+            continue
+
+        observed -= PREVIEW_ONLY_STREAM_FIELDS
+        expected = {snake_to_camel(field) for field in fields}
+        missing = sorted(expected - observed)
+        unexpected = sorted(observed - expected)
+        if missing:
+            errors.append(f"{ts_interface} is missing fields: {', '.join(missing)}")
+        if unexpected:
+            errors.append(f"{ts_interface} has undeclared fields: {', '.join(unexpected)}")
     return errors
 
 
 def validate_workspace(root: Path) -> list[str]:
     """Returns errors for the checked-in preview and Rust control-plane sources."""
     try:
+        rust_paths = [path for _, _, path in ALIGNMENTS + STRUCT_ALIGNMENTS]
         rust_source = "".join(
-            (root / path).read_text(encoding="utf-8") for _, _, path in ALIGNMENTS
+            (root / path).read_text(encoding="utf-8") for path in rust_paths
         )
         ts_source = (root / "apps" / "desktop-ui" / "src" / "types.ts").read_text(encoding="utf-8")
     except OSError as error:
@@ -140,16 +225,43 @@ export type SessionState = 'idle' | 'pairing' | 'ready' | 'streaming' | 'reconne
 
 export type PairingState = 'inactive' | 'active' | 'consumed' | 'expired' | 'revoked'
 """
+    RUST_SNAPSHOT = """
+pub struct StreamMetricsSnapshot {
+    /// Successfully authenticated packets.
+    pub authenticated_packets: u64,
+    /// Current PCM blocks belonging to the active stream epoch.
+    pub queued_pcm_blocks: u16,
+    /// Adaptive-target minimum water level of the active epoch, in frames.
+    pub target_min_frames: u16,
+    /// Smoothed packet-arrival-jitter estimate of the active epoch, in ms.
+    pub target_smoothed_jitter_ms: u32,
+    /// Stream-local resets.
+    pub stream_resets: u64,
+}
+"""
+    TS_INTERFACE = """
+export interface StreamMetrics {
+  authenticatedPackets: MetricCounter
+  queuedPcmBlocks: number
+  targetMinFrames: number
+  targetSmoothedJitterMs: number
+  streamResets: MetricCounter
+  currentJitterMs: number
+  playoutDelayMs: number
+}
+"""
 
     def test_matching_enums_and_unions_are_valid(self) -> None:
-        self.assertEqual(validate_sources(self.RUST, self.TS), [])
+        rust = self.RUST + self.RUST_SNAPSHOT
+        ts = self.TS + self.TS_INTERFACE
+        self.assertEqual(validate_sources(rust, ts), [])
 
     def test_reports_missing_and_undeclared_ts_values(self) -> None:
-        ts = self.TS.replace("'outputUnavailable'", "'outputUnavailable' | 'drifted'").replace(
-            "'revoked'", "'expired'"
-        )
+        ts = (self.TS + self.TS_INTERFACE).replace(
+            "'outputUnavailable'", "'outputUnavailable' | 'drifted'"
+        ).replace("'revoked'", "'expired'")
         self.assertEqual(
-            validate_sources(self.RUST, ts),
+            validate_sources(self.RUST + self.RUST_SNAPSHOT, ts),
             [
                 "SessionState has undeclared values: drifted",
                 "PairingState is missing values: revoked",
@@ -157,24 +269,27 @@ export type PairingState = 'inactive' | 'active' | 'consumed' | 'expired' | 'rev
         )
 
     def test_reports_rust_variant_removal_and_missing_ts_union(self) -> None:
-        rust = self.RUST.replace("    OutputUnavailable,", "")
+        rust = (self.RUST + self.RUST_SNAPSHOT).replace("    OutputUnavailable,", "")
         self.assertEqual(
-            validate_sources(rust, self.TS),
+            validate_sources(rust, self.TS + self.TS_INTERFACE),
             ["SessionState has undeclared values: outputUnavailable"],
         )
 
-        ts = self.TS.replace("export type PairingState =", "export type PairingStatus =")
+        ts = (self.TS + self.TS_INTERFACE).replace(
+            "export type PairingState =", "export type PairingStatus ="
+        )
         self.assertEqual(
-            validate_sources(self.RUST, ts),
+            validate_sources(self.RUST + self.RUST_SNAPSHOT, ts),
             ["preview alignment is invalid: TypeScript union type PairingState is not declared"],
         )
 
-    def test_rejects_missing_rust_enum_declaration(self) -> None:
+    def test_rejects_missing_rust_declarations(self) -> None:
         self.assertEqual(
-            validate_sources("pub fn unrelated() {}", self.TS),
+            validate_sources("pub fn unrelated() {}", self.TS + self.TS_INTERFACE),
             [
                 "preview alignment is invalid: Rust enum SessionPhase is not declared",
                 "preview alignment is invalid: Rust enum PairingSnapshotState is not declared",
+                "preview alignment is invalid: Rust struct StreamMetricsSnapshot is not declared",
             ],
         )
 
@@ -185,7 +300,47 @@ export type PairingState = 'inactive' | 'active' | 'consumed' | 'expired' | 'rev
             "  | 'outputUnavailable'\n"
             "export type PairingState = 'inactive' | 'active' | 'consumed' | 'expired' | 'revoked'\n"
         )
-        self.assertEqual(validate_sources(self.RUST, ts), [])
+        self.assertEqual(
+            validate_sources(self.RUST + self.RUST_SNAPSHOT, ts + self.TS_INTERFACE), []
+        )
+
+    def test_matching_struct_fields_are_valid(self) -> None:
+        rust = self.RUST + self.RUST_SNAPSHOT
+        ts = self.TS + self.TS_INTERFACE
+        self.assertEqual(validate_sources(rust, ts), [])
+
+    def test_reports_missing_and_undeclared_ts_fields(self) -> None:
+        rust = self.RUST + self.RUST_SNAPSHOT
+        ts = self.TS + self.TS_INTERFACE
+        ts = ts.replace("  streamResets: MetricCounter\n", "")
+        ts = ts.replace("  currentJitterMs: number\n", "  inventedMetric: number\n")
+        self.assertEqual(
+            validate_sources(rust, ts),
+            [
+                "StreamMetrics is missing fields: streamResets",
+                "StreamMetrics has undeclared fields: inventedMetric",
+            ],
+        )
+
+    def test_reports_rust_field_removal_and_missing_ts_interface(self) -> None:
+        rust = self.RUST + self.RUST_SNAPSHOT.replace(
+            "    pub target_smoothed_jitter_ms: u32,\n", ""
+        )
+        self.assertEqual(
+            validate_sources(rust, self.TS + self.TS_INTERFACE),
+            ["StreamMetrics has undeclared fields: targetSmoothedJitterMs"],
+        )
+
+        ts = self.TS + self.TS_INTERFACE.replace(
+            "export interface StreamMetrics {", "export interface StreamMetricsX {"
+        )
+        self.assertEqual(
+            validate_sources(self.RUST + self.RUST_SNAPSHOT, ts),
+            [
+                "preview alignment is invalid: "
+                "TypeScript interface StreamMetrics is not declared"
+            ],
+        )
 
 
 if __name__ == "__main__":
