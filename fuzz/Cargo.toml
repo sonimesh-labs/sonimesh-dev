@@ -10,6 +10,7 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 sonimesh-audio = { path = "../crates/sonimesh-audio" }
+sonimesh-app = { path = "../crates/sonimesh-app" }
 sonimesh-network = { path = "../crates/sonimesh-network" }
 sonimesh-protocol = { path = "../crates/sonimesh-protocol" }
 
@@ -71,12 +72,14 @@ path = "fuzz_targets/adaptive_jitter_target.rs"
 test = false
 doc = false
 bench = false
+
 [[bin]]
 name = "nominal_resampler"
 path = "fuzz_targets/nominal_resampler.rs"
 test = false
 doc = false
 bench = false
+
 [[bin]]
 name = "channel_mapper"
 path = "fuzz_targets/channel_mapper.rs"
@@ -90,6 +93,7 @@ path = "fuzz_targets/peak_limiter.rs"
 test = false
 doc = false
 bench = false
+
 [[bin]]
 name = "drift_controller"
 path = "fuzz_targets/drift_controller.rs"
@@ -100,6 +104,13 @@ bench = false
 [[bin]]
 name = "fixed_slot_mixer"
 path = "fuzz_targets/fixed_slot_mixer.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "control_stream_coordinator"
+path = "fuzz_targets/control_stream_coordinator.rs"
 test = false
 doc = false
 bench = false

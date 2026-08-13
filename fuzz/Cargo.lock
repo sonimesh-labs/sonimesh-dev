@@ -586,6 +586,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
+name = "sonimesh-app"
+version = "0.1.0"
+dependencies = [
+ "sonimesh-audio",
+ "sonimesh-diagnostics",
+ "sonimesh-network",
+ "sonimesh-platform",
+ "sonimesh-protocol",
+]
+
+[[package]]
 name = "sonimesh-audio"
 version = "0.1.0"
 dependencies = [
@@ -602,6 +613,7 @@ name = "sonimesh-fuzz"
 version = "0.0.0"
 dependencies = [
  "libfuzzer-sys",
+ "sonimesh-app",
  "sonimesh-audio",
  "sonimesh-network",
  "sonimesh-protocol",
@@ -613,6 +625,10 @@ version = "0.1.0"
 dependencies = [
  "sonimesh-protocol",
 ]
+
+[[package]]
+name = "sonimesh-platform"
+version = "0.1.0"
 
 [[package]]
 name = "sonimesh-protocol"
