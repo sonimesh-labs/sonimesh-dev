@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use sonimesh_audio::{
     AdaptiveJitterTarget, ArrivalJitter, ArrivalJitterConfigError, DecodeStep, DecodeWorkerError,
-    FrameDecoder, InsertOutcome, JitterTargetConfig, JitterTargetConfigError, OPUS_SAMPLE_RATE_HZ,
-    RealtimePcmProducer, RealtimePcmPushOutcome, StreamDecodeWorker,
+    FrameDecoder, InsertOutcome, JitterMode, JitterTargetConfig, JitterTargetConfigError,
+    OPUS_SAMPLE_RATE_HZ, RealtimePcmProducer, RealtimePcmPushOutcome, StreamDecodeWorker,
 };
 use sonimesh_diagnostics::StreamCounters;
 use sonimesh_network::{
@@ -50,6 +50,31 @@ pub struct AdaptiveTargetConfig {
     pub arrival_ticks_per_second: u64,
     /// Monotonic arrival clock queried once per admitted packet.
     pub tick_source: Box<dyn FnMut() -> u64>,
+}
+
+impl AdaptiveTargetConfig {
+    /// Builds the preset configuration for one stream with a monotonic clock.
+    ///
+    /// The returned [`JitterTargetConfig`] follows the mode preset range
+    /// (architecture section 11) and the tick source is a ready-made
+    /// process-monotonic clock at `arrival_ticks_per_second` (for example
+    /// `1_000_000_000` for a nanosecond clock). Validation of the mode range
+    /// against the buffer capacity happens when
+    /// [`ReceiverStreamPipeline::new_with_adaptive_target`] constructs the
+    /// controller.
+    #[must_use]
+    pub fn preset(
+        mode: JitterMode,
+        frame_duration_ms: u32,
+        buffer_capacity_frames: usize,
+        arrival_ticks_per_second: u64,
+    ) -> Self {
+        Self {
+            target: JitterTargetConfig::preset(mode, frame_duration_ms, buffer_capacity_frames),
+            arrival_ticks_per_second,
+            tick_source: Box::new(crate::monotonic_tick_source(arrival_ticks_per_second)),
+        }
+    }
 }
 
 /// Failure while receiving, admitting, decoding, or rotating one stream pipeline.
@@ -551,5 +576,27 @@ mod adaptive_target_setup_error_tests {
                 .downcast_ref::<ArrivalJitterConfigError>()
                 .is_some()
         );
+    }
+}
+
+#[cfg(test)]
+mod adaptive_target_config_tests {
+    use sonimesh_audio::JitterMode;
+
+    use crate::AdaptiveTargetConfig;
+
+    #[test]
+    fn preset_matches_the_mode_range_and_ticks_monotonically() {
+        let mut config = AdaptiveTargetConfig::preset(JitterMode::Balanced, 20, 4, 1_000);
+        assert_eq!(config.arrival_ticks_per_second, 1_000);
+        assert_eq!(config.target.mode, JitterMode::Balanced);
+        assert_eq!(config.target.frame_duration_ms, 20);
+        assert_eq!(config.target.buffer_capacity_frames, 4);
+
+        let first = (config.tick_source)();
+        for _ in 0..1_000 {
+            let next = (config.tick_source)();
+            assert!(next >= first, "the preset clock must never move backward");
+        }
     }
 }
