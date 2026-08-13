@@ -92,6 +92,8 @@ cargo run -p sonimesh-latency-measurement -- summary
 ```
 
 Each line must be a finite number; NaN and infinite values are rejected.
+The command fails when no offset lines are provided, so an empty measurement
+file cannot silently pass as a successful summary.
 
 ## Algorithm
 

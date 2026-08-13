@@ -243,18 +243,20 @@ fn summarize_lines<R: BufRead>(reader: R) -> Result<(), Box<dyn Error>> {
         }
         offsets_ms.push(value);
     }
-    match summarize_ms(&offsets_ms) {
-        Some(summary) => println!(
-            "runs={} min_ms={:.3} p50_ms={:.3} p95_ms={:.3} p99_ms={:.3} max_ms={:.3}",
-            offsets_ms.len(),
-            summary.min_ms,
-            summary.p50_ms,
-            summary.p95_ms,
-            summary.p99_ms,
-            summary.max_ms
-        ),
-        None => eprintln!("summary: no offsets provided on stdin"),
-    }
+    let Some(summary) = summarize_ms(&offsets_ms) else {
+        // Empty input is not a valid summary; fail closed so an empty
+        // measurement file cannot pass as a successful aggregation.
+        return Err("no offsets provided on stdin".into());
+    };
+    println!(
+        "runs={} min_ms={:.3} p50_ms={:.3} p95_ms={:.3} p99_ms={:.3} max_ms={:.3}",
+        offsets_ms.len(),
+        summary.min_ms,
+        summary.p50_ms,
+        summary.p95_ms,
+        summary.p99_ms,
+        summary.max_ms
+    );
     Ok(())
 }
 
@@ -842,6 +844,15 @@ mod tests {
 
         let error = summarize_lines(Cursor::new("-inf\n".as_bytes())).expect_err("inf offset");
         assert!(error.to_string().contains("invalid offset `-inf`"));
+    }
+
+    #[test]
+    fn summary_rejects_empty_or_blank_stdin() {
+        let error = summarize_lines(Cursor::new("".as_bytes())).expect_err("empty stdin");
+        assert!(error.to_string().contains("no offsets provided on stdin"));
+
+        let error = summarize_lines(Cursor::new(" \n\t\n".as_bytes())).expect_err("blank stdin");
+        assert!(error.to_string().contains("no offsets provided on stdin"));
     }
 
     #[test]
