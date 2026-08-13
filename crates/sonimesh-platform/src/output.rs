@@ -192,7 +192,7 @@ impl std::error::Error for OutputError {
 
 #[cfg(test)]
 mod debug_tests {
-    use super::{OutputError, RenderSourceFactoryError};
+    use super::{OutputConfigError, OutputError, RenderSourceFactoryError};
 
     #[test]
     fn backend_debug_redacts_free_form_error_messages() {
@@ -206,5 +206,58 @@ mod debug_tests {
         assert!(output_debug.contains("Backend { message_len:"));
         assert!(!factory_debug.contains("Private Headphones"));
         assert!(!output_debug.contains("persistent-device-id"));
+    }
+
+    #[test]
+    fn output_error_display_has_stable_messages() {
+        assert_eq!(
+            OutputError::DeviceUnavailable.to_string(),
+            "output device is unavailable"
+        );
+        assert_eq!(
+            OutputError::UnsupportedFormat.to_string(),
+            "output format is unsupported"
+        );
+        assert_eq!(
+            OutputError::AlreadyRunning.to_string(),
+            "output stream is already running"
+        );
+        assert_eq!(
+            OutputError::Backend("boom".to_owned()).to_string(),
+            "output backend failed: boom"
+        );
+        assert_eq!(
+            OutputError::InvalidConfig(OutputConfigError::InvalidSampleRate).to_string(),
+            "output sample rate is outside the supported 8-192 kHz range"
+        );
+    }
+
+    #[test]
+    fn output_error_debug_never_exposes_free_form_payload() {
+        for error in [
+            OutputError::DeviceUnavailable,
+            OutputError::UnsupportedFormat,
+            OutputError::AlreadyRunning,
+        ] {
+            let debug = format!("{error:?}");
+            assert!(
+                !debug.contains('(') && !debug.contains('{'),
+                "unexpected payload in debug output: {debug}"
+            );
+        }
+        assert_eq!(
+            format!("{:?}", OutputError::Backend("secret".to_owned())),
+            "Backend { message_len: 6 }"
+        );
+    }
+
+    #[test]
+    fn output_error_source_links_config_errors() {
+        let error = OutputError::InvalidConfig(OutputConfigError::InvalidChannelCount);
+        let source = std::error::Error::source(&error);
+        assert_eq!(
+            source.map(ToString::to_string),
+            Some(OutputConfigError::InvalidChannelCount.to_string())
+        );
     }
 }

@@ -137,4 +137,28 @@ mod tests {
             Err(OutputError::UnsupportedFormat)
         );
     }
+
+    #[test]
+    fn output_config_wraps_invalid_probe_bounds() {
+        let mut probe = probe(Some(SampleFormat::Float32));
+        probe.sample_rate_hz = 0;
+        assert!(matches!(
+            probe.output_config(None, 1_024),
+            Err(OutputError::InvalidConfig(_))
+        ));
+    }
+
+    #[test]
+    fn buffer_size_variants_compare_and_debug_cleanly() {
+        assert_eq!(CpalBufferSize::Unknown, CpalBufferSize::Unknown);
+        let range = CpalBufferSize::Range {
+            minimum_frames: 240,
+            maximum_frames: 4_800,
+        };
+        assert_ne!(range, CpalBufferSize::Unknown);
+        assert_eq!(
+            format!("{range:?}"),
+            "Range { minimum_frames: 240, maximum_frames: 4800 }"
+        );
+    }
 }

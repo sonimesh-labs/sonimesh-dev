@@ -161,4 +161,54 @@ mod tests {
         assert_eq!(snapshot.maximum_callback_frames, 960);
         assert!(snapshot.maximum_callback_gap_ns <= snapshot.last_callback_offset_ns);
     }
+
+    #[test]
+    fn first_callback_records_no_callback_gap() {
+        let status = CallbackStatus::default();
+        status.callback(480, 240);
+
+        let snapshot = status.snapshot();
+        assert_eq!(snapshot.callback_count, 1);
+        assert_eq!(snapshot.maximum_callback_gap_ns, 0);
+        assert!(snapshot.last_callback_offset_ns > 0);
+    }
+
+    #[test]
+    fn callback_tracks_maximums_and_last_values() {
+        let status = CallbackStatus::default();
+        status.callback(480, 240);
+        status.callback(960, 480);
+        status.callback(240, 120);
+
+        let snapshot = status.snapshot();
+        assert_eq!(snapshot.callback_count, 3);
+        assert_eq!(snapshot.last_callback_samples, 240);
+        assert_eq!(snapshot.maximum_callback_samples, 960);
+        assert_eq!(snapshot.last_callback_frames, 120);
+        assert_eq!(snapshot.maximum_callback_frames, 480);
+        assert!(
+            snapshot.maximum_callback_gap_ns <= snapshot.last_callback_offset_ns,
+            "any callback gap must stay within the total elapsed offset"
+        );
+    }
+
+    #[test]
+    fn oversized_and_stream_error_events_are_counted() {
+        let status = CallbackStatus::default();
+        status.oversized();
+        status.stream_error();
+        status.oversized();
+
+        let snapshot = status.snapshot();
+        assert_eq!(snapshot.oversized_callbacks, 2);
+        assert_eq!(snapshot.stream_errors, 1);
+    }
+
+    #[test]
+    fn narrow_frames_saturates_at_the_u32_boundary() {
+        assert_eq!(narrow_frames(0), 0);
+        assert_eq!(narrow_frames(u64::from(u32::MAX)), u32::MAX);
+        assert_eq!(narrow_frames(u64::from(u32::MAX) + 1), u32::MAX);
+        assert_eq!(narrow_frames(u64::MAX), u32::MAX);
+    }
 }
