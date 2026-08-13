@@ -48,7 +48,9 @@ The vector pin checkers (`check_pairing_vectors.py`, `check_control_frame_vector
 `check_media_crypto_vectors.py`) reimplement each documented version-one protocol
 boundary in pure standard-library Python and cross-check the pins published in the
 protocol docs, the Rust tests, and the Kotlin tests. `check_ci_wiring.py` verifies
-that every `tools/` checker is wired into CI with its required mode.
+that every `tools/` checker is wired into CI with its required
+mode and that the contributor-facing Core checks block documents the same tools with the
+same modes.
 
 ## Fuzz checks
 
