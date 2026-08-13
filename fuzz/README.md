@@ -30,6 +30,14 @@ production workspace so `libfuzzer-sys` never becomes a shipping dependency.
   into the bounded output-stage limiter, proving it cannot panic, must fail
   non-finite input closed to silence, must keep output within the ceiling,
   and must leave the block untouched when channels or alignment are rejected.
+- `drift_controller` feeds arbitrary validated occupancy PI parameters and
+  occupancy snapshots into the bounded per-stream drift controller, proving
+  adversarial occupancy cannot panic the controller, exceed the ratio or slew
+  caps, or survive a hard resync with stale history.
+- `fixed_slot_mixer` drives arbitrary insert/remove/render/push/gain scripts
+  through the preallocated realtime slot table, proving membership churn cannot
+  panic the mixer, bypass the fixed slot bound, or leave render output
+  non-finite while the producers carry finite samples.
 - `protected_media_ingress` exercises raw input, valid authenticated arbitrary
   payloads, duplicate replay, undersized output buffers, and deterministic
   single-byte flags-byte and tag tampering plus ciphertext tampering for
@@ -68,6 +76,8 @@ cargo +nightly-2026-07-18 fuzz run media_packet -- -max_len=1264
 cargo +nightly-2026-07-18 fuzz run nominal_resampler -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run channel_mapper -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run peak_limiter -- -max_len=1024
+cargo +nightly-2026-07-18 fuzz run drift_controller -- -max_len=1024
+cargo +nightly-2026-07-18 fuzz run fixed_slot_mixer -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run protected_media_ingress -- -max_len=1264
 cargo +nightly-2026-07-18 fuzz run pairing_binding -- -max_len=4096
 cargo +nightly-2026-07-18 fuzz run untrusted_control_stream -- -max_len=65540

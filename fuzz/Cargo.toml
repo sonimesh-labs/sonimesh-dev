@@ -90,3 +90,16 @@ path = "fuzz_targets/peak_limiter.rs"
 test = false
 doc = false
 bench = false
+[[bin]]
+name = "drift_controller"
+path = "fuzz_targets/drift_controller.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fixed_slot_mixer"
+path = "fuzz_targets/fixed_slot_mixer.rs"
+test = false
+doc = false
+bench = false

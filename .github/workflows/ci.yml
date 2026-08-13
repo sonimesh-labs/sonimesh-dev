@@ -132,6 +132,8 @@ jobs:
           cargo +nightly-2026-07-18 fuzz run nominal_resampler -- -runs=512 -max_len=1024 -timeout=5
           cargo +nightly-2026-07-18 fuzz run channel_mapper -- -runs=512 -max_len=1024 -timeout=5
           cargo +nightly-2026-07-18 fuzz run peak_limiter -- -runs=512 -max_len=1024 -timeout=5
+          cargo +nightly-2026-07-18 fuzz run drift_controller -- -runs=512 -max_len=1024 -timeout=5
+          cargo +nightly-2026-07-18 fuzz run fixed_slot_mixer -- -runs=512 -max_len=1024 -timeout=5
           cargo +nightly-2026-07-18 fuzz run protected_media_ingress -- -runs=512 -max_len=1264 -timeout=5
           cargo +nightly-2026-07-18 fuzz run pairing_binding -- -runs=512 -max_len=4096 -timeout=5
           cargo +nightly-2026-07-18 fuzz run untrusted_control_stream -- -runs=512 -max_len=65540 -timeout=5
