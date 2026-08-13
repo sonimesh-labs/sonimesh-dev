@@ -30,6 +30,8 @@ pub enum WavError {
     },
     /// The format chunk declares zero channels.
     ZeroChannels,
+    /// The format chunk declares a zero sample rate.
+    ZeroSampleRate,
     /// The file contains no audio frames.
     Empty,
 }
@@ -51,6 +53,7 @@ impl fmt::Display for WavError {
                 )
             }
             Self::ZeroChannels => formatter.write_str("wave format declares zero channels"),
+            Self::ZeroSampleRate => formatter.write_str("wave format declares a zero sample rate"),
             Self::Empty => formatter.write_str("wave file contains no audio frames"),
         }
     }
@@ -66,6 +69,7 @@ impl std::error::Error for WavError {
             | Self::Truncated
             | Self::UnsupportedFormat { .. }
             | Self::ZeroChannels
+            | Self::ZeroSampleRate
             | Self::Empty => None,
         }
     }
@@ -410,6 +414,9 @@ fn parse_format_chunk(chunk: &[u8]) -> Result<FormatInfo, WavError> {
     if channels == 0 {
         return Err(WavError::ZeroChannels);
     }
+    if sample_rate_hz == 0 {
+        return Err(WavError::ZeroSampleRate);
+    }
     // WAVE_FORMAT_EXTENSIBLE wraps the real format code in a subformat GUID.
     if audio_format == 0xFFFE {
         if chunk.len() < 40 {
@@ -642,6 +649,20 @@ mod tests {
 
         let empty = encode_mono(48_000, &[], SampleFormat::Pcm16);
         assert!(matches!(inspect_mono(&empty), Err(WavError::Empty)));
+    }
+
+    #[test]
+    fn readers_reject_zero_sample_rate() {
+        let bytes = build_wave(0, 1, 16, &[0x00, 0x00]);
+        assert!(matches!(
+            inspect_mono(&bytes),
+            Err(WavError::ZeroSampleRate)
+        ));
+        assert!(matches!(parse_mono(&bytes), Err(WavError::ZeroSampleRate)));
+        assert_eq!(
+            WavError::ZeroSampleRate.to_string(),
+            "wave format declares a zero sample rate"
+        );
     }
 
     #[test]
