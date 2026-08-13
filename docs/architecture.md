@@ -581,10 +581,14 @@ Current jitter occupancy is published per stream as a coherent (current,
 high-water) encoded-frame pair in the diagnostics snapshot, matching the
 PCM ring level pair in section 8.2. Each snapshot also carries an active
 target-state block — target/min/max jitter water levels, smoothed jitter
-in milliseconds, and raised/lowered step counts — which the Phase 2
-adaptive controller publishes once it drives the playout scheduler
-([ADR 0016](./adr/0016-adaptive-jitter-target.md)); until then these
-fields read zero.
+in milliseconds, and raised/lowered step counts — published by the
+adaptive controller ([ADR 0016](./adr/0016-adaptive-jitter-target.md))
+once the receiver pipeline feeds it from live authenticated packets
+(section 11). The three water levels are stored as one atomic set, so a
+snapshot always reads a coherent `min <= target <= max` triple; the
+smoothed jitter and step counters are cumulative telemetry and may briefly
+span an epoch transition. The product playout scheduler that consumes the
+target remains Phase 2 work.
 
 Realtime code updates counters only. Structured logs are emitted by non-realtime
 domains, use stable event codes, and redact keys, audio payloads, full IPs, and
