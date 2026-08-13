@@ -259,3 +259,256 @@ where
         ReceiverOutputController::snapshot(self)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use sonimesh_audio::RealtimePcmProducer;
+    use sonimesh_diagnostics::StreamCounters;
+    use sonimesh_platform::{
+        AudioOutput, OutputConfig, OutputDeviceId, OutputDeviceInfo, OutputError, OutputHealth,
+        RenderSource, SampleFormat,
+    };
+
+    use super::{ReceiverOutputController, ReceiverOutputLifecycleError};
+    use crate::{
+        OutputSelection, ReceiverPcmEndpointFactory, ReceiverPcmProducerInstaller, SourcePcmFormat,
+    };
+
+    const SAMPLES: usize = 256;
+
+    struct FakeOutput {
+        started: bool,
+        stopped: bool,
+        health: OutputHealth,
+        fail_start: bool,
+    }
+
+    impl Default for FakeOutput {
+        fn default() -> Self {
+            Self {
+                started: false,
+                stopped: false,
+                health: OutputHealth::Healthy,
+                fail_start: false,
+            }
+        }
+    }
+
+    impl AudioOutput for FakeOutput {
+        fn devices(&self) -> Result<Vec<OutputDeviceInfo>, OutputError> {
+            Ok(Vec::new())
+        }
+
+        fn start(
+            &mut self,
+            _device: Option<&OutputDeviceId>,
+            _config: OutputConfig,
+            _source: Box<dyn RenderSource>,
+        ) -> Result<(), OutputError> {
+            if self.fail_start {
+                return Err(OutputError::DeviceUnavailable);
+            }
+            self.started = true;
+            self.stopped = false;
+            Ok(())
+        }
+
+        fn stop(&mut self) {
+            self.started = false;
+            self.stopped = true;
+        }
+
+        fn health(&self) -> OutputHealth {
+            self.health
+        }
+    }
+
+    #[derive(Default)]
+    struct FakePipeline {
+        replaced: usize,
+    }
+
+    impl ReceiverPcmProducerInstaller<SAMPLES> for FakePipeline {
+        fn replace_pcm_producer(&mut self, _producer: RealtimePcmProducer<SAMPLES>) {
+            self.replaced += 1;
+        }
+    }
+
+    fn selection(device: Option<OutputDeviceId>) -> OutputSelection {
+        OutputSelection {
+            device,
+            config: OutputConfig {
+                sample_rate_hz: 48_000,
+                channels: 2,
+                sample_format: SampleFormat::Float32,
+                requested_callback_frames: Some(480),
+                maximum_callback_frames: 1_024,
+            },
+        }
+    }
+
+    fn endpoint_factory() -> ReceiverPcmEndpointFactory<SAMPLES> {
+        ReceiverPcmEndpointFactory::new(
+            8,
+            SourcePcmFormat::new(48_000, 2).expect("fixed source format is valid"),
+            Arc::new(StreamCounters::default()),
+        )
+    }
+
+    fn controller(output: FakeOutput) -> ReceiverOutputController<FakeOutput, SAMPLES> {
+        ReceiverOutputController::new(output, endpoint_factory())
+    }
+
+    #[test]
+    fn start_installs_a_producer_only_after_backend_acceptance() {
+        let mut pipeline = FakePipeline::default();
+        let mut controller = controller(FakeOutput::default());
+
+        controller.start(selection(None), &mut pipeline).unwrap();
+        assert_eq!(pipeline.replaced, 1);
+        assert!(controller.output().started);
+
+        let snapshot = controller.snapshot();
+        assert!(snapshot.selection_retained());
+        assert!(snapshot.stream_active());
+        assert!(!snapshot.fault_reported());
+    }
+
+    #[test]
+    fn start_rejects_an_already_active_stream() {
+        let mut pipeline = FakePipeline::default();
+        let mut controller = controller(FakeOutput::default());
+        controller.start(selection(None), &mut pipeline).unwrap();
+
+        assert!(matches!(
+            controller.start(selection(None), &mut pipeline),
+            Err(ReceiverOutputLifecycleError::StreamAlreadyActive)
+        ));
+        assert_eq!(pipeline.replaced, 1);
+    }
+
+    #[test]
+    fn invalid_selection_is_rejected_before_backend_start() {
+        let mut pipeline = FakePipeline::default();
+        let mut controller = controller(FakeOutput::default());
+        let mut invalid = selection(None);
+        invalid.config.channels = 0;
+
+        assert!(matches!(
+            controller.start(invalid, &mut pipeline),
+            Err(ReceiverOutputLifecycleError::Endpoint(_))
+        ));
+        assert!(!controller.output().started);
+        assert_eq!(pipeline.replaced, 0);
+    }
+
+    #[test]
+    fn backend_failure_does_not_install_the_producer() {
+        let mut pipeline = FakePipeline::default();
+        let output = FakeOutput {
+            fail_start: true,
+            ..Default::default()
+        };
+        let mut controller = controller(output);
+
+        assert!(matches!(
+            controller.start(selection(None), &mut pipeline),
+            Err(ReceiverOutputLifecycleError::Output(
+                OutputError::DeviceUnavailable
+            ))
+        ));
+        assert_eq!(pipeline.replaced, 0);
+        assert!(!controller.snapshot().stream_active());
+    }
+
+    #[test]
+    fn monitor_reports_a_fault_once() {
+        let mut pipeline = FakePipeline::default();
+        let output = FakeOutput {
+            health: OutputHealth::StreamError,
+            ..Default::default()
+        };
+        let mut controller = controller(output);
+        controller.start(selection(None), &mut pipeline).unwrap();
+
+        assert_eq!(controller.monitor(), Some(OutputHealth::StreamError));
+        assert!(!controller.snapshot().stream_active());
+        assert!(controller.snapshot().fault_reported());
+        assert_eq!(controller.monitor(), None);
+    }
+
+    #[test]
+    fn recover_requires_a_previous_selection() {
+        let mut pipeline = FakePipeline::default();
+        let mut controller = controller(FakeOutput::default());
+
+        assert!(matches!(
+            controller.recover(&mut pipeline),
+            Err(ReceiverOutputLifecycleError::MissingSelection)
+        ));
+        assert_eq!(pipeline.replaced, 0);
+    }
+
+    #[test]
+    fn recover_reinstalls_a_fresh_producer_after_a_fault() {
+        let mut pipeline = FakePipeline::default();
+        let output = FakeOutput {
+            health: OutputHealth::CallbackCapacityExceeded,
+            ..Default::default()
+        };
+        let mut controller = controller(output);
+        controller.start(selection(None), &mut pipeline).unwrap();
+        assert_eq!(
+            controller.monitor(),
+            Some(OutputHealth::CallbackCapacityExceeded)
+        );
+
+        controller.recover(&mut pipeline).unwrap();
+        assert_eq!(pipeline.replaced, 2);
+        assert!(controller.snapshot().stream_active());
+        assert!(!controller.snapshot().fault_reported());
+    }
+
+    #[test]
+    fn stop_marks_a_fault_and_keeps_the_selection() {
+        let mut pipeline = FakePipeline::default();
+        let mut controller = controller(FakeOutput::default());
+        controller.start(selection(None), &mut pipeline).unwrap();
+
+        controller.stop();
+        assert!(controller.output().stopped);
+        let snapshot = controller.snapshot();
+        assert!(snapshot.selection_retained());
+        assert!(!snapshot.stream_active());
+        assert!(snapshot.fault_reported());
+    }
+
+    #[test]
+    fn gain_handle_is_shared_and_survives_recovery() {
+        let mut pipeline = FakePipeline::default();
+        let output = FakeOutput {
+            health: OutputHealth::StreamError,
+            ..Default::default()
+        };
+        let mut controller = controller(output);
+        controller.start(selection(None), &mut pipeline).unwrap();
+        assert!(controller.gain_handle().set_gain(0.5).is_ok());
+        assert_eq!(controller.monitor(), Some(OutputHealth::StreamError));
+        controller.recover(&mut pipeline).unwrap();
+        assert!(controller.gain_handle().set_gain(0.25).is_ok());
+    }
+
+    #[test]
+    fn error_display_is_actionable() {
+        assert_eq!(
+            ReceiverOutputLifecycleError::MissingSelection.to_string(),
+            "receiver output recovery has no selection"
+        );
+        assert_eq!(
+            ReceiverOutputLifecycleError::StreamAlreadyActive.to_string(),
+            "receiver output stream is already active"
+        );
+    }
+}
