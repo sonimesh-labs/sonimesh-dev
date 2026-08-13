@@ -244,3 +244,227 @@ where
         MixerOutputController::snapshot(self)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use sonimesh_platform::{
+        AudioOutput, OutputConfig, OutputDeviceId, OutputDeviceInfo, OutputError, OutputHealth,
+        RenderSource, SampleFormat,
+    };
+
+    use super::{MixerOutputController, MixerOutputLifecycleError};
+    use crate::{OutputSelection, SourcePcmFormat};
+
+    const SLOTS: usize = 2;
+    const SAMPLES: usize = 256;
+
+    struct FakeOutput {
+        started: bool,
+        stopped: bool,
+        health: OutputHealth,
+        fail_start: bool,
+    }
+
+    impl Default for FakeOutput {
+        fn default() -> Self {
+            Self {
+                started: false,
+                stopped: false,
+                health: OutputHealth::Healthy,
+                fail_start: false,
+            }
+        }
+    }
+
+    impl AudioOutput for FakeOutput {
+        fn devices(&self) -> Result<Vec<OutputDeviceInfo>, OutputError> {
+            Ok(Vec::new())
+        }
+
+        fn start(
+            &mut self,
+            _device: Option<&OutputDeviceId>,
+            _config: OutputConfig,
+            _source: Box<dyn RenderSource>,
+        ) -> Result<(), OutputError> {
+            if self.fail_start {
+                return Err(OutputError::DeviceUnavailable);
+            }
+            self.started = true;
+            self.stopped = false;
+            Ok(())
+        }
+
+        fn stop(&mut self) {
+            self.started = false;
+            self.stopped = true;
+        }
+
+        fn health(&self) -> OutputHealth {
+            self.health
+        }
+    }
+
+    fn selection(device: Option<OutputDeviceId>) -> OutputSelection {
+        OutputSelection {
+            device,
+            config: OutputConfig {
+                sample_rate_hz: 48_000,
+                channels: 2,
+                sample_format: SampleFormat::Float32,
+                requested_callback_frames: Some(480),
+                maximum_callback_frames: 1_024,
+            },
+        }
+    }
+
+    fn controller(output: FakeOutput) -> MixerOutputController<FakeOutput, SLOTS, SAMPLES> {
+        MixerOutputController::new(output)
+    }
+
+    #[test]
+    fn start_installs_a_membership_handle_and_output_format() {
+        let mut controller = controller(FakeOutput::default());
+        assert!(controller.membership().is_none());
+        assert_eq!(controller.output_format(), None);
+
+        controller.start(selection(None)).unwrap();
+        assert!(controller.membership().is_some());
+        assert_eq!(
+            controller.output_format(),
+            Some(SourcePcmFormat::new(48_000, 2).unwrap())
+        );
+        assert!(controller.output().started);
+
+        let snapshot = controller.snapshot();
+        assert!(snapshot.selection_retained());
+        assert!(snapshot.stream_active());
+        assert!(!snapshot.fault_reported());
+    }
+
+    #[test]
+    fn start_rejects_an_already_active_stream() {
+        let mut controller = controller(FakeOutput::default());
+        controller.start(selection(None)).unwrap();
+
+        assert_eq!(
+            controller.start(selection(None)),
+            Err(MixerOutputLifecycleError::StreamAlreadyActive)
+        );
+        assert!(controller.snapshot().stream_active());
+    }
+
+    #[test]
+    fn invalid_selection_is_rejected_before_the_backend_starts() {
+        let mut controller = controller(FakeOutput::default());
+        let mut invalid = selection(None);
+        invalid.config.channels = 0;
+
+        assert!(matches!(
+            controller.start(invalid),
+            Err(MixerOutputLifecycleError::Source(_))
+        ));
+        assert!(!controller.output().started);
+        assert!(controller.membership().is_none());
+    }
+
+    #[test]
+    fn backend_failure_surfaces_as_an_output_error() {
+        let output = FakeOutput {
+            fail_start: true,
+            ..Default::default()
+        };
+        let mut controller = controller(output);
+
+        assert_eq!(
+            controller.start(selection(None)),
+            Err(MixerOutputLifecycleError::Output(
+                OutputError::DeviceUnavailable
+            ))
+        );
+        assert!(controller.membership().is_none());
+        assert!(!controller.snapshot().stream_active());
+    }
+
+    #[test]
+    fn monitor_ignores_healthy_and_stopped_streams() {
+        let mut controller = controller(FakeOutput::default());
+        assert_eq!(controller.monitor(), None);
+
+        controller.start(selection(None)).unwrap();
+        assert_eq!(controller.monitor(), None);
+        assert!(controller.snapshot().stream_active());
+        assert!(!controller.snapshot().fault_reported());
+    }
+
+    #[test]
+    fn monitor_reports_a_fault_once_and_retires_the_handle() {
+        let output = FakeOutput {
+            health: OutputHealth::StreamError,
+            ..Default::default()
+        };
+        let mut controller = controller(output);
+        controller.start(selection(None)).unwrap();
+        assert!(controller.membership().is_some());
+
+        assert_eq!(controller.monitor(), Some(OutputHealth::StreamError));
+        assert!(controller.membership().is_none());
+        assert!(!controller.snapshot().stream_active());
+        assert!(controller.snapshot().fault_reported());
+        // The same fault is reported only once.
+        assert_eq!(controller.monitor(), None);
+    }
+
+    #[test]
+    fn recover_requires_a_previous_selection() {
+        let mut controller = controller(FakeOutput::default());
+        assert_eq!(
+            controller.recover(),
+            Err(MixerOutputLifecycleError::MissingSelection)
+        );
+    }
+
+    #[test]
+    fn recover_recreates_a_stream_after_a_fault() {
+        let output = FakeOutput {
+            health: OutputHealth::CallbackCapacityExceeded,
+            ..Default::default()
+        };
+        let mut controller = controller(output);
+        controller.start(selection(None)).unwrap();
+        controller.monitor();
+        assert!(controller.membership().is_none());
+
+        controller.recover().unwrap();
+        assert!(controller.membership().is_some());
+        assert!(controller.output().started);
+        assert!(controller.snapshot().stream_active());
+        assert!(!controller.snapshot().fault_reported());
+    }
+
+    #[test]
+    fn stop_retires_the_handle_and_marks_a_fault() {
+        let mut controller = controller(FakeOutput::default());
+        controller.start(selection(None)).unwrap();
+
+        controller.stop();
+        assert!(controller.membership().is_none());
+        assert!(controller.output().stopped);
+        let snapshot = controller.snapshot();
+        assert!(snapshot.selection_retained());
+        assert!(!snapshot.stream_active());
+        assert!(snapshot.fault_reported());
+    }
+
+    #[test]
+    fn error_display_is_actionable() {
+        assert_eq!(
+            MixerOutputLifecycleError::MissingSelection.to_string(),
+            "mixer output recovery has no saved selection"
+        );
+        assert_eq!(
+            MixerOutputLifecycleError::StreamAlreadyActive.to_string(),
+            "mixer output stream is already active"
+        );
+    }
+}
