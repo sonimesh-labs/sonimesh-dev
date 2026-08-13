@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicI32, AtomicU16, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicU32, AtomicU64, Ordering};
 
 /// Lock-free counters writable from realtime or network domains.
 #[derive(Debug, Default)]
@@ -17,9 +17,7 @@ pub struct StreamCounters {
     pcm_discontinuities: AtomicU64,
     queued_pcm_state: AtomicU32,
     jitter_state: AtomicU32,
-    target_frames: AtomicU16,
-    target_min_frames: AtomicU16,
-    target_max_frames: AtomicU16,
+    target_water_levels: AtomicU64,
     target_smoothed_jitter_ms: AtomicU32,
     target_raised_steps: AtomicU32,
     target_lowered_steps: AtomicU32,
@@ -132,10 +130,12 @@ impl StreamCounters {
 
     /// Publishes the bounded adaptive-target water levels and step counts.
     ///
-    /// The minimum and maximum are fixed by the controller configuration, the
-    /// target moves within them, and the smoothed jitter and step counters
-    /// describe the transport signal and the controller's response. All six
-    /// values belong to one stream-local target epoch.
+    /// The minimum and maximum are fixed by the controller configuration and
+    /// the target moves within them. The three water levels are stored as one
+    /// atomic set, so a concurrent snapshot always reads a coherent triple
+    /// (`min <= target <= max`). The smoothed jitter and the raised/lowered
+    /// step counters are cumulative telemetry and may briefly span an epoch
+    /// transition in a snapshot.
     pub fn publish_target_state(
         &self,
         min_frames: u16,
@@ -145,9 +145,10 @@ impl StreamCounters {
         raised_steps: u32,
         lowered_steps: u32,
     ) {
-        self.target_min_frames.store(min_frames, Ordering::Relaxed);
-        self.target_max_frames.store(max_frames, Ordering::Relaxed);
-        self.target_frames.store(target_frames, Ordering::Relaxed);
+        self.target_water_levels.store(
+            pack_target_water_levels(min_frames, max_frames, target_frames),
+            Ordering::Relaxed,
+        );
         self.target_smoothed_jitter_ms
             .store(smoothed_jitter_ms, Ordering::Relaxed);
         self.target_raised_steps
@@ -201,6 +202,8 @@ impl StreamCounters {
             unpack_sample_rates(self.nominal_sample_rates.load(Ordering::Relaxed));
         let (jitter_frames, jitter_high_water_frames) =
             unpack_jitter_state(self.jitter_state.load(Ordering::Relaxed));
+        let (target_min_frames, target_max_frames, target_frames) =
+            unpack_target_water_levels(self.target_water_levels.load(Ordering::Relaxed));
 
         StreamMetricsSnapshot {
             authenticated_packets: self.authenticated_packets.load(Ordering::Relaxed),
@@ -219,9 +222,9 @@ impl StreamCounters {
             queued_pcm_high_water_blocks,
             jitter_frames,
             jitter_high_water_frames,
-            target_min_frames: self.target_min_frames.load(Ordering::Relaxed),
-            target_max_frames: self.target_max_frames.load(Ordering::Relaxed),
-            target_frames: self.target_frames.load(Ordering::Relaxed),
+            target_min_frames,
+            target_max_frames,
+            target_frames,
             target_smoothed_jitter_ms: self.target_smoothed_jitter_ms.load(Ordering::Relaxed),
             target_raised_steps: self.target_raised_steps.load(Ordering::Relaxed),
             target_lowered_steps: self.target_lowered_steps.load(Ordering::Relaxed),
@@ -373,6 +376,22 @@ fn unpack_sample_rates(packed_sample_rates: u64) -> (u32, u32) {
         u32::try_from(packed_sample_rates & u64::from(u32::MAX))
             .expect("masked sample rate fits in u32"),
     )
+}
+
+fn pack_target_water_levels(min_frames: u16, max_frames: u16, target_frames: u16) -> u64 {
+    u64::from(min_frames)
+        | (u64::from(max_frames) << u16::BITS)
+        | (u64::from(target_frames) << (u16::BITS * 2))
+}
+
+fn unpack_target_water_levels(packed: u64) -> (u16, u16, u16) {
+    let min_frames =
+        u16::try_from(packed & u64::from(u16::MAX)).expect("masked target minimum fits in u16");
+    let max_frames = u16::try_from((packed >> u16::BITS) & u64::from(u16::MAX))
+        .expect("shifted target maximum fits in u16");
+    let target_frames =
+        u16::try_from(packed >> (u16::BITS * 2)).expect("shifted target water level fits in u16");
+    (min_frames, max_frames, target_frames)
 }
 
 #[cfg(test)]
@@ -639,22 +658,54 @@ mod tests {
     }
 
     #[test]
-    fn concurrent_target_state_publication_keeps_each_field_coherent() {
+    fn target_water_levels_round_trip_across_the_full_u16_range() {
+        for min_frames in [0, 1, u16::MAX / 3, u16::MAX / 2, u16::MAX - 1, u16::MAX] {
+            for max_frames in [0, 1, u16::MAX / 3, u16::MAX / 2, u16::MAX - 1, u16::MAX] {
+                for target_frames in [0, 1, u16::MAX / 3, u16::MAX / 2, u16::MAX - 1, u16::MAX] {
+                    let packed = pack_target_water_levels(min_frames, max_frames, target_frames);
+                    assert_eq!(
+                        unpack_target_water_levels(packed),
+                        (min_frames, max_frames, target_frames)
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn concurrent_target_water_levels_are_read_as_one_coherent_triple() {
         let counters = std::sync::Arc::new(StreamCounters::default());
         let writer = std::sync::Arc::clone(&counters);
 
+        // The two epochs are chosen so that the newer minimum exceeds the
+        // older maximum: independent stores could expose `min > max`, while
+        // the single packed store cannot.
+        // The initial default state is a coherent zero triple.
+        let epochs = [
+            (0_u16, 0_u16, 0_u16),
+            (1_u16, 3_u16, 2_u16),
+            (5_u16, 7_u16, 6_u16),
+        ];
         let writer = std::thread::spawn(move || {
-            for frame in (0_u16..=u16::MAX).cycle().take(100_000) {
-                let min = frame % 8;
-                let max = min.saturating_add(16);
-                writer.publish_target_state(min, max, frame % 32, u32::from(frame), 1, 0);
+            for frame in 0..100_000 {
+                let (min, max, target) = epochs[frame % epochs.len()];
+                writer.publish_target_state(min, max, target, u32::try_from(frame).unwrap(), 1, 0);
             }
         });
         for _ in 0..100_000 {
             let snapshot = counters.snapshot();
+            let (min, max, target) = (
+                snapshot.target_min_frames,
+                snapshot.target_max_frames,
+                snapshot.target_frames,
+            );
             assert!(
-                snapshot.target_min_frames <= snapshot.target_max_frames,
-                "min must not exceed max in any observed snapshot"
+                min <= target && target <= max,
+                "water levels must satisfy min <= target <= max in any snapshot"
+            );
+            assert!(
+                epochs.contains(&(min, max, target)),
+                "water levels must be read as one coherent epoch, got {min}/{max}/{target}"
             );
         }
         writer.join().expect("target metric writer must finish");
