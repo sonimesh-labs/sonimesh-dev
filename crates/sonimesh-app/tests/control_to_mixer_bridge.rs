@@ -1232,3 +1232,48 @@ fn snapshot_polling_alone_retires_the_reconnect_window() {
         sonimesh_app::ReconnectGraceState::Idle
     );
 }
+
+#[test]
+fn reconnecting_through_snapshot_polls_clears_the_projected_countdown() {
+    // The same composition entry point as the expiry test, but the bridge
+    // reconnects before the deadline: the projected countdown clears and the
+    // session returns to ready without a stale remaining time.
+    let counters = Arc::new(StreamCounters::default());
+    let mut session = SessionState::IDLE;
+    let mut pairing = PairingInvitationController::<1>::new();
+    pairing
+        .begin(&mut session, PairingId::new([41; 16]), 100, 50, 1)
+        .unwrap();
+    assert_eq!(
+        pairing.verify_proof(&mut session, 101, PairingSource::new([43; 16]), || {
+            PairingProofVerification::Verified
+        }),
+        Ok(PairingAttemptOutcome::Paired)
+    );
+    let mut bridge = bridge_with(session);
+    let token = authenticated(&mut bridge);
+    let mut pipeline = pipeline_for(1, 1, Arc::clone(&counters));
+    start_one(&mut bridge, token, 1, 1, None, &mut pipeline);
+
+    bridge
+        .acknowledge_platform_event(SessionEvent::ConnectionLost)
+        .unwrap();
+    bridge.begin_reconnect_grace(200, 2_000).unwrap();
+
+    let reconnecting = bridge.desktop_snapshot_at(&mut pairing, 500).unwrap();
+    assert_eq!(reconnecting.session(), SessionPhase::Reconnecting);
+    assert_eq!(reconnecting.reconnect_remaining_ms(), Some(1_700));
+
+    bridge
+        .acknowledge_platform_event(SessionEvent::Reconnected)
+        .unwrap();
+
+    let reconnected = bridge.desktop_snapshot_at(&mut pairing, 600).unwrap();
+    assert_eq!(reconnected.session(), SessionPhase::Ready);
+    assert_eq!(reconnected.reconnect_remaining_ms(), None);
+    assert_eq!(bridge.state().phase(), SessionPhase::Ready);
+    assert_eq!(
+        bridge.coordinator().reconnect_grace_state(),
+        sonimesh_app::ReconnectGraceState::Idle
+    );
+}
