@@ -181,6 +181,10 @@ impl SampleFormat {
 /// # Errors
 ///
 /// Returns [`WavError`] when the file cannot be written.
+///
+/// # Panics
+///
+/// Panics when `sample_rate_hz` is zero; see [`encode_mono`].
 pub fn write_mono(
     path: &Path,
     sample_rate_hz: u32,
@@ -321,10 +325,13 @@ pub fn parse_mono(bytes: &[u8]) -> Result<MonoWav, WavError> {
 ///
 /// # Panics
 ///
-/// Panics when the encoded file is larger than `u32::MAX` bytes.
+/// Panics when `sample_rate_hz` is zero, because the resulting WAVE would be
+/// rejected by every reader in this crate, or when the encoded file is larger
+/// than `u32::MAX` bytes.
 #[must_use]
 #[allow(clippy::cast_possible_truncation)]
 pub fn encode_mono(sample_rate_hz: u32, samples: &[f32], format: SampleFormat) -> Vec<u8> {
+    assert!(sample_rate_hz > 0, "sample rate must be non-zero");
     let bytes_per_sample = format.bytes_per_sample();
     let data_bytes = samples.len() * bytes_per_sample;
     let mut bytes = Vec::with_capacity(44 + data_bytes);
@@ -663,6 +670,12 @@ mod tests {
             WavError::ZeroSampleRate.to_string(),
             "wave format declares a zero sample rate"
         );
+    }
+
+    #[test]
+    #[should_panic(expected = "sample rate must be non-zero")]
+    fn encode_mono_rejects_zero_sample_rate() {
+        let _ = encode_mono(0, &[0.0], SampleFormat::Pcm16);
     }
 
     #[test]
