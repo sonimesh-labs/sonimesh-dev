@@ -96,16 +96,24 @@ may be compromised.
 
 The Rust foundation keeps deterministic adversarial-input regressions for bounded
 control/media parsing and invalid AEAD payloads. The independent `fuzz/`
-workspace adds LibFuzzer targets for arbitrary control frames, mutations of
-all five published control payload shapes, near-valid media packets,
-protected ingress, the pure pairing-binding verifier, and bounded
-length-prefixed control framing fed through arbitrary chunk boundaries. The ingress target
+workspace adds LibFuzzer targets across the control, media, and bounded
+audio-DSP boundaries (the full inventory lives in `fuzz/README.md`): arbitrary
+control frames, mutations of all five published control payload shapes and the
+hello negotiation, near-valid media packets, protected ingress, the pure
+pairing-binding verifier, and bounded length-prefixed control framing fed
+through arbitrary chunk boundaries. The ingress target
 also constructs valid AEAD packets carrying arbitrary bounded payload bytes,
 retries them as replay, uses undersized output storage, deterministically mutates a
 flags byte in the authenticated header and a tag byte on every input plus a ciphertext byte for nonempty
 payloads, and requires every rejected path to clear plaintext.
 The pairing target exercises both local roles, rejects reflected and altered
 proofs, and checks arbitrary proof input against the exact opposite-role proof.
+The realtime audio targets feed adversarial rate metadata, sample payloads,
+occupancy snapshots, arrival ticks, and membership scripts into the bounded
+nominal resampler, peak limiter, channel mapper, drift controller, fixed-slot
+mixer, arrival-jitter estimator, adaptive target controller, and per-stream
+decode worker, asserting the fixed capacity, consumed/produced, gain, and
+initialized-output guarantees hold on every accepted or rejected step.
 
 `tools/check_fuzz_targets.py` keeps the manifest registration, fuzz README
 inventory and runnable commands, and finite CI smoke list synchronized. Linux
