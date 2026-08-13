@@ -19,6 +19,7 @@ HEADER_PATTERN = re.compile(r"^(?P<name>soak duration|report interval) \(s\): (?
 MAXIMUM_FRAMES_PATTERN = re.compile(r"^maximum frames: (?P<value>\d+)$")
 REQUEST_PATTERN = re.compile(r"^requested frames: (?P<value>default|\d+)$")
 FORMAT_PREFIX = "default format: "
+DEVICE_SELECTION_PATTERN = re.compile(r"^device selection: (?P<value>pinned|default)$")
 
 
 @dataclass(frozen=True)
@@ -88,6 +89,7 @@ class SoakReport:
     maximum_frames: int
     periodic_statuses: tuple[SoakStatus, ...]
     final_status: SoakStatus
+    device_selection: str | None = None
 
 
 def parse_header(line: str) -> tuple[str, int] | None:
@@ -104,6 +106,11 @@ def parse_configuration_header(line: str) -> tuple[str, str | int] | None:
         if not value:
             raise ValueError("default format header is empty")
         return "default format", value
+    if line.startswith("device selection: "):
+        selection = DEVICE_SELECTION_PATTERN.fullmatch(line)
+        if selection is None:
+            raise ValueError("device selection header must be pinned or default")
+        return "device selection", selection.group("value")
     request = REQUEST_PATTERN.fullmatch(line)
     if request is not None:
         return "requested frames", request.group("value")
@@ -187,6 +194,9 @@ def validate_report(lines: list[str], backend: str) -> SoakReport:
         else:
             periodic_statuses.append(status)
 
+    device_selection = headers.get("device selection")
+    if device_selection is not None and device_selection not in ("pinned", "default"):
+        raise ValueError("device selection header must be pinned or default")
     duration = headers.get("soak duration")
     interval = headers.get("report interval")
     default_format = headers.get("default format")
@@ -251,6 +261,7 @@ def validate_report(lines: list[str], backend: str) -> SoakReport:
         maximum_frames=maximum_frames,
         periodic_statuses=tuple(periodic_statuses),
         final_status=final_status,
+        device_selection=device_selection,
     )
 
 
@@ -325,6 +336,11 @@ def main() -> int:
         return 1
 
     final = report.final_status
+    selection = (
+        f" device_selection={report.device_selection}"
+        if report.device_selection is not None
+        else ""
+    )
     print(
         "output soak log: ok "
         f"backend={BACKENDS[arguments.backend].name} "
@@ -333,6 +349,7 @@ def main() -> int:
         f"final_count={final.count} "
         f"max_frames={final.maximum_frames} "
         f"max_gap_ns={final.maximum_gap_nanoseconds}"
+        f"{selection}"
     )
     return 0
 
@@ -358,6 +375,41 @@ class OutputSoakLogTests(unittest.TestCase):
         self.assertEqual(report.maximum_frames, 8_192)
         self.assertEqual(len(report.periodic_statuses), 3)
         self.assertEqual(report.final_status.maximum_frames, 1056)
+        self.assertIsNone(report.device_selection)
+
+    def test_accepts_optional_device_selection_header(self) -> None:
+        transcript = [
+            "soak duration (s): 5",
+            "report interval (s): 5",
+            "device selection: pinned",
+            "default format: 48000 Hz, 8 channels, F32",
+            "requested frames: 480",
+            "maximum frames: 8192",
+            cpal_status(5, 500),
+            f"final {cpal_status(5, 500)}",
+        ]
+        report = validate_report(transcript, "cpal")
+        self.assertEqual(report.device_selection, "pinned")
+
+        legacy = [line for line in transcript if not line.startswith("device selection:")]
+        report = validate_report(legacy, "cpal")
+        self.assertIsNone(report.device_selection)
+
+    def test_rejects_malformed_device_selection_header(self) -> None:
+        transcript = [
+            "soak duration (s): 5",
+            "report interval (s): 5",
+            "device selection: other",
+            "default format: 48000 Hz, 8 channels, F32",
+            "requested frames: 480",
+            "maximum frames: 8192",
+            cpal_status(5, 500),
+            f"final {cpal_status(5, 500)}",
+        ]
+        with self.assertRaisesRegex(
+            ValueError, "device selection header must be pinned or default"
+        ):
+            validate_report(transcript, "cpal")
 
     def test_rejects_missing_periodic_status_and_unhealthy_final(self) -> None:
         transcript = [

@@ -95,6 +95,12 @@ and the direct-WASAPI prototype smoke accept the same identifier, with or
 without the `wasapi:` prefix. This keeps the same bounded callback measurement
 available for non-default endpoints such as a specific Realtek or USB device.
 
+The long-running CPAL soak (`output_soak`) and the direct-WASAPI soak
+(`wasapi_output_soak`) accept the same opaque endpoint identifier through
+SONIMESH_OUTPUT_SOAK_DEVICE_ID, with the same empty/non-Unicode rejection and
+fail-closed unknown-device behavior, so an eight-hour soak can target a pinned
+endpoint instead of the current default on either backend.
+
 The `tools/latency-measurement` crate provides the deterministic MLS reference
 signal and correlation offset estimator used by the acoustic timing workflow.
 It has no dependencies and is covered by the ordinary `cargo test --workspace`
