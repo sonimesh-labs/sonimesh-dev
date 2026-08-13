@@ -7,7 +7,7 @@
 //! and fuzzes short arbitrary signals to prove the documented domain never
 //! panics and that repeated calls agree exactly.
 
-use sonimesh_latency_measurement::{OffsetConfig, estimate_offset_ms, test_signal};
+use sonimesh_latency_measurement::{OffsetConfig, OffsetError, estimate_offset_ms, test_signal};
 
 /// Small deterministic xorshift64 generator; no external dependency.
 struct XorShift64(u64);
@@ -260,4 +260,45 @@ fn leading_edge_fractional_lag_quantizes_to_the_integer_grid() {
             );
         }
     }
+}
+
+/// Non-finite or negative configuration bounds are rejected before any
+/// correlation work, so a caller cannot silently disable the distinctness
+/// check with a NaN or negative ratio. Finite non-negative bounds (including
+/// the documented zero ratio) are never reported as invalid configuration.
+#[test]
+fn non_finite_or_negative_bounds_are_rejected() {
+    let reference = test_signal(48_000, 1, 7);
+    let recording = delayed_recording(0, &reference);
+    let mut config = OffsetConfig::new(48_000);
+
+    for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -1.0, -0.5] {
+        config.distinctness_ratio = bad;
+        assert_eq!(
+            estimate_offset_ms(&config, &reference, &recording),
+            Err(OffsetError::InvalidConfig),
+            "ratio {bad}"
+        );
+        config.distinctness_ratio = 3.0;
+        config.max_search_ms = bad;
+        assert_eq!(
+            estimate_offset_ms(&config, &reference, &recording),
+            Err(OffsetError::InvalidConfig),
+            "max_search_ms {bad}"
+        );
+        config.max_search_ms = 1_000.0;
+    }
+
+    config.distinctness_ratio = 0.0;
+    config.max_search_ms = 1_000.0;
+    assert!(!matches!(
+        estimate_offset_ms(&config, &reference, &recording),
+        Err(OffsetError::InvalidConfig)
+    ));
+    config.distinctness_ratio = 3.0;
+    config.max_search_ms = 0.0;
+    assert!(!matches!(
+        estimate_offset_ms(&config, &reference, &recording),
+        Err(OffsetError::InvalidConfig)
+    ));
 }

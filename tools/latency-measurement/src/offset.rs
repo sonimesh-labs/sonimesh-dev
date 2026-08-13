@@ -62,6 +62,8 @@ pub struct OffsetEstimate {
 pub enum OffsetError {
     /// The configured sample rate is zero.
     ZeroSampleRate,
+    /// A search or distinctness bound is non-finite or negative.
+    InvalidConfig,
     /// The reference signal contains no samples.
     EmptyReference,
     /// The recording contains no samples.
@@ -97,6 +99,9 @@ impl fmt::Display for OffsetError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::ZeroSampleRate => formatter.write_str("sample rate must be non-zero"),
+            Self::InvalidConfig => {
+                formatter.write_str("offset configuration must use finite, non-negative bounds")
+            }
             Self::EmptyReference => formatter.write_str("reference signal is empty"),
             Self::EmptyRecording => formatter.write_str("recording is empty"),
             Self::RecordingTooShort {
@@ -150,12 +155,14 @@ const PEAK_SEPARATION_SAMPLES: usize = 16;
 ///
 /// # Errors
 ///
-/// Returns [`OffsetError`] when the inputs are too short, the search window is
-/// empty, or no correlation peak is distinct enough to trust.
+/// Returns [`OffsetError`] when the configuration uses non-finite or negative
+/// bounds, the inputs are too short, the search window is empty, or no
+/// correlation peak is distinct enough to trust.
 #[allow(
     clippy::cast_possible_truncation,
     clippy::cast_precision_loss,
-    clippy::cast_sign_loss
+    clippy::cast_sign_loss,
+    clippy::too_many_lines
 )]
 pub fn estimate_offset_ms(
     config: &OffsetConfig,
@@ -164,6 +171,13 @@ pub fn estimate_offset_ms(
 ) -> Result<OffsetEstimate, OffsetError> {
     if config.sample_rate_hz == 0 {
         return Err(OffsetError::ZeroSampleRate);
+    }
+    if !config.max_search_ms.is_finite()
+        || config.max_search_ms < 0.0
+        || !config.distinctness_ratio.is_finite()
+        || config.distinctness_ratio < 0.0
+    {
+        return Err(OffsetError::InvalidConfig);
     }
     if reference.is_empty() {
         return Err(OffsetError::EmptyReference);
