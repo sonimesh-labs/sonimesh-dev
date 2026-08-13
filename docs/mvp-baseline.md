@@ -175,6 +175,15 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   StopStream, StreamStatus, and ControlError wire vectors and their semantic
   bounds. The transport is explicitly unauthenticated and is not a TLS or
   pairing implementation.
+- receiver-generated control-plane replies: the app control domain now builds
+  bounded `StreamStatus` and `ControlError` envelopes that echo the answered
+  command's request ID, re-validate every generated frame against the protocol
+  contract, and map coordinator rejections to explicit wire error codes with
+  retryability (`RetryLater` for a pending change or a full stream table,
+  `UnsupportedCapability` for an unnegotiated frame duration,
+  `IncompatibleVersion` for a hello version mismatch, and `InvalidRequest`
+  otherwise). Replies survive the untrusted TCP control framing in both
+  directions; no TLS, pairing, or key material is involved.
 - a capture-only Kotlin/Compose Android phase 0A bootstrap with direct,
   non-persisted MediaProjection consent transfer, a media-projection foreground
   service, a fixed PCM16 AudioRecord read buffer, low-rate state publication

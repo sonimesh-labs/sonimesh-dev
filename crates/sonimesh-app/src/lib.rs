@@ -33,8 +33,9 @@ pub use control_snapshot::{
     DesktopControlSnapshot, OutputSnapshot, OutputSnapshotSource, PairingSnapshotState,
 };
 pub use control_stream::{
-    ControlOperationToken, ControlSessionToken, ControlStreamAction, ControlStreamCoordinator,
-    ControlStreamError, MAX_ACTIVE_STREAMS, MediaStreamIdentity, StreamStartRequest,
+    ControlOperationToken, ControlReply, ControlSessionToken, ControlStreamAction,
+    ControlStreamCoordinator, ControlStreamError, MAX_ACTIVE_STREAMS, MediaStreamIdentity,
+    StreamStartRequest,
 };
 pub use control_to_mixer::{BridgeSnapshot, ControlToMixerBridge, ControlToMixerError};
 pub use diagnostic_export_action::{

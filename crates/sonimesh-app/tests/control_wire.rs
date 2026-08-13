@@ -12,14 +12,15 @@ use std::net::{TcpListener, TcpStream};
 use std::thread;
 
 use sonimesh_app::{
-    ControlSessionToken, ControlStreamAction, ControlStreamCoordinator, PairingAttemptOutcome,
-    PairingId, PairingInvitationController, PairingProofVerification, PairingSource, SessionPhase,
+    ControlReply, ControlSessionToken, ControlStreamAction, ControlStreamCoordinator,
+    ControlStreamError, MediaStreamIdentity, PairingAttemptOutcome, PairingId,
+    PairingInvitationController, PairingProofVerification, PairingSource, SessionPhase,
     SessionState,
 };
 use sonimesh_network::{UntrustedControlError, UntrustedControlPoll, UntrustedControlStream};
 use sonimesh_protocol::{
-    CONTROL_PROTOCOL_VERSION, Capability, ControlFrameError, Envelope, Hello, StartStream,
-    StopStream, StreamState, StreamStatus, encode_control_frame, envelope,
+    CONTROL_PROTOCOL_VERSION, Capability, ControlFrameError, Envelope, ErrorCode, Hello,
+    StartStream, StopStream, StreamState, StreamStatus, encode_control_frame, envelope,
 };
 
 /// Builds a paired, authenticated control coordinator in the ready phase.
@@ -284,6 +285,45 @@ fn expired_control_session_rejects_a_late_wire_frame() {
         Err(sonimesh_app::ControlStreamError::StaleControlSession)
     ));
     assert_eq!(coordinator.state(), SessionState::IDLE);
+}
+
+#[test]
+fn receiver_reply_frames_round_trip_over_the_control_stream() {
+    let (mut sender, mut reader) = connected_pair();
+
+    let status = ControlReply::stream_status(
+        MediaStreamIdentity {
+            session_id: 7,
+            stream_id: 9,
+            key_epoch: 0x2345,
+        },
+        StreamState::Streaming,
+        "receiving",
+    )
+    .unwrap()
+    .into_envelope(99)
+    .unwrap();
+    send_frame(&mut sender, &status);
+    let envelope = receive_frame(&mut reader);
+    assert_eq!(envelope.protocol_version, CONTROL_PROTOCOL_VERSION);
+    assert_eq!(envelope.request_id, 99);
+    assert!(matches!(
+        envelope.payload,
+        Some(envelope::Payload::StreamStatus(ref response))
+            if response.state == StreamState::Streaming as i32
+                && response.media_session_id == 7
+                && response.stream_id == 9
+    ));
+
+    let error = ControlReply::for_rejection(100, &ControlStreamError::PendingChange).unwrap();
+    send_frame(&mut sender, &error);
+    let envelope = receive_frame(&mut reader);
+    assert_eq!(envelope.request_id, 100);
+    assert!(matches!(
+        envelope.payload,
+        Some(envelope::Payload::Error(ref response))
+            if response.code == ErrorCode::RetryLater as i32 && response.retryable
+    ));
 }
 
 #[test]
