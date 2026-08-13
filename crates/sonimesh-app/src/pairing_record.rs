@@ -300,3 +300,242 @@ impl<const MAX_SOURCES: usize> PairingRecord<MAX_SOURCES> {
         Ok(index)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn id(byte: u8) -> PairingId {
+        PairingId::new([byte; 16])
+    }
+
+    fn source(byte: u8) -> PairingSource {
+        PairingSource::new([byte; 16])
+    }
+
+    fn record() -> PairingRecord<2> {
+        PairingRecord::new(id(1), 1_000, 3).expect("fixed test configuration is valid")
+    }
+
+    #[test]
+    fn construction_rejects_zero_capacity_and_invalid_attempt_limits() {
+        assert!(matches!(
+            PairingRecord::<0>::new(id(1), 1_000, 3),
+            Err(PairingRecordError::ZeroSourceCapacity)
+        ));
+        assert!(matches!(
+            PairingRecord::<2>::new(id(1), 1_000, 0),
+            Err(PairingRecordError::InvalidAttemptLimit)
+        ));
+        assert!(matches!(
+            PairingRecord::<2>::new(id(1), 1_000, MAX_PAIRING_ATTEMPTS_PER_SOURCE + 1),
+            Err(PairingRecordError::InvalidAttemptLimit)
+        ));
+
+        let record = PairingRecord::<2>::new(id(7), 1_000, 3).unwrap();
+        assert_eq!(record.id(), id(7));
+        assert_eq!(record.state(), PairingRecordState::Active);
+    }
+
+    #[test]
+    fn observe_transitions_active_to_expired_at_the_deadline() {
+        let mut record = record();
+        assert_eq!(record.observe(500), Ok(PairingRecordState::Active));
+        assert_eq!(record.observe(999), Ok(PairingRecordState::Active));
+        assert_eq!(record.observe(1_000), Ok(PairingRecordState::Expired));
+        assert_eq!(record.state(), PairingRecordState::Expired);
+    }
+
+    #[test]
+    fn observe_clock_regression_force_expires_and_cannot_be_revived() {
+        let mut record = record();
+        record.observe(500).unwrap();
+        assert_eq!(record.observe(400), Err(PairingRecordError::TimeRegressed));
+        assert_eq!(record.state(), PairingRecordState::Expired);
+        // A later forward jump cannot revive the force-expired invitation.
+        assert_eq!(record.observe(2_000), Ok(PairingRecordState::Expired));
+        assert_eq!(
+            record.verify_proof(2_000, source(1), || PairingProofVerification::Verified),
+            Err(PairingRecordError::Expired)
+        );
+    }
+
+    #[test]
+    fn verified_proof_consumes_the_invitation_exactly_once() {
+        let mut record = record();
+        assert_eq!(
+            record.verify_proof(100, source(1), || PairingProofVerification::Verified),
+            Ok(PairingAttemptOutcome::Paired)
+        );
+        assert_eq!(record.state(), PairingRecordState::Consumed);
+        assert_eq!(
+            record.verify_proof(200, source(1), || PairingProofVerification::Verified),
+            Err(PairingRecordError::Consumed)
+        );
+        // Consumed records keep reporting consumed to preserve the audit state.
+        assert_eq!(record.observe(300), Ok(PairingRecordState::Consumed));
+    }
+
+    #[test]
+    fn rejected_proofs_charge_the_source_and_report_remaining_attempts() {
+        let mut record = record();
+        assert_eq!(
+            record.verify_proof(100, source(1), || PairingProofVerification::Rejected),
+            Ok(PairingAttemptOutcome::Rejected {
+                attempts_remaining: 2
+            })
+        );
+        assert_eq!(
+            record.verify_proof(200, source(1), || PairingProofVerification::Rejected),
+            Ok(PairingAttemptOutcome::Rejected {
+                attempts_remaining: 1
+            })
+        );
+        assert_eq!(record.state(), PairingRecordState::Active);
+    }
+
+    #[test]
+    fn exhausted_source_is_rate_limited_before_verify_is_invoked() {
+        let mut record = record();
+        let mut verify_calls = 0;
+        for _ in 0..3 {
+            record
+                .verify_proof(100, source(1), || {
+                    verify_calls += 1;
+                    PairingProofVerification::Rejected
+                })
+                .unwrap();
+        }
+        assert_eq!(verify_calls, 3);
+        assert_eq!(
+            record.verify_proof(200, source(1), || {
+                verify_calls += 1;
+                PairingProofVerification::Verified
+            }),
+            Err(PairingRecordError::SourceRateLimited)
+        );
+        assert_eq!(verify_calls, 3);
+        assert_eq!(record.state(), PairingRecordState::Active);
+    }
+
+    #[test]
+    fn failed_verification_consumes_an_attempt_and_fails_closed() {
+        let mut record = record();
+        assert_eq!(
+            record.verify_proof(100, source(1), || PairingProofVerification::Failed),
+            Err(PairingRecordError::VerificationFailed)
+        );
+        assert_eq!(record.state(), PairingRecordState::Active);
+        // The failed proof was still charged, so only two attempts remain.
+        assert_eq!(
+            record.verify_proof(200, source(1), || PairingProofVerification::Rejected),
+            Ok(PairingAttemptOutcome::Rejected {
+                attempts_remaining: 1
+            })
+        );
+    }
+
+    #[test]
+    fn rate_limits_are_tracked_per_source() {
+        let mut record = record();
+        for _ in 0..3 {
+            record
+                .verify_proof(100, source(1), || PairingProofVerification::Rejected)
+                .unwrap();
+        }
+        assert_eq!(
+            record.verify_proof(200, source(1), || PairingProofVerification::Rejected),
+            Err(PairingRecordError::SourceRateLimited)
+        );
+        // A distinct source has its own bounded budget.
+        assert_eq!(
+            record.verify_proof(300, source(2), || PairingProofVerification::Rejected),
+            Ok(PairingAttemptOutcome::Rejected {
+                attempts_remaining: 2
+            })
+        );
+    }
+
+    #[test]
+    fn a_full_source_table_rejects_a_new_distinct_source() {
+        let mut record = PairingRecord::<1>::new(id(1), 1_000, 3).unwrap();
+        record
+            .verify_proof(100, source(1), || PairingProofVerification::Rejected)
+            .unwrap();
+        assert_eq!(
+            record.verify_proof(200, source(2), || PairingProofVerification::Verified),
+            Err(PairingRecordError::SourceTableFull)
+        );
+        // The existing source keeps its own budget.
+        assert_eq!(
+            record.verify_proof(300, source(1), || PairingProofVerification::Rejected),
+            Ok(PairingAttemptOutcome::Rejected {
+                attempts_remaining: 1
+            })
+        );
+    }
+
+    #[test]
+    fn expired_invitation_rejects_before_invoking_the_verifier() {
+        let mut record = record();
+        let mut verify_calls = 0;
+        assert_eq!(
+            record.verify_proof(1_000, source(1), || {
+                verify_calls += 1;
+                PairingProofVerification::Verified
+            }),
+            Err(PairingRecordError::Expired)
+        );
+        assert_eq!(verify_calls, 0);
+        assert_eq!(record.state(), PairingRecordState::Expired);
+    }
+
+    #[test]
+    fn revoked_invitation_rejects_all_future_proofs() {
+        let mut record = record();
+        record.revoke();
+        assert_eq!(record.state(), PairingRecordState::Revoked);
+        assert_eq!(
+            record.verify_proof(100, source(1), || PairingProofVerification::Verified),
+            Err(PairingRecordError::Revoked)
+        );
+        assert_eq!(record.observe(200), Ok(PairingRecordState::Revoked));
+    }
+
+    #[test]
+    fn expire_preserves_a_consumed_audit_state() {
+        let mut record = record();
+        record
+            .verify_proof(100, source(1), || PairingProofVerification::Verified)
+            .unwrap();
+        record.expire();
+        assert_eq!(record.state(), PairingRecordState::Consumed);
+        assert_eq!(
+            record.verify_proof(200, source(1), || PairingProofVerification::Verified),
+            Err(PairingRecordError::Consumed)
+        );
+    }
+
+    #[test]
+    fn ids_and_sources_debug_output_is_redacted() {
+        let id_debug = format!("{:?}", id(0xAB));
+        assert!(id_debug.contains("[REDACTED]"));
+        assert!(!id_debug.contains("AB"));
+
+        let source_debug = format!("{:?}", source(0xAB));
+        assert!(source_debug.contains("[REDACTED]"));
+        assert!(!source_debug.contains("AB"));
+    }
+
+    #[test]
+    fn error_display_is_actionable() {
+        assert_eq!(
+            PairingRecordError::SourceRateLimited.to_string(),
+            "pairing source exceeded its attempt limit"
+        );
+        assert_eq!(
+            PairingRecordError::VerificationFailed.to_string(),
+            "pairing proof verification failed"
+        );
+    }
+}
