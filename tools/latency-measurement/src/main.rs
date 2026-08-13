@@ -148,8 +148,12 @@ fn run_measure(args: &MeasureArgs) -> Result<(), Box<dyn Error>> {
 }
 
 fn run_summary() -> Result<(), Box<dyn Error>> {
+    summarize_lines(std::io::stdin().lock())
+}
+
+fn summarize_lines<R: BufRead>(reader: R) -> Result<(), Box<dyn Error>> {
     let mut offsets_ms = Vec::new();
-    for line in std::io::stdin().lock().lines() {
+    for line in reader.lines() {
         let line = line?;
         let trimmed = line.trim();
         if trimmed.is_empty() {
@@ -158,6 +162,9 @@ fn run_summary() -> Result<(), Box<dyn Error>> {
         let value: f64 = trimmed
             .parse()
             .map_err(|error| format!("invalid offset `{trimmed}`: {error}"))?;
+        if !value.is_finite() {
+            return Err(format!("invalid offset `{trimmed}`: not a finite number").into());
+        }
         offsets_ms.push(value);
     }
     match summarize_ms(&offsets_ms) {
@@ -298,14 +305,19 @@ fn parse_measure(rest: &[String]) -> Result<Option<MeasureArgs>, String> {
         }
         index += 1;
     }
-    if max_search_ms <= 0.0 {
+    if !max_search_ms.is_finite() || max_search_ms <= 0.0 {
         return Err("--max-search-ms must be positive".into());
     }
     if coarse_factor == 0 {
         return Err("--coarse-factor must be non-zero".into());
     }
-    if distinctness_ratio <= 0.0 {
+    if !distinctness_ratio.is_finite() || distinctness_ratio <= 0.0 {
         return Err("--distinctness-ratio must be positive".into());
+    }
+    if let Some(probe_ms) = probe_ms {
+        if !probe_ms.is_finite() || probe_ms <= 0.0 {
+            return Err("--probe-ms must be positive".into());
+        }
     }
     if paths.len() < 2 {
         return Err("measure requires a reference and at least one recording".into());
@@ -372,10 +384,12 @@ Options:
 
 #[cfg(test)]
 mod tests {
+    use std::io::Cursor;
     use std::path::PathBuf;
 
     use super::{
         Parsed, parse_args, parse_f64, parse_generate, parse_measure, parse_u32, parse_usize,
+        summarize_lines,
     };
 
     fn args(items: &[&str]) -> Vec<String> {
@@ -609,6 +623,48 @@ mod tests {
                 .to_string()
                 .contains("--distinctness-ratio must be positive")
         );
+    }
+
+    #[test]
+    fn measure_rejects_non_finite_bounds_and_probe() {
+        for bad in ["NaN", "inf", "-inf"] {
+            let error = parse_args(args(&["measure", "--max-search-ms", bad, "r.wav", "c.wav"]))
+                .expect_err("non-finite search");
+            assert!(
+                error
+                    .to_string()
+                    .contains("--max-search-ms must be positive")
+            );
+
+            let error = parse_args(args(&[
+                "measure",
+                "--distinctness-ratio",
+                bad,
+                "r.wav",
+                "c.wav",
+            ]))
+            .expect_err("non-finite ratio");
+            assert!(
+                error
+                    .to_string()
+                    .contains("--distinctness-ratio must be positive")
+            );
+        }
+
+        for bad in ["NaN", "inf", "-inf", "0", "-4"] {
+            let error = parse_args(args(&["measure", "--probe-ms", bad, "r.wav", "c.wav"]))
+                .expect_err("bad probe");
+            assert!(error.to_string().contains("--probe-ms must be positive"));
+        }
+    }
+
+    #[test]
+    fn summary_rejects_non_finite_offsets() {
+        let error = summarize_lines(Cursor::new("10\nNaN\n".as_bytes())).expect_err("NaN offset");
+        assert!(error.to_string().contains("invalid offset `NaN`"));
+
+        let error = summarize_lines(Cursor::new("-inf\n".as_bytes())).expect_err("inf offset");
+        assert!(error.to_string().contains("invalid offset `-inf`"));
     }
 
     #[test]

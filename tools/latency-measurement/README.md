@@ -52,6 +52,8 @@ Summarize offsets read from stdin, one number per line:
 cargo run -p sonimesh-latency-measurement -- summary
 ```
 
+Each line must be a finite number; NaN and infinite values are rejected.
+
 ## Algorithm
 
 `estimate_offset_ms` correlates the leading probe of the reference (default
