@@ -296,6 +296,51 @@ fn cli_measure_rejects_sample_rate_mismatch() {
     std::fs::remove_dir_all(&dir).expect("cleanup temp dir");
 }
 
+/// A missing recording fails `measure` fast with an I/O error naming the
+/// path, so a broken measurement run cannot silently pass as a successful one.
+#[test]
+fn cli_measure_fails_fast_on_missing_recording() {
+    let bin = env!("CARGO_BIN_EXE_sonimesh-latency-measurement");
+    let dir = test_dir("missing-recording");
+    std::fs::create_dir_all(&dir).expect("create temp dir");
+    let reference_path = dir.join("reference.wav");
+
+    let output = Command::new(bin)
+        .args([
+            "generate",
+            "--sample-rate",
+            "48000",
+            "--seconds",
+            "1",
+            "--seed",
+            "7",
+        ])
+        .arg(&reference_path)
+        .output()
+        .expect("generate runs");
+    assert!(output.status.success(), "generate failed");
+
+    let missing_path = dir.join("missing.wav");
+    let output = Command::new(bin)
+        .args(["measure"])
+        .arg(&reference_path)
+        .arg(&missing_path)
+        .output()
+        .expect("measure runs");
+    assert!(!output.status.success(), "missing recording must fail");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("missing.wav") && stderr.contains("wave file I/O failed"),
+        "unexpected stderr: {stderr}"
+    );
+    assert!(
+        output.stdout.is_empty(),
+        "no per-run output is expected on failure"
+    );
+
+    std::fs::remove_dir_all(&dir).expect("cleanup temp dir");
+}
+
 #[test]
 fn cli_info_reports_declared_wave_properties() {
     let bin = env!("CARGO_BIN_EXE_sonimesh-latency-measurement");
