@@ -160,3 +160,115 @@ pub(crate) fn adapt_render_source(
     .map_err(|error| RenderSourceFactoryError::Build(error.to_string()))?;
     Ok(Box::new(channel_mapped))
 }
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use sonimesh_diagnostics::StreamCounters;
+    use sonimesh_platform::{
+        OutputConfig, RenderSource, RenderSourceFactory, RenderSourceFactoryError, SampleFormat,
+    };
+
+    use super::FormatAdaptedRenderSourceFactory;
+    use crate::SourcePcmFormat;
+
+    struct FakeSource {
+        value: f32,
+    }
+
+    impl RenderSource for FakeSource {
+        fn render(&mut self, output: &mut [f32]) {
+            output.fill(self.value);
+        }
+    }
+
+    struct CountingFactory {
+        created: usize,
+        value: f32,
+    }
+
+    impl RenderSourceFactory for CountingFactory {
+        fn create(
+            &mut self,
+            _config: &OutputConfig,
+        ) -> Result<Box<dyn RenderSource>, RenderSourceFactoryError> {
+            self.created += 1;
+            Ok(Box::new(FakeSource { value: self.value }))
+        }
+    }
+
+    fn config() -> OutputConfig {
+        OutputConfig {
+            sample_rate_hz: 48_000,
+            channels: 2,
+            sample_format: SampleFormat::Float32,
+            requested_callback_frames: Some(480),
+            maximum_callback_frames: 1_024,
+        }
+    }
+
+    fn factory(
+        metrics: Option<Arc<StreamCounters>>,
+    ) -> FormatAdaptedRenderSourceFactory<CountingFactory> {
+        FormatAdaptedRenderSourceFactory::new(
+            CountingFactory {
+                created: 0,
+                value: 0.25,
+            },
+            SourcePcmFormat::new(48_000, 1).expect("fixed test format is valid"),
+            metrics,
+        )
+    }
+
+    #[test]
+    fn adjustment_handle_is_shared_across_clones() {
+        let metrics = Arc::new(StreamCounters::default());
+        let factory = factory(Some(Arc::clone(&metrics)));
+
+        let handle = factory.adjustment_handle();
+        assert_eq!(handle.current_ppm(), 0);
+        handle.set_ppm(100).unwrap();
+        assert_eq!(factory.adjustment_handle().current_ppm(), 100);
+        assert_eq!(metrics.snapshot().drift_adjustment_ppm, 100);
+    }
+
+    #[test]
+    fn create_rejects_an_invalid_output_config_before_the_inner_factory() {
+        let mut factory = factory(None);
+        let mut invalid = config();
+        invalid.channels = 0;
+
+        assert!(matches!(
+            factory.create(&invalid),
+            Err(RenderSourceFactoryError::InvalidConfig(_))
+        ));
+        assert_eq!(factory.source_factory.created, 0);
+    }
+
+    #[test]
+    fn create_returns_a_format_adapted_source() {
+        let mut factory = factory(None);
+        let mut source = factory.create(&config()).unwrap();
+
+        assert_eq!(factory.source_factory.created, 1);
+        let mut output = [0.0; 256];
+        source.render(&mut output);
+        assert!(output.iter().all(|sample| (sample - 0.25).abs() < 1e-6));
+    }
+
+    #[test]
+    fn output_lifecycle_publishes_and_clears_nominal_rates() {
+        let metrics = Arc::new(StreamCounters::default());
+        let mut factory = factory(Some(Arc::clone(&metrics)));
+
+        factory.output_started(&config());
+        let snapshot = metrics.snapshot();
+        assert_eq!(snapshot.nominal_input_sample_rate_hz, 48_000);
+        assert_eq!(snapshot.nominal_output_sample_rate_hz, 48_000);
+
+        factory.output_stopped();
+        let snapshot = metrics.snapshot();
+        assert_eq!(snapshot.nominal_input_sample_rate_hz, 0);
+        assert_eq!(snapshot.nominal_output_sample_rate_hz, 0);
+    }
+}

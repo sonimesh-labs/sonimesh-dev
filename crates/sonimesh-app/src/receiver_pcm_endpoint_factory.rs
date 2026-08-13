@@ -184,3 +184,150 @@ impl<const SAMPLES_PER_BLOCK: usize> ReceiverPcmEndpointFactory<SAMPLES_PER_BLOC
         })
     }
 }
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use sonimesh_audio::{RealtimePcmPushOutcome, RealtimeQueueConfigError, realtime_pcm_queue};
+    use sonimesh_diagnostics::StreamCounters;
+    use sonimesh_platform::{OutputConfig, RenderSourceFactoryError, SampleFormat};
+
+    use super::{ReceiverPcmEndpointError, ReceiverPcmEndpointFactory};
+    use crate::SourcePcmFormat;
+
+    const SAMPLES: usize = 256;
+
+    fn source_format() -> SourcePcmFormat {
+        SourcePcmFormat::new(48_000, 1).expect("fixed test format is valid")
+    }
+
+    fn config() -> OutputConfig {
+        OutputConfig {
+            sample_rate_hz: 48_000,
+            channels: 2,
+            sample_format: SampleFormat::Float32,
+            requested_callback_frames: Some(480),
+            maximum_callback_frames: 1_024,
+        }
+    }
+
+    fn factory(counters: Arc<StreamCounters>) -> ReceiverPcmEndpointFactory<SAMPLES> {
+        ReceiverPcmEndpointFactory::new(8, source_format(), counters)
+    }
+
+    fn assert_close(samples: &[f32], expected: f32) {
+        assert!(
+            samples
+                .iter()
+                .all(|sample| (sample - expected).abs() < 1e-6)
+        );
+    }
+
+    #[test]
+    fn create_rejects_an_invalid_output_config_before_queue_setup() {
+        let factory = factory(Arc::new(StreamCounters::default()));
+        let mut invalid = config();
+        invalid.channels = 0;
+
+        assert!(matches!(
+            factory.create(&invalid),
+            Err(ReceiverPcmEndpointError::Source(
+                RenderSourceFactoryError::InvalidConfig(_)
+            ))
+        ));
+    }
+
+    #[test]
+    fn create_rejects_an_invalid_queue_capacity() {
+        let counters = Arc::new(StreamCounters::default());
+        let factory = ReceiverPcmEndpointFactory::<SAMPLES>::new(0, source_format(), counters);
+
+        assert!(matches!(
+            factory.create(&config()),
+            Err(ReceiverPcmEndpointError::Queue(
+                RealtimeQueueConfigError::ZeroCapacity
+            ))
+        ));
+    }
+
+    #[test]
+    fn create_returns_a_producer_and_renderable_source() {
+        let counters = Arc::new(StreamCounters::default());
+        let factory = factory(counters);
+        let endpoint = factory.create(&config()).unwrap();
+        let (mut producer, mut source) = endpoint.into_parts();
+
+        assert_eq!(
+            producer.push(&[0.5; SAMPLES]),
+            RealtimePcmPushOutcome::Inserted
+        );
+        let mut output = [0.0; SAMPLES];
+        source.render(&mut output);
+        assert_close(&output, 0.5);
+    }
+
+    #[test]
+    fn gain_and_adjustment_handles_are_shared_with_created_endpoints() {
+        let counters = Arc::new(StreamCounters::default());
+        let factory = factory(Arc::clone(&counters));
+        let gain = factory.gain_handle();
+        let adjustment = factory.adjustment_handle();
+        let endpoint = factory.create(&config()).unwrap();
+
+        gain.set_gain(0.5).unwrap();
+        assert!((endpoint.gain_handle().gain() - 0.5).abs() < 1e-6);
+        assert!((factory.gain_handle().gain() - 0.5).abs() < 1e-6);
+
+        adjustment.set_ppm(100).unwrap();
+        assert_eq!(factory.adjustment_handle().current_ppm(), 100);
+        assert_eq!(counters.snapshot().drift_adjustment_ppm, 100);
+    }
+
+    #[test]
+    fn each_create_builds_an_independent_queue_pair() {
+        let factory = factory(Arc::new(StreamCounters::default()));
+        let (mut first_producer, mut first_source) =
+            factory.create(&config()).unwrap().into_parts();
+        let (second_producer, mut second_source) = factory.create(&config()).unwrap().into_parts();
+
+        assert_eq!(
+            first_producer.push(&[0.5; SAMPLES]),
+            RealtimePcmPushOutcome::Inserted
+        );
+        let mut first_output = [0.0; SAMPLES];
+        first_source.render(&mut first_output);
+        assert_close(&first_output, 0.5);
+
+        let mut second_output = [0.5; SAMPLES];
+        second_source.render(&mut second_output);
+        assert!(second_output.iter().all(|sample| sample.abs() < 1e-6));
+        assert!(second_producer.is_empty());
+    }
+
+    #[test]
+    fn deferred_metrics_publish_only_after_platform_acceptance() {
+        let counters = Arc::new(StreamCounters::default());
+        let factory = factory(Arc::clone(&counters));
+
+        factory.create_deferred_metrics(&config()).unwrap();
+        let snapshot = counters.snapshot();
+        assert_eq!(snapshot.nominal_input_sample_rate_hz, 0);
+        assert_eq!(snapshot.nominal_output_sample_rate_hz, 0);
+
+        factory.publish_output_format(&config());
+        let snapshot = counters.snapshot();
+        assert_eq!(snapshot.nominal_input_sample_rate_hz, 48_000);
+        assert_eq!(snapshot.nominal_output_sample_rate_hz, 48_000);
+
+        factory.clear_output_format();
+        let snapshot = counters.snapshot();
+        assert_eq!(snapshot.nominal_input_sample_rate_hz, 0);
+        assert_eq!(snapshot.nominal_output_sample_rate_hz, 0);
+    }
+
+    #[test]
+    fn queue_helpers_still_work_for_unused_producers() {
+        let (producer, _) = realtime_pcm_queue::<SAMPLES>(2).unwrap();
+        assert!(producer.is_empty());
+    }
+}
