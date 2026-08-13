@@ -96,3 +96,133 @@ impl<const SLOTS: usize, const PCM_SAMPLES_PER_BLOCK: usize> RenderSource
         }
     }
 }
+#[cfg(test)]
+mod tests {
+    use sonimesh_audio::{GainControlHandle, RealtimePcmPushOutcome, realtime_pcm_queue};
+    use sonimesh_platform::{OutputConfig, RenderSource, SampleFormat};
+
+    use super::{MixerRenderSource, MixerRenderSourceError};
+
+    const SLOTS: usize = 2;
+    const SAMPLES: usize = 256;
+
+    fn config(channels: u16) -> OutputConfig {
+        OutputConfig {
+            sample_rate_hz: 48_000,
+            channels,
+            sample_format: SampleFormat::Float32,
+            requested_callback_frames: Some(480),
+            maximum_callback_frames: 1_024,
+        }
+    }
+
+    fn source() -> MixerRenderSource<SLOTS, SAMPLES> {
+        MixerRenderSource::new(&config(2)).expect("fixed test source is valid")
+    }
+
+    fn activated_source() -> (
+        MixerRenderSource<SLOTS, SAMPLES>,
+        sonimesh_audio::RealtimePcmProducer<SAMPLES>,
+    ) {
+        let mut source = source();
+        let membership = source.membership();
+        let (producer, consumer) =
+            realtime_pcm_queue::<SAMPLES>(8).expect("bounded test queue is valid");
+        assert_eq!(
+            membership.insert(consumer, GainControlHandle::new(), None),
+            Ok(())
+        );
+        assert_eq!(membership.pending_commands(), 1);
+        source.render(&mut [0.0; SAMPLES]);
+        (source, producer)
+    }
+
+    #[test]
+    fn new_rejects_an_invalid_output_config() {
+        assert!(matches!(
+            MixerRenderSource::<SLOTS, SAMPLES>::new(&config(0)),
+            Err(MixerRenderSourceError::InvalidConfig)
+        ));
+    }
+
+    #[test]
+    fn new_accepts_a_valid_config_and_exposes_channels() {
+        let source = source();
+        assert_eq!(source.channels(), 2);
+        assert_eq!(source.membership().pending_commands(), 0);
+    }
+
+    #[test]
+    fn render_starts_with_silence_and_applies_pending_commands() {
+        let mut source = source();
+        let membership = source.membership();
+        let (_, consumer) = realtime_pcm_queue::<SAMPLES>(8).expect("bounded test queue is valid");
+        membership
+            .insert(consumer, GainControlHandle::new(), None)
+            .unwrap();
+        assert_eq!(membership.pending_commands(), 1);
+
+        let mut output = [0.5; SAMPLES];
+        source.render(&mut output);
+
+        assert_eq!(membership.pending_commands(), 0);
+        assert!(output.iter().all(|sample| sample.abs() < 1e-6));
+    }
+
+    #[test]
+    fn render_mixes_an_inserted_slot_with_unity_gain() {
+        let (mut source, mut producer) = activated_source();
+        assert_eq!(
+            producer.push(&[0.5; SAMPLES]),
+            RealtimePcmPushOutcome::Inserted
+        );
+
+        let mut output = [0.0; SAMPLES];
+        source.render(&mut output);
+
+        assert!(output.iter().all(|sample| (sample - 0.5).abs() < 1e-6));
+    }
+
+    #[test]
+    fn render_sums_multiple_active_slots() {
+        let mut source = source();
+        let membership = source.membership();
+        let (mut first_producer, first_consumer) =
+            realtime_pcm_queue::<SAMPLES>(8).expect("bounded test queue is valid");
+        let (mut second_producer, second_consumer) =
+            realtime_pcm_queue::<SAMPLES>(8).expect("bounded test queue is valid");
+        membership
+            .insert(first_consumer, GainControlHandle::new(), None)
+            .unwrap();
+        membership
+            .insert(second_consumer, GainControlHandle::new(), None)
+            .unwrap();
+        source.render(&mut [0.0; SAMPLES]);
+
+        first_producer.push(&[0.25; SAMPLES]);
+        second_producer.push(&[0.5; SAMPLES]);
+
+        let mut output = [0.0; SAMPLES];
+        source.render(&mut output);
+
+        assert!(output.iter().all(|sample| (sample - 0.75).abs() < 1e-6));
+    }
+
+    #[test]
+    fn render_limits_the_sum_to_the_ceiling() {
+        let (mut source, mut producer) = activated_source();
+        assert_eq!(
+            producer.push(&[2.0; SAMPLES]),
+            RealtimePcmPushOutcome::Inserted
+        );
+
+        let mut output = [0.0; SAMPLES];
+        source.render(&mut output);
+
+        assert!(
+            output
+                .iter()
+                .all(|sample| sample.is_finite() && *sample <= 1.0 + 1e-6)
+        );
+    }
+}

@@ -116,3 +116,142 @@ impl RenderSource for ChannelMappedRenderSource {
         );
     }
 }
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use sonimesh_audio::ChannelMappingError;
+    use sonimesh_platform::{MAX_CALLBACK_FRAMES, RenderSource};
+
+    use super::{ChannelMappedRenderSource, ChannelMappedRenderSourceError};
+
+    struct FakeSource {
+        value: f32,
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl FakeSource {
+        fn new(value: f32, calls: Arc<AtomicUsize>) -> Self {
+            Self { value, calls }
+        }
+    }
+
+    impl RenderSource for FakeSource {
+        fn render(&mut self, output: &mut [f32]) {
+            self.calls.fetch_add(1, Ordering::Relaxed);
+            output.fill(self.value);
+        }
+    }
+
+    fn source(value: f32) -> ChannelMappedRenderSource {
+        ChannelMappedRenderSource::new(
+            Box::new(FakeSource::new(value, Arc::new(AtomicUsize::new(0)))),
+            1,
+            2,
+            480,
+        )
+        .expect("fixed test source is valid")
+    }
+
+    #[test]
+    fn new_rejects_invalid_channel_layouts() {
+        assert!(matches!(
+            ChannelMappedRenderSource::new(
+                Box::new(FakeSource::new(0.5, Arc::new(AtomicUsize::new(0)))),
+                0,
+                2,
+                480
+            ),
+            Err(ChannelMappedRenderSourceError::Mapping(
+                ChannelMappingError::InvalidInputChannelCount
+            ))
+        ));
+        assert!(matches!(
+            ChannelMappedRenderSource::new(
+                Box::new(FakeSource::new(0.5, Arc::new(AtomicUsize::new(0)))),
+                1,
+                0,
+                480
+            ),
+            Err(ChannelMappedRenderSourceError::Mapping(
+                ChannelMappingError::InvalidOutputChannelCount
+            ))
+        ));
+    }
+
+    #[test]
+    fn new_rejects_zero_or_oversized_callback_bounds() {
+        assert!(matches!(
+            ChannelMappedRenderSource::new(
+                Box::new(FakeSource::new(0.5, Arc::new(AtomicUsize::new(0)))),
+                1,
+                2,
+                0
+            ),
+            Err(ChannelMappedRenderSourceError::InvalidMaximumCallbackFrames)
+        ));
+        assert!(matches!(
+            ChannelMappedRenderSource::new(
+                Box::new(FakeSource::new(0.5, Arc::new(AtomicUsize::new(0)))),
+                1,
+                2,
+                MAX_CALLBACK_FRAMES + 1
+            ),
+            Err(ChannelMappedRenderSourceError::InvalidMaximumCallbackFrames)
+        ));
+    }
+
+    #[test]
+    fn new_exposes_the_wrapped_layouts() {
+        let source = source(0.25);
+        assert_eq!(source.input_channels(), 1);
+        assert_eq!(source.output_channels(), 2);
+    }
+
+    #[test]
+    fn render_maps_each_mono_frame_to_both_output_channels() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut source = ChannelMappedRenderSource::new(
+            Box::new(FakeSource::new(0.25, Arc::clone(&calls))),
+            1,
+            2,
+            480,
+        )
+        .unwrap();
+
+        let mut output = [0.0; 256];
+        source.render(&mut output);
+
+        assert!(output.iter().all(|sample| (sample - 0.25).abs() < 1e-6));
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn render_writes_silence_when_the_callback_exceeds_the_bound() {
+        let mut source = ChannelMappedRenderSource::new(
+            Box::new(FakeSource::new(0.25, Arc::new(AtomicUsize::new(0)))),
+            1,
+            2,
+            4,
+        )
+        .unwrap();
+
+        let mut output = [1.0; 16];
+        source.render(&mut output);
+
+        assert!(output.iter().all(|sample| sample.abs() < 1e-6));
+    }
+
+    #[test]
+    fn render_leaves_a_tail_silent_for_a_partial_frame() {
+        let mut source = source(0.25);
+
+        let mut output = [0.5; 5];
+        source.render(&mut output);
+
+        assert!((output[0] - 0.25).abs() < 1e-6);
+        assert!((output[3] - 0.25).abs() < 1e-6);
+        assert!(output[4].abs() < 1e-6);
+    }
+}
