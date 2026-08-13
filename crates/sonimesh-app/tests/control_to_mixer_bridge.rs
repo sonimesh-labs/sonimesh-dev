@@ -905,6 +905,109 @@ fn export_flow_persists_bundles_to_the_disk_store_and_recovers_them() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+#[test]
+fn pipeline_publishes_jitter_water_level_after_receive_and_decode() {
+    let counters = Arc::new(StreamCounters::default());
+    let mut bridge = bridge();
+    let token = authenticated(&mut bridge);
+    let mut pipeline = pipeline_for(1, 1, Arc::clone(&counters));
+    let mut sealer = sealer();
+
+    start_one(
+        &mut bridge,
+        token,
+        1,
+        1,
+        Some(Arc::clone(&counters)),
+        &mut pipeline,
+    );
+
+    // Admit three consecutive packets without decoding: every authenticated
+    // frame stays buffered, so the current level and the high-water mark
+    // climb together.
+    for sequence in 0_u32..3 {
+        let packet = sealer
+            .seal(
+                0,
+                u64::from(sequence) * u64::try_from(BLOCK).unwrap(),
+                &[0x2A; 8],
+            )
+            .unwrap();
+        let mut plaintext = [0_u8; 8];
+        let outcome = pipeline.receive(&packet.datagram, &mut plaintext).unwrap();
+        assert!(
+            !matches!(
+                outcome,
+                sonimesh_audio::InsertOutcome::Resynchronized { .. }
+            ),
+            "the first three packets must not resynchronize the jitter buffer"
+        );
+    }
+    let snapshot = counters.snapshot();
+    assert_eq!(snapshot.jitter_frames, 3);
+    assert_eq!(snapshot.jitter_high_water_frames, 3);
+
+    // Decoding drains exactly one buffered frame. The high-water mark is a
+    // per-epoch maximum and must not decrease.
+    assert!(matches!(
+        pipeline.decode_next().unwrap(),
+        sonimesh_audio::DecodeStep::Decoded { .. }
+    ));
+    let snapshot = counters.snapshot();
+    assert_eq!(snapshot.jitter_frames, 2);
+    assert_eq!(snapshot.jitter_high_water_frames, 3);
+
+    // The exported snapshot carries the same water level through the bridge.
+    let mut metrics = Vec::new();
+    let exported = bridge.export_snapshot("0.1.0", None, None, &mut metrics);
+    assert_eq!(exported.streams.len(), 1);
+    assert_eq!(exported.streams[0].jitter_frames, 2);
+    assert_eq!(exported.streams[0].jitter_high_water_frames, 3);
+}
+
+#[test]
+fn pipeline_retires_jitter_epoch_on_hard_resynchronize() {
+    let counters = Arc::new(StreamCounters::default());
+    let mut bridge = bridge();
+    let token = authenticated(&mut bridge);
+    let mut pipeline = pipeline_for(1, 1, Arc::clone(&counters));
+    let mut sealer = sealer();
+
+    start_one(
+        &mut bridge,
+        token,
+        1,
+        1,
+        Some(Arc::clone(&counters)),
+        &mut pipeline,
+    );
+
+    for sequence in 0_u32..3 {
+        let packet = sealer
+            .seal(
+                0,
+                u64::from(sequence) * u64::try_from(BLOCK).unwrap(),
+                &[0x2A; 8],
+            )
+            .unwrap();
+        let mut plaintext = [0_u8; 8];
+        let _ = pipeline.receive(&packet.datagram, &mut plaintext).unwrap();
+    }
+    let before = counters.snapshot();
+    assert_eq!(before.jitter_frames, 3);
+    assert_eq!(before.jitter_high_water_frames, 3);
+
+    pipeline.hard_resynchronize();
+
+    let after = counters.snapshot();
+    assert_eq!(after.jitter_frames, 0);
+    assert_eq!(after.jitter_high_water_frames, 0);
+    // Admission counters survive the stream-local reset; only the jitter
+    // epoch is retired, and the reset itself is recorded.
+    assert_eq!(after.authenticated_packets, before.authenticated_packets);
+    assert_eq!(after.stream_resets, before.stream_resets + 1);
+}
+
 static NEXT_EXPORT_DIR: AtomicU64 = AtomicU64::new(0);
 
 fn export_temp_dir() -> PathBuf {
