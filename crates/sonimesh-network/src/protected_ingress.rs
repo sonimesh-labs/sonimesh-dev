@@ -127,3 +127,222 @@ const fn identity_for(context: MediaKeyContext) -> StreamIdentity {
         key_epoch: context.key_epoch,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use sonimesh_protocol::{
+        MAX_MEDIA_PLAINTEXT_LEN, MediaDirection, MediaKeyContext, MediaSealer, PacketParseError,
+        ReplayDecision, SessionSecret,
+    };
+
+    use super::{ProtectedIngressError, ProtectedMediaIngress};
+    use crate::{IngressError, StreamIdentity};
+
+    const SESSION_ID: u64 = 7;
+    const STREAM_ID: u32 = 9;
+    const EPOCH: u16 = 1;
+
+    fn context(key_epoch: u16) -> MediaKeyContext {
+        MediaKeyContext::new(
+            SESSION_ID,
+            STREAM_ID,
+            key_epoch,
+            MediaDirection::AndroidToDesktop,
+        )
+        .expect("fixed test context is valid")
+    }
+
+    fn secret() -> SessionSecret {
+        SessionSecret::new([0xA5; 32])
+    }
+
+    fn ingress(key_epoch: u16) -> ProtectedMediaIngress {
+        ProtectedMediaIngress::new(&secret(), context(key_epoch))
+            .expect("fixed test key context derives an opener")
+    }
+
+    fn sealed_datagram(context: MediaKeyContext, payload: &[u8]) -> Vec<u8> {
+        let mut sealer = MediaSealer::new(&secret(), context).expect("fixed test context seals");
+        sealer
+            .seal(0, 960, payload)
+            .expect("bounded test payload is sealable")
+            .datagram
+    }
+
+    #[test]
+    fn ingress_exposes_the_installed_context_and_identity() {
+        let ingress = ingress(EPOCH);
+
+        assert_eq!(ingress.context(), context(EPOCH));
+        assert_eq!(
+            ingress.identity(),
+            StreamIdentity {
+                session_id: SESSION_ID,
+                stream_id: STREAM_ID,
+                key_epoch: EPOCH,
+            }
+        );
+    }
+
+    #[test]
+    fn receive_round_trips_a_sealed_payload() {
+        let mut ingress = ingress(EPOCH);
+        let datagram = sealed_datagram(context(EPOCH), b"opus frame bytes");
+        let mut plaintext = [0xA5; MAX_MEDIA_PLAINTEXT_LEN];
+
+        let frame = ingress.receive(&datagram, &mut plaintext).unwrap();
+
+        assert_eq!(frame.opus_payload, b"opus frame bytes");
+        assert_eq!(frame.header.session_id, SESSION_ID);
+        assert_eq!(frame.header.stream_id, STREAM_ID);
+        assert_eq!(frame.header.key_epoch, EPOCH);
+        assert_eq!(frame.header.sequence, 0);
+    }
+
+    #[test]
+    fn rejects_an_authenticated_replay_and_clears_plaintext() {
+        let mut ingress = ingress(EPOCH);
+        let datagram = sealed_datagram(context(EPOCH), &[1, 2, 3]);
+        let mut plaintext = [0xA5; MAX_MEDIA_PLAINTEXT_LEN];
+        ingress.receive(&datagram, &mut plaintext).unwrap();
+        plaintext.fill(0xA5);
+
+        let error = ingress.receive(&datagram, &mut plaintext).unwrap_err();
+
+        assert_eq!(error, IngressError::Replay(ReplayDecision::Duplicate));
+        assert!(plaintext.iter().all(|byte| *byte == 0));
+    }
+
+    #[test]
+    fn rejects_a_malformed_datagram_before_authentication() {
+        let mut ingress = ingress(EPOCH);
+        let mut plaintext = [0xFF; 8];
+
+        assert_eq!(
+            ingress.receive(&[0x00], &mut plaintext),
+            Err(IngressError::Parse(PacketParseError::Truncated))
+        );
+        assert!(plaintext.iter().all(|byte| *byte == 0));
+    }
+
+    #[test]
+    fn rejects_tampered_ciphertext_and_clears_plaintext() {
+        let mut ingress = ingress(EPOCH);
+        let mut datagram = sealed_datagram(context(EPOCH), &[9, 8, 7]);
+        let last = datagram.len() - 1;
+        datagram[last] ^= 0x01;
+        let mut plaintext = [0xA5; MAX_MEDIA_PLAINTEXT_LEN];
+
+        assert!(matches!(
+            ingress.receive(&datagram, &mut plaintext),
+            Err(IngressError::Authentication(_))
+        ));
+        assert!(plaintext.iter().all(|byte| *byte == 0));
+    }
+
+    #[test]
+    fn rejects_a_plaintext_buffer_shorter_than_the_payload() {
+        let mut ingress = ingress(EPOCH);
+        let payload = [0xAB; 16];
+        let datagram = sealed_datagram(context(EPOCH), &payload);
+        let mut plaintext = [0xA5; MAX_MEDIA_PLAINTEXT_LEN];
+        let short = payload.len() - 1;
+
+        assert!(ingress.receive(&datagram, &mut plaintext[..short]).is_err());
+        assert!(plaintext[..short].iter().all(|byte| *byte == 0));
+    }
+
+    #[test]
+    fn rotation_rejects_a_changed_session_stream_or_direction() {
+        let mut ingress = ingress(EPOCH);
+        let datagram = sealed_datagram(context(EPOCH), &[1]);
+
+        let mut changed_session = context(2);
+        changed_session.session_id += 1;
+        assert_eq!(
+            ingress.rotate(&secret(), changed_session),
+            Err(ProtectedIngressError::RotationContextMismatch)
+        );
+
+        let mut changed_stream = context(2);
+        changed_stream.stream_id += 1;
+        assert_eq!(
+            ingress.rotate(&secret(), changed_stream),
+            Err(ProtectedIngressError::RotationContextMismatch)
+        );
+
+        let changed_direction =
+            MediaKeyContext::new(SESSION_ID, STREAM_ID, 2, MediaDirection::DesktopToAndroid)
+                .expect("fixed direction variant is valid");
+        assert_eq!(
+            ingress.rotate(&secret(), changed_direction),
+            Err(ProtectedIngressError::RotationContextMismatch)
+        );
+
+        assert_eq!(ingress.context(), context(EPOCH));
+        let mut plaintext = [0xA5; MAX_MEDIA_PLAINTEXT_LEN];
+        assert!(ingress.receive(&datagram, &mut plaintext).is_ok());
+    }
+
+    #[test]
+    fn rotation_rejects_a_non_increasing_epoch() {
+        let mut ingress = ingress(3);
+
+        assert_eq!(
+            ingress.rotate(&secret(), context(3)),
+            Err(ProtectedIngressError::NonIncreasingEpoch)
+        );
+        assert_eq!(
+            ingress.rotate(&secret(), context(2)),
+            Err(ProtectedIngressError::NonIncreasingEpoch)
+        );
+        assert_eq!(ingress.context(), context(3));
+    }
+
+    #[test]
+    fn rotation_advances_the_epoch_and_replaces_the_opener() {
+        let mut ingress = ingress(EPOCH);
+        let old_datagram = sealed_datagram(context(EPOCH), &[1]);
+
+        ingress.rotate(&secret(), context(2)).unwrap();
+        assert_eq!(ingress.context(), context(2));
+        assert_eq!(ingress.identity().key_epoch, 2);
+
+        // The previous epoch is no longer admitted by the replacement ingress.
+        let mut plaintext = [0xA5; MAX_MEDIA_PLAINTEXT_LEN];
+        assert_eq!(
+            ingress.receive(&old_datagram, &mut plaintext),
+            Err(IngressError::UnknownStream)
+        );
+        assert!(plaintext.iter().all(|byte| *byte == 0));
+
+        // The new epoch decrypts under the replacement opener.
+        let new_datagram = sealed_datagram(context(2), &[2, 3]);
+        let frame = ingress.receive(&new_datagram, &mut plaintext).unwrap();
+        assert_eq!(frame.opus_payload, [2, 3]);
+    }
+
+    #[test]
+    fn rotation_failure_keeps_the_previous_epoch_working() {
+        let mut ingress = ingress(EPOCH);
+        let datagram = sealed_datagram(context(EPOCH), &[7]);
+
+        assert!(ingress.rotate(&secret(), context(EPOCH)).is_err());
+
+        let mut plaintext = [0xA5; MAX_MEDIA_PLAINTEXT_LEN];
+        let frame = ingress.receive(&datagram, &mut plaintext).unwrap();
+        assert_eq!(frame.opus_payload, [7]);
+    }
+
+    #[test]
+    fn protected_ingress_error_display_is_actionable() {
+        assert_eq!(
+            ProtectedIngressError::RotationContextMismatch.to_string(),
+            "media rotation changed the session, stream, or direction"
+        );
+        assert_eq!(
+            ProtectedIngressError::NonIncreasingEpoch.to_string(),
+            "media rotation key epoch must strictly increase"
+        );
+    }
+}
