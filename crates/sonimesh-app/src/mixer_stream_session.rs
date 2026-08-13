@@ -685,3 +685,497 @@ fn frames_per_block(request: StreamStartRequest) -> Result<usize, MixerStreamSes
     }
     usize::try_from(numerator / 1_000).map_err(|_| MixerStreamSessionError::FrameBudgetOverflow)
 }
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use sonimesh_audio::{
+        MAX_DRIFT_ADJUSTMENT_PPM, MAX_PCM_QUEUE_BLOCKS, RealtimePcmProducer,
+        RealtimePcmPushOutcome, RealtimeQueueConfigError,
+    };
+    use sonimesh_diagnostics::StreamCounters;
+    use sonimesh_platform::{
+        AudioOutput, OutputConfig, OutputDeviceId, OutputDeviceInfo, OutputError, OutputHealth,
+        RenderSource, SampleFormat,
+    };
+
+    use super::{MixerStreamSession, MixerStreamSessionError};
+    use crate::{
+        GainControlHandle, MediaStreamIdentity, MixerAdmissionError, MixerOutputLifecycleError,
+        OutputSelection, ReceiverPcmProducerInstaller, SourcePcmFormatError, StreamStartRequest,
+    };
+
+    const SLOTS: usize = 2;
+    const OUTPUT_SAMPLES: usize = 256;
+    const SOURCE_SAMPLES: usize = 480;
+
+    struct FakeOutput {
+        started: bool,
+        stopped: bool,
+        health: OutputHealth,
+        fail_start: bool,
+    }
+
+    impl Default for FakeOutput {
+        fn default() -> Self {
+            Self {
+                started: false,
+                stopped: false,
+                health: OutputHealth::Healthy,
+                fail_start: false,
+            }
+        }
+    }
+
+    impl AudioOutput for FakeOutput {
+        fn devices(&self) -> Result<Vec<OutputDeviceInfo>, OutputError> {
+            Ok(Vec::new())
+        }
+
+        fn start(
+            &mut self,
+            _device: Option<&OutputDeviceId>,
+            _config: OutputConfig,
+            _source: Box<dyn RenderSource>,
+        ) -> Result<(), OutputError> {
+            if self.fail_start {
+                return Err(OutputError::DeviceUnavailable);
+            }
+            self.started = true;
+            self.stopped = false;
+            Ok(())
+        }
+
+        fn stop(&mut self) {
+            self.started = false;
+            self.stopped = true;
+        }
+
+        fn health(&self) -> OutputHealth {
+            self.health
+        }
+    }
+
+    struct FakePipeline<const S: usize> {
+        replaced: usize,
+        producer: Option<RealtimePcmProducer<S>>,
+    }
+
+    impl<const S: usize> Default for FakePipeline<S> {
+        fn default() -> Self {
+            Self {
+                replaced: 0,
+                producer: None,
+            }
+        }
+    }
+
+    impl<const S: usize> ReceiverPcmProducerInstaller<S> for FakePipeline<S> {
+        fn replace_pcm_producer(&mut self, producer: RealtimePcmProducer<S>) {
+            self.replaced += 1;
+            self.producer = Some(producer);
+        }
+    }
+
+    fn selection(device: Option<OutputDeviceId>) -> OutputSelection {
+        OutputSelection {
+            device,
+            config: OutputConfig {
+                sample_rate_hz: 48_000,
+                channels: 2,
+                sample_format: SampleFormat::Float32,
+                requested_callback_frames: Some(480),
+                maximum_callback_frames: 1_024,
+            },
+        }
+    }
+
+    fn identity(stream_id: u32) -> MediaStreamIdentity {
+        MediaStreamIdentity {
+            session_id: 0x0102_0304,
+            stream_id,
+            key_epoch: 0,
+        }
+    }
+
+    fn request(identity: MediaStreamIdentity) -> StreamStartRequest {
+        StreamStartRequest {
+            identity,
+            sample_rate_hz: 48_000,
+            channels: 1,
+            frame_duration_ms: 10,
+        }
+    }
+
+    fn session(output: FakeOutput) -> MixerStreamSession<FakeOutput, SLOTS, OUTPUT_SAMPLES> {
+        MixerStreamSession::new(output, 8).expect("fixed test session is valid")
+    }
+
+    fn started(
+        session: &mut MixerStreamSession<FakeOutput, SLOTS, OUTPUT_SAMPLES>,
+        identity: MediaStreamIdentity,
+        pipeline: &mut FakePipeline<SOURCE_SAMPLES>,
+    ) {
+        session
+            .start_stream(request(identity), 8, None, pipeline)
+            .unwrap();
+    }
+
+    #[test]
+    fn new_rejects_zero_and_oversized_queue_capacity() {
+        assert!(matches!(
+            MixerStreamSession::<FakeOutput, SLOTS, OUTPUT_SAMPLES>::new(FakeOutput::default(), 0),
+            Err(MixerStreamSessionError::Membership(
+                MixerAdmissionError::Queue(RealtimeQueueConfigError::ZeroCapacity)
+            ))
+        ));
+        assert!(matches!(
+            MixerStreamSession::<FakeOutput, SLOTS, OUTPUT_SAMPLES>::new(
+                FakeOutput::default(),
+                MAX_PCM_QUEUE_BLOCKS + 1
+            ),
+            Err(MixerStreamSessionError::Membership(
+                MixerAdmissionError::Queue(RealtimeQueueConfigError::CapacityTooLarge)
+            ))
+        ));
+    }
+
+    #[test]
+    fn start_stream_requires_an_active_output() {
+        let mut pipeline = FakePipeline::<SOURCE_SAMPLES>::default();
+        let mut session = session(FakeOutput::default());
+
+        assert_eq!(
+            session.start_stream(request(identity(1)), 8, None, &mut pipeline),
+            Err(MixerStreamSessionError::OutputNotActive)
+        );
+        assert_eq!(pipeline.replaced, 0);
+        assert_eq!(session.stream_count(), 0);
+    }
+
+    #[test]
+    fn start_output_rejects_an_already_active_stream() {
+        let mut session = session(FakeOutput::default());
+        session.start_output(selection(None)).unwrap();
+
+        assert_eq!(
+            session.start_output(selection(None)),
+            Err(MixerStreamSessionError::Output(
+                MixerOutputLifecycleError::StreamAlreadyActive
+            ))
+        );
+    }
+
+    #[test]
+    fn start_stream_admits_into_the_lowest_slot_and_installs_the_producer() {
+        let mut session = session(FakeOutput::default());
+        session.start_output(selection(None)).unwrap();
+        let mut pipeline = FakePipeline::<SOURCE_SAMPLES>::default();
+
+        let started = session
+            .start_stream(request(identity(1)), 8, None, &mut pipeline)
+            .unwrap();
+        assert_eq!(started.slot, 0);
+        assert_eq!(pipeline.replaced, 1);
+        assert!(pipeline.producer.is_some());
+        assert_eq!(session.stream_count(), 1);
+        assert!(session.pending_commands() >= 1);
+        assert!(session.snapshot().stream_active());
+        assert!(session.gain(identity(1)).is_ok());
+    }
+
+    #[test]
+    fn start_stream_rejects_a_duplicate_identity() {
+        let mut session = session(FakeOutput::default());
+        session.start_output(selection(None)).unwrap();
+        let mut pipeline = FakePipeline::<SOURCE_SAMPLES>::default();
+        started(&mut session, identity(1), &mut pipeline);
+
+        assert_eq!(
+            session.start_stream(request(identity(1)), 8, None, &mut pipeline),
+            Err(MixerStreamSessionError::DuplicateStream(identity(1)))
+        );
+        assert_eq!(session.stream_count(), 1);
+    }
+
+    #[test]
+    fn start_stream_rejects_a_mismatched_source_block_size() {
+        let mut session = session(FakeOutput::default());
+        session.start_output(selection(None)).unwrap();
+        let mut pipeline = FakePipeline::<256>::default();
+
+        assert_eq!(
+            session.start_stream(request(identity(1)), 8, None, &mut pipeline),
+            Err(MixerStreamSessionError::SourceBlockMismatch {
+                expected: SOURCE_SAMPLES
+            })
+        );
+        assert_eq!(session.stream_count(), 0);
+    }
+
+    #[test]
+    fn start_stream_rejects_an_invalid_source_format() {
+        let mut session = session(FakeOutput::default());
+        session.start_output(selection(None)).unwrap();
+        let mut pipeline = FakePipeline::<SOURCE_SAMPLES>::default();
+        let mut invalid = request(identity(1));
+        invalid.channels = 0;
+
+        assert!(matches!(
+            session.start_stream(invalid, 8, None, &mut pipeline),
+            Err(MixerStreamSessionError::SourceFormat(
+                SourcePcmFormatError::InvalidChannelCount
+            ))
+        ));
+        assert_eq!(session.stream_count(), 0);
+    }
+
+    #[test]
+    fn pump_all_underflows_without_source_data() {
+        let mut session = session(FakeOutput::default());
+        session.start_output(selection(None)).unwrap();
+        let mut pipeline = FakePipeline::<SOURCE_SAMPLES>::default();
+        started(&mut session, identity(1), &mut pipeline);
+
+        assert_eq!(session.pump_all(), Ok(()));
+        assert_eq!(session.queued_source_blocks(identity(1)).unwrap(), 0);
+    }
+
+    #[test]
+    fn pump_all_converts_queued_source_blocks_into_the_slot_queue() {
+        let mut session = session(FakeOutput::default());
+        session.start_output(selection(None)).unwrap();
+        let mut pipeline = FakePipeline::<SOURCE_SAMPLES>::default();
+        started(&mut session, identity(1), &mut pipeline);
+
+        let producer = pipeline.producer.as_mut().unwrap();
+        assert_eq!(
+            producer.push(&[0.5; SOURCE_SAMPLES]),
+            RealtimePcmPushOutcome::Inserted
+        );
+        assert_eq!(session.queued_source_blocks(identity(1)).unwrap(), 1);
+
+        session.pump_all().unwrap();
+        assert_eq!(session.queued_source_blocks(identity(1)).unwrap(), 0);
+        assert_eq!(session.queued_output_blocks(identity(1)).unwrap(), 1);
+    }
+
+    #[test]
+    fn begin_epoch_retires_partial_conversion_state() {
+        let mut session = session(FakeOutput::default());
+        session.start_output(selection(None)).unwrap();
+        let mut pipeline = FakePipeline::<SOURCE_SAMPLES>::default();
+        started(&mut session, identity(1), &mut pipeline);
+
+        let producer = pipeline.producer.as_mut().unwrap();
+        assert_eq!(
+            producer.push(&[0.5; SOURCE_SAMPLES]),
+            RealtimePcmPushOutcome::Inserted
+        );
+        session.pump_all().unwrap();
+        assert_eq!(session.queued_output_blocks(identity(1)).unwrap(), 1);
+
+        session.begin_epoch(identity(1)).unwrap();
+        assert_eq!(session.queued_output_blocks(identity(1)).unwrap(), 0);
+        assert_eq!(
+            session.begin_epoch(identity(9)),
+            Err(MixerStreamSessionError::UnknownStream(identity(9)))
+        );
+    }
+
+    #[test]
+    fn remove_stream_retires_the_slot_for_reuse() {
+        let mut session = session(FakeOutput::default());
+        session.start_output(selection(None)).unwrap();
+        let mut pipeline = FakePipeline::<SOURCE_SAMPLES>::default();
+        started(&mut session, identity(1), &mut pipeline);
+        started(&mut session, identity(2), &mut pipeline);
+        assert_eq!(session.stream_count(), 2);
+
+        session.remove_stream(identity(1)).unwrap();
+        assert_eq!(session.stream_count(), 1);
+        assert!(matches!(
+            session.gain(identity(1)),
+            Err(MixerStreamSessionError::UnknownStream(found))
+                if found == identity(1)
+        ));
+
+        let readmitted = session
+            .start_stream(request(identity(3)), 8, None, &mut pipeline)
+            .unwrap();
+        assert_eq!(readmitted.slot, 0);
+        assert_eq!(
+            session.remove_stream(identity(9)),
+            Err(MixerStreamSessionError::UnknownStream(identity(9)))
+        );
+    }
+
+    #[test]
+    fn rotate_stream_replaces_an_identity_in_place() {
+        let mut session = session(FakeOutput::default());
+        session.start_output(selection(None)).unwrap();
+        let mut pipeline = FakePipeline::<SOURCE_SAMPLES>::default();
+        started(&mut session, identity(1), &mut pipeline);
+
+        let rotated = session
+            .rotate_stream(identity(1), request(identity(2)))
+            .unwrap();
+        assert_eq!(rotated.slot, 0);
+        assert_eq!(session.stream_count(), 1);
+        assert!(session.gain(identity(2)).is_ok());
+        assert!(matches!(
+            session.gain(identity(1)),
+            Err(MixerStreamSessionError::UnknownStream(found))
+                if found == identity(1)
+        ));
+    }
+
+    #[test]
+    fn rotate_stream_rejects_unknown_format_changes_and_duplicates() {
+        let mut session = session(FakeOutput::default());
+        session.start_output(selection(None)).unwrap();
+        let mut pipeline = FakePipeline::<SOURCE_SAMPLES>::default();
+        started(&mut session, identity(1), &mut pipeline);
+        started(&mut session, identity(2), &mut pipeline);
+
+        assert_eq!(
+            session.rotate_stream(identity(9), request(identity(3))),
+            Err(MixerStreamSessionError::UnknownStream(identity(9)))
+        );
+        assert_eq!(
+            session.rotate_stream(identity(1), request(identity(2))),
+            Err(MixerStreamSessionError::DuplicateStream(identity(2)))
+        );
+
+        let mut changed = request(identity(3));
+        changed.frame_duration_ms = 20;
+        assert_eq!(
+            session.rotate_stream(identity(1), changed),
+            Err(MixerStreamSessionError::RotationFormatChange)
+        );
+        assert_eq!(session.stream_count(), 2);
+    }
+
+    #[test]
+    fn set_rate_adjustment_ppm_applies_bounded_corrections() {
+        let mut session = session(FakeOutput::default());
+        session.start_output(selection(None)).unwrap();
+        let mut pipeline = FakePipeline::<SOURCE_SAMPLES>::default();
+        started(&mut session, identity(1), &mut pipeline);
+
+        session.set_rate_adjustment_ppm(identity(1), 100).unwrap();
+        assert!(matches!(
+            session.set_rate_adjustment_ppm(identity(1), MAX_DRIFT_ADJUSTMENT_PPM + 1),
+            Err(MixerStreamSessionError::Resampler(_))
+        ));
+        assert_eq!(
+            session.set_rate_adjustment_ppm(identity(9), 0),
+            Err(MixerStreamSessionError::UnknownStream(identity(9)))
+        );
+    }
+
+    #[test]
+    fn gain_returns_the_shared_control_handle() {
+        let mut session = session(FakeOutput::default());
+        session.start_output(selection(None)).unwrap();
+        let mut pipeline = FakePipeline::<SOURCE_SAMPLES>::default();
+        started(&mut session, identity(1), &mut pipeline);
+
+        let handle: GainControlHandle = session.gain(identity(1)).unwrap();
+        handle.set_gain(0.5).unwrap();
+        let shared = session.gain(identity(1)).unwrap();
+        assert!((shared.gain() - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn monitor_retires_membership_but_keeps_stream_records() {
+        let output = FakeOutput {
+            health: OutputHealth::StreamError,
+            ..Default::default()
+        };
+        let mut session = session(output);
+        session.start_output(selection(None)).unwrap();
+        let mut pipeline = FakePipeline::<SOURCE_SAMPLES>::default();
+        started(&mut session, identity(1), &mut pipeline);
+
+        assert_eq!(session.monitor(), Some(OutputHealth::StreamError));
+        assert_eq!(session.monitor(), None);
+        assert_eq!(session.stream_count(), 1);
+        assert_eq!(session.pending_commands(), 0);
+        assert!(!session.snapshot().stream_active());
+        assert!(session.snapshot().fault_reported());
+        assert_eq!(
+            session.start_stream(request(identity(2)), 8, None, &mut pipeline),
+            Err(MixerStreamSessionError::OutputNotActive)
+        );
+    }
+
+    #[test]
+    fn recover_output_readmits_persisted_streams() {
+        let output = FakeOutput {
+            health: OutputHealth::CallbackCapacityExceeded,
+            ..Default::default()
+        };
+        let mut session = session(output);
+        session.start_output(selection(None)).unwrap();
+        let mut pipeline = FakePipeline::<SOURCE_SAMPLES>::default();
+        started(&mut session, identity(1), &mut pipeline);
+        started(&mut session, identity(2), &mut pipeline);
+        assert_eq!(
+            session.monitor(),
+            Some(OutputHealth::CallbackCapacityExceeded)
+        );
+
+        let identities = session.recover_output().unwrap();
+        assert_eq!(identities, vec![identity(1), identity(2)]);
+        assert!(session.snapshot().stream_active());
+
+        let recovered = session.recover_stream(identity(1), &mut pipeline).unwrap();
+        assert_eq!(recovered.slot, 0);
+        assert_eq!(pipeline.replaced, 3);
+        assert_eq!(
+            session.recover_stream(identity(9), &mut pipeline),
+            Err(MixerStreamSessionError::UnknownStream(identity(9)))
+        );
+    }
+
+    #[test]
+    fn stop_retires_every_stream_record() {
+        let mut session = session(FakeOutput::default());
+        session.start_output(selection(None)).unwrap();
+        let mut pipeline = FakePipeline::<SOURCE_SAMPLES>::default();
+        started(&mut session, identity(1), &mut pipeline);
+        started(&mut session, identity(2), &mut pipeline);
+
+        session.stop();
+        assert_eq!(session.stream_count(), 0);
+        assert_eq!(session.pending_commands(), 0);
+        assert!(session.output().stopped);
+        assert!(!session.snapshot().stream_active());
+        assert!(matches!(
+            session.gain(identity(1)),
+            Err(MixerStreamSessionError::UnknownStream(found))
+                if found == identity(1)
+        ));
+    }
+
+    #[test]
+    fn stream_metrics_reports_one_redacted_entry_per_stream() {
+        let mut session = session(FakeOutput::default());
+        session.start_output(selection(None)).unwrap();
+        let mut pipeline = FakePipeline::<SOURCE_SAMPLES>::default();
+        session
+            .start_stream(
+                request(identity(1)),
+                8,
+                Some(Arc::new(StreamCounters::default())),
+                &mut pipeline,
+            )
+            .unwrap();
+        started(&mut session, identity(2), &mut pipeline);
+
+        let metrics = session.stream_metrics();
+        assert_eq!(metrics.len(), 2);
+        assert_eq!(session.stream_metrics().len(), session.stream_count());
+    }
+}
