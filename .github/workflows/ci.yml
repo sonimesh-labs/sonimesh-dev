@@ -35,6 +35,8 @@ jobs:
           python tools/check_workspace_boundaries.py
           python tools/check_doc_links.py --self-test
           python tools/check_doc_links.py
+          python tools/check_doc_dates.py --self-test
+          python tools/check_doc_dates.py
           python tools/check_fuzz_targets.py --self-test
           python tools/check_fuzz_targets.py
           python tools/check_adr_index.py --self-test

@@ -22,6 +22,7 @@ cargo test --workspace --all-targets --all-features
 cargo run -p sonimesh-network-simulator
 python tools/check_workspace_boundaries.py
 python tools/check_doc_links.py
+python tools/check_doc_dates.py
 python tools/check_fuzz_targets.py
 python tools/check_adr_index.py
 python tools/check_preview_alignment.py
@@ -53,7 +54,10 @@ that every `tools/` checker is wired into CI with its required
 mode and that the contributor-facing Core checks block documents the same tools with the
 same modes. `check_doc_links.py` verifies that every relative Markdown link in the
 repository-owned documentation resolves to an existing file, skipping generated directories
-and fenced code blocks.
+and fenced code blocks. `check_doc_dates.py` verifies that every `> Updated:` date
+declared by a design or measurement document is not older than the newest git commit that
+changed the document's content, treating pure date-line refreshes as non-content so a date
+edit does not immediately look stale.
 
 ## Fuzz checks
 
