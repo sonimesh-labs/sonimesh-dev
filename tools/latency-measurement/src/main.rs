@@ -69,6 +69,8 @@ struct MeasureArgs {
 #[derive(Debug)]
 struct InfoArgs {
     paths: Vec<PathBuf>,
+    /// Fail unless every file shares the same declared sample rate.
+    check: bool,
 }
 
 fn main() -> ExitCode {
@@ -171,6 +173,8 @@ fn run_measure(args: &MeasureArgs) -> Result<(), Box<dyn Error>> {
 
 fn run_info(args: &InfoArgs) -> Result<(), Box<dyn Error>> {
     let mut failures = 0_usize;
+    let mut first_rate: Option<u32> = None;
+    let mut mismatch: Option<(u32, u32)> = None;
     for path in &args.paths {
         match read_info(path) {
             Ok(info) => {
@@ -187,6 +191,15 @@ fn run_info(args: &InfoArgs) -> Result<(), Box<dyn Error>> {
                     info.audio_format,
                     info.frames,
                 );
+                match first_rate {
+                    None => first_rate = Some(info.sample_rate_hz),
+                    Some(rate) if rate != info.sample_rate_hz => {
+                        if mismatch.is_none() {
+                            mismatch = Some((rate, info.sample_rate_hz));
+                        }
+                    }
+                    Some(_) => {}
+                }
             }
             Err(error) => {
                 eprintln!("error: {}: {error}", path.display());
@@ -196,6 +209,16 @@ fn run_info(args: &InfoArgs) -> Result<(), Box<dyn Error>> {
     }
     if failures > 0 {
         return Err(format!("failed to inspect {failures} of {} files", args.paths.len()).into());
+    }
+    if args.check {
+        if let Some((expected, actual)) = mismatch {
+            return Err(
+                format!("sample rate mismatch across files: {expected} Hz vs {actual} Hz").into(),
+            );
+        }
+        if let Some(rate) = first_rate {
+            println!("check=ok sample_rate_hz={rate}");
+        }
     }
     Ok(())
 }
@@ -405,17 +428,21 @@ fn parse_info(rest: &[String]) -> Result<Option<InfoArgs>, String> {
     if rest.iter().any(|arg| arg == "-h" || arg == "--help") {
         return Ok(None);
     }
+    let mut check = false;
     let mut paths = Vec::new();
     for arg in rest {
-        if arg.starts_with('-') {
-            return Err(format!("unknown flag `{arg}` for info"));
+        match arg.as_str() {
+            "--check" => check = true,
+            flag if flag.starts_with('-') => {
+                return Err(format!("unknown flag `{flag}` for info"));
+            }
+            _ => paths.push(PathBuf::from(arg)),
         }
-        paths.push(PathBuf::from(arg));
     }
     if paths.is_empty() {
         return Err("info requires at least one path".into());
     }
-    Ok(Some(InfoArgs { paths }))
+    Ok(Some(InfoArgs { paths, check }))
 }
 
 fn parse_u32(value: Option<&String>, flag: &str) -> Result<u32, String> {
@@ -452,7 +479,7 @@ fn print_usage() {
 Usage:
   sonimesh-latency-measurement generate [--sample-rate N] [--seconds N] [--seed N] [--bits FMT] <output.wav>
   sonimesh-latency-measurement measure [--max-search-ms N] [--coarse-factor N] [--distinctness-ratio R] [--probe-ms N] [--offsets-only] <reference.wav> <recording.wav>...
-  sonimesh-latency-measurement info <wave.wav>...
+  sonimesh-latency-measurement info [--check] <wave.wav>...
   sonimesh-latency-measurement summary
   sonimesh-latency-measurement --help
 
@@ -472,6 +499,7 @@ Options:
   --distinctness-ratio R  Minimum best/second-best peak ratio (default: 3.0).
   --probe-ms N            Correlation probe duration in ms (default: 32768 samples).
   --offsets-only          Print only per-run offsets (one per line) for summary.
+  --check                 Fail unless all files share the same sample rate (info).
 
 Info output:
   audio_format  Declared WAVE tag: 1 = PCM, 3 = IEEE float."
@@ -857,6 +885,21 @@ mod tests {
                 PathBuf::from("b.wav"),
                 PathBuf::from("c.wav")
             ]
+        );
+        assert!(!info.check);
+    }
+
+    #[test]
+    fn info_accepts_check_flag() {
+        let Parsed::Info(info) =
+            parse_args(args(&["info", "--check", "a.wav", "b.wav"])).expect("parsed")
+        else {
+            panic!("expected info");
+        };
+        assert!(info.check);
+        assert_eq!(
+            info.paths,
+            vec![PathBuf::from("a.wav"), PathBuf::from("b.wav")]
         );
     }
 

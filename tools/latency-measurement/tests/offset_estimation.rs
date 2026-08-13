@@ -477,3 +477,66 @@ fn cli_measure_offsets_only_pipes_into_summary() {
 
     std::fs::remove_dir_all(&dir).expect("cleanup temp dir");
 }
+
+#[test]
+fn cli_info_check_gates_on_sample_rate_consistency() {
+    let bin = env!("CARGO_BIN_EXE_sonimesh-latency-measurement");
+    let dir = test_dir("info_check");
+    std::fs::create_dir_all(&dir).expect("create temp dir");
+    let reference_path = dir.join("reference.wav");
+    let same_rate_path = dir.join("same_rate.wav");
+    let other_rate_path = dir.join("other_rate.wav");
+
+    let output = Command::new(bin)
+        .args(["generate", "--seconds", "1"])
+        .arg(&reference_path)
+        .output()
+        .expect("generate runs");
+    assert!(output.status.success(), "generate failed");
+    let output = Command::new(bin)
+        .args(["generate", "--seconds", "1"])
+        .arg(&same_rate_path)
+        .output()
+        .expect("generate runs");
+    assert!(output.status.success(), "generate failed");
+    let output = Command::new(bin)
+        .args(["generate", "--sample-rate", "44100", "--seconds", "1"])
+        .arg(&other_rate_path)
+        .output()
+        .expect("generate runs");
+    assert!(output.status.success(), "generate failed");
+
+    let output = Command::new(bin)
+        .args(["info", "--check"])
+        .arg(&reference_path)
+        .arg(&same_rate_path)
+        .output()
+        .expect("info check runs");
+    assert!(
+        output.status.success(),
+        "same-rate check failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("utf8 stdout");
+    assert!(
+        stdout.contains("check=ok sample_rate_hz=48000"),
+        "unexpected check output: {stdout}"
+    );
+
+    let output = Command::new(bin)
+        .args(["info", "--check"])
+        .arg(&reference_path)
+        .arg(&other_rate_path)
+        .output()
+        .expect("info check runs");
+    assert!(!output.status.success(), "mismatched check must fail");
+    let stdout = String::from_utf8(output.stdout).expect("utf8 stdout");
+    assert!(stdout.contains("file="), "per-file info missing: {stdout}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("sample rate mismatch across files"),
+        "unexpected stderr: {stderr}"
+    );
+
+    std::fs::remove_dir_all(&dir).expect("cleanup temp dir");
+}

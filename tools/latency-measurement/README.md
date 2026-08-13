@@ -75,6 +75,14 @@ WAVE_FORMAT_EXTENSIBLE is resolved to its subformat tag). Run this before
 layout. A file that cannot be read is reported on stderr while the remaining
 files are still processed; the command exits non-zero if any file failed.
 
+Pass `--check` to turn the sample-rate consistency check into a gate: the
+command fails (and exits non-zero) unless every file declares the same sample
+rate, and prints `check=ok sample_rate_hz=...` when they agree:
+
+```sh
+cargo run -p sonimesh-latency-measurement -- info --check capture1.wav capture2.wav
+```
+
 ### summary
 
 Summarize offsets read from stdin, one number per line:
