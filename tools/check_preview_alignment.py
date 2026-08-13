@@ -23,9 +23,25 @@ ALIGNMENTS = (
 # publishes them.
 PREVIEW_ONLY_STREAM_FIELDS = frozenset({"currentJitterMs", "playoutDelayMs"})
 
+# DesktopSnapshot fields owned by the preview adapter or by separate low-rate
+# APIs rather than by the Rust control snapshot: output-device lists, volume
+# controls, the StreamCounters metrics, the reply log, and the adapter flag.
+PREVIEW_ONLY_SNAPSHOT_FIELDS = frozenset(
+    {
+        "outputDevices",
+        "selectedOutputId",
+        "gain",
+        "muted",
+        "metrics",
+        "replies",
+        "previewAdapter",
+    }
+)
+
 STRUCT_ALIGNMENTS = (
     ("StreamMetrics", "StreamMetricsSnapshot", "crates/sonimesh-diagnostics/src/metrics.rs"),
     ("OutputSnapshot", "OutputSnapshot", "crates/sonimesh-app/src/control_snapshot.rs"),
+    ("DesktopSnapshot", "DesktopControlSnapshot", "crates/sonimesh-app/src/control_snapshot.rs"),
 )
 
 # Receiver-generated control-plane replies surface two bounded contracts: the
@@ -284,7 +300,7 @@ def validate_sources(rust_source: str, ts_source: str) -> list[str]:
             errors.append(f"preview alignment is invalid: {error}")
             continue
 
-        observed -= PREVIEW_ONLY_STREAM_FIELDS
+        observed -= PREVIEW_ONLY_STREAM_FIELDS | PREVIEW_ONLY_SNAPSHOT_FIELDS
         expected = {snake_to_camel(field) for field in fields}
         missing = sorted(expected - observed)
         unexpected = sorted(observed - expected)
@@ -427,6 +443,17 @@ pub struct OutputSnapshot {
     /// Latest low-rate output health state.
     health: OutputHealth,
 }
+
+pub struct DesktopControlSnapshot {
+    /// Redacted session phase.
+    session: SessionPhase,
+    /// Redacted invitation lifecycle.
+    pairing: PairingSnapshotState,
+    /// Redacted output lifecycle.
+    output: OutputSnapshot,
+    /// Bounded reconnect window remaining time.
+    reconnect_remaining_ms: Option<u64>,
+}
 """
     TS_INTERFACE = """
 export interface StreamMetrics {
@@ -444,6 +471,20 @@ export interface OutputSnapshot {
   streamActive: boolean
   faultReported: boolean
   health: OutputHealth
+}
+
+export interface DesktopSnapshot {
+  session: SessionState
+  outputDevices: OutputDevice[]
+  selectedOutputId: string | null
+  gain: number
+  muted: boolean
+  output: OutputSnapshot
+  pairing: PairingStatus
+  reconnectRemainingMs: number | null
+  metrics: StreamMetrics
+  replies: ControlReply[]
+  previewAdapter: boolean
 }
 """
 
@@ -488,6 +529,7 @@ export interface OutputSnapshot {
                 "preview alignment is invalid: Rust enum OutputHealth is not declared",
                 "preview alignment is invalid: Rust struct StreamMetricsSnapshot is not declared",
                 "preview alignment is invalid: Rust struct OutputSnapshot is not declared",
+                "preview alignment is invalid: Rust struct DesktopControlSnapshot is not declared",
             ],
         )
 
@@ -576,6 +618,28 @@ export interface OutputSnapshot {
             [
                 "OutputSnapshot is missing fields: selectionRetained",
                 "OutputSnapshot has undeclared fields: inventedField",
+            ],
+        )
+
+
+    def test_reports_desktop_snapshot_field_drift(self) -> None:
+        rust = self.RUST + self.RUST_SNAPSHOT
+        ts = (self.TS + self.TS_INTERFACE).replace(
+            "  reconnectRemainingMs: number | null\n", ""
+        )
+        self.assertEqual(
+            validate_sources(rust, ts),
+            ["DesktopSnapshot is missing fields: reconnectRemainingMs"],
+        )
+
+        ts = (self.TS + self.TS_INTERFACE).replace(
+            "  reconnectRemainingMs: number | null\n", "  inventedSnapshotField: boolean\n"
+        )
+        self.assertEqual(
+            validate_sources(rust, ts),
+            [
+                "DesktopSnapshot is missing fields: reconnectRemainingMs",
+                "DesktopSnapshot has undeclared fields: inventedSnapshotField",
             ],
         )
 
