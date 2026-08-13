@@ -282,3 +282,70 @@ fn udp_stream_keeps_rendering_after_output_recovery() {
     assert_eq!(harness.controller.output().start_calls, 2);
     assert_eq!(harness.controller.output().stop_calls, 1);
 }
+
+#[test]
+fn key_epoch_rotation_keeps_the_active_output_streaming() {
+    let mut harness = harness();
+    harness
+        .controller
+        .start(selection(), &mut harness.pipeline)
+        .unwrap();
+    let mut sender = sender(&harness);
+
+    send_phase(&mut sender, &mut harness, 0, 0x01, PHASE_FRAMES);
+    render_and_expect(&mut harness, 1.0);
+    assert_eq!(
+        harness.pipeline.pinned_source(),
+        Some(sender.local_addr().unwrap())
+    );
+
+    // Rotate both sides to a strictly newer epoch with a fresh secret; the
+    // pinned source and the active output survive without a platform restart.
+    let epoch_two = MediaKeyContext::new(
+        0x0102_0304_0506_0708,
+        9,
+        2,
+        MediaDirection::AndroidToDesktop,
+    )
+    .unwrap();
+    let rotated_secret = SessionSecret::new([0xB5; 32]);
+    sender.rotate(&rotated_secret, epoch_two).unwrap();
+    harness
+        .pipeline
+        .rotate(&rotated_secret, epoch_two, 0)
+        .unwrap();
+
+    // Retire the epoch-one blocks still queued after the first callback, then
+    // send the epoch-two phase; the new frames restart at sequence zero.
+    let mut drain = [0.0_f32; CALLBACK_FRAMES];
+    harness.controller.output_mut().render(&mut drain);
+    send_phase(&mut sender, &mut harness, 0, 0x02, PHASE_FRAMES);
+
+    // The first post-rotation callback intentionally fades over the bounded
+    // discontinuity window instead of clicking, then reaches the new value.
+    let mut callback = [f32::NAN; CALLBACK_FRAMES];
+    harness.controller.output_mut().render(&mut callback);
+    assert!(
+        callback[CALLBACK_FRAMES - 200..]
+            .iter()
+            .all(|sample| (sample - 2.0).abs() < f32::EPSILON),
+        "rotated stream did not reach value 2.0: first={:?} tail={:?}",
+        &callback[..8],
+        &callback[CALLBACK_FRAMES - 8..]
+    );
+    assert!(
+        harness.counters.snapshot().pcm_discontinuities >= 1,
+        "rotation must count one bounded PCM discontinuity"
+    );
+
+    assert_eq!(
+        harness.pipeline.pinned_source(),
+        Some(sender.local_addr().unwrap())
+    );
+    assert_eq!(
+        harness.counters.snapshot().authenticated_packets,
+        u64::from(PHASE_FRAMES) * 2
+    );
+    assert_eq!(harness.counters.snapshot().rejected_packets, 0);
+    assert_eq!(harness.controller.output().start_calls, 1);
+}
