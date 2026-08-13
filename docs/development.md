@@ -142,8 +142,10 @@ callbacks. Platform implementations depend inward on these contracts.
 `tools/check_workspace_boundaries.py` is the CI guard for the current direct
 Rust graph. It uses Cargo metadata to enforce the six crate edges above and
 rejects direct Tauri/webview, Vue, Android, JNI, and NDK dependencies in that
-foundation. It intentionally cannot prove source-level execution-domain rules;
-those remain code-review and test requirements.
+foundation. It also enforces the documented standard-library-only contracts by
+rejecting any direct, dev, or build dependency in `sonimesh-diagnostics` and
+`tools/latency-measurement`. It intentionally cannot prove source-level
+execution-domain rules; those remain code-review and test requirements.
 
 `tools/check_android_capture_boundary.py` guards only the phase 0A production
 Android source set. It rejects direct networking, TLS/crypto/Keystore, Opus,

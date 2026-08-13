@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Reject direct Rust dependencies that cross SoniMesh foundation boundaries."""
+"""Reject direct Rust dependencies that cross SoniMesh foundation boundaries.
+
+Also enforces the documented standard-library-only contracts: packages in
+``ZERO_DEPENDENCY_PACKAGES`` must not declare any direct, dev, or build
+dependency, so a documented "no dependencies" boundary cannot silently
+gain an external crate.
+"""
 
 from __future__ import annotations
 
@@ -28,6 +34,18 @@ FOUNDATION_DEPENDENCIES: dict[str, frozenset[str]] = {
     ),
 }
 
+# Packages documented as standard-library-only. Any direct, dev, or build
+# dependency violates the published contract: sonimesh-diagnostics is
+# "standard library only" in docs/development.md, and tools/latency-measurement
+# is "intentionally dependency-free (standard library only)" in its README.
+ZERO_DEPENDENCY_PACKAGES = frozenset(
+    {
+        "sonimesh-diagnostics",
+        "sonimesh-latency-measurement",
+    }
+)
+
+
 FORBIDDEN_DEPENDENCIES = frozenset(
     {
         "android-activity",
@@ -53,6 +71,11 @@ def validate_metadata(metadata: Mapping[str, Any]) -> list[str]:
 
     package_dependencies = {
         package.get("name"): dependency_names(package.get("dependencies", []))
+        for package in packages
+        if isinstance(package, Mapping) and isinstance(package.get("name"), str)
+    }
+    package_all_dependencies = {
+        package.get("name"): all_dependency_names(package)
         for package in packages
         if isinstance(package, Mapping) and isinstance(package.get("name"), str)
     }
@@ -87,6 +110,17 @@ def validate_metadata(metadata: Mapping[str, Any]) -> list[str]:
                 f"{package} has forbidden platform or UI dependencies: {', '.join(forbidden)}"
             )
 
+    for package in sorted(ZERO_DEPENDENCY_PACKAGES):
+        dependencies = package_dependencies.get(package)
+        if dependencies is None:
+            violations.append(f"missing zero-dependency package: {package}")
+            continue
+        unexpected = sorted(package_all_dependencies[package])
+        if unexpected:
+            violations.append(
+                f"{package} must stay standard-library-only but depends on: {', '.join(unexpected)}"
+            )
+
     return violations
 
 
@@ -101,6 +135,14 @@ def dependency_names(dependencies: object) -> set[str]:
         for name in [dependency.get("name")]
         if isinstance(name, str)
     }
+
+
+def all_dependency_names(package: Mapping[str, Any]) -> set[str]:
+    """Returns direct dependency names across normal, dev, and build tables."""
+    names: set[str] = set()
+    for table in ("dependencies", "dev_dependencies", "build_dependencies"):
+        names.update(dependency_names(package.get(table, [])))
+    return names
 
 
 def cargo_metadata() -> Mapping[str, Any]:
@@ -145,6 +187,14 @@ class WorkspaceBoundaryTests(unittest.TestCase):
                     "dependencies": [{"name": dependency} for dependency in dependencies],
                 }
             )
+        for package in sorted(ZERO_DEPENDENCY_PACKAGES):
+            dependencies = overrides.get(package, [])
+            packages.append(
+                {
+                    "name": package,
+                    "dependencies": [{"name": dependency} for dependency in dependencies],
+                }
+            )
         return {"packages": packages}
 
     def test_accepts_documented_foundation_edges(self) -> None:
@@ -168,6 +218,32 @@ class WorkspaceBoundaryTests(unittest.TestCase):
             [
                 "sonimesh-network has forbidden platform or UI dependencies: jni, tauri",
             ],
+        )
+
+    def test_reports_zero_dependency_violation(self) -> None:
+        violations = validate_metadata(
+            self.metadata_with({"sonimesh-latency-measurement": {"rand"}})
+        )
+        self.assertEqual(
+            violations,
+            [
+                "sonimesh-latency-measurement must stay standard-library-only but depends on: rand",
+            ],
+        )
+
+    def test_reports_missing_zero_dependency_package(self) -> None:
+        # sonimesh-latency-measurement is not part of the foundation graph, so
+        # this exercises only the zero-dependency missing-package path.
+        metadata = self.metadata_with({})
+        metadata["packages"] = [
+            package
+            for package in metadata["packages"]
+            if package["name"] != "sonimesh-latency-measurement"
+        ]
+        violations = validate_metadata(metadata)
+        self.assertEqual(
+            violations,
+            ["missing zero-dependency package: sonimesh-latency-measurement"],
         )
 
 
