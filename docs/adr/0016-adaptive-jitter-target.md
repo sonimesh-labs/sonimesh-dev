@@ -107,6 +107,11 @@ are in flight, and forces a playout when the gate deadline expires, so the
 controller can gate playout without an unbounded mid-stream stall and every
 configured run completes; the product playout scheduler remains Phase 2
 work.
+A bounded relative arrival-jitter estimator in `sonimesh-audio`
+(`ArrivalJitter`) measures per-packet inter-arrival deviation from a
+monotonic arrival clock and the sender sample timestamps, so a real packet
+stream can feed the controller without a shared clock; its unit and
+property tests pin the exact injected-variation reporting.
 
 ## Rollback plan
 

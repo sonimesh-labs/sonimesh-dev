@@ -443,6 +443,11 @@ so a mid-stream stall stays bounded and the run always completes. A
 product playout scheduler consuming that target remains future Phase 2
 work.
 
+For the receiver, a bounded relative arrival-jitter estimator in
+`sonimesh-audio` converts inter-arrival times into sender-sample units and
+reports the per-packet deviation in milliseconds, so the adaptive controller
+can be fed from a real packet stream without a shared clock.
+
 Recovery policy:
 
 - single missing frame: Opus PLC where the decoder mode supports it;

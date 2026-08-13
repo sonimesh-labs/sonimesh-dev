@@ -3,6 +3,7 @@
 //! Types in this crate allocate no memory after construction. Platform output,
 //! Opus bindings, and realtime source adapters remain separate boundaries.
 
+mod arrival_jitter;
 mod channel_map;
 mod decode;
 mod drift;
@@ -18,6 +19,7 @@ mod pcm_ring;
 mod realtime_queue;
 mod resampler;
 
+pub use arrival_jitter::{ArrivalJitter, ArrivalJitterConfigError};
 pub use channel_map::{ChannelMapper, ChannelMappingError, MAX_AUDIO_CHANNELS};
 pub use decode::{DecodeStep, DecodeWorkerError, FrameDecoder, StreamDecodeWorker};
 pub use drift::{
