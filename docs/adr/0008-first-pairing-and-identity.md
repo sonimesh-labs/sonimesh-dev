@@ -206,6 +206,17 @@ pairing inputs. A host Gradle build validates only test compilation; a dated API
 The spike does not choose Conscrypt for production, establish interoperability
 with Windows Rustls, or enable pairing.
 
+Recorded spike evidence:
+
+- [Windows credential-store spike protocol](../measurements/windows-credential-store-spike.md)
+  and [2026-07-20 result](../measurements/2026-07-20-windows-credential-store-spike.md);
+- [Android keystore spike protocol](../measurements/android-keystore-spike.md)
+  and [2026-07-20 result](../measurements/2026-07-20-android-keystore-spike.md);
+- [Windows TLS provider spike protocol](../measurements/windows-tls-provider-spike.md)
+  and [2026-07-20 result](../measurements/2026-07-20-windows-tls-provider-spike.md);
+- [Android TLS provider spike protocol](../measurements/android-tls-provider-spike.md)
+  and [2026-07-20 result](../measurements/2026-07-20-android-tls-provider-spike.md).
+
 ## Rollback plan
 
 Pairing protocol versions and QR payload versions are explicit. A future

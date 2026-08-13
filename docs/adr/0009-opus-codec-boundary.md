@@ -73,6 +73,8 @@ malformed authenticated payloads, oversized output reporting, reset behavior,
 and 10/20 ms vectors. Compare loss/PLC and CPU on representative media content.
 The build gate and proposed experiment cells are maintained in
 [Opus build and experiment matrix](../measurements/opus-build-and-experiment-matrix.md).
+An initial [toolchain preflight](../measurements/2026-07-20-opus-native-preflight.md) records the
+read-only availability probe; it is an observation, not a build or quality claim.
 Physical latency and Android capture claims remain separate tests.
 
 ## Rollback plan

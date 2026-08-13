@@ -265,6 +265,11 @@ record](./measurements/2026-07-20-windows-output-backend-comparison.md). This
 does not close the backend-selection, physical device/power lifecycle, or
 physical-latency gates in ADR 0003.
 
+A same-host [backend recheck record](./measurements/2026-07-20-windows-output-backend-recheck.md)
+and a later [output recheck](./measurements/2026-08-13-windows-output-recheck.md) repeat the
+silent smoke against the current reference host, a pinned Realtek endpoint, and a 44.1 kHz
+virtual endpoint; neither closes the ADR 0003 gates.
+
 A two-second silent CPAL smoke on the Windows reference host observed callback
 sizes beyond both the requested and device-reported frame sizes. The evidence and
 remaining gaps are documented in
