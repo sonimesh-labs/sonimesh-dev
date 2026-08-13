@@ -250,9 +250,12 @@ impl ControlStreamCoordinator {
     ///
     /// The pairing owner applies its monotonic clock before projecting, so a
     /// bridge cannot present an active invitation without first observing
-    /// expiry. The output snapshot is read directly from the supplied output
-    /// owner, and session-owned state is retired before returning whenever the
-    /// observation moves the lifecycle to idle.
+    /// expiry. This entry point also observes the bounded reconnect-grace
+    /// clock first, so a bridge that only polls snapshots sees a reconnecting
+    /// session retire once its deadline passes and never observes a stale
+    /// countdown. The output snapshot is read directly from the supplied
+    /// output owner, and session-owned state is retired before returning
+    /// whenever the observation moves the lifecycle to idle.
     ///
     /// # Errors
     ///
