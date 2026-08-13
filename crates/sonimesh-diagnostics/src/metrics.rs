@@ -389,8 +389,8 @@ fn unpack_target_water_levels(packed: u64) -> (u16, u16, u16) {
         u16::try_from(packed & u64::from(u16::MAX)).expect("masked target minimum fits in u16");
     let max_frames = u16::try_from((packed >> u16::BITS) & u64::from(u16::MAX))
         .expect("shifted target maximum fits in u16");
-    let target_frames =
-        u16::try_from(packed >> (u16::BITS * 2)).expect("shifted target water level fits in u16");
+    let target_frames = u16::try_from((packed >> (u16::BITS * 2)) & u64::from(u16::MAX))
+        .expect("shifted target water level fits in u16");
     (min_frames, max_frames, target_frames)
 }
 
@@ -734,5 +734,128 @@ mod tests {
             ),
             (48_000, 96_000),
         );
+    }
+
+    #[test]
+    fn queued_pcm_state_round_trips_across_the_full_u16_range() {
+        for blocks in [0, 1, u16::MAX / 3, u16::MAX / 2, u16::MAX - 1, u16::MAX] {
+            for high_water_blocks in [0, 1, u16::MAX / 3, u16::MAX / 2, u16::MAX - 1, u16::MAX] {
+                let packed = pack_queued_pcm_state(blocks, high_water_blocks);
+                assert_eq!(unpack_queued_pcm_state(packed), (blocks, high_water_blocks));
+            }
+        }
+    }
+
+    #[test]
+    fn queued_pcm_state_packs_level_low_and_high_water_high() {
+        let packed = pack_queued_pcm_state(0x1234, 0xABCD);
+        assert_eq!(packed & u32::from(u16::MAX), 0x1234);
+        assert_eq!(packed >> u16::BITS, 0xABCD);
+    }
+
+    #[test]
+    fn jitter_state_round_trips_across_the_full_u16_range() {
+        for frames in [0, 1, u16::MAX / 3, u16::MAX / 2, u16::MAX - 1, u16::MAX] {
+            for high_water_frames in [0, 1, u16::MAX / 3, u16::MAX / 2, u16::MAX - 1, u16::MAX] {
+                let packed = pack_jitter_state(frames, high_water_frames);
+                assert_eq!(unpack_jitter_state(packed), (frames, high_water_frames));
+            }
+        }
+    }
+
+    #[test]
+    fn jitter_state_packs_level_low_and_high_water_high() {
+        let packed = pack_jitter_state(0x1234, 0xABCD);
+        assert_eq!(packed & u32::from(u16::MAX), 0x1234);
+        assert_eq!(packed >> u16::BITS, 0xABCD);
+    }
+
+    #[test]
+    fn sample_rates_round_trip_across_representative_values() {
+        for input_sample_rate_hz in [0, 1, 8_000, 48_000, 192_000, u32::MAX] {
+            for output_sample_rate_hz in [0, 1, 44_100, 48_000, 192_000, u32::MAX] {
+                let packed = pack_sample_rates(input_sample_rate_hz, output_sample_rate_hz);
+                assert_eq!(
+                    unpack_sample_rates(packed),
+                    (input_sample_rate_hz, output_sample_rate_hz)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn sample_rates_pack_input_high_and_output_low() {
+        let packed = pack_sample_rates(0x1234_5678, 0x9ABC_DEF0);
+        assert_eq!(packed >> u32::BITS, 0x1234_5678);
+        assert_eq!(packed & u64::from(u32::MAX), 0x9ABC_DEF0);
+    }
+
+    #[test]
+    fn unpack_helpers_decode_arbitrary_bit_patterns_without_panicking() {
+        // Every unpack helper masks before the fallible conversion, so any
+        // stored bit pattern must decode without panicking and must equal the
+        // explicit mask-and-shift reconstruction.
+        for state in [
+            0x0000_0000,
+            0x0000_8000,
+            0x8000_0000,
+            0xDEAD_BEEF,
+            0xFFFF_FFFF,
+        ] {
+            let (blocks, high_water_blocks) = unpack_queued_pcm_state(state);
+            assert_eq!(u32::from(blocks), state & u32::from(u16::MAX));
+            assert_eq!(u32::from(high_water_blocks), state >> u16::BITS);
+
+            let (frames, high_water_frames) = unpack_jitter_state(state);
+            assert_eq!(u32::from(frames), state & u32::from(u16::MAX));
+            assert_eq!(u32::from(high_water_frames), state >> u16::BITS);
+        }
+        for packed in [0x0000_0000_0000_0000, 0xDEAD_BEEF_CAFE_F00D, u64::MAX] {
+            let (input_sample_rate_hz, output_sample_rate_hz) = unpack_sample_rates(packed);
+            assert_eq!(u64::from(input_sample_rate_hz), packed >> u32::BITS);
+            assert_eq!(
+                u64::from(output_sample_rate_hz),
+                packed & u64::from(u32::MAX)
+            );
+
+            let (min_frames, max_frames, target_frames) = unpack_target_water_levels(packed);
+            assert_eq!(u64::from(min_frames), packed & u64::from(u16::MAX));
+            assert_eq!(
+                u64::from(max_frames),
+                (packed >> u16::BITS) & u64::from(u16::MAX)
+            );
+            assert_eq!(
+                u64::from(target_frames),
+                (packed >> (u16::BITS * 2)) & u64::from(u16::MAX)
+            );
+        }
+    }
+
+    #[test]
+    fn ratio_from_rates_returns_none_for_zero_rates() {
+        assert_eq!(ratio_from_rates(0, 44_100), None);
+        assert_eq!(ratio_from_rates(48_000, 0), None);
+        assert_eq!(ratio_from_rates(0, 0), None);
+        assert_eq!(ratio_from_rates(48_000, 44_100), Some(48_000.0 / 44_100.0));
+    }
+
+    #[test]
+    fn saturating_add_clamps_at_u64_max() {
+        let counter = AtomicU64::new(0);
+        saturating_add(&counter, 5);
+        saturating_add(&counter, 0);
+        assert_eq!(counter.load(Ordering::Relaxed), 5);
+
+        let saturated = AtomicU64::new(u64::MAX);
+        saturating_add(&saturated, 1);
+        assert_eq!(saturated.load(Ordering::Relaxed), u64::MAX);
+
+        let near_max = AtomicU64::new(u64::MAX - 1);
+        saturating_add(&near_max, 2);
+        assert_eq!(near_max.load(Ordering::Relaxed), u64::MAX);
+
+        let incremented = AtomicU64::new(0);
+        saturating_increment(&incremented);
+        assert_eq!(incremented.load(Ordering::Relaxed), 1);
     }
 }
