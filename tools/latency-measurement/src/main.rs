@@ -504,7 +504,7 @@ Options:
   --max-search-ms N       Search window after the recording start, in ms (default: 1000).
   --coarse-factor N       Coarse-search downsampling factor (default: 16).
   --distinctness-ratio R  Minimum best/second-best peak ratio (default: 3.0).
-  --probe-ms N            Correlation probe duration in ms (default: 32768 samples).
+  --probe-ms N            Correlation probe duration in ms (default: 32768 samples, about 683 ms at 48 kHz).
   --offsets-only          Print only per-run offsets (one per line) for summary.
   --check                 Fail unless all files share the same sample rate (info).
 
