@@ -58,6 +58,7 @@ production workspace so `libfuzzer-sys` never becomes a shipping dependency.
   bounded number of decode/PLC decisions, proving adversarial post-auth bytes
   cannot panic the worker, exceed the fixed frame capacity, or grow the PCM
   queue past its bound.
+- `replay_window` drives the authenticated replay window with deterministic u32 and window-width edge sequences plus fuzz-derived forward, reorder, duplicate, and far-behind operations, comparing every decision against an independent set-based model so bit-rotation or window-width bugs cannot silently change the packet-dedup admission contract.
 - `untrusted_control_stream` feeds arbitrary bytes through the bounded
   length-prefixed control framing state machine in a deterministic per-input
   chunk size, exercising partial length and payload reads, oversize and
@@ -84,6 +85,7 @@ cargo +nightly-2026-07-18 fuzz run pairing_binding -- -max_len=4096
 cargo +nightly-2026-07-18 fuzz run untrusted_control_stream -- -max_len=65540
 cargo +nightly-2026-07-18 fuzz run negotiation -- -max_len=66052
 cargo +nightly-2026-07-18 fuzz run control_stream_coordinator -- -max_len=1024
+cargo +nightly-2026-07-18 fuzz run replay_window -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run stream_decode_worker -- -max_len=64
 ```
 
