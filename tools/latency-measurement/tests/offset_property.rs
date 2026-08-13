@@ -262,6 +262,21 @@ fn leading_edge_fractional_lag_quantizes_to_the_integer_grid() {
     }
 }
 
+/// A zero sample rate is rejected with the dedicated error before any
+/// correlation work, so callers cannot run the estimator with a degenerate
+/// rate that would make every lag and offset meaningless.
+#[test]
+fn zero_sample_rate_config_is_rejected() {
+    let reference = test_signal(48_000, 1, 7);
+    let recording = delayed_recording(0, &reference);
+    let config = OffsetConfig::new(0);
+
+    assert_eq!(
+        estimate_offset_ms(&config, &reference, &recording),
+        Err(OffsetError::ZeroSampleRate)
+    );
+}
+
 /// Non-finite or negative configuration bounds are rejected before any
 /// correlation work, so a caller cannot silently disable the distinctness
 /// check with a NaN or negative ratio. Finite non-negative bounds (including
