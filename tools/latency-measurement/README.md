@@ -48,6 +48,16 @@ accepts PCM 16/24/32-bit and IEEE float 32/64-bit WAVE files, including
 WAVE_FORMAT_EXTENSIBLE variants. Each run is printed as `offset_ms=...`, and
 with more than one recording a `min/p50/p95/p99/max` summary is printed.
 
+Pass `--offsets-only` to print just the per-run offset numbers, one per line.
+This composes with `summary` so offsets from separate measurement sessions can
+be accumulated and aggregated:
+
+```sh
+cargo run -p sonimesh-latency-measurement -- measure --offsets-only \
+  --max-search-ms 1000 reference.wav capture1.wav >> offsets.txt
+cargo run -p sonimesh-latency-measurement -- summary < offsets.txt
+```
+
 ### info
 
 Report the declared properties of one or more WAVE files without decoding

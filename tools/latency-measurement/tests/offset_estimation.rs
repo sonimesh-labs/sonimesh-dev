@@ -1,6 +1,7 @@
 //! End-to-end checks for the latency measurement library and CLI.
 
-use std::process::Command;
+use std::io::Write;
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use sonimesh_latency_measurement::{
@@ -387,6 +388,91 @@ fn cli_info_reports_per_file_errors_and_continues() {
     assert!(
         stderr.contains("failed to inspect 1 of 2 files"),
         "failure summary missing: {stderr}"
+    );
+
+    std::fs::remove_dir_all(&dir).expect("cleanup temp dir");
+}
+
+#[test]
+fn cli_measure_offsets_only_pipes_into_summary() {
+    let bin = env!("CARGO_BIN_EXE_sonimesh-latency-measurement");
+    let dir = test_dir("offsets_only");
+    std::fs::create_dir_all(&dir).expect("create temp dir");
+    let reference_path = dir.join("reference.wav");
+    let recording_path = dir.join("recording.wav");
+
+    let output = Command::new(bin)
+        .args([
+            "generate",
+            "--sample-rate",
+            "48000",
+            "--seconds",
+            "3",
+            "--seed",
+            "7",
+        ])
+        .arg(&reference_path)
+        .output()
+        .expect("generate runs");
+    assert!(
+        output.status.success(),
+        "generate failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let reference = read_mono(&reference_path).expect("reference reads");
+    let recording = delayed_recording(12_000, &reference.samples);
+    write_mono(
+        &recording_path,
+        SAMPLE_RATE,
+        &recording,
+        SampleFormat::Pcm16,
+    )
+    .expect("recording writes");
+
+    let output = Command::new(bin)
+        .args(["measure", "--offsets-only", "--max-search-ms", "1000"])
+        .arg(&reference_path)
+        .arg(&recording_path)
+        .output()
+        .expect("measure runs");
+    assert!(
+        output.status.success(),
+        "measure failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("utf8 stdout");
+    let offsets: Vec<f64> = stdout
+        .lines()
+        .map(|line| line.trim().parse::<f64>().expect("bare offset line"))
+        .collect();
+    assert_eq!(offsets.len(), 1, "expected one offset line: {stdout}");
+    assert!((offsets[0] - 250.0).abs() < 1.0, "offset_ms={}", offsets[0]);
+
+    // Pipe the bare offsets into the summary subcommand.
+    let mut child = Command::new(bin)
+        .arg("summary")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("summary spawns");
+    child
+        .stdin
+        .as_mut()
+        .expect("stdin piped")
+        .write_all(stdout.as_bytes())
+        .expect("offset written");
+    drop(child.stdin.take());
+    let summary_out = child.wait_with_output().expect("summary finishes");
+    assert!(
+        summary_out.status.success(),
+        "summary failed: {}",
+        String::from_utf8_lossy(&summary_out.stderr)
+    );
+    let summary_stdout = String::from_utf8(summary_out.stdout).expect("utf8 summary");
+    assert!(
+        summary_stdout.contains("runs=1") && summary_stdout.contains("p50_ms="),
+        "unexpected summary: {summary_stdout}"
     );
 
     std::fs::remove_dir_all(&dir).expect("cleanup temp dir");

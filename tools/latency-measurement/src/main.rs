@@ -60,6 +60,9 @@ struct MeasureArgs {
     probe_ms: Option<f64>,
     reference: PathBuf,
     recordings: Vec<PathBuf>,
+    /// Print only the per-run offset numbers, one per line, for piping into
+    /// `summary`.
+    offsets_only: bool,
 }
 
 /// Arguments for the `info` subcommand.
@@ -136,26 +139,32 @@ fn run_measure(args: &MeasureArgs) -> Result<(), Box<dyn Error>> {
         }
         let estimate = estimate_offset_ms(&config, &reference.samples, &recording.samples)
             .map_err(|error| format!("recording {}: {error}", path.display()))?;
-        println!(
-            "run={} recording={} offset_ms={:.3} lag_samples={:.3} distinctness_ratio={:.1}",
-            index + 1,
-            path.display(),
-            estimate.offset_ms,
-            estimate.lag_samples,
-            estimate.distinctness_ratio
-        );
+        if args.offsets_only {
+            println!("{:.3}", estimate.offset_ms);
+        } else {
+            println!(
+                "run={} recording={} offset_ms={:.3} lag_samples={:.3} distinctness_ratio={:.1}",
+                index + 1,
+                path.display(),
+                estimate.offset_ms,
+                estimate.lag_samples,
+                estimate.distinctness_ratio
+            );
+        }
         offsets_ms.push(estimate.offset_ms);
     }
-    if let Some(summary) = summarize_ms(&offsets_ms) {
-        println!(
-            "runs={} min_ms={:.3} p50_ms={:.3} p95_ms={:.3} p99_ms={:.3} max_ms={:.3}",
-            offsets_ms.len(),
-            summary.min_ms,
-            summary.p50_ms,
-            summary.p95_ms,
-            summary.p99_ms,
-            summary.max_ms
-        );
+    if !args.offsets_only {
+        if let Some(summary) = summarize_ms(&offsets_ms) {
+            println!(
+                "runs={} min_ms={:.3} p50_ms={:.3} p95_ms={:.3} p99_ms={:.3} max_ms={:.3}",
+                offsets_ms.len(),
+                summary.min_ms,
+                summary.p50_ms,
+                summary.p95_ms,
+                summary.p99_ms,
+                summary.max_ms
+            );
+        }
     }
     Ok(())
 }
@@ -331,11 +340,13 @@ fn parse_measure(rest: &[String]) -> Result<Option<MeasureArgs>, String> {
     let mut coarse_factor = 16_usize;
     let mut distinctness_ratio = 3.0_f64;
     let mut probe_ms: Option<f64> = None;
+    let mut offsets_only = false;
     let mut paths: Vec<PathBuf> = Vec::new();
     let mut index = 0;
     while index < rest.len() {
         let arg = &rest[index];
         match arg.as_str() {
+            "--offsets-only" => offsets_only = true,
             "--max-search-ms" => {
                 index += 1;
                 max_search_ms = parse_f64(rest.get(index), "--max-search-ms")?;
@@ -386,6 +397,7 @@ fn parse_measure(rest: &[String]) -> Result<Option<MeasureArgs>, String> {
         probe_ms,
         reference,
         recordings,
+        offsets_only,
     }))
 }
 
@@ -439,7 +451,7 @@ fn print_usage() {
 
 Usage:
   sonimesh-latency-measurement generate [--sample-rate N] [--seconds N] [--seed N] [--bits FMT] <output.wav>
-  sonimesh-latency-measurement measure [--max-search-ms N] [--coarse-factor N] [--distinctness-ratio R] [--probe-ms N] <reference.wav> <recording.wav>...
+  sonimesh-latency-measurement measure [--max-search-ms N] [--coarse-factor N] [--distinctness-ratio R] [--probe-ms N] [--offsets-only] <reference.wav> <recording.wav>...
   sonimesh-latency-measurement info <wave.wav>...
   sonimesh-latency-measurement summary
   sonimesh-latency-measurement --help
@@ -459,6 +471,7 @@ Options:
   --coarse-factor N       Coarse-search downsampling factor (default: 16).
   --distinctness-ratio R  Minimum best/second-best peak ratio (default: 3.0).
   --probe-ms N            Correlation probe duration in ms (default: 32768 samples).
+  --offsets-only          Print only per-run offsets (one per line) for summary.
 
 Info output:
   audio_format  Declared WAVE tag: 1 = PCM, 3 = IEEE float."
@@ -667,6 +680,7 @@ mod tests {
         assert_eq!(measure.coarse_factor, 16);
         assert_close(measure.distinctness_ratio, 3.0);
         assert!(measure.probe_ms.is_none());
+        assert!(!measure.offsets_only);
         assert_eq!(measure.reference, PathBuf::from("reference.wav"));
         assert_eq!(measure.recordings, vec![PathBuf::from("recording.wav")]);
     }
@@ -700,6 +714,22 @@ mod tests {
             measure.recordings,
             vec![PathBuf::from("a.wav"), PathBuf::from("b.wav")]
         );
+    }
+
+    #[test]
+    fn measure_accepts_offsets_only_flag() {
+        let Parsed::Measure(measure) = parse_args(args(&[
+            "measure",
+            "--offsets-only",
+            "reference.wav",
+            "recording.wav",
+        ]))
+        .expect("parsed") else {
+            panic!("expected measure");
+        };
+        assert!(measure.offsets_only);
+        assert_eq!(measure.reference, PathBuf::from("reference.wav"));
+        assert_eq!(measure.recordings, vec![PathBuf::from("recording.wav")]);
     }
 
     #[test]
