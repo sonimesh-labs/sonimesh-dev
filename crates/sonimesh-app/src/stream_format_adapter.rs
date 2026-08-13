@@ -345,3 +345,175 @@ impl<const SOURCE_SAMPLES_PER_BLOCK: usize, const OUTPUT_SAMPLES_PER_BLOCK: usiz
         self.input_frames -= frames;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use sonimesh_audio::{
+        MAX_DRIFT_ADJUSTMENT_PPM, RealtimePcmConsumer, RealtimePcmPopOutcome, RealtimePcmProducer,
+        RealtimePcmPushOutcome, realtime_pcm_queue,
+    };
+
+    use super::{PumpOutcome, StreamFormatAdapter, StreamFormatAdapterError};
+    use crate::SourcePcmFormat;
+
+    const SOURCE_SAMPLES: usize = 256;
+    const OUTPUT_SAMPLES: usize = 256;
+
+    fn stereo_48k() -> SourcePcmFormat {
+        SourcePcmFormat::new(48_000, 2).expect("fixed test format is valid")
+    }
+
+    fn queues() -> (
+        RealtimePcmProducer<SOURCE_SAMPLES>,
+        RealtimePcmConsumer<SOURCE_SAMPLES>,
+    ) {
+        realtime_pcm_queue::<SOURCE_SAMPLES>(8).expect("bounded test queue is valid")
+    }
+
+    fn adapter(
+        source: RealtimePcmConsumer<SOURCE_SAMPLES>,
+        output: RealtimePcmProducer<OUTPUT_SAMPLES>,
+    ) -> StreamFormatAdapter<SOURCE_SAMPLES, OUTPUT_SAMPLES> {
+        StreamFormatAdapter::new(source, output, stereo_48k(), stereo_48k())
+            .expect("fixed test adapter is valid")
+    }
+
+    #[test]
+    fn new_rejects_an_invalid_source_layout() {
+        let (_, source) = queues();
+        let (output, _) = queues();
+        let invalid = SourcePcmFormat {
+            sample_rate_hz: 48_000,
+            channels: 0,
+        };
+
+        assert!(matches!(
+            StreamFormatAdapter::<SOURCE_SAMPLES, OUTPUT_SAMPLES>::new(
+                source,
+                output,
+                invalid,
+                stereo_48k()
+            ),
+            Err(StreamFormatAdapterError::Resampler(_))
+        ));
+    }
+
+    #[test]
+    fn new_rejects_a_block_too_small_for_the_output_layout() {
+        let (_, source) = queues();
+        let (output, _) = realtime_pcm_queue::<1>(8).expect("one-sample queue is valid");
+
+        assert!(matches!(
+            StreamFormatAdapter::<SOURCE_SAMPLES, 1>::new(
+                source,
+                output,
+                stereo_48k(),
+                stereo_48k()
+            ),
+            Err(StreamFormatAdapterError::BlockTooSmallForLayout)
+        ));
+    }
+
+    #[test]
+    fn pump_underflows_when_the_source_is_empty() {
+        let (_, source) = queues();
+        let (output, mut output_consumer) = queues();
+        let mut adapter = adapter(source, output);
+
+        assert_eq!(adapter.pump().unwrap(), PumpOutcome::Underflow);
+        assert_eq!(adapter.queued_source_blocks(), 0);
+        assert_eq!(adapter.queued_output_blocks(), 0);
+
+        let mut out = [0.0; OUTPUT_SAMPLES];
+        assert!(matches!(
+            output_consumer.pop_into(&mut out),
+            RealtimePcmPopOutcome::Underflow { .. }
+        ));
+    }
+
+    #[test]
+    fn pump_converts_a_source_block_into_a_pushed_output_block() {
+        let (mut source_producer, source) = queues();
+        let (output, mut output_consumer) = queues();
+        let mut adapter = adapter(source, output);
+
+        assert_eq!(
+            source_producer.push(&[0.5; SOURCE_SAMPLES]),
+            RealtimePcmPushOutcome::Inserted
+        );
+        let PumpOutcome::Pushed { frames, queue } = adapter.pump().unwrap() else {
+            panic!("one complete source block must convert into an output block");
+        };
+        assert_eq!(queue, RealtimePcmPushOutcome::Inserted);
+        assert!(frames > 0);
+        assert_eq!(adapter.queued_output_blocks(), 1);
+
+        let mut out = [0.0; OUTPUT_SAMPLES];
+        let RealtimePcmPopOutcome::Filled { samples, .. } = output_consumer.pop_into(&mut out)
+        else {
+            panic!("pumped output block must be observable from the slot queue");
+        };
+        assert_eq!(samples, frames * 2);
+        assert!(out[..samples].iter().all(|sample| *sample > 0.0));
+    }
+
+    #[test]
+    fn pump_drains_available_source_blocks_into_conversion_scratch() {
+        let (mut source_producer, source) = queues();
+        let (output, _) = queues();
+        let mut adapter = adapter(source, output);
+
+        source_producer.push(&[0.25; SOURCE_SAMPLES]);
+        source_producer.push(&[0.75; SOURCE_SAMPLES]);
+        assert_eq!(adapter.queued_source_blocks(), 2);
+
+        adapter.pump().unwrap();
+        // Both complete blocks were drained into the adapter's bounded scratch.
+        assert_eq!(adapter.queued_source_blocks(), 0);
+    }
+
+    #[test]
+    fn begin_epoch_retires_queued_output_blocks() {
+        let (mut source_producer, source) = queues();
+        let (output, _) = queues();
+        let mut adapter = adapter(source, output);
+
+        source_producer.push(&[0.5; SOURCE_SAMPLES]);
+        adapter.pump().unwrap();
+        assert_eq!(adapter.queued_output_blocks(), 1);
+
+        adapter.begin_epoch();
+        assert_eq!(adapter.queued_output_blocks(), 0);
+        assert_eq!(adapter.queued_source_blocks(), 0);
+    }
+
+    #[test]
+    fn set_rate_adjustment_ppm_rejects_an_out_of_bound_correction() {
+        let (_, source) = queues();
+        let (output, _) = queues();
+        let mut adapter = adapter(source, output);
+
+        assert!(
+            adapter
+                .set_rate_adjustment_ppm(MAX_DRIFT_ADJUSTMENT_PPM + 1)
+                .is_err()
+        );
+        assert!(adapter.set_rate_adjustment_ppm(0).is_ok());
+    }
+
+    #[test]
+    fn error_display_is_actionable() {
+        assert_eq!(
+            StreamFormatAdapterError::ZeroSamplesPerBlock.to_string(),
+            "format adapter PCM blocks must hold at least one sample"
+        );
+        assert_eq!(
+            StreamFormatAdapterError::BlockTooSmallForLayout.to_string(),
+            "format adapter PCM block cannot hold one frame"
+        );
+        assert_eq!(
+            StreamFormatAdapterError::ScratchSizeOverflow.to_string(),
+            "format adapter conversion scratch size overflowed"
+        );
+    }
+}
