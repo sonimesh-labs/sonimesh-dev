@@ -5,7 +5,7 @@
 //! input must produce bit-identical output. A small seeded xorshift generator
 //! keeps the sweep deterministic without adding a dependency.
 
-use sonimesh_latency_measurement::{SampleFormat, encode_mono, parse_mono};
+use sonimesh_latency_measurement::{SampleFormat, encode_mono, inspect_mono, parse_mono};
 
 /// Small deterministic xorshift64 generator; no external dependency.
 struct XorShift64(u64);
@@ -100,4 +100,39 @@ fn encode_is_deterministic_and_format_tokens_round_trip() {
     }
     assert_eq!(SampleFormat::parse("20"), None);
     assert_eq!(SampleFormat::parse("float32"), None);
+}
+
+/// `inspect_mono` reports the same declared properties the encoder wrote:
+/// sample rate, mono layout, format tag, bit depth, frame count, and duration.
+#[test]
+fn inspect_mono_reports_declared_properties_consistently() {
+    const STEPS: usize = 300;
+    const SAMPLE_COUNT: usize = 256;
+    let mut rng = XorShift64(0x1E5A_1E5A_0CAF_0042);
+
+    for _ in 0..STEPS {
+        let format = FORMATS[rng.next_usize(FORMATS.len())];
+        let rate = SAMPLE_RATES[rng.next_usize(SAMPLE_RATES.len())];
+        let samples: Vec<f32> = (0..SAMPLE_COUNT).map(|_| next_sample(&mut rng)).collect();
+
+        let bytes = encode_mono(rate, &samples, format);
+        let info = inspect_mono(&bytes).expect("encoded wave inspects");
+        let (expected_format, expected_bits) = match format {
+            SampleFormat::Pcm16 => (1, 16),
+            SampleFormat::Pcm24 => (1, 24),
+            SampleFormat::Pcm32 => (1, 32),
+            SampleFormat::Float32 => (3, 32),
+            SampleFormat::Float64 => (3, 64),
+        };
+        assert_eq!(info.sample_rate_hz, rate, "{format:?} rate {rate}");
+        assert_eq!(info.channels, 1, "{format:?}");
+        assert_eq!(info.audio_format, expected_format, "{format:?}");
+        assert_eq!(info.bits_per_sample, expected_bits, "{format:?}");
+        assert_eq!(info.frames, SAMPLE_COUNT, "{format:?}");
+        assert_eq!(
+            info.duration_ms(),
+            Some((SAMPLE_COUNT as u64 * 1_000) / u64::from(rate)),
+            "{format:?} rate {rate}"
+        );
+    }
 }
