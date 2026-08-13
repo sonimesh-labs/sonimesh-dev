@@ -564,9 +564,12 @@ Per-stream diagnostics should include:
 
 Current jitter occupancy is published per stream as a coherent (current,
 high-water) encoded-frame pair in the diagnostics snapshot, matching the
-PCM ring level pair in section 8.2. Target/min/max jitter water levels
-await the Phase 2 playout scheduler that consumes the adaptive target
-controller ([ADR 0016](./adr/0016-adaptive-jitter-target.md)).
+PCM ring level pair in section 8.2. Each snapshot also carries an active
+target-state block — target/min/max jitter water levels, smoothed jitter
+in milliseconds, and raised/lowered step counts — which the Phase 2
+adaptive controller publishes once it drives the playout scheduler
+([ADR 0016](./adr/0016-adaptive-jitter-target.md)); until then these
+fields read zero.
 
 Realtime code updates counters only. Structured logs are emitted by non-realtime
 domains, use stable event codes, and redact keys, audio payloads, full IPs, and

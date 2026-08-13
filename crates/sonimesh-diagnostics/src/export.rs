@@ -330,6 +330,7 @@ enum ExportCounterValue {
     Number(i64),
 }
 
+#[allow(clippy::too_many_lines)]
 fn write_stream_object(out: &mut String, snapshot: &StreamMetricsSnapshot) {
     out.push('{');
     let mut first = true;
@@ -365,6 +366,30 @@ fn write_stream_object(out: &mut String, snapshot: &StreamMetricsSnapshot) {
         (
             "jitter_high_water_frames",
             ExportCounterValue::Number(i64::from(snapshot.jitter_high_water_frames)),
+        ),
+        (
+            "target_min_frames",
+            ExportCounterValue::Number(i64::from(snapshot.target_min_frames)),
+        ),
+        (
+            "target_max_frames",
+            ExportCounterValue::Number(i64::from(snapshot.target_max_frames)),
+        ),
+        (
+            "target_frames",
+            ExportCounterValue::Number(i64::from(snapshot.target_frames)),
+        ),
+        (
+            "target_smoothed_jitter_ms",
+            ExportCounterValue::Number(i64::from(snapshot.target_smoothed_jitter_ms)),
+        ),
+        (
+            "target_raised_steps",
+            ExportCounterValue::Number(i64::from(snapshot.target_raised_steps)),
+        ),
+        (
+            "target_lowered_steps",
+            ExportCounterValue::Number(i64::from(snapshot.target_lowered_steps)),
         ),
         (
             "plc_frames",
@@ -490,6 +515,12 @@ mod tests {
             queued_pcm_high_water_blocks: 9,
             jitter_frames: 3,
             jitter_high_water_frames: 5,
+            target_min_frames: 2,
+            target_max_frames: 8,
+            target_frames: 4,
+            target_smoothed_jitter_ms: 35,
+            target_raised_steps: 3,
+            target_lowered_steps: 1,
             drift_adjustment_ppm: -125,
             ..StreamMetricsSnapshot::default()
         }
@@ -514,7 +545,7 @@ mod tests {
         let stream = sample_stream();
         let streams = [stream];
         let snapshot = full_snapshot(&streams);
-        let expected = "{\"format_version\":1,\"software_version\":\"0.1.0\",\"endpoint\":\"[ipv4-address-redacted]:49321\",\"platform_format\":{\"sample_rate_hz\":48000,\"channels\":2},\"buffer_policy\":\"balanced\",\"session_phase\":\"streaming\",\"streams\":[{\"authenticated_packets\":\"12\",\"duplicate_packets\":\"0\",\"rejected_packets\":\"0\",\"late_packets\":\"0\",\"reordered_packets\":\"0\",\"jitter_resync_dropped_frames\":\"0\",\"jitter_frames\":3,\"jitter_high_water_frames\":5,\"plc_frames\":\"0\",\"decode_errors\":\"0\",\"pcm_underflows\":\"3\",\"pcm_refill_limit_hits\":\"1\",\"pcm_overflows\":\"0\",\"pcm_discontinuities\":\"0\",\"queued_pcm_blocks\":7,\"queued_pcm_high_water_blocks\":9,\"stream_resets\":\"0\",\"nominal_input_sample_rate_hz\":0,\"nominal_output_sample_rate_hz\":0,\"drift_adjustment_ppm\":-125,\"drift_hard_resyncs\":\"0\"}]}";
+        let expected = "{\"format_version\":1,\"software_version\":\"0.1.0\",\"endpoint\":\"[ipv4-address-redacted]:49321\",\"platform_format\":{\"sample_rate_hz\":48000,\"channels\":2},\"buffer_policy\":\"balanced\",\"session_phase\":\"streaming\",\"streams\":[{\"authenticated_packets\":\"12\",\"duplicate_packets\":\"0\",\"rejected_packets\":\"0\",\"late_packets\":\"0\",\"reordered_packets\":\"0\",\"jitter_resync_dropped_frames\":\"0\",\"jitter_frames\":3,\"jitter_high_water_frames\":5,\"target_min_frames\":2,\"target_max_frames\":8,\"target_frames\":4,\"target_smoothed_jitter_ms\":35,\"target_raised_steps\":3,\"target_lowered_steps\":1,\"plc_frames\":\"0\",\"decode_errors\":\"0\",\"pcm_underflows\":\"3\",\"pcm_refill_limit_hits\":\"1\",\"pcm_overflows\":\"0\",\"pcm_discontinuities\":\"0\",\"queued_pcm_blocks\":7,\"queued_pcm_high_water_blocks\":9,\"stream_resets\":\"0\",\"nominal_input_sample_rate_hz\":0,\"nominal_output_sample_rate_hz\":0,\"drift_adjustment_ppm\":-125,\"drift_hard_resyncs\":\"0\"}]}";
         let first = build_export_bundle(&snapshot).unwrap();
         let second = build_export_bundle(&snapshot).unwrap();
         assert_eq!(first, expected);
@@ -542,8 +573,14 @@ mod tests {
         assert!(bundle.contains("\"drift_adjustment_ppm\":-2147483648"));
         assert!(bundle.contains("\"nominal_input_sample_rate_hz\":48000"));
         assert!(bundle.contains("\"jitter_frames\":0"));
+        assert!(bundle.contains("\"target_min_frames\":0"));
+        assert!(bundle.contains("\"target_max_frames\":0"));
+        assert!(bundle.contains("\"target_frames\":0"));
+        assert!(bundle.contains("\"target_smoothed_jitter_ms\":0"));
         assert!(!bundle.contains("\"queued_pcm_blocks\":\""));
         assert!(!bundle.contains("\"jitter_frames\":\""));
+        assert!(!bundle.contains("\"target_frames\":\""));
+        assert!(!bundle.contains("\"target_smoothed_jitter_ms\":\""));
     }
 
     #[test]
@@ -729,6 +766,12 @@ mod tests {
             queued_pcm_high_water_blocks: u16::MAX,
             jitter_frames: u16::MAX,
             jitter_high_water_frames: u16::MAX,
+            target_min_frames: u16::MAX,
+            target_max_frames: u16::MAX,
+            target_frames: u16::MAX,
+            target_smoothed_jitter_ms: u32::MAX,
+            target_raised_steps: u32::MAX,
+            target_lowered_steps: u32::MAX,
             stream_resets: u64::MAX,
             nominal_input_sample_rate_hz: 192_000,
             nominal_output_sample_rate_hz: 8_000,

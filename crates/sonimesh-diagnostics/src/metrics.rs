@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicI32, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicU16, AtomicU32, AtomicU64, Ordering};
 
 /// Lock-free counters writable from realtime or network domains.
 #[derive(Debug, Default)]
@@ -17,6 +17,12 @@ pub struct StreamCounters {
     pcm_discontinuities: AtomicU64,
     queued_pcm_state: AtomicU32,
     jitter_state: AtomicU32,
+    target_frames: AtomicU16,
+    target_min_frames: AtomicU16,
+    target_max_frames: AtomicU16,
+    target_smoothed_jitter_ms: AtomicU32,
+    target_raised_steps: AtomicU32,
+    target_lowered_steps: AtomicU32,
     stream_resets: AtomicU64,
     nominal_sample_rates: AtomicU64,
     drift_adjustment_ppm: AtomicI32,
@@ -124,6 +130,40 @@ impl StreamCounters {
         self.jitter_state.store(0, Ordering::Relaxed);
     }
 
+    /// Publishes the bounded adaptive-target water levels and step counts.
+    ///
+    /// The minimum and maximum are fixed by the controller configuration, the
+    /// target moves within them, and the smoothed jitter and step counters
+    /// describe the transport signal and the controller's response. All six
+    /// values belong to one stream-local target epoch.
+    pub fn publish_target_state(
+        &self,
+        min_frames: u16,
+        max_frames: u16,
+        target_frames: u16,
+        smoothed_jitter_ms: u32,
+        raised_steps: u32,
+        lowered_steps: u32,
+    ) {
+        self.target_min_frames.store(min_frames, Ordering::Relaxed);
+        self.target_max_frames.store(max_frames, Ordering::Relaxed);
+        self.target_frames.store(target_frames, Ordering::Relaxed);
+        self.target_smoothed_jitter_ms
+            .store(smoothed_jitter_ms, Ordering::Relaxed);
+        self.target_raised_steps
+            .store(raised_steps, Ordering::Relaxed);
+        self.target_lowered_steps
+            .store(lowered_steps, Ordering::Relaxed);
+    }
+
+    /// Starts a fresh adaptive-target epoch after a stream-local retirement.
+    ///
+    /// Every published value becomes zero until the pipeline republishes the
+    /// controller state on the next observation.
+    pub fn reset_target_state(&self) {
+        self.publish_target_state(0, 0, 0, 0, 0, 0);
+    }
+
     /// Records a stream-local reset.
     pub fn stream_reset(&self) {
         saturating_increment(&self.stream_resets);
@@ -179,6 +219,12 @@ impl StreamCounters {
             queued_pcm_high_water_blocks,
             jitter_frames,
             jitter_high_water_frames,
+            target_min_frames: self.target_min_frames.load(Ordering::Relaxed),
+            target_max_frames: self.target_max_frames.load(Ordering::Relaxed),
+            target_frames: self.target_frames.load(Ordering::Relaxed),
+            target_smoothed_jitter_ms: self.target_smoothed_jitter_ms.load(Ordering::Relaxed),
+            target_raised_steps: self.target_raised_steps.load(Ordering::Relaxed),
+            target_lowered_steps: self.target_lowered_steps.load(Ordering::Relaxed),
             stream_resets: self.stream_resets.load(Ordering::Relaxed),
             nominal_input_sample_rate_hz,
             nominal_output_sample_rate_hz,
@@ -223,6 +269,18 @@ pub struct StreamMetricsSnapshot {
     pub jitter_frames: u16,
     /// Largest active-epoch jitter-buffer frame count observed since stream creation.
     pub jitter_high_water_frames: u16,
+    /// Adaptive-target minimum water level of the active epoch, in frames.
+    pub target_min_frames: u16,
+    /// Adaptive-target maximum water level of the active epoch, in frames.
+    pub target_max_frames: u16,
+    /// Current adaptive-target water level of the active epoch, in frames.
+    pub target_frames: u16,
+    /// Smoothed packet-arrival-jitter estimate of the active epoch, in ms.
+    pub target_smoothed_jitter_ms: u32,
+    /// Target-raising steps taken in the active epoch.
+    pub target_raised_steps: u32,
+    /// Target-lowering steps taken in the active epoch.
+    pub target_lowered_steps: u32,
     /// Stream-local resets.
     pub stream_resets: u64,
     /// Validated nominal input sample rate, or zero before publication.
@@ -546,6 +604,60 @@ mod tests {
             assert!(snapshot.jitter_high_water_frames >= snapshot.jitter_frames);
         }
         writer.join().expect("jitter metric writer must finish");
+    }
+
+    #[test]
+    fn adaptive_target_state_is_published_and_retired_as_one_epoch() {
+        let counters = StreamCounters::default();
+        counters.publish_target_state(2, 8, 4, 35, 3, 1);
+        let snapshot = counters.snapshot();
+        assert_eq!(
+            (
+                snapshot.target_min_frames,
+                snapshot.target_max_frames,
+                snapshot.target_frames,
+                snapshot.target_smoothed_jitter_ms,
+                snapshot.target_raised_steps,
+                snapshot.target_lowered_steps,
+            ),
+            (2, 8, 4, 35, 3, 1)
+        );
+
+        counters.reset_target_state();
+        let snapshot = counters.snapshot();
+        assert_eq!(
+            (
+                snapshot.target_min_frames,
+                snapshot.target_max_frames,
+                snapshot.target_frames,
+                snapshot.target_smoothed_jitter_ms,
+                snapshot.target_raised_steps,
+                snapshot.target_lowered_steps,
+            ),
+            (0, 0, 0, 0, 0, 0)
+        );
+    }
+
+    #[test]
+    fn concurrent_target_state_publication_keeps_each_field_coherent() {
+        let counters = std::sync::Arc::new(StreamCounters::default());
+        let writer = std::sync::Arc::clone(&counters);
+
+        let writer = std::thread::spawn(move || {
+            for frame in (0_u16..=u16::MAX).cycle().take(100_000) {
+                let min = frame % 8;
+                let max = min.saturating_add(16);
+                writer.publish_target_state(min, max, frame % 32, u32::from(frame), 1, 0);
+            }
+        });
+        for _ in 0..100_000 {
+            let snapshot = counters.snapshot();
+            assert!(
+                snapshot.target_min_frames <= snapshot.target_max_frames,
+                "min must not exceed max in any observed snapshot"
+            );
+        }
+        writer.join().expect("target metric writer must finish");
     }
 
     #[test]
