@@ -7,6 +7,7 @@ mod redacted_endpoint;
 mod redacted_io_error;
 mod source_endpoint_pin;
 mod udp_receiver;
+mod udp_sender;
 mod untrusted_control_stream;
 
 pub use ingress::{Authenticator, IngressError, MediaIngress, ReceivedFrame, StreamIdentity};
@@ -14,6 +15,7 @@ pub use protected_ingress::{ProtectedIngressError, ProtectedMediaIngress};
 pub use protocol_authenticator::ProtocolAuthenticator;
 pub use source_endpoint_pin::{SourceEndpointAdmissionError, SourceEndpointPin};
 pub use udp_receiver::{ReceivedDatagram, UdpMediaReceiver, UdpReceiveError};
+pub use udp_sender::{UdpMediaSender, UdpSendError};
 pub use untrusted_control_stream::{
     UntrustedControlError, UntrustedControlPoll, UntrustedControlStream, UntrustedControlWrite,
 };

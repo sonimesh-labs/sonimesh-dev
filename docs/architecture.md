@@ -411,6 +411,14 @@ state. Key-epoch rotation preserves the pin; changing the endpoint requires a
 fresh authenticated media session and fresh key material rather than automatic
 address migration.
 
+The UDP media transport is bounded in both directions. The sender transmits
+through a non-blocking socket and caps every datagram at
+`MAX_MEDIA_DATAGRAM_LEN` (1200 bytes) to avoid IP fragmentation. An oversized
+payload is rejected before touching the socket, and the sender never blocks:
+a full OS send buffer is reported as backpressure so the caller applies its
+own drop or pacing policy. The destination address is routing metadata only
+and does not authenticate the peer.
+
 ## 11. Jitter, loss, and clock drift
 
 Each stream owns a bounded jitter buffer and a monotonic playout schedule.
