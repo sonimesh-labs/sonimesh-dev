@@ -21,6 +21,15 @@ production workspace so `libfuzzer-sys` never becomes a shipping dependency.
   linear resampler, proving adversarial rate metadata cannot panic the
   interpolation loop, exceed the consumed/produced bounds, or leave output
   uninitialized on a rejected step.
+- `channel_mapper` feeds arbitrary negotiated input/output channel layouts,
+  buffer lengths, and finite sample payloads into the bounded interleaved
+  mapper, proving layout metadata cannot panic the mapping loop, inflate the
+  produced count, or leave output uninitialized on a rejected step.
+- `peak_limiter` feeds arbitrary validated ceilings and release coefficients
+  plus arbitrary interleaved sample payloads, including non-finite values,
+  into the bounded output-stage limiter, proving it cannot panic, must fail
+  non-finite input closed to silence, must keep output within the ceiling,
+  and must leave the block untouched when channels or alignment are rejected.
 - `protected_media_ingress` exercises raw input, valid authenticated arbitrary
   payloads, duplicate replay, undersized output buffers, and deterministic
   single-byte flags-byte and tag tampering plus ciphertext tampering for
@@ -57,6 +66,8 @@ cargo +nightly-2026-07-18 fuzz run adaptive_jitter_target -- -max_len=64
 
 cargo +nightly-2026-07-18 fuzz run media_packet -- -max_len=1264
 cargo +nightly-2026-07-18 fuzz run nominal_resampler -- -max_len=1024
+cargo +nightly-2026-07-18 fuzz run channel_mapper -- -max_len=1024
+cargo +nightly-2026-07-18 fuzz run peak_limiter -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run protected_media_ingress -- -max_len=1264
 cargo +nightly-2026-07-18 fuzz run pairing_binding -- -max_len=4096
 cargo +nightly-2026-07-18 fuzz run untrusted_control_stream -- -max_len=65540

@@ -77,3 +77,16 @@ path = "fuzz_targets/nominal_resampler.rs"
 test = false
 doc = false
 bench = false
+[[bin]]
+name = "channel_mapper"
+path = "fuzz_targets/channel_mapper.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "peak_limiter"
+path = "fuzz_targets/peak_limiter.rs"
+test = false
+doc = false
+bench = false
