@@ -70,9 +70,9 @@ def markdown_section(source: str, heading: str) -> str:
 
     section_indices = [index for index, title in headings if title == heading]
     if not section_indices:
-        raise ValueError(f"fuzz README is missing section: {heading}")
+        raise ValueError(f"markdown is missing section: {heading}")
     if len(section_indices) > 1:
-        raise ValueError(f"fuzz README repeats section: {heading}")
+        raise ValueError(f"markdown repeats section: {heading}")
 
     start = section_indices[0] + 1
     end = next((index for index, _ in headings if index >= start), len(lines))
@@ -84,10 +84,10 @@ def documented_targets(source: str) -> list[str]:
     return DOC_TARGET_PATTERN.findall(markdown_section(source, "## Targets"))
 
 
-def documented_run_targets(source: str) -> list[str]:
-    """Returns targets from standalone commands in the README runnable-command section."""
+def run_targets_in_section(source: str, heading: str) -> list[str]:
+    """Returns targets from standalone fuzz-run commands in one markdown section."""
     targets: list[str] = []
-    for line in markdown_section(source, "## Run a target").splitlines():
+    for line in markdown_section(source, heading).splitlines():
         parts = line.strip().split()
         if len(parts) < 6 or tuple(parts[:4]) != FUZZ_RUN_PREFIX:
             continue
@@ -99,6 +99,16 @@ def documented_run_targets(source: str) -> list[str]:
         ):
             targets.append(target)
     return targets
+
+
+def documented_run_targets(source: str) -> list[str]:
+    """Returns targets from standalone commands in the README runnable-command section."""
+    return run_targets_in_section(source, "## Run a target")
+
+
+def development_run_targets(source: str) -> list[str]:
+    """Returns targets from standalone commands in the contributor development-doc section."""
+    return run_targets_in_section(source, "## Fuzz checks")
 
 
 def smoke_script(source: str) -> tuple[str, str | None]:
@@ -185,12 +195,15 @@ def inventory_errors(expected: list[str], observed: list[str], label: str) -> li
     return errors
 
 
-def validate_sources(manifest: str, readme: str, workflow: str, root: Path) -> list[str]:
+def validate_sources(
+    manifest: str, readme: str, development: str, workflow: str, root: Path
+) -> list[str]:
     """Returns deterministic consistency errors across fuzz target inventories."""
     try:
         targets = manifest_targets(manifest)
         readme_targets = documented_targets(readme)
         readme_runs = documented_run_targets(readme)
+        development_runs = development_run_targets(development)
     except (tomllib.TOMLDecodeError, ValueError) as error:
         return [f"fuzz target inventory is invalid: {error}"]
 
@@ -212,6 +225,7 @@ def validate_sources(manifest: str, readme: str, workflow: str, root: Path) -> l
 
     errors.extend(inventory_errors(declared, readme_targets, "fuzz README"))
     errors.extend(inventory_errors(declared, readme_runs, "fuzz README commands"))
+    errors.extend(inventory_errors(declared, development_runs, "development docs"))
     script, script_error = smoke_script(workflow)
     if script_error is not None:
         errors.append(script_error)
@@ -223,14 +237,15 @@ def validate_sources(manifest: str, readme: str, workflow: str, root: Path) -> l
 
 
 def validate_workspace(root: Path) -> list[str]:
-    """Returns errors for the checked-in fuzz manifests and CI workflow."""
+    """Returns errors for the checked-in fuzz manifests, docs, and CI workflow."""
     try:
         manifest = (root / "fuzz" / "Cargo.toml").read_text(encoding="utf-8")
         readme = (root / "fuzz" / "README.md").read_text(encoding="utf-8")
+        development = (root / "docs" / "development.md").read_text(encoding="utf-8")
         workflow = (root / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     except OSError as error:
         return [f"unable to read fuzz target inventory: {error}"]
-    return validate_sources(manifest, readme, workflow, root)
+    return validate_sources(manifest, readme, development, workflow, root)
 
 
 def write_target(root: Path, name: str) -> None:
@@ -252,8 +267,11 @@ def main() -> int:
 
 
 class FuzzTargetInventoryTests(unittest.TestCase):
-    def sources(self, manifest: str, targets: str, commands: str, smoke: str) -> tuple[str, str, str]:
+    def sources(
+        self, manifest: str, targets: str, commands: str, smoke: str
+    ) -> tuple[str, str, str, str]:
         readme = f"## Targets\n{targets}\n## Run a target\n{commands}"
+        development = f"## Fuzz checks\n~~~bash\n{commands}~~~\n"
         workflow = f"""      - name: Reproduction command
         run: cargo +nightly-2026-07-18 fuzz run control_frame -- -runs=1
       - name: Run finite fuzz smoke
@@ -266,7 +284,7 @@ class FuzzTargetInventoryTests(unittest.TestCase):
         run: |
           cargo +nightly-2026-07-18 fuzz run control_frame -- -runs=0
 """
-        return manifest, readme, workflow
+        return manifest, readme, development, workflow
 
     def test_requires_real_unique_readme_sections_and_standalone_commands(self) -> None:
         with self.assertRaisesRegex(ValueError, "missing section"):
@@ -280,7 +298,7 @@ class FuzzTargetInventoryTests(unittest.TestCase):
 name = "control_frame"
 path = "fuzz_targets/control_frame.rs"
 """
-        manifest, readme, workflow = self.sources(
+        manifest, readme, development, workflow = self.sources(
             manifest,
             "- `control_frame` accepts arbitrary frames.\n",
             "true && cargo +nightly-2026-07-18 fuzz run control_frame -- -max_len=1\n",
@@ -290,8 +308,11 @@ path = "fuzz_targets/control_frame.rs"
             root = Path(directory)
             write_target(root, "control_frame")
             self.assertEqual(
-                validate_sources(manifest, readme, workflow, root),
-                ["fuzz README commands is missing fuzz targets: control_frame"],
+                validate_sources(manifest, readme, development, workflow, root),
+                [
+                    "fuzz README commands is missing fuzz targets: control_frame",
+                    "development docs is missing fuzz targets: control_frame",
+                ],
             )
 
     def test_rejects_attached_shell_metacharacters_in_smoke_options(self) -> None:
@@ -308,7 +329,7 @@ path = "fuzz_targets/control_frame.rs"
 name = "../outside"
 path = "fuzz_targets/../outside.rs"
 """
-        manifest, readme, workflow = self.sources(
+        manifest, readme, development, workflow = self.sources(
             manifest,
             "- `outside` is not the invalid manifest target.\n",
             "cargo +nightly-2026-07-18 fuzz run outside -- -max_len=1\n",
@@ -320,7 +341,7 @@ path = "fuzz_targets/../outside.rs"
           cargo +nightly-2026-07-18 fuzz run outside -- -runs=1
 """
         with tempfile.TemporaryDirectory() as directory:
-            errors = validate_sources(manifest, readme, workflow, Path(directory))
+            errors = validate_sources(manifest, readme, development, workflow, Path(directory))
             self.assertIn("fuzz manifest has an invalid target name: ../outside", errors)
             self.assertIn("fuzz CI repeats the Run finite fuzz smoke step", errors)
 
@@ -333,7 +354,7 @@ path = "fuzz_targets/control_frame.rs"
 name = "media_packet"
 path = "fuzz_targets/media_packet.rs"
 """
-        manifest, readme, workflow = self.sources(
+        manifest, readme, development, workflow = self.sources(
             manifest,
             "- `control_frame` accepts arbitrary frames.\n- `media_packet` accepts arbitrary datagrams.\n",
             "cargo +nightly-2026-07-18 fuzz run control_frame -- -max_len=1\ncargo +nightly-2026-07-18 fuzz run media_packet -- -max_len=1\n",
@@ -343,7 +364,7 @@ path = "fuzz_targets/media_packet.rs"
             root = Path(directory)
             write_target(root, "control_frame")
             write_target(root, "media_packet")
-            self.assertEqual(validate_sources(manifest, readme, workflow, root), [])
+            self.assertEqual(validate_sources(manifest, readme, development, workflow, root), [])
 
     def test_reports_missing_documentation_and_smoke_targets(self) -> None:
         manifest = """[[bin]]
@@ -354,7 +375,7 @@ path = "fuzz_targets/control_frame.rs"
 name = "pairing_binding"
 path = "fuzz_targets/pairing_binding.rs"
 """
-        manifest, readme, workflow = self.sources(
+        manifest, readme, development, workflow = self.sources(
             manifest,
             "- `control_frame` accepts arbitrary frames.\n",
             "cargo +nightly-2026-07-18 fuzz run control_frame -- -max_len=1\n",
@@ -365,10 +386,11 @@ path = "fuzz_targets/pairing_binding.rs"
             write_target(root, "control_frame")
             write_target(root, "pairing_binding")
             self.assertEqual(
-                validate_sources(manifest, readme, workflow, root),
+                validate_sources(manifest, readme, development, workflow, root),
                 [
                     "fuzz README is missing fuzz targets: pairing_binding",
                     "fuzz README commands is missing fuzz targets: pairing_binding",
+                    "development docs is missing fuzz targets: pairing_binding",
                     "fuzz CI smoke is missing fuzz targets: pairing_binding",
                 ],
             )
@@ -378,7 +400,7 @@ path = "fuzz_targets/pairing_binding.rs"
 name = "control_frame"
 path = "../outside.rs"
 """
-        manifest, readme, workflow = self.sources(
+        manifest, readme, development, workflow = self.sources(
             manifest,
             "- `control_frame` accepts arbitrary frames.\n",
             "cargo +nightly-2026-07-18 fuzz run control_frame -- -max_len=1\n",
@@ -387,7 +409,7 @@ path = "../outside.rs"
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             self.assertEqual(
-                validate_sources(manifest, readme, workflow, root),
+                validate_sources(manifest, readme, development, workflow, root),
                 [
                     "fuzz manifest target control_frame must use source path: fuzz_targets/control_frame.rs",
                     "fuzz CI smoke has command has unsupported shell composition or argument syntax: cargo +nightly-2026-07-18 fuzz run control_frame -- -runs=1 \\",
@@ -403,7 +425,7 @@ path = "../outside.rs"
 name = "control_frame"
 path = "fuzz_targets/control_frame.rs"
 """
-        manifest, readme, workflow = self.sources(
+        manifest, readme, development, workflow = self.sources(
             manifest,
             "- `control_frame` accepts arbitrary frames.\n- `control_frame` repeats the target.\n- `unknown_target` is not declared.\n",
             "cargo +nightly-2026-07-18 fuzz run control_frame -- -max_len=1\ncargo +nightly-2026-07-18 fuzz run unknown_target -- -max_len=1\n",
@@ -413,13 +435,40 @@ path = "fuzz_targets/control_frame.rs"
             root = Path(directory)
             write_target(root, "control_frame")
             self.assertEqual(
-                validate_sources(manifest, readme, workflow, root),
+                validate_sources(manifest, readme, development, workflow, root),
                 [
                     "fuzz README repeats fuzz targets: control_frame",
                     "fuzz README has undeclared fuzz targets: unknown_target",
                     "fuzz README commands has undeclared fuzz targets: unknown_target",
+                    "development docs has undeclared fuzz targets: unknown_target",
                     "fuzz CI smoke repeats fuzz targets: control_frame",
                 ],
+            )
+
+    def test_reports_development_doc_drift(self) -> None:
+        manifest = """[[bin]]
+name = "control_frame"
+path = "fuzz_targets/control_frame.rs"
+
+[[bin]]
+name = "adaptive_jitter_target"
+path = "fuzz_targets/adaptive_jitter_target.rs"
+"""
+        manifest, readme, development, workflow = self.sources(
+            manifest,
+            "- `control_frame` accepts arbitrary frames.\n- `adaptive_jitter_target` accepts arbitrary ticks.\n",
+            "cargo +nightly-2026-07-18 fuzz run control_frame -- -max_len=1\ncargo +nightly-2026-07-18 fuzz run adaptive_jitter_target -- -max_len=1\n",
+            "          cargo +nightly-2026-07-18 fuzz run control_frame -- -runs=1\n          cargo +nightly-2026-07-18 fuzz run adaptive_jitter_target -- -runs=1\n",
+        )
+        # Reproduce the real regression: the development doc omits one declared target.
+        development = development.replace("adaptive_jitter_target -- -max_len=1\n", "")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_target(root, "control_frame")
+            write_target(root, "adaptive_jitter_target")
+            self.assertEqual(
+                validate_sources(manifest, readme, development, workflow, root),
+                ["development docs is missing fuzz targets: adaptive_jitter_target"],
             )
 
 
