@@ -106,14 +106,71 @@ BANNED_MARKERS = (
 )
 
 
+def test_module_ranges(source: str) -> list[tuple[int, int]]:
+    """Returns (start, end) ranges of `#[cfg(test)]`-gated modules.
+
+    The guarded realtime functions are production code, so a test-only trait
+    implementation must not count as a duplicate or shadow the production
+    function. Only attributes immediately followed by a `mod <name> {` block
+    are treated as test modules; anything else is scanned normally.
+    """
+    ranges: list[tuple[int, int]] = []
+    search_from = 0
+    while True:
+        attribute = source.find("#[cfg(test)]", search_from)
+        if attribute < 0:
+            return ranges
+        search_from = attribute + len("#[cfg(test)]")
+        rest = source[search_from:]
+        stripped = rest.lstrip()
+        offset = search_from + len(rest) - len(stripped)
+        if not stripped.startswith("mod "):
+            continue
+        brace = stripped.find("{")
+        if brace < 0:
+            continue
+        start = offset + brace
+        depth = 0
+        for index in range(start, len(source)):
+            if source[index] == "{":
+                depth += 1
+            elif source[index] == "}":
+                depth -= 1
+                if depth == 0:
+                    ranges.append((attribute, index + 1))
+                    search_from = index + 1
+                    break
+    return ranges
+
+
 def function_body(source: str, function: str) -> str:
     """Returns one named function body, rejecting ambiguous or malformed source."""
     needle = f"fn {function}("
-    start = source.find(needle)
+    test_ranges = test_module_ranges(source)
+
+    def outside_tests(position: int) -> bool:
+        return not any(start <= position < end for start, end in test_ranges)
+
+    start = -1
+    search_from = 0
+    while True:
+        candidate = source.find(needle, search_from)
+        if candidate < 0:
+            break
+        if outside_tests(candidate):
+            start = candidate
+            search_from = candidate + len(needle)
+            break
+        search_from = candidate + len(needle)
     if start < 0:
         raise ValueError(f"missing function {function}")
-    if source.find(needle, start + len(needle)) >= 0:
-        raise ValueError(f"multiple functions named {function}")
+    while True:
+        duplicate = source.find(needle, search_from)
+        if duplicate < 0:
+            break
+        if outside_tests(duplicate):
+            raise ValueError(f"multiple functions named {function}")
+        search_from = duplicate + len(needle)
     brace = source.find("{", start)
     if brace < 0:
         raise ValueError(f"function {function} has no opening brace")
@@ -171,6 +228,23 @@ class OutputRealtimeBoundaryTests(unittest.TestCase):
     def test_rejects_direct_allocation_and_logging(self) -> None:
         source = "fn render() { let samples = vec![0.0; 8]; println!(\"{samples:?}\"); }"
         self.assertEqual(validate_target(source, "render"), ["println!", "vec!"])
+
+    def test_skips_functions_inside_cfg_test_modules(self) -> None:
+        source = (
+            "fn render() { do_work(); }\n"
+            "#[cfg(test)]\n"
+            "mod tests {\n"
+            "    impl RenderSource for FakeSource {\n"
+            "        fn render(&mut self, output: &mut [f32]) { output.fill(0.0); }\n"
+            "    }\n"
+            "}\n"
+        )
+        self.assertEqual(function_body(source, "render").strip(), "do_work();")
+
+    def test_test_module_does_not_mask_a_missing_function(self) -> None:
+        source = "#[cfg(test)]\nmod tests { fn render() {} }\n"
+        with self.assertRaisesRegex(ValueError, "missing function"):
+            function_body(source, "render")
 
     def test_app_crate_render_path_is_guarded(self) -> None:
         app_crate_targets = {
