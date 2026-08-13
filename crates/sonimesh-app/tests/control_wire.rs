@@ -285,3 +285,79 @@ fn expired_control_session_rejects_a_late_wire_frame() {
     ));
     assert_eq!(coordinator.state(), SessionState::IDLE);
 }
+
+#[test]
+fn key_epoch_rotation_flows_over_the_wire_and_keeps_the_stream_active() {
+    let (mut sender, mut reader) = connected_pair();
+    let (mut coordinator, token) = authenticated_coordinator();
+
+    send_frame(&mut sender, &hello_envelope());
+    let envelope = receive_frame(&mut reader);
+    assert!(matches!(
+        coordinator.accept(token, &envelope).unwrap(),
+        ControlStreamAction::Negotiated(_)
+    ));
+
+    send_frame(&mut sender, &start_envelope(0x2345));
+    let envelope = receive_frame(&mut reader);
+    let ControlStreamAction::Start {
+        token: start_token,
+        request,
+    } = coordinator.accept(token, &envelope).unwrap()
+    else {
+        panic!("expected a start action after the wire hello");
+    };
+    coordinator.complete_start(start_token, request).unwrap();
+    assert_eq!(coordinator.state().phase(), SessionPhase::Streaming);
+    assert_eq!(coordinator.active(), Some(request.identity));
+
+    // A start for a strictly newer epoch over the same connection rotates the
+    // stream in place instead of stopping and restarting it.
+    send_frame(&mut sender, &start_envelope(0x2346));
+    let envelope = receive_frame(&mut reader);
+    let ControlStreamAction::Rotate {
+        token: rotate_token,
+        previous,
+        next,
+    } = coordinator.accept(token, &envelope).unwrap()
+    else {
+        panic!("expected a rotation action for the newer epoch");
+    };
+    assert_eq!(previous, request.identity);
+    assert_eq!(next.identity.session_id, request.identity.session_id);
+    assert_eq!(next.identity.stream_id, request.identity.stream_id);
+    assert_eq!(next.identity.key_epoch, 0x2346);
+    coordinator
+        .complete_rotation(rotate_token, previous, next)
+        .unwrap();
+    assert_eq!(coordinator.state().phase(), SessionPhase::Streaming);
+    assert_eq!(coordinator.active(), Some(next.identity));
+
+    // A stale start for the retired epoch is rejected and cannot disturb the
+    // active rotated stream.
+    send_frame(&mut sender, &start_envelope(0x2345));
+    let envelope = receive_frame(&mut reader);
+    assert!(matches!(
+        coordinator.accept(token, &envelope),
+        Err(sonimesh_app::ControlStreamError::StaleEpoch {
+            active: 0x2346,
+            requested: 0x2345,
+        })
+    ));
+    assert_eq!(coordinator.active(), Some(next.identity));
+
+    // The active rotated epoch stops cleanly over the wire.
+    send_frame(&mut sender, &stop_envelope(0x2346));
+    let envelope = receive_frame(&mut reader);
+    let ControlStreamAction::Stop {
+        token: stop_token,
+        identity,
+    } = coordinator.accept(token, &envelope).unwrap()
+    else {
+        panic!("expected a stop action for the rotated epoch");
+    };
+    assert_eq!(identity, next.identity);
+    coordinator.complete_stop(stop_token, identity).unwrap();
+    assert_eq!(coordinator.state().phase(), SessionPhase::Ready);
+    assert_eq!(coordinator.active(), None);
+}
