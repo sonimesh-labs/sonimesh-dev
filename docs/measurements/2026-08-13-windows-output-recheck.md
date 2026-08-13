@@ -90,14 +90,55 @@ This validates only the command's fixed selection, redacted reporting, explicit
 stop, re-probe, and fresh-start path against a non-default endpoint. A future
 removal run must retain the old stream's status after the physical event.
 
+## Direct-WASAPI pinned-endpoint two-second silent smoke
+
+The direct-WASAPI prototype smoke now accepts the same
+`SONIMESH_OUTPUT_SMOKE_DEVICE_ID` identifier as the CPAL smoke, with or without
+the `wasapi:` prefix, and resolves it among the active render endpoints. With
+the Realtek endpoint pinned, the smoke completed with:
+
+| Field | Observed value |
+| --- | ---: |
+| Render count | 189 |
+| Latest observed frames | 512 |
+| Maximum observed frames | 512 |
+| Endpoint buffer frames | 1,126 |
+| Primed silence frames | 1,126 |
+| Latest local offset | 3,239,035,600 ns |
+| Largest local scheduling gap | 10,926,500 ns |
+| Capacity faults | 0 |
+| Stream errors | 0 |
+
+Direct WASAPI on the Realtek endpoint therefore rendered 512-frame quanta after
+a 1,126-frame priming buffer, matching the endpoint's 512-frame reported range.
+An unknown pinned identifier was also rejected with `DeviceUnavailable` before
+any stream started, confirming the selection fails closed.
+
+## Sixty-second default-endpoint silent smoke repeat
+
+Both backends repeated the default-endpoint silent smoke for sixty seconds on
+the same boot. CPAL reported 5,999 callbacks, 480-frame latest and 1,056-frame
+maximum callbacks, a 60,064,738,600 ns latest local offset, a 17,396,800 ns
+largest scheduling gap, and zero capacity faults or stream errors. Direct WASAPI
+reported 6,000 renders, 480-frame latest and maximum renders, a 1,056-frame
+endpoint and priming buffer, a 60,068,546,700 ns latest local offset, a
+17,432,500 ns largest scheduling gap, and zero capacity faults or stream
+errors.
+
+These repeat the same 60-second observations recorded on 2026-07-20 on this
+host. This is an extended silent repeat, not the required eight-hour soak.
+
 ## Interpretation and remaining work
 
-The fresh default-endpoint run reproduces the known backend difference: CPAL
-received a 1,056-frame callback under a 480-frame request while direct WASAPI
-rendered 480-frame quanta after a 1,056-frame priming buffer. The pinned
-Realtek run adds the first CPAL callback-size observation on a 512-frame
-reported endpoint (1,126-frame maximum callback). All silent runs stayed inside
-the 8,192-frame source bound with zero capacity faults and zero stream errors.
+The default-endpoint runs reproduce the known backend difference: CPAL received
+a 1,056-frame callback under a 480-frame request while direct WASAPI rendered
+480-frame quanta after a 1,056-frame priming buffer. The pinned Realtek runs
+add the first symmetric two-backend comparison on a 512-frame reported endpoint:
+CPAL observed a 1,126-frame maximum callback while direct WASAPI rendered
+512-frame quanta after a 1,126-frame priming buffer. CPAL's largest callback
+therefore matched the direct-WASAPI endpoint buffer on both endpoints. All
+silent runs stayed inside the 8,192-frame source bound with zero capacity
+faults and zero stream errors.
 
 The Phase 0B evidence still needs an observed default-role change, current
 default and pinned-device removal, sleep/wake followed by explicit recreation,
