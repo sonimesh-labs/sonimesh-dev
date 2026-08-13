@@ -15,6 +15,15 @@ use sonimesh_latency_measurement::{
     OffsetConfig, estimate_offset_ms, read_mono, summarize_ms, test_signal, write_mono_16bit,
 };
 
+/// SoniMesh control-plane sample-rate bounds the `generate` command accepts.
+const MIN_GENERATE_SAMPLE_RATE_HZ: u32 = 8_000;
+const MAX_GENERATE_SAMPLE_RATE_HZ: u32 = 192_000;
+/// Longest accepted reference duration, in seconds.
+const MAX_GENERATE_SECONDS: u32 = 3_600;
+/// Upper bound on generated reference samples (10 minutes at 192 kHz), which
+/// keeps the in-memory buffer and the written WAVE file bounded.
+const MAX_GENERATE_SAMPLES: u32 = MAX_GENERATE_SAMPLE_RATE_HZ * 600;
+
 /// Top-level parsed command.
 #[derive(Debug)]
 enum Parsed {
@@ -231,11 +240,18 @@ fn parse_generate(rest: &[String]) -> Result<Option<GenerateArgs>, String> {
         }
         index += 1;
     }
-    if sample_rate_hz == 0 {
-        return Err("--sample-rate must be non-zero".into());
+    if !(MIN_GENERATE_SAMPLE_RATE_HZ..=MAX_GENERATE_SAMPLE_RATE_HZ).contains(&sample_rate_hz) {
+        return Err(format!(
+            "--sample-rate must be in {MIN_GENERATE_SAMPLE_RATE_HZ}..={MAX_GENERATE_SAMPLE_RATE_HZ} Hz"
+        ));
     }
-    if seconds == 0 {
-        return Err("--seconds must be non-zero".into());
+    if !(1..=MAX_GENERATE_SECONDS).contains(&seconds) {
+        return Err(format!("--seconds must be in 1..={MAX_GENERATE_SECONDS}"));
+    }
+    if sample_rate_hz.saturating_mul(seconds) > MAX_GENERATE_SAMPLES {
+        return Err(format!(
+            "--seconds and --sample-rate exceed the {MAX_GENERATE_SAMPLES}-sample reference bound"
+        ));
     }
     let output = output.ok_or_else(|| "generate requires an output path".to_owned())?;
     Ok(Some(GenerateArgs {
@@ -433,11 +449,56 @@ mod tests {
     fn generate_rejects_zero_rate_and_seconds() {
         let error = parse_args(args(&["generate", "--sample-rate", "0", "ref.wav"]))
             .expect_err("zero rate");
-        assert!(error.to_string().contains("--sample-rate must be non-zero"));
+        assert!(
+            error
+                .to_string()
+                .contains("--sample-rate must be in 8000..=192000 Hz")
+        );
 
         let error =
             parse_args(args(&["generate", "--seconds", "0", "ref.wav"])).expect_err("zero seconds");
-        assert!(error.to_string().contains("--seconds must be non-zero"));
+        assert!(error.to_string().contains("--seconds must be in 1..=3600"));
+    }
+
+    #[test]
+    fn generate_rejects_out_of_range_rate_and_seconds() {
+        let error = parse_args(args(&["generate", "--sample-rate", "4000", "ref.wav"]))
+            .expect_err("low rate");
+        assert!(
+            error
+                .to_string()
+                .contains("--sample-rate must be in 8000..=192000 Hz")
+        );
+
+        let error = parse_args(args(&["generate", "--sample-rate", "200000", "ref.wav"]))
+            .expect_err("high rate");
+        assert!(
+            error
+                .to_string()
+                .contains("--sample-rate must be in 8000..=192000 Hz")
+        );
+
+        let error =
+            parse_args(args(&["generate", "--seconds", "3601", "ref.wav"])).expect_err("too long");
+        assert!(error.to_string().contains("--seconds must be in 1..=3600"));
+    }
+
+    #[test]
+    fn generate_rejects_excessive_total_samples() {
+        let error = parse_args(args(&[
+            "generate",
+            "--sample-rate",
+            "192000",
+            "--seconds",
+            "601",
+            "ref.wav",
+        ]))
+        .expect_err("too many samples");
+        assert!(
+            error
+                .to_string()
+                .contains("115200000-sample reference bound")
+        );
     }
 
     #[test]
