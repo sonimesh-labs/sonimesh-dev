@@ -52,8 +52,9 @@ The vector pin checkers (`check_pairing_vectors.py`, `check_control_frame_vector
 boundary in pure standard-library Python and cross-check the pins published in the
 protocol docs, the Rust tests, and the Kotlin tests. `check_ci_wiring.py` verifies
 that every `tools/` checker is wired into CI with its required
-mode and that the contributor-facing Core checks block documents the same tools with the
-same modes. `check_doc_links.py` verifies that every relative Markdown link in the
+mode, that the contributor-facing Core checks block documents the same tools with the
+same modes, and that every Cargo command and Gradle task listed in that block also runs
+in CI. `check_doc_links.py` verifies that every relative Markdown link in the
 repository-owned documentation resolves to an existing file, skipping generated directories
 and fenced code blocks. `check_doc_dates.py` verifies that every `> Updated:` date
 declared by a design or measurement document is not older than the newest git commit that
