@@ -1,10 +1,12 @@
 //! End-to-end checks for the latency measurement library and CLI.
 
+use std::path::Path;
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use sonimesh_latency_measurement::{
-    OffsetConfig, OffsetError, estimate_offset_ms, read_mono, test_signal, write_mono_16bit,
+    OffsetConfig, OffsetError, WavError, estimate_offset_ms, read_mono, test_signal,
+    write_mono_16bit,
 };
 
 const SAMPLE_RATE: u32 = 48_000;
@@ -164,6 +166,106 @@ fn cli_generate_and_measure_round_trip() {
     );
 
     std::fs::remove_dir_all(&dir).expect("cleanup temp dir");
+}
+
+#[test]
+fn cli_measure_recovers_delay_from_24_bit_recording() {
+    let bin = env!("CARGO_BIN_EXE_sonimesh-latency-measurement");
+    let dir = test_dir("24bit");
+    std::fs::create_dir_all(&dir).expect("create temp dir");
+    let reference_path = dir.join("reference.wav");
+    let recording_path = dir.join("recording24.wav");
+
+    let output = Command::new(bin)
+        .args([
+            "generate",
+            "--sample-rate",
+            "48000",
+            "--seconds",
+            "3",
+            "--seed",
+            "7",
+        ])
+        .arg(&reference_path)
+        .output()
+        .expect("generate runs");
+    assert!(
+        output.status.success(),
+        "generate failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let reference = read_mono(&reference_path).expect("reference reads");
+    // 100 ms of leading silence at 48 kHz, stored as 24-bit PCM.
+    let delay_samples = 4_800_usize;
+    let recording = delayed_recording(delay_samples, &reference.samples);
+    write_mono_24bit(&recording_path, SAMPLE_RATE, &recording).expect("24-bit recording writes");
+
+    let output = Command::new(bin)
+        .args(["measure", "--max-search-ms", "1000"])
+        .arg(&reference_path)
+        .arg(&recording_path)
+        .output()
+        .expect("measure runs");
+    assert!(
+        output.status.success(),
+        "measure failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("utf8 stdout");
+    let offset_ms = stdout
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("run=1 ").and_then(|rest| {
+                rest.split_whitespace()
+                    .find_map(|token| token.strip_prefix("offset_ms="))
+            })
+        })
+        .expect("offset line present")
+        .parse::<f64>()
+        .expect("offset parses");
+    assert!((offset_ms - 100.0).abs() < 1.0, "offset_ms={offset_ms}");
+
+    std::fs::remove_dir_all(&dir).expect("cleanup temp dir");
+}
+
+/// Encodes mono samples as a 24-bit PCM WAVE file for the integration test.
+///
+/// The reader side is covered by the library unit tests; this helper exists
+/// only to feed the CLI `measure` path a realistic 24-bit capture.
+#[allow(clippy::cast_possible_truncation)]
+fn write_mono_24bit(path: &Path, sample_rate_hz: u32, samples: &[f32]) -> Result<(), WavError> {
+    let data_bytes = samples.len() * 3;
+    let mut bytes = Vec::with_capacity(44 + data_bytes);
+    bytes.extend_from_slice(b"RIFF");
+    bytes.extend_from_slice(
+        &u32::try_from(36 + data_bytes)
+            .expect("file size fits u32")
+            .to_le_bytes(),
+    );
+    bytes.extend_from_slice(b"WAVE");
+    bytes.extend_from_slice(b"fmt ");
+    bytes.extend_from_slice(&16_u32.to_le_bytes());
+    bytes.extend_from_slice(&1_u16.to_le_bytes()); // PCM
+    bytes.extend_from_slice(&1_u16.to_le_bytes()); // mono
+    bytes.extend_from_slice(&sample_rate_hz.to_le_bytes());
+    bytes.extend_from_slice(&(sample_rate_hz * 3).to_le_bytes()); // byte rate
+    bytes.extend_from_slice(&3_u16.to_le_bytes()); // block align
+    bytes.extend_from_slice(&24_u16.to_le_bytes()); // bits per sample
+    bytes.extend_from_slice(b"data");
+    bytes.extend_from_slice(
+        &u32::try_from(data_bytes)
+            .expect("data size fits u32")
+            .to_le_bytes(),
+    );
+    for &sample in samples {
+        let scaled = (f64::from(sample) * 8_388_607.0)
+            .round()
+            .clamp(-8_388_608.0, 8_388_607.0) as i32;
+        // Little-endian three-byte two's-complement representation.
+        bytes.extend_from_slice(&scaled.to_le_bytes()[..3]);
+    }
+    std::fs::write(path, bytes).map_err(WavError::Io)
 }
 
 #[test]
