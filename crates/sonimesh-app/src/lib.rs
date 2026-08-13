@@ -1,5 +1,6 @@
 //! Desktop control-domain coordination, independent of Tauri commands.
 
+mod arrival_clock;
 mod channel_mapped_render_source;
 mod control_snapshot;
 mod control_stream;
@@ -26,6 +27,7 @@ mod stream_drift_controller;
 mod stream_format_adapter;
 mod udp_receiver_pipeline;
 
+pub use arrival_clock::monotonic_tick_source;
 pub use channel_mapped_render_source::{ChannelMappedRenderSource, ChannelMappedRenderSourceError};
 pub use control_snapshot::{
     DesktopControlSnapshot, OutputSnapshot, OutputSnapshotSource, PairingSnapshotState,
@@ -65,7 +67,8 @@ pub use receiver_pcm_endpoint_factory::{
     ReceiverPcmEndpoint, ReceiverPcmEndpointError, ReceiverPcmEndpointFactory,
 };
 pub use receiver_pipeline::{
-    FreshSessionInstallError, ReceiverPipelineError, ReceiverStreamPipeline,
+    AdaptiveTargetConfig, AdaptiveTargetSetupError, FreshSessionInstallError,
+    ReceiverPipelineError, ReceiverStreamPipeline,
 };
 pub use reconnect_grace::{
     ReconnectGraceController, ReconnectGraceError, ReconnectGraceObservation, ReconnectGraceState,

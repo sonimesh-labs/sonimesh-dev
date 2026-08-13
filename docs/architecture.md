@@ -446,7 +446,14 @@ work.
 For the receiver, a bounded relative arrival-jitter estimator in
 `sonimesh-audio` converts inter-arrival times into sender-sample units and
 reports the per-packet deviation in milliseconds, so the adaptive controller
-can be fed from a real packet stream without a shared clock.
+can be fed from a real packet stream without a shared clock. The receiver
+pipeline (`ReceiverStreamPipeline` and the UDP receiver) can now run that
+estimator and the adaptive target controller against the live authenticated
+packet stream: an opt-in configuration supplies a monotonic arrival clock,
+each admitted packet feeds the per-packet deviation and jitter occupancy
+into the controller, and the active target state is published through the
+per-stream diagnostics. The product playout scheduler that consumes the
+target remains Phase 2 work.
 
 Recovery policy:
 

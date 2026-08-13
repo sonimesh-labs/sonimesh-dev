@@ -13,7 +13,10 @@ use sonimesh_network::{
 };
 use sonimesh_protocol::{MAX_MEDIA_PLAINTEXT_LEN, MediaKeyContext, SessionSecret};
 
-use crate::{FreshSessionInstallError, ReceiverPipelineError, ReceiverStreamPipeline};
+use crate::{
+    AdaptiveTargetConfig, AdaptiveTargetSetupError, FreshSessionInstallError,
+    ReceiverPipelineError, ReceiverStreamPipeline,
+};
 
 /// Error while constructing a UDP-backed receiver pipeline.
 pub enum UdpReceiverSetupError {
@@ -21,6 +24,8 @@ pub enum UdpReceiverSetupError {
     Socket(io::Error),
     /// The protected ingress could not derive its initial media key.
     Pipeline(ProtectedIngressError),
+    /// The opt-in adaptive jitter controller could not be built.
+    Adaptive(AdaptiveTargetSetupError),
 }
 
 impl fmt::Debug for UdpReceiverSetupError {
@@ -32,6 +37,7 @@ impl fmt::Debug for UdpReceiverSetupError {
                 .field("raw_os_error", &error.raw_os_error())
                 .finish(),
             Self::Pipeline(error) => formatter.debug_tuple("Pipeline").field(error).finish(),
+            Self::Adaptive(error) => formatter.debug_tuple("Adaptive").field(error).finish(),
         }
     }
 }
@@ -41,6 +47,9 @@ impl fmt::Display for UdpReceiverSetupError {
         match self {
             Self::Socket(error) => write!(formatter, "UDP receiver setup failed: {error}"),
             Self::Pipeline(error) => write!(formatter, "receiver pipeline setup failed: {error}"),
+            Self::Adaptive(error) => {
+                write!(formatter, "adaptive receiver setup failed: {error}")
+            }
         }
     }
 }
@@ -50,6 +59,7 @@ impl std::error::Error for UdpReceiverSetupError {
         match self {
             Self::Socket(error) => Some(error),
             Self::Pipeline(error) => Some(error),
+            Self::Adaptive(error) => Some(error),
         }
     }
 }
@@ -177,6 +187,49 @@ where
             initial_sequence,
         )
         .map_err(UdpReceiverSetupError::Pipeline)?;
+        Ok(Self {
+            receiver,
+            pipeline,
+            source_pin: SourceEndpointPin::new(),
+            plaintext: [0; MAX_MEDIA_PLAINTEXT_LEN],
+        })
+    }
+
+    /// Binds a UDP socket and creates one stream pipeline that also runs the
+    /// adaptive jitter controller.
+    ///
+    /// See [`ReceiverStreamPipeline::new_with_adaptive_target`] for the
+    /// controller configuration contract; the monotonic arrival clock is
+    /// supplied inside the [`AdaptiveTargetConfig`] (see
+    /// [`monotonic_tick_source`](crate::monotonic_tick_source) for a ready-made
+    /// source).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`UdpReceiverSetupError`] when socket setup, media key setup, or
+    /// controller configuration fails.
+    #[allow(clippy::too_many_arguments)] // mirrors `bind` plus one bundled controller config
+    pub fn bind_with_adaptive_target(
+        address: SocketAddr,
+        secret: &SessionSecret,
+        context: MediaKeyContext,
+        decoder: D,
+        producer: RealtimePcmProducer<PCM_SAMPLES_PER_BLOCK>,
+        counters: Arc<StreamCounters>,
+        initial_sequence: u32,
+        adaptive: AdaptiveTargetConfig,
+    ) -> Result<Self, UdpReceiverSetupError> {
+        let receiver = UdpMediaReceiver::bind(address).map_err(UdpReceiverSetupError::Socket)?;
+        let pipeline = ReceiverStreamPipeline::new_with_adaptive_target(
+            secret,
+            context,
+            decoder,
+            producer,
+            counters,
+            initial_sequence,
+            adaptive,
+        )
+        .map_err(UdpReceiverSetupError::Adaptive)?;
         Ok(Self {
             receiver,
             pipeline,
@@ -425,6 +478,49 @@ mod setup_debug_tests {
         assert!(debug.contains("AddrNotAvailable"));
         assert!(!debug.contains("192.168.10.42"));
         assert!(!debug.contains("bind failed"));
+    }
+
+    #[test]
+    fn adaptive_failure_debug_identifies_the_configuration_cause() {
+        use sonimesh_audio::JitterTargetConfigError;
+
+        use crate::AdaptiveTargetSetupError;
+
+        let error = UdpReceiverSetupError::Adaptive(AdaptiveTargetSetupError::Target(
+            JitterTargetConfigError::ZeroCapacity,
+        ));
+
+        let debug = format!("{error:?}");
+
+        assert!(debug.contains("Adaptive"));
+        assert!(debug.contains("ZeroCapacity"));
+    }
+}
+
+#[cfg(test)]
+mod adaptive_setup_source_tests {
+    use std::error::Error;
+
+    use sonimesh_audio::ArrivalJitterConfigError;
+
+    use crate::AdaptiveTargetSetupError;
+
+    use super::UdpReceiverSetupError;
+
+    #[test]
+    fn adaptive_variant_retains_the_controller_cause() {
+        let error = UdpReceiverSetupError::Adaptive(AdaptiveTargetSetupError::Arrival(
+            ArrivalJitterConfigError::ZeroTickRate,
+        ));
+
+        let cause = error
+            .source()
+            .expect("composite error must retain its cause");
+        assert!(cause.downcast_ref::<AdaptiveTargetSetupError>().is_some());
+        let arrival = cause
+            .source()
+            .expect("controller error must retain its cause");
+        assert!(arrival.downcast_ref::<ArrivalJitterConfigError>().is_some());
     }
 }
 

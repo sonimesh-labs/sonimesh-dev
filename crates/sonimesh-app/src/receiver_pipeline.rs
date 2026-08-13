@@ -2,8 +2,9 @@ use core::fmt;
 use std::sync::Arc;
 
 use sonimesh_audio::{
-    DecodeStep, DecodeWorkerError, FrameDecoder, InsertOutcome, RealtimePcmProducer,
-    RealtimePcmPushOutcome, StreamDecodeWorker,
+    AdaptiveJitterTarget, ArrivalJitter, ArrivalJitterConfigError, DecodeStep, DecodeWorkerError,
+    FrameDecoder, InsertOutcome, JitterTargetConfig, JitterTargetConfigError, OPUS_SAMPLE_RATE_HZ,
+    RealtimePcmProducer, RealtimePcmPushOutcome, StreamDecodeWorker,
 };
 use sonimesh_diagnostics::StreamCounters;
 use sonimesh_network::{
@@ -25,6 +26,30 @@ pub struct ReceiverStreamPipeline<
     ingress: ProtectedMediaIngress,
     decode: StreamDecodeWorker<D, JITTER_CAPACITY, MAX_ENCODED_BYTES, PCM_SAMPLES_PER_BLOCK>,
     counters: Arc<StreamCounters>,
+    adaptive_target: Option<AdaptiveTargetController>,
+}
+
+/// Opt-in per-stream adaptive jitter controller fed from the live packet stream.
+///
+/// The arrival estimator consumes the caller-supplied monotonic clock and the
+/// packet sender sample timestamp, and the target controller converts each
+/// deviation plus the current jitter occupancy into a bounded target step.
+/// This is a packet-processing-domain object; it must never be called from the
+/// output callback.
+struct AdaptiveTargetController {
+    arrival: ArrivalJitter,
+    target: AdaptiveJitterTarget,
+    tick_source: Box<dyn FnMut() -> u64>,
+}
+
+/// Configuration for the opt-in adaptive-target controller of one stream.
+pub struct AdaptiveTargetConfig {
+    /// Validated per-mode jitter target range and frame conversion.
+    pub target: JitterTargetConfig,
+    /// Rate of the caller's monotonic arrival clock, in ticks per second.
+    pub arrival_ticks_per_second: u64,
+    /// Monotonic arrival clock queried once per admitted packet.
+    pub tick_source: Box<dyn FnMut() -> u64>,
 }
 
 /// Failure while receiving, admitting, decoding, or rotating one stream pipeline.
@@ -63,6 +88,43 @@ impl std::error::Error for FreshSessionInstallError {
         match self {
             Self::ReusedSessionId => None,
             Self::Ingress(error) => Some(error),
+        }
+    }
+}
+
+/// Failure while building the opt-in adaptive-target controller.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AdaptiveTargetSetupError {
+    /// The protected ingress could not derive its initial media key.
+    Ingress(ProtectedIngressError),
+    /// The jitter target configuration is unbounded or cannot fit the buffer.
+    Target(JitterTargetConfigError),
+    /// The arrival-jitter estimator clock rates are invalid.
+    Arrival(ArrivalJitterConfigError),
+}
+
+impl fmt::Display for AdaptiveTargetSetupError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Ingress(error) => {
+                write!(formatter, "adaptive target ingress setup failed: {error}")
+            }
+            Self::Target(error) => {
+                write!(formatter, "adaptive target configuration failed: {error}")
+            }
+            Self::Arrival(error) => {
+                write!(formatter, "adaptive target arrival clock failed: {error}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for AdaptiveTargetSetupError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Ingress(error) => Some(error),
+            Self::Target(error) => Some(error),
+            Self::Arrival(error) => Some(error),
         }
     }
 }
@@ -119,7 +181,53 @@ where
             ingress: ProtectedMediaIngress::new(secret, context)?,
             decode: StreamDecodeWorker::new(decoder, producer, initial_sequence),
             counters,
+            adaptive_target: None,
         })
+    }
+
+    /// Creates one stream pipeline that also runs the adaptive jitter controller.
+    ///
+    /// The caller supplies an [`AdaptiveTargetConfig`] with a validated
+    /// [`JitterTargetConfig`] and a monotonic arrival clock in ticks of
+    /// `arrival_ticks_per_second` (for example `1_000_000_000` for a nanosecond
+    /// clock). The clock is queried once per admitted packet; see
+    /// [`monotonic_tick_source`](crate::monotonic_tick_source) for a ready-made
+    /// process-monotonic source. The controller feeds each authenticated packet
+    /// through [`ArrivalJitter`] and [`AdaptiveJitterTarget`] and publishes the
+    /// active target state through the shared counters.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AdaptiveTargetSetupError`] when the controller configuration
+    /// is unbounded or the initial media opener cannot be derived.
+    pub fn new_with_adaptive_target(
+        secret: &SessionSecret,
+        context: MediaKeyContext,
+        decoder: D,
+        producer: RealtimePcmProducer<PCM_SAMPLES_PER_BLOCK>,
+        counters: Arc<StreamCounters>,
+        initial_sequence: u32,
+        adaptive: AdaptiveTargetConfig,
+    ) -> Result<Self, AdaptiveTargetSetupError> {
+        let arrival = ArrivalJitter::new(OPUS_SAMPLE_RATE_HZ, adaptive.arrival_ticks_per_second)
+            .map_err(AdaptiveTargetSetupError::Arrival)?;
+        let target =
+            AdaptiveJitterTarget::new(adaptive.target).map_err(AdaptiveTargetSetupError::Target)?;
+        let mut pipeline = Self::new(
+            secret,
+            context,
+            decoder,
+            producer,
+            counters,
+            initial_sequence,
+        )
+        .map_err(AdaptiveTargetSetupError::Ingress)?;
+        pipeline.adaptive_target = Some(AdaptiveTargetController {
+            arrival,
+            target,
+            tick_source: adaptive.tick_source,
+        });
+        Ok(pipeline)
     }
 
     /// Returns the media key context currently accepted by this pipeline.
@@ -152,7 +260,7 @@ where
         datagram: &[u8],
         plaintext: &mut [u8],
     ) -> Result<InsertOutcome, ReceiverPipelineError<D::Error>> {
-        let admission = {
+        let (admission, sample_timestamp) = {
             let frame = match self.ingress.receive(datagram, plaintext) {
                 Ok(frame) => {
                     self.counters.authenticated();
@@ -163,10 +271,11 @@ where
                     return Err(ReceiverPipelineError::Ingress(error));
                 }
             };
-            self.decode.admit(
-                frame.header.sequence,
-                frame.header.sample_timestamp,
-                frame.opus_payload,
+            let sample_timestamp = frame.header.sample_timestamp;
+            (
+                self.decode
+                    .admit(frame.header.sequence, sample_timestamp, frame.opus_payload),
+                sample_timestamp,
             )
         };
         plaintext.fill(0);
@@ -176,9 +285,11 @@ where
                     self.decode.reset_after_jitter_resynchronization();
                     self.counters.reset_queued_pcm_epoch();
                     self.counters.reset_jitter_epoch();
+                    self.reset_adaptive_target_epoch();
                 }
                 self.record_jitter_outcome(outcome);
                 self.publish_jitter_frames();
+                self.observe_adaptive_target(outcome, sample_timestamp);
                 Ok(outcome)
             }
             Err(error) => {
@@ -234,6 +345,7 @@ where
         self.decode.begin_epoch(initial_sequence);
         self.counters.reset_queued_pcm_epoch();
         self.counters.reset_jitter_epoch();
+        self.reset_adaptive_target_epoch();
         self.counters.stream_reset();
         Ok(())
     }
@@ -264,6 +376,7 @@ where
         self.decode.begin_epoch(initial_sequence);
         self.counters.reset_queued_pcm_epoch();
         self.counters.reset_jitter_epoch();
+        self.reset_adaptive_target_epoch();
         self.counters.stream_reset();
         Ok(())
     }
@@ -277,6 +390,7 @@ where
         self.decode.hard_resynchronize();
         self.counters.reset_queued_pcm_epoch();
         self.counters.reset_jitter_epoch();
+        self.reset_adaptive_target_epoch();
         self.counters.stream_reset();
     }
 
@@ -290,6 +404,7 @@ where
         self.decode.replace_pcm_producer(producer);
         self.counters.reset_queued_pcm_epoch();
         self.counters.reset_jitter_epoch();
+        self.reset_adaptive_target_epoch();
         self.counters.stream_reset();
     }
 
@@ -328,6 +443,49 @@ where
             .set_jitter_frames(u16::try_from(frames).unwrap_or(u16::MAX));
     }
 
+    fn observe_adaptive_target(&mut self, outcome: InsertOutcome, sample_timestamp: u64) {
+        if !matches!(
+            outcome,
+            InsertOutcome::Inserted
+                | InsertOutcome::Reordered
+                | InsertOutcome::Late
+                | InsertOutcome::Disabled
+        ) {
+            return;
+        }
+        let Some(adaptive) = &mut self.adaptive_target else {
+            return;
+        };
+        let arrival_ticks = (adaptive.tick_source)();
+        if let Some(deviation_ms) = adaptive.arrival.observe(arrival_ticks, sample_timestamp) {
+            let buffered_frames = self.decode.jitter_len();
+            let _ = adaptive.target.observe(deviation_ms, buffered_frames);
+        }
+        self.publish_target_state();
+    }
+
+    fn publish_target_state(&self) {
+        let Some(adaptive) = &self.adaptive_target else {
+            return;
+        };
+        self.counters.publish_target_state(
+            u16::try_from(adaptive.target.min_frames()).unwrap_or(u16::MAX),
+            u16::try_from(adaptive.target.max_frames()).unwrap_or(u16::MAX),
+            u16::try_from(adaptive.target.target_frames()).unwrap_or(u16::MAX),
+            adaptive.target.smoothed_jitter_ms(),
+            adaptive.target.raised_steps(),
+            adaptive.target.lowered_steps(),
+        );
+    }
+
+    fn reset_adaptive_target_epoch(&mut self) {
+        if let Some(adaptive) = &mut self.adaptive_target {
+            adaptive.arrival.reset();
+            adaptive.target.reset();
+        }
+        self.counters.reset_target_state();
+    }
+
     fn record_jitter_outcome(&self, outcome: InsertOutcome) {
         match outcome {
             InsertOutcome::Duplicate => self.counters.duplicate(),
@@ -350,5 +508,48 @@ mod fresh_session_error_tests {
     #[test]
     fn reused_session_policy_error_has_no_synthetic_cause() {
         assert!(std::error::Error::source(&FreshSessionInstallError::ReusedSessionId).is_none());
+    }
+}
+
+#[cfg(test)]
+mod adaptive_target_setup_error_tests {
+    use std::error::Error;
+
+    use sonimesh_audio::{ArrivalJitterConfigError, JitterTargetConfigError};
+    use sonimesh_network::ProtectedIngressError;
+    use sonimesh_protocol::MediaCryptoError;
+
+    use super::AdaptiveTargetSetupError;
+
+    fn source(error: &AdaptiveTargetSetupError) -> &(dyn Error + 'static) {
+        error
+            .source()
+            .expect("composite error must retain its cause")
+    }
+
+    #[test]
+    fn every_variant_retains_its_cause() {
+        let ingress = AdaptiveTargetSetupError::Ingress(ProtectedIngressError::Crypto(
+            MediaCryptoError::AuthenticationFailed,
+        ));
+        assert!(
+            source(&ingress)
+                .downcast_ref::<ProtectedIngressError>()
+                .is_some()
+        );
+
+        let target = AdaptiveTargetSetupError::Target(JitterTargetConfigError::ZeroCapacity);
+        assert!(
+            source(&target)
+                .downcast_ref::<JitterTargetConfigError>()
+                .is_some()
+        );
+
+        let arrival = AdaptiveTargetSetupError::Arrival(ArrivalJitterConfigError::ZeroTickRate);
+        assert!(
+            source(&arrival)
+                .downcast_ref::<ArrivalJitterConfigError>()
+                .is_some()
+        );
     }
 }

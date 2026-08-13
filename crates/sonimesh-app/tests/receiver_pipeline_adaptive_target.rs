@@ -1,0 +1,286 @@
+//! Adaptive-target controller wiring through a real protected packet stream.
+//!
+//! These tests feed authenticated media packets through the receiver pipeline
+//! with a scripted monotonic arrival clock, proving that the arrival-jitter
+//! estimator and the adaptive target controller run on the live packet stream
+//! and that their state flows into the shared diagnostics counters.
+
+use core::convert::Infallible;
+use std::collections::VecDeque;
+use std::sync::Arc;
+use std::sync::Mutex;
+
+use sonimesh_app::{AdaptiveTargetConfig, ReceiverStreamPipeline};
+use sonimesh_audio::{
+    DecodeStep, FrameDecoder, InsertOutcome, JitterMode, JitterTargetConfig, realtime_pcm_queue,
+};
+use sonimesh_diagnostics::StreamCounters;
+use sonimesh_protocol::{MediaDirection, MediaKeyContext, MediaSealer, SessionSecret};
+
+const JITTER_CAPACITY: usize = 4;
+const MAX_ENCODED_BYTES: usize = 8;
+const PCM_SAMPLES_PER_BLOCK: usize = 4;
+
+struct ByteDecoder;
+
+impl FrameDecoder for ByteDecoder {
+    type Error = Infallible;
+
+    fn decode(&mut self, encoded: &[u8], output: &mut [f32]) -> Result<usize, Self::Error> {
+        output[0] = f32::from(encoded[0]);
+        Ok(1)
+    }
+
+    fn decode_plc(&mut self, output: &mut [f32]) -> Result<usize, Self::Error> {
+        output[0] = 0.0;
+        Ok(1)
+    }
+}
+
+type Pipeline =
+    ReceiverStreamPipeline<ByteDecoder, JITTER_CAPACITY, MAX_ENCODED_BYTES, PCM_SAMPLES_PER_BLOCK>;
+
+fn context() -> MediaKeyContext {
+    MediaKeyContext::new(
+        0x0102_0304_0506_0708,
+        9,
+        1,
+        MediaDirection::AndroidToDesktop,
+    )
+    .unwrap()
+}
+
+type TickSource = Box<dyn FnMut() -> u64>;
+
+fn tick_source(ticks: &[u64]) -> (TickSource, Arc<Mutex<VecDeque<u64>>>) {
+    let queue = Arc::new(Mutex::new(ticks.iter().copied().collect::<VecDeque<_>>()));
+    let source = {
+        let queue = Arc::clone(&queue);
+        Box::new(move || {
+            queue
+                .lock()
+                .unwrap()
+                .pop_front()
+                .expect("arrival tick sequence exhausted")
+        })
+    };
+    (source, queue)
+}
+
+fn adaptive_pipeline(
+    ticks: &[u64],
+    counters: Arc<StreamCounters>,
+) -> (Pipeline, MediaSealer, Arc<Mutex<VecDeque<u64>>>) {
+    let secret = SessionSecret::new([0xA5; 32]);
+    let context = context();
+    let (producer, _consumer) = realtime_pcm_queue::<PCM_SAMPLES_PER_BLOCK>(4).unwrap();
+    let (tick_source, queue) = tick_source(ticks);
+    let pipeline = Pipeline::new_with_adaptive_target(
+        &secret,
+        context,
+        ByteDecoder,
+        producer,
+        counters,
+        0,
+        AdaptiveTargetConfig {
+            target: JitterTargetConfig::preset(JitterMode::Balanced, 20, JITTER_CAPACITY),
+            arrival_ticks_per_second: 1_000,
+            tick_source,
+        },
+    )
+    .unwrap();
+    let sealer = MediaSealer::new(&secret, context).unwrap();
+    (pipeline, sealer, queue)
+}
+
+fn send(pipeline: &mut Pipeline, sealer: &mut MediaSealer, sample_timestamp: u64) {
+    let packet = sealer.seal(0, sample_timestamp, &[7]).unwrap();
+    let mut plaintext = [0_u8; MAX_ENCODED_BYTES];
+    assert_eq!(
+        pipeline.receive(&packet.datagram, &mut plaintext).unwrap(),
+        InsertOutcome::Inserted
+    );
+    // Drain the admitted frame so the fixed-capacity buffer never fills and
+    // forces a resynchronization that would drop the playout state.
+    assert!(matches!(
+        pipeline.decode_next().unwrap(),
+        DecodeStep::Decoded { .. }
+    ));
+}
+
+fn target_state(counters: &StreamCounters) -> (u16, u16, u16, u32, u32, u32) {
+    let snapshot = counters.snapshot();
+    (
+        snapshot.target_min_frames,
+        snapshot.target_max_frames,
+        snapshot.target_frames,
+        snapshot.target_smoothed_jitter_ms,
+        snapshot.target_raised_steps,
+        snapshot.target_lowered_steps,
+    )
+}
+
+#[test]
+fn pipeline_feeds_the_controller_and_publishes_the_target_state() {
+    let counters = Arc::new(StreamCounters::default());
+    // Four 20 ms frames at perfect cadence, then arrival slips of 100 ms per
+    // frame so the controller sees 80 ms of sustained jitter.
+    let mut ticks = (1_u64..=4).map(|frame| frame * 20).collect::<Vec<_>>();
+    let mut next = ticks[3];
+    for _ in 0..32 {
+        next += 100;
+        ticks.push(next);
+    }
+    let (mut pipeline, mut sealer, _queue) = adaptive_pipeline(&ticks, Arc::clone(&counters));
+
+    for frame in 0_u64..4 {
+        send(&mut pipeline, &mut sealer, frame * 960);
+    }
+    // Balanced 40-70 ms at 20 ms frames: min 2, base 3, max 4 frames. Perfect
+    // cadence contributes zero jitter, so the target stays at base.
+    assert_eq!(
+        target_state(&counters),
+        (2, 4, 3, 0, 0, 0),
+        "perfect cadence must keep the target at base with no steps"
+    );
+
+    for frame in 4_u64..36 {
+        send(&mut pipeline, &mut sealer, frame * 960);
+    }
+    let (min, max, target, smoothed, raised, _lowered) = target_state(&counters);
+    assert_eq!((min, max), (2, 4));
+    assert!(
+        smoothed > 0,
+        "sustained arrival slip must move the smoothed jitter estimate"
+    );
+    assert!(
+        raised >= 1,
+        "sustained high jitter must raise the target at least once"
+    );
+    assert!(target > 3, "the target must leave the base under pressure");
+}
+
+#[test]
+fn hard_resynchronize_retires_and_republishes_the_target_epoch() {
+    let counters = Arc::new(StreamCounters::default());
+    let mut ticks = (1_u64..=4).map(|frame| frame * 20).collect::<Vec<_>>();
+    let mut next = ticks[3];
+    for _ in 0..12 {
+        next += 100;
+        ticks.push(next);
+    }
+    // A fresh 20 ms cadence after the reset.
+    for _ in 0..3 {
+        next += 20;
+        ticks.push(next);
+    }
+    let (mut pipeline, mut sealer, _queue) = adaptive_pipeline(&ticks, Arc::clone(&counters));
+
+    for frame in 0_u64..16 {
+        send(&mut pipeline, &mut sealer, frame * 960);
+    }
+    assert!(target_state(&counters).3 > 0, "jitter must be visible");
+
+    pipeline.hard_resynchronize();
+    assert_eq!(
+        target_state(&counters),
+        (0, 0, 0, 0, 0, 0),
+        "a stream-local retirement must clear the published target epoch"
+    );
+
+    // The controller restarts from a fresh baseline: the next packet only
+    // establishes it, and following perfect-cadence packets keep the target at
+    // base with no steps.
+    for frame in 16_u64..19 {
+        send(&mut pipeline, &mut sealer, frame * 960);
+    }
+    assert_eq!(
+        target_state(&counters),
+        (2, 4, 3, 0, 0, 0),
+        "after a reset a fresh epoch republishes the configured water levels"
+    );
+}
+
+#[test]
+fn backward_arrival_ticks_are_skipped_without_corrupting_the_baseline() {
+    let counters = Arc::new(StreamCounters::default());
+    let (mut pipeline, mut sealer, queue) = adaptive_pipeline(&[10], Arc::clone(&counters));
+
+    // First packet establishes the baseline only.
+    send(&mut pipeline, &mut sealer, 0);
+    assert_eq!(target_state(&counters), (2, 4, 3, 0, 0, 0));
+
+    // A backward tick is skipped without advancing the estimator or controller.
+    queue.lock().unwrap().push_back(5);
+    send(&mut pipeline, &mut sealer, 960);
+    assert_eq!(target_state(&counters), (2, 4, 3, 0, 0, 0));
+
+    // The next forward tick measures from the preserved baseline pair
+    // (10 ticks, timestamp 0): 20 ticks arrive against a 40 ms sample delta,
+    // so the deviation is 20 ms and the smoothed estimate moves to 5 ms. Had
+    // the backward tick replaced the baseline, the deviation would instead be
+    // 5 ms, so this value proves the original baseline survived the skip.
+    queue.lock().unwrap().push_back(30);
+    send(&mut pipeline, &mut sealer, 1920);
+    assert_eq!(
+        target_state(&counters),
+        (2, 4, 3, 5, 0, 0),
+        "a skipped backward tick must not corrupt later measurements"
+    );
+}
+
+#[test]
+fn receives_authenticated_udp_media_into_the_adaptive_controller() {
+    use std::net::UdpSocket;
+    use std::thread;
+
+    use sonimesh_app::{UdpPollOutcome, UdpReceiverPipeline};
+
+    type UdpPipeline =
+        UdpReceiverPipeline<ByteDecoder, JITTER_CAPACITY, MAX_ENCODED_BYTES, PCM_SAMPLES_PER_BLOCK>;
+
+    let counters = Arc::new(StreamCounters::default());
+    let secret = SessionSecret::new([0xA5; 32]);
+    let context = context();
+    let (producer, _consumer) = realtime_pcm_queue::<PCM_SAMPLES_PER_BLOCK>(4).unwrap();
+    let (tick_source, _queue) = tick_source(&[10, 30]);
+    let mut pipeline = UdpPipeline::bind_with_adaptive_target(
+        "127.0.0.1:0".parse().unwrap(),
+        &secret,
+        context,
+        ByteDecoder,
+        producer,
+        Arc::clone(&counters),
+        0,
+        AdaptiveTargetConfig {
+            target: JitterTargetConfig::preset(JitterMode::Balanced, 20, JITTER_CAPACITY),
+            arrival_ticks_per_second: 1_000,
+            tick_source,
+        },
+    )
+    .unwrap();
+
+    let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let mut sealer = MediaSealer::new(&secret, context).unwrap();
+    let packet = sealer.seal(0, 0, &[7]).unwrap();
+    sender
+        .send_to(&packet.datagram, pipeline.local_addr().unwrap())
+        .unwrap();
+
+    let mut outcome = None;
+    for _ in 0..1_000 {
+        match pipeline.poll() {
+            Ok(UdpPollOutcome::Empty) => thread::yield_now(),
+            other => {
+                outcome = Some(other);
+                break;
+            }
+        }
+    }
+    let outcome = outcome.expect("loopback datagram was not delivered");
+    assert!(matches!(outcome, Ok(UdpPollOutcome::Processed { .. })));
+
+    // The first packet only establishes the arrival baseline, but the target
+    // configuration is already published for the active epoch.
+    assert_eq!(target_state(&counters), (2, 4, 3, 0, 0, 0));
+}

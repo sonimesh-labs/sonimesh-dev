@@ -179,6 +179,8 @@ pub struct AdaptiveJitterTarget {
     smoothed_jitter_ms: u32,
     raise_pressure: u8,
     lower_pressure: u8,
+    raised_steps: u32,
+    lowered_steps: u32,
 }
 
 impl AdaptiveJitterTarget {
@@ -203,6 +205,8 @@ impl AdaptiveJitterTarget {
             smoothed_jitter_ms: 0,
             raise_pressure: 0,
             lower_pressure: 0,
+            raised_steps: 0,
+            lowered_steps: 0,
         })
     }
 
@@ -278,15 +282,29 @@ impl AdaptiveJitterTarget {
         self.smoothed_jitter_ms
     }
 
+    /// Returns the target-raising steps taken in the active epoch.
+    #[must_use]
+    pub const fn raised_steps(&self) -> u32 {
+        self.raised_steps
+    }
+
+    /// Returns the target-lowering steps taken in the active epoch.
+    #[must_use]
+    pub const fn lowered_steps(&self) -> u32 {
+        self.lowered_steps
+    }
+
     /// Clears stream-local control history after an external reset.
     ///
-    /// The jitter estimate, both debounce counters, and the target return to
-    /// the mode base.
+    /// The jitter estimate, both debounce counters, the step counters, and the
+    /// target return to the mode base.
     pub fn reset(&mut self) {
         self.target_frames = self.base_frames;
         self.smoothed_jitter_ms = 0;
         self.raise_pressure = 0;
         self.lower_pressure = 0;
+        self.raised_steps = 0;
+        self.lowered_steps = 0;
     }
 
     /// Converts one packet-arrival-jitter and water-level observation into a
@@ -308,6 +326,7 @@ impl AdaptiveJitterTarget {
             if self.raise_pressure >= RAISE_DEBOUNCE && self.target_frames < self.max_frames {
                 self.raise_pressure = 0;
                 self.target_frames += 1;
+                self.raised_steps = self.raised_steps.saturating_add(1);
                 return JitterTargetStep::Raised;
             }
             return JitterTargetStep::Held;
@@ -320,6 +339,7 @@ impl AdaptiveJitterTarget {
             if self.lower_pressure >= LOWER_DEBOUNCE && self.target_frames > self.min_frames {
                 self.lower_pressure = 0;
                 self.target_frames -= 1;
+                self.lowered_steps = self.lowered_steps.saturating_add(1);
                 return JitterTargetStep::Lowered;
             }
             return JitterTargetStep::Held;
@@ -599,5 +619,62 @@ mod tests {
         }
         // After the debounce window the estimate has approached 80 ms.
         assert!(controller.smoothed_jitter_ms() >= 70);
+    }
+
+    #[test]
+    fn step_counters_match_observed_raised_and_lowered_steps() {
+        let mut controller = AdaptiveJitterTarget::new(CONFIG).unwrap();
+        assert_eq!(
+            (controller.raised_steps(), controller.lowered_steps()),
+            (0, 0)
+        );
+
+        let mut raised = 0;
+        for _ in 0..32 {
+            if controller.observe(80, 8) == JitterTargetStep::Raised {
+                raised += 1;
+            }
+        }
+        assert!(raised >= 1, "sustained high jitter must raise the target");
+        assert_eq!(controller.raised_steps(), raised);
+        assert_eq!(controller.lowered_steps(), 0);
+
+        let mut lowered = 0;
+        for _ in 0..128 {
+            if controller.observe(0, 8) == JitterTargetStep::Lowered {
+                lowered += 1;
+            }
+        }
+        assert!(lowered >= 1, "sustained surplus must lower the target");
+        assert_eq!(controller.lowered_steps(), lowered);
+        assert_eq!(controller.raised_steps(), raised);
+
+        // Held observations never touch either step counter: a steady 30 ms
+        // observation sits inside the dead zone between `target / 2` and
+        // `target`, so neither branch accumulates pressure.
+        let raised_before = controller.raised_steps();
+        let lowered_before = controller.lowered_steps();
+        for _ in 0..16 {
+            assert_eq!(controller.observe(30, 8), JitterTargetStep::Held);
+        }
+        assert_eq!(controller.raised_steps(), raised_before);
+        assert_eq!(controller.lowered_steps(), lowered_before);
+    }
+
+    #[test]
+    fn reset_clears_the_step_counters() {
+        let mut controller = AdaptiveJitterTarget::new(CONFIG).unwrap();
+        for _ in 0..12 {
+            let _ = controller.observe(80, 8);
+        }
+        assert!(controller.raised_steps() > 0);
+
+        controller.reset();
+        assert_eq!(
+            (controller.raised_steps(), controller.lowered_steps()),
+            (0, 0)
+        );
+        assert_eq!(controller.smoothed_jitter_ms(), 0);
+        assert_eq!(controller.target_frames(), controller.base_frames());
     }
 }
