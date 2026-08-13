@@ -290,3 +290,347 @@ impl<const MAX_SOURCES: usize> Default for PairingInvitationController<MAX_SOURC
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use sonimesh_platform::OutputHealth;
+
+    use super::*;
+    use crate::control_snapshot::PairingSnapshotState;
+    use crate::{OutputSnapshot, SessionPhase};
+
+    struct TestOutput;
+
+    impl OutputSnapshotSource for TestOutput {
+        fn snapshot(&self) -> OutputSnapshot {
+            OutputSnapshot::from_health(true, false, false, OutputHealth::Healthy)
+        }
+    }
+
+    fn id(byte: u8) -> PairingId {
+        PairingId::new([byte; 16])
+    }
+
+    fn source(byte: u8) -> PairingSource {
+        PairingSource::new([byte; 16])
+    }
+
+    fn controller() -> PairingInvitationController<2> {
+        PairingInvitationController::new()
+    }
+
+    #[test]
+    fn fresh_controller_has_no_invitation_and_projects_an_idle_snapshot() {
+        let mut controller = controller();
+        let mut session = SessionState::IDLE;
+
+        assert_eq!(controller.state(), None);
+        let snapshot = controller
+            .snapshot_at(&mut session, 100, &TestOutput)
+            .unwrap();
+        assert_eq!(snapshot.session(), SessionPhase::Idle);
+        assert_eq!(snapshot.pairing(), PairingSnapshotState::Inactive);
+        assert!(snapshot.output().selection_retained());
+        assert_eq!(controller.state(), None);
+    }
+
+    #[test]
+    fn begin_requires_an_idle_session_and_non_zero_lifetime() {
+        let mut controller = controller();
+        let mut session = SessionState::IDLE;
+
+        assert_eq!(
+            controller.begin(&mut session, id(1), 100, 0, 3),
+            Err(PairingInvitationError::ZeroLifetime)
+        );
+        assert_eq!(
+            controller.begin(&mut session, id(1), u64::MAX, 1, 3),
+            Err(PairingInvitationError::ExpiryOverflow)
+        );
+        assert_eq!(
+            controller.begin(&mut session, id(1), 100, 1, 0),
+            Err(PairingInvitationError::Record(
+                PairingRecordError::InvalidAttemptLimit
+            ))
+        );
+        assert_eq!(controller.state(), None);
+        assert_eq!(session, SessionState::IDLE);
+
+        // A non-idle session cannot start pairing.
+        let mut streaming = SessionState::IDLE;
+        streaming.apply(SessionEvent::StartPairing).unwrap();
+        streaming.establish_trust();
+        streaming.apply(SessionEvent::StartStream).unwrap();
+        assert_eq!(
+            controller.begin(&mut streaming, id(1), 100, 1_000, 3),
+            Err(PairingInvitationError::InvalidSessionState(
+                SessionState::STREAMING
+            ))
+        );
+    }
+
+    #[test]
+    fn begin_admits_one_active_invitation_and_advances_to_pairing() {
+        let mut controller = controller();
+        let mut session = SessionState::IDLE;
+
+        controller
+            .begin(&mut session, id(1), 100, 1_000, 3)
+            .unwrap();
+        assert_eq!(controller.state(), Some(PairingRecordState::Active));
+        assert_eq!(session, SessionState::PAIRING);
+
+        // A second active invitation cannot replace the first.
+        assert_eq!(
+            controller.begin(&mut session, id(2), 200, 1_000, 3),
+            Err(PairingInvitationError::ActiveInvitation)
+        );
+        assert_eq!(controller.state(), Some(PairingRecordState::Active));
+    }
+
+    #[test]
+    fn observe_expiry_returns_the_desktop_to_idle() {
+        let mut controller = controller();
+        let mut session = SessionState::IDLE;
+        controller
+            .begin(&mut session, id(1), 100, 1_000, 3)
+            .unwrap();
+
+        assert_eq!(
+            controller.observe(&mut session, 1_099).unwrap(),
+            PairingRecordState::Active
+        );
+        assert_eq!(
+            controller.observe(&mut session, 1_100).unwrap(),
+            PairingRecordState::Expired
+        );
+        assert_eq!(session, SessionState::IDLE);
+        // The expired record is retained for the UI snapshot.
+        assert_eq!(controller.state(), Some(PairingRecordState::Expired));
+    }
+
+    #[test]
+    fn observe_clock_regression_force_expires_and_returns_to_idle() {
+        let mut controller = controller();
+        let mut session = SessionState::IDLE;
+        controller
+            .begin(&mut session, id(1), 100, 1_000, 3)
+            .unwrap();
+        controller.observe(&mut session, 500).unwrap();
+
+        assert_eq!(
+            controller.observe(&mut session, 400),
+            Err(PairingInvitationError::Record(
+                PairingRecordError::TimeRegressed
+            ))
+        );
+        assert_eq!(session, SessionState::IDLE);
+        assert_eq!(controller.state(), Some(PairingRecordState::Expired));
+    }
+
+    #[test]
+    fn verified_proof_moves_the_session_to_ready() {
+        let mut controller = controller();
+        let mut session = SessionState::IDLE;
+        controller
+            .begin(&mut session, id(1), 100, 1_000, 3)
+            .unwrap();
+
+        let outcome = controller
+            .verify_proof(&mut session, 200, source(1), || {
+                PairingProofVerification::Verified
+            })
+            .unwrap();
+        assert_eq!(outcome, PairingAttemptOutcome::Paired);
+        assert_eq!(session, SessionState::READY);
+        assert_eq!(controller.state(), Some(PairingRecordState::Consumed));
+    }
+
+    #[test]
+    fn rejected_proof_keeps_the_invitation_and_session_in_pairing() {
+        let mut controller = controller();
+        let mut session = SessionState::IDLE;
+        controller
+            .begin(&mut session, id(1), 100, 1_000, 3)
+            .unwrap();
+
+        let outcome = controller
+            .verify_proof(&mut session, 200, source(1), || {
+                PairingProofVerification::Rejected
+            })
+            .unwrap();
+        assert_eq!(
+            outcome,
+            PairingAttemptOutcome::Rejected {
+                attempts_remaining: 2
+            }
+        );
+        assert_eq!(session, SessionState::PAIRING);
+        assert_eq!(controller.state(), Some(PairingRecordState::Active));
+    }
+
+    #[test]
+    fn rate_limited_source_keeps_the_session_in_pairing() {
+        let mut controller = controller();
+        let mut session = SessionState::IDLE;
+        controller
+            .begin(&mut session, id(1), 100, 1_000, 2)
+            .unwrap();
+        for _ in 0..2 {
+            controller
+                .verify_proof(&mut session, 200, source(1), || {
+                    PairingProofVerification::Rejected
+                })
+                .unwrap();
+        }
+
+        assert_eq!(
+            controller.verify_proof(&mut session, 300, source(1), || {
+                PairingProofVerification::Verified
+            }),
+            Err(PairingInvitationError::Record(
+                PairingRecordError::SourceRateLimited
+            ))
+        );
+        assert_eq!(session, SessionState::PAIRING);
+    }
+
+    #[test]
+    fn expired_proof_returns_the_session_to_idle_and_never_invokes_verifier() {
+        let mut controller = controller();
+        let mut session = SessionState::IDLE;
+        controller
+            .begin(&mut session, id(1), 100, 1_000, 3)
+            .unwrap();
+        let mut verify_calls = 0;
+
+        assert_eq!(
+            controller.verify_proof(&mut session, 1_100, source(1), || {
+                verify_calls += 1;
+                PairingProofVerification::Verified
+            }),
+            Err(PairingInvitationError::Record(PairingRecordError::Expired))
+        );
+        assert_eq!(verify_calls, 0);
+        assert_eq!(session, SessionState::IDLE);
+        assert_eq!(controller.state(), Some(PairingRecordState::Expired));
+    }
+
+    #[test]
+    fn verify_proof_requires_the_pairing_session_state() {
+        let mut controller = controller();
+        let mut session = SessionState::IDLE;
+        controller
+            .begin(&mut session, id(1), 100, 1_000, 3)
+            .unwrap();
+
+        // A ready session cannot admit proofs: only the pairing phase may.
+        let mut ready = SessionState::IDLE;
+        ready.apply(SessionEvent::StartPairing).unwrap();
+        ready.establish_trust();
+        assert_eq!(
+            controller.verify_proof(&mut ready, 200, source(1), || {
+                PairingProofVerification::Verified
+            }),
+            Err(PairingInvitationError::InvalidSessionState(
+                SessionState::READY
+            ))
+        );
+    }
+
+    #[test]
+    fn expire_and_revoke_return_the_desktop_to_idle() {
+        let mut controller = controller();
+        let mut session = SessionState::IDLE;
+        controller
+            .begin(&mut session, id(1), 100, 1_000, 3)
+            .unwrap();
+
+        assert_eq!(
+            controller.expire(&mut session).unwrap(),
+            PairingRecordState::Expired
+        );
+        assert_eq!(session, SessionState::IDLE);
+
+        controller
+            .begin(&mut session, id(2), 200, 1_000, 3)
+            .unwrap();
+        assert_eq!(
+            controller.revoke(&mut session).unwrap(),
+            PairingRecordState::Revoked
+        );
+        assert_eq!(session, SessionState::IDLE);
+    }
+
+    #[test]
+    fn operations_without_an_invitation_report_missing() {
+        let mut controller = controller();
+        let mut session = SessionState::IDLE;
+
+        assert_eq!(
+            controller.observe(&mut session, 100),
+            Err(PairingInvitationError::MissingInvitation)
+        );
+        assert_eq!(
+            controller.expire(&mut session),
+            Err(PairingInvitationError::MissingInvitation)
+        );
+        assert_eq!(
+            controller.revoke(&mut session),
+            Err(PairingInvitationError::MissingInvitation)
+        );
+        assert_eq!(controller.state(), None);
+    }
+
+    #[test]
+    fn snapshot_projects_active_pairing_state() {
+        let mut controller = controller();
+        let mut session = SessionState::IDLE;
+        controller
+            .begin(&mut session, id(1), 100, 1_000, 3)
+            .unwrap();
+
+        let snapshot = controller
+            .snapshot_at(&mut session, 500, &TestOutput)
+            .unwrap();
+        assert_eq!(snapshot.session(), SessionPhase::Pairing);
+        assert_eq!(snapshot.pairing(), PairingSnapshotState::Active);
+        assert!(snapshot.output().selection_retained());
+    }
+
+    #[test]
+    fn snapshot_after_expiry_projects_expired_pairing_state() {
+        let mut controller = controller();
+        let mut session = SessionState::IDLE;
+        controller
+            .begin(&mut session, id(1), 100, 1_000, 3)
+            .unwrap();
+        controller.observe(&mut session, 1_100).unwrap();
+
+        let snapshot = controller
+            .snapshot_at(&mut session, 1_200, &TestOutput)
+            .unwrap();
+        assert_eq!(snapshot.session(), SessionPhase::Idle);
+        assert_eq!(snapshot.pairing(), PairingSnapshotState::Expired);
+    }
+
+    #[test]
+    fn error_display_is_actionable_and_preserves_sources() {
+        assert_eq!(
+            PairingInvitationError::ActiveInvitation.to_string(),
+            "a pairing invitation is already active"
+        );
+        assert_eq!(
+            PairingInvitationError::MissingInvitation.to_string(),
+            "there is no pairing invitation"
+        );
+        assert_eq!(
+            PairingInvitationError::Record(PairingRecordError::SourceRateLimited).to_string(),
+            "pairing record rejected the operation: pairing source exceeded its attempt limit"
+        );
+        assert_eq!(
+            PairingInvitationError::InvalidSessionState(SessionState::STREAMING).to_string(),
+            "pairing operation requires a different session state than SessionState(Streaming)"
+        );
+    }
+}
