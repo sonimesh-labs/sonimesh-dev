@@ -116,7 +116,10 @@ impl<const MAX_SOURCES: usize> PairingInvitationController<MAX_SOURCES> {
         session: SessionState,
         output: crate::OutputSnapshot,
     ) -> DesktopControlSnapshot {
-        DesktopControlSnapshot::from_pairing_state(session, self.state(), output)
+        // The pairing owner has no reconnect window; the control-session
+        // coordinator observes the reconnect clock and injects the bounded
+        // remaining time after this pairing projection.
+        DesktopControlSnapshot::from_pairing_state(session, self.state(), output, None)
     }
 
     /// Starts a new active invitation from an idle desktop session.

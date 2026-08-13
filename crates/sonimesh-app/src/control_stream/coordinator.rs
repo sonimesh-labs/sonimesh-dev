@@ -264,9 +264,27 @@ impl ControlStreamCoordinator {
         now_ms: u64,
         output: &impl OutputSnapshotSource,
     ) -> Result<DesktopControlSnapshot, PairingInvitationError> {
+        let reconnect_remaining_ms = self.snapshot_reconnect_remaining_ms(now_ms);
         let result = pairing.snapshot_at(&mut self.state, now_ms, output);
         self.retire_if_idle();
-        result
+        result.map(|snapshot| snapshot.with_reconnect_remaining_ms(reconnect_remaining_ms))
+    }
+
+    /// Observes the reconnect window with the snapshot clock and returns the
+    /// bounded remaining milliseconds.
+    ///
+    /// The snapshot entry point advances both the pairing invitation clock and
+    /// the reconnect-window clock, so a bridge that only polls snapshots still
+    /// sees a reconnecting session retire once its deadline passes. A clock
+    /// regression or deadline already force-expires the window and retires the
+    /// control session, so the projection fails closed with no remaining time.
+    fn snapshot_reconnect_remaining_ms(&mut self, now_ms: u64) -> Option<u64> {
+        match self.observe_reconnect_grace(now_ms) {
+            Ok(ReconnectGraceObservation::InGrace { remaining_ms }) => Some(remaining_ms),
+            Ok(ReconnectGraceObservation::Idle | ReconnectGraceObservation::Expired) | Err(_) => {
+                None
+            }
+        }
     }
 
     /// Expires an active pairing invitation through this lifecycle owner.
@@ -808,5 +826,116 @@ mod token_tests {
             Err(ControlStreamError::OperationTokenExhausted)
         ));
         assert_eq!(counter.load(Ordering::Relaxed), u64::MAX);
+    }
+}
+
+#[cfg(test)]
+mod snapshot_tests {
+    use super::ControlStreamCoordinator;
+    use crate::{
+        OutputSnapshot, OutputSnapshotSource, PairingAttemptOutcome, PairingId,
+        PairingInvitationController, PairingProofVerification, PairingSource, SessionEvent,
+        SessionState,
+    };
+    use sonimesh_platform::OutputHealth;
+    use sonimesh_protocol::Capability;
+
+    struct HealthyOutput;
+
+    impl OutputSnapshotSource for HealthyOutput {
+        fn snapshot(&self) -> OutputSnapshot {
+            OutputSnapshot::from_health(false, false, false, OutputHealth::Healthy)
+        }
+    }
+
+    fn trusted_session() -> SessionState {
+        let mut pairing = PairingInvitationController::<1>::new();
+        let mut session = SessionState::IDLE;
+        pairing
+            .begin(&mut session, PairingId::new([1; 16]), 100, 50, 1)
+            .unwrap();
+        assert_eq!(
+            pairing.verify_proof(&mut session, 101, PairingSource::new([2; 16]), || {
+                PairingProofVerification::Verified
+            }),
+            Ok(PairingAttemptOutcome::Paired)
+        );
+        session
+    }
+
+    fn consumed_pairing() -> PairingInvitationController<1> {
+        let mut pairing = PairingInvitationController::new();
+        let mut session = SessionState::IDLE;
+        pairing
+            .begin(&mut session, PairingId::new([1; 16]), 100, 50, 1)
+            .unwrap();
+        pairing
+            .verify_proof(&mut session, 101, PairingSource::new([2; 16]), || {
+                PairingProofVerification::Verified
+            })
+            .unwrap();
+        pairing
+    }
+
+    #[test]
+    fn snapshot_projects_no_reconnect_window_outside_grace() {
+        let mut coordinator =
+            ControlStreamCoordinator::new(trusted_session(), &[Capability::FrameDuration20Ms])
+                .unwrap();
+        let mut pairing = consumed_pairing();
+
+        let snapshot = coordinator
+            .snapshot_at(&mut pairing, 200, &HealthyOutput)
+            .unwrap();
+        assert_eq!(snapshot.session(), crate::SessionPhase::Ready);
+        assert_eq!(snapshot.pairing(), crate::PairingSnapshotState::Consumed);
+        assert_eq!(snapshot.reconnect_remaining_ms(), None);
+    }
+
+    #[test]
+    fn snapshot_advances_and_projects_the_reconnect_window() {
+        let mut coordinator =
+            ControlStreamCoordinator::new(trusted_session(), &[Capability::FrameDuration20Ms])
+                .unwrap();
+        let mut pairing = consumed_pairing();
+
+        coordinator
+            .acknowledge_platform_event(SessionEvent::ConnectionLost)
+            .unwrap();
+        coordinator.begin_reconnect_grace(200, 2_000).unwrap();
+
+        let reconnecting = coordinator
+            .snapshot_at(&mut pairing, 500, &HealthyOutput)
+            .unwrap();
+        assert_eq!(reconnecting.session(), crate::SessionPhase::Reconnecting);
+        assert_eq!(reconnecting.reconnect_remaining_ms(), Some(1_700));
+
+        let expired = coordinator
+            .snapshot_at(&mut pairing, 2_200, &HealthyOutput)
+            .unwrap();
+        assert_eq!(expired.session(), crate::SessionPhase::Idle);
+        assert_eq!(expired.reconnect_remaining_ms(), None);
+    }
+
+    #[test]
+    fn snapshot_reconnect_clock_regression_fails_closed() {
+        let mut coordinator =
+            ControlStreamCoordinator::new(trusted_session(), &[Capability::FrameDuration20Ms])
+                .unwrap();
+        let mut pairing = consumed_pairing();
+
+        coordinator
+            .acknowledge_platform_event(SessionEvent::ConnectionLost)
+            .unwrap();
+        coordinator.begin_reconnect_grace(200, 2_000).unwrap();
+        coordinator
+            .snapshot_at(&mut pairing, 500, &HealthyOutput)
+            .unwrap();
+
+        let regressed = coordinator
+            .snapshot_at(&mut pairing, 400, &HealthyOutput)
+            .unwrap();
+        assert_eq!(regressed.session(), crate::SessionPhase::Idle);
+        assert_eq!(regressed.reconnect_remaining_ms(), None);
     }
 }

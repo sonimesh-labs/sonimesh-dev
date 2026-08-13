@@ -12,6 +12,10 @@ pub struct DesktopControlSnapshot {
     session: SessionPhase,
     pairing: PairingSnapshotState,
     output: OutputSnapshot,
+    /// Bounded milliseconds remaining before the control session must expire,
+    /// or `None` when no reconnect window is armed. A bridge must poll the
+    /// snapshot entry point so the coordinator can advance the reconnect clock.
+    reconnect_remaining_ms: Option<u64>,
 }
 
 /// Redacted output lifecycle suitable for low-rate UI state.
@@ -46,11 +50,13 @@ impl DesktopControlSnapshot {
         session: SessionState,
         pairing: Option<PairingRecordState>,
         output: OutputSnapshot,
+        reconnect_remaining_ms: Option<u64>,
     ) -> Self {
         Self {
             session: session.phase(),
             pairing: PairingSnapshotState::from_record(pairing),
             output,
+            reconnect_remaining_ms,
         }
     }
 
@@ -70,6 +76,24 @@ impl DesktopControlSnapshot {
     #[must_use]
     pub const fn output(&self) -> OutputSnapshot {
         self.output
+    }
+
+    /// Returns bounded milliseconds remaining before the control session must
+    /// expire, or `None` when no reconnect window is armed.
+    #[must_use]
+    pub const fn reconnect_remaining_ms(&self) -> Option<u64> {
+        self.reconnect_remaining_ms
+    }
+
+    /// Overrides the projected reconnect window with the coordinator-observed
+    /// remaining time after the pairing owner projects its monotonic clock.
+    #[must_use]
+    pub(crate) const fn with_reconnect_remaining_ms(
+        mut self,
+        reconnect_remaining_ms: Option<u64>,
+    ) -> Self {
+        self.reconnect_remaining_ms = reconnect_remaining_ms;
+        self
     }
 }
 
@@ -199,9 +223,23 @@ mod tests {
                 SessionState::IDLE,
                 record,
                 output(false, false, false),
+                None,
             );
             assert_eq!(snapshot.pairing(), expected);
         }
+    }
+
+    #[test]
+    fn reconnect_remaining_ms_accessor_round_trips() {
+        let snapshot = DesktopControlSnapshot::from_pairing_state(
+            SessionState::IDLE,
+            None,
+            output(false, false, false),
+            Some(1_700),
+        );
+        assert_eq!(snapshot.reconnect_remaining_ms(), Some(1_700));
+        let cleared = snapshot.with_reconnect_remaining_ms(None);
+        assert_eq!(cleared.reconnect_remaining_ms(), None);
     }
 
     #[test]
@@ -213,6 +251,7 @@ mod tests {
             session,
             Some(PairingRecordState::Active),
             output(false, false, false),
+            None,
         );
         assert_eq!(snapshot.session(), crate::SessionPhase::Pairing);
     }

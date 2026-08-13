@@ -114,6 +114,7 @@ fn empty_pairing_owner_projects_an_inactive_idle_snapshot() {
     assert_eq!(snapshot.session(), SessionPhase::Idle);
     assert_eq!(snapshot.pairing(), PairingSnapshotState::Inactive);
     assert_eq!(snapshot.output(), output.snapshot());
+    assert_eq!(snapshot.reconnect_remaining_ms(), None);
 }
 
 #[test]
@@ -151,6 +152,7 @@ fn accepted_pairing_projects_the_ready_receiver_phase() {
     assert_eq!(snapshot.session(), SessionPhase::Ready);
     assert_eq!(snapshot.pairing(), PairingSnapshotState::Consumed);
     assert_eq!(snapshot.output(), output.snapshot());
+    assert_eq!(snapshot.reconnect_remaining_ms(), None);
 }
 
 #[test]
