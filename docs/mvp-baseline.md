@@ -1,7 +1,7 @@
 # MVP implementation baseline
 
 > Status: foundation implemented; platform feasibility remains open
-> Updated: 2026-08-12
+> Updated: 2026-08-13
 
 This baseline turns the architecture documents into a buildable core without
 claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
@@ -138,9 +138,19 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   state, and permits rebinding only after fresh-session installation. The
   authenticated control-plane reconnection that supplies that fresh session
   remains unimplemented.
+- a non-blocking fixed-capacity UDP media sender that rejects oversized
+  datagrams before touching the socket, never blocks (a full OS send buffer is
+  reported as backpressure for the caller's own drop or pacing policy), and
+  treats the destination as routing metadata only.
 - an application-domain UDP receiver pipeline that feeds one socket datagram
   through protected ingress, bounded jitter admission, and non-realtime decode;
   control-session and output lifecycle wiring remain separate.
+- a bounded adaptive jitter target fed by per-packet relative arrival jitter:
+  the controller moves the target water level within configured limits, an
+  opt-in receiver-pipeline configuration supplies a monotonic arrival clock and
+  feeds live authenticated packets, and the published water levels (one atomic
+  set), smoothed jitter, and step counts reach the diagnostic export. The
+  product playout scheduler that consumes the target remains Phase 2 work.
 - an independent LibFuzzer workspace for bounded control decoding, media packet
   parsing, and protected ingress. The ingress target covers arbitrary bytes,
   valid authenticated arbitrary payloads, replay, output bounds, tampering,
