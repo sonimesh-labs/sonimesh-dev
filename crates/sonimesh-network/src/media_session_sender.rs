@@ -465,7 +465,9 @@ mod tests {
         let mut receiver = crate::UdpMediaReceiver::bind("127.0.0.1:0".parse().unwrap()).unwrap();
         sender.set_peer(receiver.local_addr().unwrap());
 
-        let outcome = sender.send_frame(0, 1234, &[7, 8, 9]).unwrap();
+        let outcome = sender
+            .send_frame(0x02, 0x0123_4567_89AB_CDEF, &[7, 8, 9])
+            .unwrap();
         assert!(matches!(
             outcome,
             super::MediaSessionSendOutcome::Sent { sequence: 0 }
@@ -475,6 +477,12 @@ mod tests {
             if let Some(datagram) = receiver.poll().unwrap() {
                 assert_eq!(datagram.payload.len(), MEDIA_HEADER_LEN + 3 + 16);
                 let packet = parse_media_packet(datagram.payload).unwrap();
+                assert_eq!(packet.header.flags, 0x02);
+                assert_eq!(packet.header.sample_timestamp, 0x0123_4567_89AB_CDEF);
+                assert_eq!(packet.header.session_id, 7);
+                assert_eq!(packet.header.stream_id, 9);
+                assert_eq!(packet.header.key_epoch, 1);
+                assert_eq!(packet.header.sequence, 0);
                 let opener = sonimesh_protocol::MediaOpener::new(&secret(), context(1)).unwrap();
                 let mut plaintext = [0_u8; MAX_MEDIA_PLAINTEXT_LEN];
                 let length = opener.open(packet, &mut plaintext).unwrap();
