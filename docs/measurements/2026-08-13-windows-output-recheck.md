@@ -128,32 +128,38 @@ errors.
 These repeat the same 60-second observations recorded on 2026-07-20 on this
 host. This is an extended silent repeat, not the required eight-hour soak.
 
-## Repeated lifecycle smoke (default and pinned Realtek)
+## Repeated lifecycle smoke (both backends, default and pinned Realtek)
 
-The CPAL lifecycle smoke (`output_lifecycle_smoke`) now accepts
+The CPAL lifecycle smoke (`output_lifecycle_smoke`) and the direct-WASAPI
+lifecycle smoke (`wasapi_lifecycle_smoke`) both accept
 `SONIMESH_OUTPUT_LIFECYCLE_DEVICE_ID`; an unset variable selects the current
 default render endpoint. Five 250 ms start/stop cycles ran against the default
-endpoint and against the pinned Realtek endpoint on the same boot. Every cycle
-reported a healthy stream with a 480-frame request and zero capacity faults or
-stream errors.
+endpoint and against the pinned Realtek endpoint on the same boot for each
+backend. Every cycle reported a healthy stream with a 480-frame request and
+zero capacity faults or stream errors.
 
-| Field | Default endpoint | Pinned Realtek |
-| --- | ---: | ---: |
-| Cycles | 5 | 5 |
-| Active duration per cycle | 250 ms | 250 ms |
-| Device selection | default | pinned |
-| Format | 48,000 Hz, 8 channels, Float32 | 48,000 Hz, 2 channels, Float32 |
-| Latest observed frames | 480 | 512 |
-| Largest observed frames | 1,056 | 1,126 |
-| Oversized callbacks | 0 | 0 |
-| Stream errors | 0 | 0 |
+| Field | CPAL default | WASAPI default | CPAL pinned | WASAPI pinned |
+| --- | ---: | ---: | ---: | ---: |
+| Cycles | 5 | 5 | 5 | 5 |
+| Active duration per cycle | 250 ms | 250 ms | 250 ms | 250 ms |
+| Device selection | default | default | pinned | pinned |
+| Format | 48 kHz, 8 ch, F32 | 48 kHz, 8 ch, F32 | 48 kHz, 2 ch, F32 | 48 kHz, 2 ch, F32 |
+| Latest observed frames | 480 | 480 | 512 | 512 |
+| Largest observed frames | 1,056 | 480 | 1,126 | 512 |
+| Primed/endpoint buffer | n/a | 1,056 | n/a | 1,126 |
+| Oversized | 0 | 0 | 0 | 0 |
+| Stream errors | 0 | 0 | 0 | 0 |
 
-The retained transcripts validate with `check_output_lifecycle_log.py
---backend cpal` and both record the exercised `device_selection` header. An
-unknown pinned identifier was rejected with `DeviceUnavailable` before the
-first cycle, confirming the selection fails closed. These are backend-local
-software observations; they do not cover device removal, default-role change,
-sleep/wake, or a long soak.
+All four retained transcripts validate with `check_output_lifecycle_log.py`
+(`--backend cpal` for the CPAL runs, `--backend wasapi` for the direct-WASAPI
+runs) and record the exercised `device_selection` header. An unknown pinned
+identifier was rejected with `DeviceUnavailable` before the first cycle on the
+CPAL path, confirming the selection fails closed. The lifecycle runs repeat the
+known backend difference across start/stop boundaries: CPAL received a
+1,056/1,126-frame callback under a 480-frame request while direct WASAPI
+rendered 480/512-frame quanta after a matching priming buffer. These are
+backend-local software observations; they do not cover device removal,
+default-role change, sleep/wake, or a long soak.
 
 ## Interpretation and remaining work
 
