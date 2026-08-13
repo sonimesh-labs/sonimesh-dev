@@ -193,7 +193,10 @@ pub fn estimate_offset_ms(
 
     let probe = &reference[..probe_len];
     let coarse_factor = config.coarse_factor.max(1);
-    let (low, high) = if search_lags > 4 * coarse_factor {
+    // Saturating arithmetic keeps an extreme caller-supplied coarse factor
+    // from overflowing; the fine search remains bounded by the recording.
+    let twice_coarse = 2_usize.saturating_mul(coarse_factor);
+    let (low, high) = if search_lags > 4_usize.saturating_mul(coarse_factor) {
         if probe_len < coarse_factor {
             return Err(OffsetError::ProbeTooShort {
                 probe_len,
@@ -207,10 +210,10 @@ pub fn estimate_offset_ms(
             &coarse_recording,
             search_lags / coarse_factor,
         );
-        let center = coarse_best * coarse_factor;
+        let center = coarse_best.saturating_mul(coarse_factor);
         (
-            center.saturating_sub(2 * coarse_factor),
-            (center + 2 * coarse_factor).min(search_lags),
+            center.saturating_sub(twice_coarse),
+            center.saturating_add(twice_coarse).min(search_lags),
         )
     } else {
         (0, search_lags)

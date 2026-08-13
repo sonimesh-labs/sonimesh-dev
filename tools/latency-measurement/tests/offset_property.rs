@@ -164,7 +164,16 @@ fn random_samples(rng: &mut XorShift64, length: usize) -> Vec<f32> {
 fn random_config(rng: &mut XorShift64) -> OffsetConfig {
     let mut config = OffsetConfig::new(*rng.pick(&[0_u32, 1, 8_000, 44_100, 48_000]));
     config.max_search_ms = *rng.pick(&[0.0, 0.5, 1.0, 100.0, 1_000.0]);
-    config.coarse_factor = *rng.pick(&[1_usize, 2, 4, 16, 64]);
+    config.coarse_factor = *rng.pick(&[
+        1_usize,
+        2,
+        4,
+        16,
+        64,
+        1 << 20,
+        usize::MAX / 4,
+        usize::MAX / 2,
+    ]);
     config.probe_len = *rng.pick(&[0_usize, 1, 16, 64, 512]);
     config.distinctness_ratio = *rng.pick(&[0.0, 1.0, 3.0, 100.0]);
     config
