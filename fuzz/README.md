@@ -16,6 +16,11 @@ production workspace so `libfuzzer-sys` never becomes a shipping dependency.
   length-prefixed Protobuf control decoder.
 - `media_packet` feeds arbitrary and near-valid bytes into the bounded media
   packet parser.
+- `nominal_resampler` feeds arbitrary sender-declared input and output sample
+  rates, channel counts, drift corrections, and buffer lengths into the bounded
+  linear resampler, proving adversarial rate metadata cannot panic the
+  interpolation loop, exceed the consumed/produced bounds, or leave output
+  uninitialized on a rejected step.
 - `protected_media_ingress` exercises raw input, valid authenticated arbitrary
   payloads, duplicate replay, undersized output buffers, and deterministic
   single-byte flags-byte and tag tampering plus ciphertext tampering for
@@ -51,6 +56,7 @@ cargo +nightly-2026-07-18 fuzz run control_frame -- -max_len=66052
 cargo +nightly-2026-07-18 fuzz run adaptive_jitter_target -- -max_len=64
 
 cargo +nightly-2026-07-18 fuzz run media_packet -- -max_len=1264
+cargo +nightly-2026-07-18 fuzz run nominal_resampler -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run protected_media_ingress -- -max_len=1264
 cargo +nightly-2026-07-18 fuzz run pairing_binding -- -max_len=4096
 cargo +nightly-2026-07-18 fuzz run untrusted_control_stream -- -max_len=65540

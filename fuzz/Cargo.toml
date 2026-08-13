@@ -71,3 +71,9 @@ path = "fuzz_targets/adaptive_jitter_target.rs"
 test = false
 doc = false
 bench = false
+[[bin]]
+name = "nominal_resampler"
+path = "fuzz_targets/nominal_resampler.rs"
+test = false
+doc = false
+bench = false
