@@ -20,7 +20,12 @@ lifecycle, and redacted output lifecycle through a low-rate
 `DesktopControlSnapshot`. That projection is built through the pairing owner's
 `snapshot_at(session, now_ms, &output_controller)` call, which observes the
 pairing clock before projection and reads the output lifecycle from its actual
-owner. It excludes pairing IDs, proofs, addresses, session material, PCM,
+owner. The `ControlToMixerBridge` composition object exposes the same
+projection through `desktop_snapshot_at(pairing, now_ms)`, observing the
+pairing clock and reading the output lifecycle from the bridge's own mixer
+session, so the future control-surface command layer can consume a
+synchronized view from one object. The projection excludes pairing IDs,
+proofs, addresses, session material, PCM,
 encoded media, realtime callbacks, platform output handles, and device-selection
 metadata.
 
