@@ -4,6 +4,7 @@
 //! - `generate` writes a deterministic MLS reference WAVE file;
 //! - `measure` estimates the offset between a reference and one or more
 //!   recordings, printing per-run offsets and a p50/p95/p99 summary;
+//! - `info` reports declared WAVE properties for pre-measurement validation;
 //! - `summary` reads one offset per line from stdin and prints the summary.
 
 use std::error::Error;
@@ -12,8 +13,8 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use sonimesh_latency_measurement::{
-    OffsetConfig, SampleFormat, estimate_offset_ms, read_mono, summarize_ms, test_signal,
-    write_mono,
+    OffsetConfig, SampleFormat, estimate_offset_ms, read_info, read_mono, summarize_ms,
+    test_signal, write_mono,
 };
 
 /// SoniMesh control-plane sample-rate bounds the `generate` command accepts.
@@ -34,6 +35,8 @@ enum Parsed {
     Generate(GenerateArgs),
     /// Estimate offsets for one or more recordings.
     Measure(MeasureArgs),
+    /// Report declared WAVE properties of one or more files.
+    Info(InfoArgs),
     /// Summarize offsets read from stdin.
     Summary,
 }
@@ -59,6 +62,12 @@ struct MeasureArgs {
     recordings: Vec<PathBuf>,
 }
 
+/// Arguments for the `info` subcommand.
+#[derive(Debug)]
+struct InfoArgs {
+    paths: Vec<PathBuf>,
+}
+
 fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
@@ -74,6 +83,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         Parsed::Help => print_usage(),
         Parsed::Generate(args) => run_generate(&args)?,
         Parsed::Measure(args) => run_measure(&args)?,
+        Parsed::Info(args) => run_info(&args)?,
         Parsed::Summary => run_summary()?,
     }
     Ok(())
@@ -150,6 +160,37 @@ fn run_measure(args: &MeasureArgs) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+fn run_info(args: &InfoArgs) -> Result<(), Box<dyn Error>> {
+    let mut failures = 0_usize;
+    for path in &args.paths {
+        match read_info(path) {
+            Ok(info) => {
+                let duration_ms = match info.duration_ms() {
+                    Some(ms) => ms.to_string(),
+                    None => "n/a".to_owned(),
+                };
+                println!(
+                    "file={} sample_rate_hz={} channels={} bits_per_sample={} audio_format={} frames={} duration_ms={duration_ms}",
+                    path.display(),
+                    info.sample_rate_hz,
+                    info.channels,
+                    info.bits_per_sample,
+                    info.audio_format,
+                    info.frames,
+                );
+            }
+            Err(error) => {
+                eprintln!("error: {}: {error}", path.display());
+                failures += 1;
+            }
+        }
+    }
+    if failures > 0 {
+        return Err(format!("failed to inspect {failures} of {} files", args.paths.len()).into());
+    }
+    Ok(())
+}
+
 fn run_summary() -> Result<(), Box<dyn Error>> {
     summarize_lines(std::io::stdin().lock())
 }
@@ -202,6 +243,10 @@ where
         },
         "measure" => match parse_measure(&rest)? {
             Some(args) => Ok(Parsed::Measure(args)),
+            None => Ok(Parsed::Help),
+        },
+        "info" => match parse_info(&rest)? {
+            Some(args) => Ok(Parsed::Info(args)),
             None => Ok(Parsed::Help),
         },
         "summary" => {
@@ -344,6 +389,23 @@ fn parse_measure(rest: &[String]) -> Result<Option<MeasureArgs>, String> {
     }))
 }
 
+fn parse_info(rest: &[String]) -> Result<Option<InfoArgs>, String> {
+    if rest.iter().any(|arg| arg == "-h" || arg == "--help") {
+        return Ok(None);
+    }
+    let mut paths = Vec::new();
+    for arg in rest {
+        if arg.starts_with('-') {
+            return Err(format!("unknown flag `{arg}` for info"));
+        }
+        paths.push(PathBuf::from(arg));
+    }
+    if paths.is_empty() {
+        return Err("info requires at least one path".into());
+    }
+    Ok(Some(InfoArgs { paths }))
+}
+
 fn parse_u32(value: Option<&String>, flag: &str) -> Result<u32, String> {
     let value = value.ok_or_else(|| format!("{flag} requires a value"))?;
     value
@@ -378,12 +440,14 @@ fn print_usage() {
 Usage:
   sonimesh-latency-measurement generate [--sample-rate N] [--seconds N] [--seed N] [--bits FMT] <output.wav>
   sonimesh-latency-measurement measure [--max-search-ms N] [--coarse-factor N] [--distinctness-ratio R] [--probe-ms N] <reference.wav> <recording.wav>...
+  sonimesh-latency-measurement info <wave.wav>...
   sonimesh-latency-measurement summary
   sonimesh-latency-measurement --help
 
 Commands:
   generate  Write a deterministic MLS reference WAVE file.
   measure   Estimate the offset between a reference and one or more recordings.
+  info      Report declared WAVE properties of one or more files.
   summary   Summarize offsets read from stdin, one number per line.
 
 Options:
@@ -394,7 +458,10 @@ Options:
   --max-search-ms N       Search window after the recording start, in ms (default: 1000).
   --coarse-factor N       Coarse-search downsampling factor (default: 16).
   --distinctness-ratio R  Minimum best/second-best peak ratio (default: 3.0).
-  --probe-ms N            Correlation probe duration in ms (default: 32768 samples)."
+  --probe-ms N            Correlation probe duration in ms (default: 32768 samples).
+
+Info output:
+  audio_format  Declared WAVE tag: 1 = PCM, 3 = IEEE float."
     );
 }
 
@@ -404,8 +471,8 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        Parsed, SampleFormat, parse_args, parse_f64, parse_generate, parse_measure, parse_u32,
-        parse_usize, summarize_lines,
+        Parsed, SampleFormat, parse_args, parse_f64, parse_generate, parse_info, parse_measure,
+        parse_u32, parse_usize, summarize_lines,
     };
 
     fn args(items: &[&str]) -> Vec<String> {
@@ -747,6 +814,48 @@ mod tests {
     }
 
     #[test]
+    fn info_accepts_multiple_paths() {
+        let Parsed::Info(info) =
+            parse_args(args(&["info", "a.wav", "b.wav", "c.wav"])).expect("parsed")
+        else {
+            panic!("expected info");
+        };
+        assert_eq!(
+            info.paths,
+            vec![
+                PathBuf::from("a.wav"),
+                PathBuf::from("b.wav"),
+                PathBuf::from("c.wav")
+            ]
+        );
+    }
+
+    #[test]
+    fn info_requires_at_least_one_path() {
+        let error = parse_args(args(&["info"])).expect_err("no paths");
+        assert!(
+            error
+                .to_string()
+                .contains("info requires at least one path")
+        );
+    }
+
+    #[test]
+    fn info_rejects_unknown_flag_and_help_short_circuits() {
+        let error = parse_args(args(&["info", "--bogus", "a.wav"])).expect_err("unknown flag");
+        assert!(
+            error
+                .to_string()
+                .contains("unknown flag `--bogus` for info")
+        );
+
+        assert!(matches!(
+            parse_args(args(&["info", "--help"])).expect("help"),
+            Parsed::Help
+        ));
+    }
+
+    #[test]
     fn unknown_subcommand_is_rejected() {
         let error = parse_args(args(&["bogus"])).expect_err("unknown command");
         assert!(error.to_string().contains("unknown subcommand `bogus`"));
@@ -786,6 +895,10 @@ mod tests {
         assert_eq!(
             parse_measure(&args(&["--probe-ms"])).expect_err("missing value"),
             "--probe-ms requires a value"
+        );
+        assert_eq!(
+            parse_info(&args(&[])).expect_err("no paths"),
+            "info requires at least one path"
         );
     }
 }

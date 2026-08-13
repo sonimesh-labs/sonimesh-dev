@@ -91,6 +91,17 @@ pub fn read_mono(path: &Path) -> Result<MonoWav, WavError> {
     parse_mono(&bytes)
 }
 
+/// Reads a WAVE file and reports its declared properties.
+///
+/// # Errors
+///
+/// Returns [`WavError`] when the file is not a supported WAVE file or the
+/// operating system cannot read it.
+pub fn read_info(path: &Path) -> Result<WavInfo, WavError> {
+    let bytes = std::fs::read(path).map_err(WavError::Io)?;
+    inspect_mono(&bytes)
+}
+
 /// Sample layout used when encoding WAVE output.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SampleFormat {
@@ -185,17 +196,9 @@ pub fn write_mono_16bit(path: &Path, sample_rate_hz: u32, samples: &[f32]) -> Re
     write_mono(path, sample_rate_hz, samples, SampleFormat::Pcm16)
 }
 
-/// Parses WAVE bytes and returns mono samples without touching the filesystem.
-///
-/// # Errors
-///
-/// Returns [`WavError`] when the bytes are not a supported WAVE file.
-///
-/// # Panics
-///
-/// Panics only on an internal fixed-slice conversion that the length checks in
-/// this function prevent from failing.
-pub fn parse_mono(bytes: &[u8]) -> Result<MonoWav, WavError> {
+/// Parses the RIFF container and returns the validated format plus the raw
+/// data chunk payload.
+fn parse_wave(bytes: &[u8]) -> Result<(FormatInfo, &[u8]), WavError> {
     if bytes.len() < 12 {
         return Err(WavError::Truncated);
     }
@@ -228,8 +231,78 @@ pub fn parse_mono(bytes: &[u8]) -> Result<MonoWav, WavError> {
         offset = end + (chunk_size & 1);
     }
 
-    let format = format.ok_or(WavError::MissingChunk)?;
-    let data = data.ok_or(WavError::MissingChunk)?;
+    Ok((
+        format.ok_or(WavError::MissingChunk)?,
+        data.ok_or(WavError::MissingChunk)?,
+    ))
+}
+
+/// Declared properties of a supported WAVE file.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct WavInfo {
+    /// Sample rate declared by the format chunk.
+    pub sample_rate_hz: u32,
+    /// Interleaved channel count.
+    pub channels: u16,
+    /// Bits per sample declared by the format chunk.
+    pub bits_per_sample: u16,
+    /// Resolved WAVE format tag (`1` = PCM, `3` = IEEE float).
+    pub audio_format: u16,
+    /// Sample frames in the data chunk; one frame spans all channels.
+    pub frames: usize,
+}
+
+impl WavInfo {
+    /// Duration of the data chunk in whole milliseconds, or `None` when the
+    /// declared sample rate is zero.
+    #[must_use]
+    pub fn duration_ms(self) -> Option<u64> {
+        if self.sample_rate_hz == 0 {
+            return None;
+        }
+        Some((self.frames as u64).saturating_mul(1_000) / u64::from(self.sample_rate_hz))
+    }
+}
+
+/// Reports the declared properties of supported WAVE bytes without decoding
+/// their samples.
+///
+/// # Errors
+///
+/// Returns [`WavError`] for the same failures as [`parse_mono`].
+///
+/// # Panics
+///
+/// Panics only on an internal fixed-slice conversion that the length checks in
+/// this function prevent from failing.
+pub fn inspect_mono(bytes: &[u8]) -> Result<WavInfo, WavError> {
+    let (format, data) = parse_wave(bytes)?;
+    let frame_bytes = usize::from(format.channels) * bytes_per_sample(&format)?;
+    let frames = data.len() / frame_bytes;
+    if frames == 0 {
+        return Err(WavError::Empty);
+    }
+    Ok(WavInfo {
+        sample_rate_hz: format.sample_rate_hz,
+        channels: format.channels,
+        bits_per_sample: format.bits_per_sample,
+        audio_format: format.audio_format,
+        frames,
+    })
+}
+
+/// Parses WAVE bytes and returns mono samples without touching the filesystem.
+///
+/// # Errors
+///
+/// Returns [`WavError`] when the bytes are not a supported WAVE file.
+///
+/// # Panics
+///
+/// Panics only on an internal fixed-slice conversion that the length checks in
+/// this function prevent from failing.
+pub fn parse_mono(bytes: &[u8]) -> Result<MonoWav, WavError> {
+    let (format, data) = parse_wave(bytes)?;
     let samples = decode_frames(&format, data)?;
     if samples.is_empty() {
         return Err(WavError::Empty);
@@ -352,15 +425,19 @@ fn parse_format_chunk(chunk: &[u8]) -> Result<FormatInfo, WavError> {
     })
 }
 
+fn bytes_per_sample(format: &FormatInfo) -> Result<usize, WavError> {
+    match (format.audio_format, format.bits_per_sample) {
+        (1, 16) => Ok(2_usize),
+        (1, 24) => Ok(3_usize),
+        (1 | 3, 32) => Ok(4_usize),
+        (3, 64) => Ok(8_usize),
+        (format, bits) => Err(WavError::UnsupportedFormat { format, bits }),
+    }
+}
+
 #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
 fn decode_frames(format: &FormatInfo, data: &[u8]) -> Result<Vec<f32>, WavError> {
-    let bytes_per_sample = match (format.audio_format, format.bits_per_sample) {
-        (1, 16) => 2_usize,
-        (1, 24) => 3_usize,
-        (1 | 3, 32) => 4_usize,
-        (3, 64) => 8_usize,
-        (format, bits) => return Err(WavError::UnsupportedFormat { format, bits }),
-    };
+    let bytes_per_sample = bytes_per_sample(format)?;
     let channels = usize::from(format.channels);
     let frame_bytes = channels * bytes_per_sample;
     if frame_bytes == 0 {
@@ -500,6 +577,71 @@ mod tests {
                 "{format:?} data size"
             );
         }
+    }
+
+    #[test]
+    fn inspect_mono_reports_declared_properties() {
+        let frames = 48_000_usize;
+        let data = vec![0_u8; frames * 3];
+        let bytes = build_wave(48_000, 1, 24, &data);
+        let info = inspect_mono(&bytes).expect("wave inspects");
+        assert_eq!(
+            info,
+            WavInfo {
+                sample_rate_hz: 48_000,
+                channels: 1,
+                bits_per_sample: 24,
+                audio_format: 1,
+                frames,
+            }
+        );
+        assert_eq!(info.duration_ms(), Some(1_000));
+    }
+
+    #[test]
+    fn inspect_mono_resolves_extensible_audio_format() {
+        // WAVE_FORMAT_EXTENSIBLE wrapping IEEE float resolves to tag 3.
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"RIFF");
+        bytes.extend_from_slice(&(4_u32 + 48 + 12).to_le_bytes());
+        bytes.extend_from_slice(b"WAVE");
+        bytes.extend_from_slice(b"fmt ");
+        bytes.extend_from_slice(&40_u32.to_le_bytes());
+        bytes.extend_from_slice(&0xFFFE_u16.to_le_bytes());
+        bytes.extend_from_slice(&1_u16.to_le_bytes());
+        bytes.extend_from_slice(&48_000_u32.to_le_bytes());
+        bytes.extend_from_slice(&(48_000_u32 * 4).to_le_bytes());
+        bytes.extend_from_slice(&4_u16.to_le_bytes());
+        bytes.extend_from_slice(&32_u16.to_le_bytes());
+        bytes.extend_from_slice(&22_u16.to_le_bytes()); // cbSize
+        bytes.extend_from_slice(&32_u16.to_le_bytes()); // valid bits
+        bytes.extend_from_slice(&0_u32.to_le_bytes()); // channel mask
+        // Subformat GUID {00000003-0000-0010-8000-00AA00389B71} (IEEE float).
+        bytes.extend_from_slice(&0x0000_0003_u32.to_le_bytes());
+        bytes.extend_from_slice(&0x0000_u16.to_le_bytes());
+        bytes.extend_from_slice(&0x0010_u16.to_le_bytes());
+        bytes.extend_from_slice(&[0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71]);
+        bytes.extend_from_slice(b"data");
+        bytes.extend_from_slice(&4_u32.to_le_bytes());
+        bytes.extend_from_slice(&0.5_f32.to_le_bytes());
+
+        let info = inspect_mono(&bytes).expect("extensible wave inspects");
+        assert_eq!(info.audio_format, 3);
+        assert_eq!(info.bits_per_sample, 32);
+        assert_eq!(info.channels, 1);
+        assert_eq!(info.frames, 1);
+    }
+
+    #[test]
+    fn inspect_mono_rejects_unsupported_and_empty_waves() {
+        let bytes = build_wave(48_000, 1, 8, &[0x80]);
+        assert!(matches!(
+            inspect_mono(&bytes),
+            Err(WavError::UnsupportedFormat { format: 1, bits: 8 })
+        ));
+
+        let empty = encode_mono(48_000, &[], SampleFormat::Pcm16);
+        assert!(matches!(inspect_mono(&empty), Err(WavError::Empty)));
     }
 
     #[test]

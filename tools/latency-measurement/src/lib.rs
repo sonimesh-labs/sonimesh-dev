@@ -15,6 +15,6 @@ pub use offset::{OffsetConfig, OffsetError, OffsetEstimate, estimate_offset_ms};
 pub use signal::{MLS_PERIOD, mls_sequence, test_signal};
 pub use stats::{LatencySummary, percentile, summarize_ms};
 pub use wav::{
-    MonoWav, SampleFormat, WavError, encode_mono, encode_mono_16bit, parse_mono, read_mono,
-    write_mono, write_mono_16bit,
+    MonoWav, SampleFormat, WavError, WavInfo, encode_mono, encode_mono_16bit, inspect_mono,
+    parse_mono, read_info, read_mono, write_mono, write_mono_16bit,
 };

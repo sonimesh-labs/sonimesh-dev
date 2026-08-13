@@ -294,3 +294,100 @@ fn cli_measure_rejects_sample_rate_mismatch() {
 
     std::fs::remove_dir_all(&dir).expect("cleanup temp dir");
 }
+
+#[test]
+fn cli_info_reports_declared_wave_properties() {
+    let bin = env!("CARGO_BIN_EXE_sonimesh-latency-measurement");
+    let dir = test_dir("info");
+    std::fs::create_dir_all(&dir).expect("create temp dir");
+    let reference_path = dir.join("reference.wav");
+
+    let output = Command::new(bin)
+        .args([
+            "generate",
+            "--sample-rate",
+            "48000",
+            "--seconds",
+            "2",
+            "--seed",
+            "7",
+            "--bits",
+            "24",
+        ])
+        .arg(&reference_path)
+        .output()
+        .expect("generate runs");
+    assert!(
+        output.status.success(),
+        "generate failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let output = Command::new(bin)
+        .arg("info")
+        .arg(&reference_path)
+        .output()
+        .expect("info runs");
+    assert!(
+        output.status.success(),
+        "info failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("utf8 stdout");
+    assert!(
+        stdout.contains("file=")
+            && stdout.contains("sample_rate_hz=48000")
+            && stdout.contains("channels=1")
+            && stdout.contains("bits_per_sample=24")
+            && stdout.contains("audio_format=1")
+            && stdout.contains("frames=96000")
+            && stdout.contains("duration_ms=2000"),
+        "unexpected info output: {stdout}"
+    );
+
+    std::fs::remove_dir_all(&dir).expect("cleanup temp dir");
+}
+
+#[test]
+fn cli_info_reports_per_file_errors_and_continues() {
+    let bin = env!("CARGO_BIN_EXE_sonimesh-latency-measurement");
+    let dir = test_dir("info_errors");
+    std::fs::create_dir_all(&dir).expect("create temp dir");
+    let good_path = dir.join("good.wav");
+    let missing_path = dir.join("missing.wav");
+
+    let output = Command::new(bin)
+        .args(["generate", "--seconds", "1"])
+        .arg(&good_path)
+        .output()
+        .expect("generate runs");
+    assert!(
+        output.status.success(),
+        "generate failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let output = Command::new(bin)
+        .arg("info")
+        .arg(&good_path)
+        .arg(&missing_path)
+        .output()
+        .expect("info runs");
+    assert!(!output.status.success(), "info must fail on a missing file");
+    let stdout = String::from_utf8(output.stdout).expect("utf8 stdout");
+    assert!(
+        stdout.contains("good.wav"),
+        "good file info missing: {stdout}"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("missing.wav"),
+        "missing-file error missing: {stderr}"
+    );
+    assert!(
+        stderr.contains("failed to inspect 1 of 2 files"),
+        "failure summary missing: {stderr}"
+    );
+
+    std::fs::remove_dir_all(&dir).expect("cleanup temp dir");
+}
