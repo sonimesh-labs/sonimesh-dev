@@ -84,7 +84,7 @@ const { busy, createPairing, error, expirePairing, refresh, resetPreview, revoke
             @simulate-command-rejection="simulateCommandRejection"
           />
           <div class="secondary-stack">
-            <OutputPanel :devices="snapshot.outputDevices" :selected-id="snapshot.selectedOutputId" :gain="snapshot.gain" :muted="snapshot.muted" :busy="busy" :preview="snapshot.previewAdapter" @select="selectOutput" @gain="setGain" @mute="setMuted" />
+            <OutputPanel :devices="snapshot.outputDevices" :selected-id="snapshot.selectedOutputId" :output="snapshot.output" :gain="snapshot.gain" :muted="snapshot.muted" :busy="busy" :preview="snapshot.previewAdapter" @select="selectOutput" @gain="setGain" @mute="setMuted" />
             <PairingPanel :pairing="snapshot.pairing" :busy="busy" :preview="snapshot.previewAdapter" @create="createPairing" @expire="expirePairing" @refresh="refresh" @revoke="revokePairing" @simulate-pairing-consumed="simulatePairingConsumed" />
           </div>
         </div>

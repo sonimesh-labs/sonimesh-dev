@@ -17,6 +17,7 @@ import type {
   DesktopSnapshot,
   MetricCounter,
   OutputDevice,
+  OutputSnapshot,
   PairingState,
   SessionState,
   StreamMetrics,
@@ -120,6 +121,7 @@ interface ModelState {
   selectedOutputId: string | null
   gain: number
   muted: boolean
+  output: OutputSnapshot
   metrics: StreamMetrics
 }
 
@@ -131,6 +133,12 @@ function initialModelState(): ModelState {
     selectedOutputId: 'default',
     gain: 1,
     muted: false,
+    output: {
+      selectionRetained: true,
+      streamActive: false,
+      faultReported: false,
+      health: 'healthy',
+    },
     metrics: initialMetrics(),
   }
 }
@@ -160,6 +168,8 @@ class PreviewBridgeModel {
       case 'startStream':
         if (s.session === 'ready' && s.pairing === 'consumed') {
           s.session = 'streaming'
+          s.output.faultReported = false
+          s.output.health = 'healthy'
         }
         return
       case 'stopStream':
@@ -169,6 +179,8 @@ class PreviewBridgeModel {
           s.session === 'outputUnavailable'
         ) {
           s.session = 'ready'
+          s.output.faultReported = false
+          s.output.health = 'healthy'
         }
         return
       case 'selectOutput':
@@ -178,6 +190,7 @@ class PreviewBridgeModel {
           )
         ) {
           s.selectedOutputId = command.deviceId
+          s.output.selectionRetained = true
         }
         return
       case 'setGain':
@@ -234,11 +247,15 @@ class PreviewBridgeModel {
       case 'simulateOutputLost':
         if (s.session === 'streaming') {
           s.session = 'outputUnavailable'
+          s.output.faultReported = true
+          s.output.health = 'streamError'
         }
         return
       case 'simulateOutputRestored':
         if (s.session === 'outputUnavailable') {
           s.session = 'streaming'
+          s.output.faultReported = false
+          s.output.health = 'healthy'
         }
         return
       case 'simulatePairingConsumed':
@@ -298,6 +315,12 @@ class PreviewBridgeModel {
             : s.pairing === 'expired'
               ? 0
               : null,
+      },
+      output: {
+        selectionRetained: s.output.selectionRetained,
+        streamActive: s.session === 'streaming',
+        faultReported: s.output.faultReported,
+        health: s.output.health,
       },
       metrics: structuredClone(s.metrics),
       previewAdapter: true,
@@ -450,6 +473,10 @@ describe('PreviewDesktopBridge property', () => {
       // Reachable-state invariants that every snapshot must satisfy.
       expect(observed.gain).toBeGreaterThanOrEqual(0)
       expect(observed.gain).toBeLessThanOrEqual(1)
+      expect(observed.output.streamActive).toBe(observed.session === 'streaming')
+      if (observed.output.health === 'healthy') {
+        expect(observed.output.faultReported).toBe(false)
+      }
       if (observed.pairing.state === 'active') {
         expect(observed.session).toBe('pairing')
       }

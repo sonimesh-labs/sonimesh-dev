@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Check, Headphones, Volume2, VolumeX } from '@lucide/vue'
+import { Activity, Check, CircleAlert, Headphones, Volume2, VolumeX } from '@lucide/vue'
 
-import type { OutputDevice } from '../types'
+import type { OutputDevice, OutputHealth, OutputSnapshot } from '../types'
 
 const props = defineProps<{
   devices: OutputDevice[]
   selectedId: string | null
+  output: OutputSnapshot
   gain: number
   muted: boolean
   busy: boolean
@@ -21,6 +22,18 @@ const emit = defineEmits<{
 
 const selectedDevice = computed(() => props.devices.find((device) => device.id === props.selectedId) ?? null)
 const volumeLabel = computed(() => (props.muted ? 'Muted' : `${Math.round(props.gain * 100)}%`))
+
+const healthLabels: Record<OutputHealth, string> = {
+  healthy: 'Healthy',
+  callbackCapacityExceeded: 'Callback capacity exceeded',
+  streamError: 'Stream error',
+}
+
+const healthDetails: Record<OutputHealth, string> = {
+  healthy: 'The output callback is running inside its bounded path.',
+  callbackCapacityExceeded: 'A callback exceeded the preallocated safe output bound.',
+  streamError: 'The backend reported an asynchronous stream fault.',
+}
 </script>
 
 <template>
@@ -39,6 +52,19 @@ const volumeLabel = computed(() => (props.muted ? 'Muted' : `${Math.round(props.
       <div>
         <strong>{{ selectedDevice.label }}</strong>
         <span>{{ preview ? 'Synthetic preview · ' : '' }}{{ selectedDevice.sampleRateHz.toLocaleString() }} Hz · {{ selectedDevice.channels }} channels</span>
+      </div>
+    </div>
+
+    <div class="output-status" :class="`health-${output.health}`" aria-label="Output health">
+      <span class="output-status-icon" aria-hidden="true">
+        <CircleAlert v-if="output.health === 'streamError'" :size="16" />
+        <Activity v-else-if="output.health === 'callbackCapacityExceeded'" :size="16" />
+        <Check v-else :size="16" />
+      </span>
+      <div>
+        <p class="output-status-line">{{ output.streamActive ? 'Stream active' : 'Stream idle' }} · {{ healthLabels[output.health] }}</p>
+        <p class="output-status-detail">{{ healthDetails[output.health] }}</p>
+        <p v-if="output.faultReported" class="output-status-fault">A stream fault was reported; reselect or reconnect the output.</p>
       </div>
     </div>
 

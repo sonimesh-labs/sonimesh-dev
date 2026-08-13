@@ -43,6 +43,12 @@ function receiverSnapshot(session: DesktopSnapshot['session']): DesktopSnapshot 
     selectedOutputId: null,
     gain: 1,
     muted: false,
+    output: {
+      selectionRetained: false,
+      streamActive: false,
+      faultReported: false,
+      health: 'healthy',
+    },
     pairing: { state: 'inactive', expiresInSeconds: null },
     metrics: {
       authenticatedPackets: '0',

@@ -50,6 +50,12 @@ function previewSnapshot(): DesktopSnapshot {
     selectedOutputId: 'default',
     gain: 1,
     muted: false,
+    output: {
+      selectionRetained: true,
+      streamActive: false,
+      faultReported: false,
+      health: 'healthy',
+    },
     pairing: { state: 'consumed', expiresInSeconds: null },
     metrics: {
       authenticatedPackets: '12844',
@@ -278,6 +284,28 @@ describe('App', () => {
 
     expect(desktopBridgeMock.setGain).toHaveBeenCalledWith(0.5)
     expect(wrapper.get('.volume-value').text()).toBe('50%')
+  })
+
+  it('surfaces a simulated output fault in the output panel', async () => {
+    desktopBridgeMock.snapshot.mockResolvedValueOnce({ ...previewSnapshot(), session: 'streaming' })
+    const wrapper = mount(App)
+    await flushPromises()
+
+    desktopBridgeMock.simulateOutputLost.mockResolvedValueOnce({
+      ...previewSnapshot(),
+      session: 'outputUnavailable',
+      output: { selectionRetained: true, streamActive: false, faultReported: true, health: 'streamError' },
+    })
+
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === 'Simulate output loss')!
+      .trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('.session-chip').text()).toBe('Preview outputUnavailable')
+    expect(wrapper.get('.output-status').text()).toContain('Stream error')
+    expect(wrapper.get('.output-status').text()).toContain('stream fault was reported')
   })
 
 })

@@ -17,6 +17,7 @@ IDENTIFIER_PATTERN = re.compile(r"^[A-Z][A-Za-z0-9_]*$")
 ALIGNMENTS = (
     ("SessionState", "SessionPhase", "crates/sonimesh-app/src/session.rs"),
     ("PairingState", "PairingSnapshotState", "crates/sonimesh-app/src/control_snapshot.rs"),
+    ("OutputHealth", "OutputHealth", "crates/sonimesh-platform/src/output.rs"),
 )
 
 # StreamMetrics fields the desktop preview synthesizes for derived UI values;
@@ -26,6 +27,7 @@ PREVIEW_ONLY_STREAM_FIELDS = frozenset({"currentJitterMs", "playoutDelayMs"})
 
 STRUCT_ALIGNMENTS = (
     ("StreamMetrics", "StreamMetricsSnapshot", "crates/sonimesh-diagnostics/src/metrics.rs"),
+    ("OutputSnapshot", "OutputSnapshot", "crates/sonimesh-app/src/control_snapshot.rs"),
 )
 
 
@@ -94,7 +96,7 @@ def rust_struct_fields(source: str, struct_name: str) -> list[str]:
 
     fields: list[str] = []
     for line in source[body_start:body_end].splitlines():
-        field_match = re.match(r"^\s*pub\s+([a-z_][a-z0-9_]*)\s*:", line)
+        field_match = re.match(r"^\s*(?:pub\s+)?([a-z_][a-z0-9_]*)\s*:", line)
         if field_match is not None:
             fields.append(field_match.group(1))
     return fields
@@ -219,11 +221,22 @@ pub enum PairingSnapshotState {
     Expired,
     Revoked,
 }
+
+pub enum OutputHealth {
+    /// No callback or backend fault has been observed.
+    Healthy,
+    /// Callback exceeded the preallocated safe output bound.
+    CallbackCapacityExceeded,
+    /// Backend reported an asynchronous stream error.
+    StreamError,
+}
 """
     TS = """
 export type SessionState = 'idle' | 'pairing' | 'ready' | 'streaming' | 'reconnecting' | 'outputUnavailable'
 
 export type PairingState = 'inactive' | 'active' | 'consumed' | 'expired' | 'revoked'
+
+export type OutputHealth = 'healthy' | 'callbackCapacityExceeded' | 'streamError'
 """
     RUST_SNAPSHOT = """
 pub struct StreamMetricsSnapshot {
@@ -238,6 +251,17 @@ pub struct StreamMetricsSnapshot {
     /// Stream-local resets.
     pub stream_resets: u64,
 }
+
+pub struct OutputSnapshot {
+    /// Whether a recovery selection is retained.
+    selection_retained: bool,
+    /// Whether the controller currently owns an active stream.
+    stream_active: bool,
+    /// Whether a non-healthy output fault has already been reported.
+    fault_reported: bool,
+    /// Latest low-rate output health state.
+    health: OutputHealth,
+}
 """
     TS_INTERFACE = """
 export interface StreamMetrics {
@@ -248,6 +272,13 @@ export interface StreamMetrics {
   streamResets: MetricCounter
   currentJitterMs: number
   playoutDelayMs: number
+}
+
+export interface OutputSnapshot {
+  selectionRetained: boolean
+  streamActive: boolean
+  faultReported: boolean
+  health: OutputHealth
 }
 """
 
@@ -289,7 +320,9 @@ export interface StreamMetrics {
             [
                 "preview alignment is invalid: Rust enum SessionPhase is not declared",
                 "preview alignment is invalid: Rust enum PairingSnapshotState is not declared",
+                "preview alignment is invalid: Rust enum OutputHealth is not declared",
                 "preview alignment is invalid: Rust struct StreamMetricsSnapshot is not declared",
+                "preview alignment is invalid: Rust struct OutputSnapshot is not declared",
             ],
         )
 
@@ -299,6 +332,7 @@ export interface StreamMetrics {
             "  | 'streaming' | 'reconnecting'\n"
             "  | 'outputUnavailable'\n"
             "export type PairingState = 'inactive' | 'active' | 'consumed' | 'expired' | 'revoked'\n"
+            "export type OutputHealth = 'healthy' | 'callbackCapacityExceeded' | 'streamError'\n"
         )
         self.assertEqual(
             validate_sources(self.RUST + self.RUST_SNAPSHOT, ts + self.TS_INTERFACE), []
@@ -339,6 +373,44 @@ export interface StreamMetrics {
             [
                 "preview alignment is invalid: "
                 "TypeScript interface StreamMetrics is not declared"
+            ],
+        )
+
+
+    def test_reports_output_health_value_drift(self) -> None:
+        rust = self.RUST + self.RUST_SNAPSHOT
+        ts = (self.TS + self.TS_INTERFACE).replace(
+            "'streamError'", "'streamError' | 'deviceGone'"
+        )
+        self.assertEqual(
+            validate_sources(rust, ts),
+            ["OutputHealth has undeclared values: deviceGone"],
+        )
+
+        ts = (self.TS + self.TS_INTERFACE).replace(
+            "export type OutputHealth =", "export type OutputHealthX ="
+        )
+        self.assertEqual(
+            validate_sources(rust, ts),
+            ["preview alignment is invalid: TypeScript union type OutputHealth is not declared"],
+        )
+
+    def test_reports_output_snapshot_field_drift(self) -> None:
+        rust = self.RUST + self.RUST_SNAPSHOT
+        ts = (self.TS + self.TS_INTERFACE).replace("  health: OutputHealth\n", "")
+        self.assertEqual(
+            validate_sources(rust, ts),
+            ["OutputSnapshot is missing fields: health"],
+        )
+
+        ts = (self.TS + self.TS_INTERFACE).replace(
+            "  selectionRetained: boolean\n", "  inventedField: boolean\n"
+        )
+        self.assertEqual(
+            validate_sources(rust, ts),
+            [
+                "OutputSnapshot is missing fields: selectionRetained",
+                "OutputSnapshot has undeclared fields: inventedField",
             ],
         )
 

@@ -1,4 +1,4 @@
-import type { DesktopSnapshot, MetricCounter, OutputDevice } from './types'
+import type { DesktopSnapshot, MetricCounter, OutputDevice, SessionState } from './types'
 
 export interface DesktopBridge {
   snapshot(): Promise<DesktopSnapshot>
@@ -43,6 +43,12 @@ const INITIAL_PREVIEW_SNAPSHOT: DesktopSnapshot = {
   selectedOutputId: 'default',
   gain: 1,
   muted: false,
+  output: {
+    selectionRetained: true,
+    streamActive: false,
+    faultReported: false,
+    health: 'healthy',
+  },
   pairing: { state: 'consumed', expiresInSeconds: null },
   metrics: {
     authenticatedPackets: '12844',
@@ -89,14 +95,18 @@ export class PreviewDesktopBridge implements DesktopBridge {
 
   async startStream(): Promise<DesktopSnapshot> {
     if (this.snapshotState.session === 'ready' && this.snapshotState.pairing.state === 'consumed') {
-      this.snapshotState.session = 'streaming'
+      this.setSession('streaming')
+      this.snapshotState.output.faultReported = false
+      this.snapshotState.output.health = 'healthy'
     }
     return this.copy()
   }
 
   async stopStream(): Promise<DesktopSnapshot> {
     if (['streaming', 'reconnecting', 'outputUnavailable'].includes(this.snapshotState.session)) {
-      this.snapshotState.session = 'ready'
+      this.setSession('ready')
+      this.snapshotState.output.faultReported = false
+      this.snapshotState.output.health = 'healthy'
     }
     return this.copy()
   }
@@ -104,6 +114,7 @@ export class PreviewDesktopBridge implements DesktopBridge {
   async selectOutput(deviceId: string): Promise<DesktopSnapshot> {
     if (this.snapshotState.outputDevices.some((device) => device.id === deviceId)) {
       this.snapshotState.selectedOutputId = deviceId
+      this.snapshotState.output.selectionRetained = true
     }
     return this.copy()
   }
@@ -124,7 +135,7 @@ export class PreviewDesktopBridge implements DesktopBridge {
     if (['inactive', 'expired', 'revoked'].includes(this.snapshotState.pairing.state)) {
       this.pairingExpiresAtMillis = Date.now() + PAIRING_INVITATION_LIFETIME_MILLIS
       this.snapshotState.pairing = { state: 'active', expiresInSeconds: PAIRING_INVITATION_LIFETIME_SECONDS }
-      this.snapshotState.session = 'pairing'
+      this.setSession('pairing')
     }
     return this.copy()
   }
@@ -133,7 +144,7 @@ export class PreviewDesktopBridge implements DesktopBridge {
     if (this.snapshotState.pairing.state === 'active') {
       this.pairingExpiresAtMillis = null
       this.snapshotState.pairing = { state: 'expired', expiresInSeconds: 0 }
-      this.snapshotState.session = 'idle'
+      this.setSession('idle')
     }
     return this.copy()
   }
@@ -142,7 +153,7 @@ export class PreviewDesktopBridge implements DesktopBridge {
     if (this.snapshotState.pairing.state === 'consumed') {
       this.pairingExpiresAtMillis = null
       this.snapshotState.pairing = { state: 'revoked', expiresInSeconds: null }
-      this.snapshotState.session = 'idle'
+      this.setSession('idle')
     }
     return this.copy()
   }
@@ -152,14 +163,14 @@ export class PreviewDesktopBridge implements DesktopBridge {
       ['ready', 'streaming'].includes(this.snapshotState.session) &&
       this.snapshotState.pairing.state === 'consumed'
     ) {
-      this.snapshotState.session = 'reconnecting'
+      this.setSession('reconnecting')
     }
     return this.copy()
   }
 
   async simulateReconnected(): Promise<DesktopSnapshot> {
     if (this.snapshotState.session === 'reconnecting') {
-      this.snapshotState.session = 'ready'
+      this.setSession('ready')
     }
     return this.copy()
   }
@@ -172,21 +183,25 @@ export class PreviewDesktopBridge implements DesktopBridge {
       // The session owner retires the trusted session on expiry while the
       // consumed pairing record stays retained for audit; revoke clears it.
       this.pairingExpiresAtMillis = null
-      this.snapshotState.session = 'idle'
+      this.setSession('idle')
     }
     return this.copy()
   }
 
   async simulateOutputLost(): Promise<DesktopSnapshot> {
     if (this.snapshotState.session === 'streaming') {
-      this.snapshotState.session = 'outputUnavailable'
+      this.setSession('outputUnavailable')
+      this.snapshotState.output.faultReported = true
+      this.snapshotState.output.health = 'streamError'
     }
     return this.copy()
   }
 
   async simulateOutputRestored(): Promise<DesktopSnapshot> {
     if (this.snapshotState.session === 'outputUnavailable') {
-      this.snapshotState.session = 'streaming'
+      this.setSession('streaming')
+      this.snapshotState.output.faultReported = false
+      this.snapshotState.output.health = 'healthy'
     }
     return this.copy()
   }
@@ -195,7 +210,7 @@ export class PreviewDesktopBridge implements DesktopBridge {
     if (this.snapshotState.pairing.state === 'active') {
       this.pairingExpiresAtMillis = null
       this.snapshotState.pairing = { state: 'consumed', expiresInSeconds: null }
-      this.snapshotState.session = 'ready'
+      this.setSession('ready')
     }
     return this.copy()
   }
@@ -242,6 +257,11 @@ export class PreviewDesktopBridge implements DesktopBridge {
     return this.copy()
   }
 
+  private setSession(session: SessionState) {
+    this.snapshotState.session = session
+    this.snapshotState.output.streamActive = session === 'streaming'
+  }
+
   private copy(): DesktopSnapshot {
     this.expireInvitationWhenDue(Date.now())
     return structuredClone(this.snapshotState)
@@ -256,7 +276,7 @@ export class PreviewDesktopBridge implements DesktopBridge {
     if (remainingMillis <= 0) {
       this.pairingExpiresAtMillis = null
       this.snapshotState.pairing = { state: 'expired', expiresInSeconds: 0 }
-      this.snapshotState.session = 'idle'
+      this.setSession('idle')
       return
     }
 

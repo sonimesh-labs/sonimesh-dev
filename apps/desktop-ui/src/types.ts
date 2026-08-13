@@ -18,6 +18,19 @@ export interface PairingStatus {
 /** Unsigned cumulative Rust counter encoded without JavaScript number loss. */
 export type MetricCounter = string
 
+export type OutputHealth = 'healthy' | 'callbackCapacityExceeded' | 'streamError'
+
+export interface OutputSnapshot {
+  /** Whether a recovery output selection is retained by the controller. */
+  selectionRetained: boolean
+  /** Whether the controller currently owns an active output stream. */
+  streamActive: boolean
+  /** Whether a non-healthy output fault has already been reported. */
+  faultReported: boolean
+  /** Latest low-rate output health state. */
+  health: OutputHealth
+}
+
 export interface StreamMetrics {
   authenticatedPackets: MetricCounter
   duplicatePackets: MetricCounter
@@ -59,6 +72,8 @@ export interface DesktopSnapshot {
   gain: number
   /** Mute flag published to the realtime render source. */
   muted: boolean
+  /** Redacted output lifecycle mirrored from the Rust control snapshot. */
+  output: OutputSnapshot
   pairing: PairingStatus
   metrics: StreamMetrics
   previewAdapter: boolean

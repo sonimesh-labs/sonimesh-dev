@@ -189,6 +189,16 @@ button:focus-visible, select:focus-visible, a:focus-visible { outline: 3px solid
 .selected-device strong { color: var(--ink-soft); font-size: 12.5px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .selected-device span:not(.device-check) { color: var(--muted); font-size: 10.5px; }
 .device-check { width: 30px; height: 30px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 10px; color: var(--signal-ink); background: var(--signal-soft); }
+.output-status { display: flex; align-items: flex-start; gap: 11px; margin: 0 0 20px; padding: 13px; border: 1px solid var(--line); border-radius: 15px; background: var(--surface-soft); }
+.output-status > div { min-width: 0; display: grid; gap: 4px; }
+.output-status-icon { width: 30px; height: 30px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 10px; color: var(--signal-ink); background: var(--signal-soft); }
+.output-status-line { color: var(--ink-soft); font-size: 12px; font-weight: 700; }
+.output-status-detail { color: var(--muted); font-size: 10.5px; line-height: 1.5; }
+.output-status-fault { color: var(--rose); font-size: 10.5px; line-height: 1.5; }
+.output-status.health-callbackCapacityExceeded { border-color: rgba(51, 121, 234, 0.22); background: var(--blue-soft); }
+.output-status.health-callbackCapacityExceeded .output-status-icon { color: var(--blue); background: rgba(51, 121, 234, 0.10); }
+.output-status.health-streamError { border-color: rgba(191, 64, 83, 0.18); background: var(--rose-soft); }
+.output-status.health-streamError .output-status-icon { color: var(--rose); background: rgba(191, 64, 83, 0.10); }
 .field-label { display: block; margin-bottom: 7px; color: var(--muted); font-size: 10px; font-weight: 750; letter-spacing: 0.08em; text-transform: uppercase; }
 .select-wrap { position: relative; }
 .select-wrap::after { content: "⌄"; position: absolute; top: 50%; right: 14px; color: var(--muted); font-size: 16px; transform: translateY(-58%); pointer-events: none; }

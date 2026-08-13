@@ -19,6 +19,12 @@ describe('PreviewDesktopBridge', () => {
     expect(snapshot.session).toBe('ready')
     expect(snapshot.pairing).toEqual({ state: 'consumed', expiresInSeconds: null })
     expect(snapshot.previewAdapter).toBe(true)
+    expect(snapshot.output).toEqual({
+      selectionRetained: true,
+      streamActive: false,
+      faultReported: false,
+      health: 'healthy',
+    })
   })
 
   it('toggles a streaming session under synthetic trust', async () => {
@@ -115,9 +121,60 @@ describe('PreviewDesktopBridge', () => {
 
     const unavailable = await bridge.simulateOutputLost()
     expect(unavailable.session).toBe('outputUnavailable')
+    expect(unavailable.output).toMatchObject({
+      streamActive: false,
+      faultReported: true,
+      health: 'streamError',
+    })
 
     const restored = await bridge.simulateOutputRestored()
     expect(restored.session).toBe('streaming')
+    expect(restored.output).toMatchObject({
+      streamActive: true,
+      faultReported: false,
+      health: 'healthy',
+    })
+  })
+
+  it('tracks the redacted output lifecycle through start, loss, restore, and stop', async () => {
+    const bridge = new PreviewDesktopBridge()
+
+    const started = await bridge.startStream()
+    expect(started.output).toMatchObject({
+      streamActive: true,
+      faultReported: false,
+      health: 'healthy',
+    })
+
+    const lost = await bridge.simulateOutputLost()
+    expect(lost.output).toMatchObject({
+      streamActive: false,
+      faultReported: true,
+      health: 'streamError',
+    })
+
+    const restored = await bridge.simulateOutputRestored()
+    expect(restored.output).toMatchObject({
+      streamActive: true,
+      faultReported: false,
+      health: 'healthy',
+    })
+
+    const stopped = await bridge.stopStream()
+    expect(stopped.session).toBe('ready')
+    expect(stopped.output).toMatchObject({
+      streamActive: false,
+      faultReported: false,
+      health: 'healthy',
+    })
+  })
+
+  it('retains the output selection when a device is chosen', async () => {
+    const bridge = new PreviewDesktopBridge()
+
+    const selected = await bridge.selectOutput('usb')
+    expect(selected.selectedOutputId).toBe('usb')
+    expect(selected.output.selectionRetained).toBe(true)
   })
 
   it('does not simulate output loss outside streaming', async () => {
