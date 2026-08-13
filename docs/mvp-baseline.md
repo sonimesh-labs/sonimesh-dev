@@ -73,6 +73,11 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   PCM transfer without claiming an Opus backend or physical audio result.
 - a generated, length-prefixed Protobuf control envelope with hard frame and
   field limits for controlled-lab command exchange.
+- symmetric bounded control framing proven over one real TCP connection: both
+  ends read and write length-prefixed envelopes through the same non-blocking
+  framing boundary, so round trips, pipelined wire order, and peer-close
+  retirement hold in both directions before any authenticated transport is
+  added;
 - bounded version-one hello negotiation that selects the exact supported
   protocol version and a canonical fixed intersection of known capabilities;
   receiver start and stop commands require this one-time negotiation, and
