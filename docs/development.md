@@ -101,6 +101,12 @@ SONIMESH_OUTPUT_SOAK_DEVICE_ID, with the same empty/non-Unicode rejection and
 fail-closed unknown-device behavior, so an eight-hour soak can target a pinned
 endpoint instead of the current default on either backend.
 
+The repeated lifecycle smokes (`output_lifecycle_smoke` and
+`wasapi_lifecycle_smoke`) accept the same opaque endpoint identifier through
+SONIMESH_OUTPUT_LIFECYCLE_DEVICE_ID, with the same empty/non-Unicode rejection
+and fail-closed unknown-device behavior, so start/stop cycle evidence can also
+target a pinned endpoint on either backend.
+
 The `tools/latency-measurement` crate provides the deterministic MLS reference
 signal and correlation offset estimator used by the acoustic timing workflow.
 It has no dependencies and is covered by the ordinary `cargo test --workspace`

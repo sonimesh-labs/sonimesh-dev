@@ -4,7 +4,9 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     use std::thread;
 
-    use sonimesh_platform::{AudioOutput, OutputConfig, OutputHealth, RenderSource};
+    use sonimesh_platform::{
+        AudioOutput, OutputConfig, OutputDeviceId, OutputHealth, RenderSource,
+    };
     use windows_wasapi_prototype::WasapiOutput;
 
     struct Silence;
@@ -17,11 +19,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let experiment = experiment_config()?;
     let mut output = WasapiOutput::new();
-    let fixed_config = output.default_output_config(Some(480), 8_192)?;
+    let pinned_id = lifecycle_device_id()?;
+    let device = pinned_id.as_ref().map(|id| OutputDeviceId::new(id.clone()));
+    let fixed_config = output.output_config_for_device(device.as_ref(), Some(480), 8_192)?;
     println!("cycles: {}", experiment.cycles);
     println!(
         "active duration (ms): {}",
         experiment.active_duration.as_millis()
+    );
+    println!(
+        "device selection: {}",
+        if device.is_some() {
+            "pinned"
+        } else {
+            "default"
+        }
     );
     println!(
         "default format: {} Hz, {} channels, {:?}",
@@ -30,7 +42,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("maximum frames: {}", fixed_config.maximum_callback_frames);
 
     for cycle in 1..=experiment.cycles {
-        let config = match output.start(None, fixed_config, Box::new(Silence)) {
+        let config = match output.start(device.as_ref(), fixed_config, Box::new(Silence)) {
             Ok(()) => fixed_config,
             Err(error) => {
                 println!("cycle {cycle}: fixed 480-frame request rejected: {error}");
@@ -38,7 +50,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     requested_callback_frames: None,
                     ..fixed_config
                 };
-                output.start(None, default_config, Box::new(Silence))?;
+                output.start(device.as_ref(), default_config, Box::new(Silence))?;
                 default_config
             }
         };
@@ -160,6 +172,29 @@ fn invalid_input_error(name: &str, message: &str) -> std::io::Error {
     )
 }
 
+#[cfg(windows)]
+fn lifecycle_device_id() -> Result<Option<String>, std::io::Error> {
+    match std::env::var("SONIMESH_OUTPUT_LIFECYCLE_DEVICE_ID") {
+        Ok(value) => validate_lifecycle_device_id(value).map(Some),
+        Err(std::env::VarError::NotPresent) => Ok(None),
+        Err(std::env::VarError::NotUnicode(_)) => Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "SONIMESH_OUTPUT_LIFECYCLE_DEVICE_ID must be valid Unicode",
+        )),
+    }
+}
+
+#[cfg(windows)]
+fn validate_lifecycle_device_id(value: String) -> Result<String, std::io::Error> {
+    if value.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "SONIMESH_OUTPUT_LIFECYCLE_DEVICE_ID must not be empty",
+        ));
+    }
+    Ok(value)
+}
+
 #[cfg(all(test, windows))]
 mod tests {
     use super::*;
@@ -174,6 +209,15 @@ mod tests {
         assert_eq!(parse_u64("1000", "duration", 1_000).unwrap(), 1_000);
         assert!(parse_u64("0", "duration", 1_000).is_err());
         assert!(parse_u64("1001", "duration", 1_000).is_err());
+    }
+
+    #[test]
+    fn lifecycle_device_identifier_bounds_are_explicit() {
+        assert_eq!(
+            validate_lifecycle_device_id("wasapi:endpoint".to_owned()).unwrap(),
+            "wasapi:endpoint"
+        );
+        assert!(validate_lifecycle_device_id(String::new()).is_err());
     }
 }
 

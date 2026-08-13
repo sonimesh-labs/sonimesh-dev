@@ -25,6 +25,7 @@ FIXED_REQUEST_REJECTION_PATTERN = re.compile(
     r"^cycle (?P<cycle>\d+): fixed 480-frame request rejected: .+$"
 )
 FORMAT_PREFIX = "default format: "
+DEVICE_SELECTION_PATTERN = re.compile(r"^device selection: (?P<value>pinned|default)$")
 
 
 @dataclass(frozen=True)
@@ -90,6 +91,7 @@ class LifecycleReport:
     default_format: str
     maximum_frames: int
     statuses: tuple[CycleStatus, ...]
+    device_selection: str | None = None
 
 
 def parse_header(line: str) -> tuple[str, int] | None:
@@ -106,6 +108,11 @@ def parse_configuration_header(line: str) -> tuple[str, str | int] | None:
         if not value.strip():
             raise ValueError("default format header is empty")
         return "default format", value
+    if line.startswith("device selection: "):
+        selection = DEVICE_SELECTION_PATTERN.fullmatch(line)
+        if selection is None:
+            raise ValueError("device selection header must be pinned or default")
+        return "device selection", selection.group("value")
     maximum = MAXIMUM_FRAMES_PATTERN.fullmatch(line)
     if maximum is not None:
         return "maximum frames", int(maximum.group("value"))
@@ -184,6 +191,9 @@ def validate_report(lines: list[str], backend: str) -> LifecycleReport:
         if status is not None:
             statuses.append((line_number, status))
 
+    device_selection = configuration.get("device selection")
+    if device_selection is not None and device_selection not in ("pinned", "default"):
+        raise ValueError("device selection header must be pinned or default")
     cycles = headers.get("cycles")
     active_duration = headers.get("active duration")
     default_format = configuration.get("default format")
@@ -226,6 +236,7 @@ def validate_report(lines: list[str], backend: str) -> LifecycleReport:
         default_format,
         maximum_frames,
         tuple(status for _, status in statuses),
+        device_selection=device_selection,
     )
 
 
@@ -279,6 +290,11 @@ def main() -> int:
 
     observed_maximum = max(status.maximum_frames for status in report.statuses)
     requests = ",".join(sorted({status.request for status in report.statuses}))
+    selection = (
+        f" device_selection={report.device_selection}"
+        if report.device_selection is not None
+        else ""
+    )
     print(
         "output lifecycle log: ok "
         f"backend={BACKENDS[arguments.backend].name} "
@@ -288,6 +304,7 @@ def main() -> int:
         f"declared_max_frames={report.maximum_frames} "
         f"requests={requests} "
         f"max_frames={observed_maximum}"
+        f"{selection}"
     )
     return 0
 
@@ -308,6 +325,37 @@ class LifecycleLogTests(unittest.TestCase):
         )
         self.assertEqual(report.cycles, 2)
         self.assertEqual(report.statuses[1].request, "default")
+        self.assertIsNone(report.device_selection)
+
+    def test_accepts_optional_device_selection_header(self) -> None:
+        transcript = [
+            "cycles: 1",
+            "active duration (ms): 250",
+            "device selection: pinned",
+            "default format: 48000 Hz, 8 channels, F32",
+            "maximum frames: 8192",
+            cpal_status(1, "480", 25, 480),
+        ]
+        report = validate_report(transcript, "cpal")
+        self.assertEqual(report.device_selection, "pinned")
+
+        legacy = [line for line in transcript if not line.startswith("device selection:")]
+        report = validate_report(legacy, "cpal")
+        self.assertIsNone(report.device_selection)
+
+    def test_rejects_malformed_device_selection_header(self) -> None:
+        transcript = [
+            "cycles: 1",
+            "active duration (ms): 250",
+            "device selection: other",
+            "default format: 48000 Hz, 8 channels, F32",
+            "maximum frames: 8192",
+            cpal_status(1, "480", 25, 480),
+        ]
+        with self.assertRaisesRegex(
+            ValueError, "device selection header must be pinned or default"
+        ):
+            validate_report(transcript, "cpal")
 
     def test_rejects_missing_cycle_and_unhealthy_status(self) -> None:
         transcript = [

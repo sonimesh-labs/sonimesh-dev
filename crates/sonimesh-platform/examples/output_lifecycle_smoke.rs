@@ -4,11 +4,20 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     use std::thread;
 
-    use sonimesh_platform::{AudioOutput, CpalOutput, OutputHealth};
+    use sonimesh_platform::{AudioOutput, CpalOutput, OutputDeviceId, OutputError, OutputHealth};
 
     let experiment = experiment_config()?;
     let mut output = CpalOutput::new();
-    let probe = output.default_device_probe()?;
+    let pinned_id = lifecycle_device_id()?;
+    let device = pinned_id.as_ref().map(|id| OutputDeviceId::new(id.clone()));
+    let probe = match device.as_ref() {
+        Some(selected) => output
+            .probe_devices()?
+            .into_iter()
+            .find(|candidate| candidate.device.id == *selected)
+            .ok_or(OutputError::DeviceUnavailable)?,
+        None => output.default_device_probe()?,
+    };
     let fixed_config = probe.output_config(Some(480), 8_192)?;
 
     println!("cycles: {}", experiment.cycles);
@@ -17,13 +26,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         experiment.active_duration.as_millis()
     );
     println!(
+        "device selection: {}",
+        if device.is_some() {
+            "pinned"
+        } else {
+            "default"
+        }
+    );
+    println!("output device: {}", probe.device.display_name);
+    println!(
         "default format: {} Hz, {} channels, {}",
         probe.sample_rate_hz, probe.channels, probe.backend_sample_format
     );
     println!("maximum frames: {}", fixed_config.maximum_callback_frames);
 
     for cycle in 1..=experiment.cycles {
-        let config = start_with_fixed_or_default(&mut output, fixed_config, cycle)?;
+        let config =
+            start_with_fixed_or_default(&mut output, device.as_ref(), fixed_config, cycle)?;
         thread::sleep(experiment.active_duration);
         let status = output.status();
         let health = output.health();
@@ -144,6 +163,7 @@ fn invalid_input_error(name: &str, message: &str) -> std::io::Error {
 #[cfg(all(windows, feature = "cpal-output"))]
 fn start_with_fixed_or_default(
     output: &mut sonimesh_platform::CpalOutput,
+    device: Option<&sonimesh_platform::OutputDeviceId>,
     fixed_config: sonimesh_platform::OutputConfig,
     cycle: u32,
 ) -> Result<sonimesh_platform::OutputConfig, sonimesh_platform::OutputError> {
@@ -157,7 +177,7 @@ fn start_with_fixed_or_default(
         }
     }
 
-    match output.start(None, fixed_config, Box::new(Silence)) {
+    match output.start(device, fixed_config, Box::new(Silence)) {
         Ok(()) => Ok(fixed_config),
         Err(error) => {
             println!("cycle {cycle}: fixed 480-frame request rejected: {error}");
@@ -165,10 +185,33 @@ fn start_with_fixed_or_default(
                 requested_callback_frames: None,
                 ..fixed_config
             };
-            output.start(None, default_config, Box::new(Silence))?;
+            output.start(device, default_config, Box::new(Silence))?;
             Ok(default_config)
         }
     }
+}
+
+#[cfg(all(windows, feature = "cpal-output"))]
+fn lifecycle_device_id() -> Result<Option<String>, std::io::Error> {
+    match std::env::var("SONIMESH_OUTPUT_LIFECYCLE_DEVICE_ID") {
+        Ok(value) => validate_lifecycle_device_id(value).map(Some),
+        Err(std::env::VarError::NotPresent) => Ok(None),
+        Err(std::env::VarError::NotUnicode(_)) => Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "SONIMESH_OUTPUT_LIFECYCLE_DEVICE_ID must be valid Unicode",
+        )),
+    }
+}
+
+#[cfg(all(windows, feature = "cpal-output"))]
+fn validate_lifecycle_device_id(value: String) -> Result<String, std::io::Error> {
+    if value.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "SONIMESH_OUTPUT_LIFECYCLE_DEVICE_ID must not be empty",
+        ));
+    }
+    Ok(value)
 }
 
 #[cfg(all(test, windows, feature = "cpal-output"))]
@@ -185,6 +228,15 @@ mod tests {
         assert_eq!(parse_u64("1000", "duration", 1_000).unwrap(), 1_000);
         assert!(parse_u64("0", "duration", 1_000).is_err());
         assert!(parse_u64("1001", "duration", 1_000).is_err());
+    }
+
+    #[test]
+    fn lifecycle_device_identifier_bounds_are_explicit() {
+        assert_eq!(
+            validate_lifecycle_device_id("wasapi:endpoint".to_owned()).unwrap(),
+            "wasapi:endpoint"
+        );
+        assert!(validate_lifecycle_device_id(String::new()).is_err());
     }
 }
 
