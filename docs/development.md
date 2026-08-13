@@ -88,6 +88,12 @@ renders silence while recording callback sizes. It is not part of ordinary CI:
 cargo run -p sonimesh-platform --example output_smoke --features cpal-output
 ~~~
 
+Set SONIMESH_OUTPUT_SMOKE_DEVICE_ID to an opaque endpoint identifier from the
+probe to target a pinned output device instead of the current default; an empty
+or non-Unicode value is rejected. This keeps the same bounded callback
+measurement available for non-default endpoints such as a specific Realtek or
+USB device.
+
 The `tools/latency-measurement` crate provides the deterministic MLS reference
 signal and correlation offset estimator used by the acoustic timing workflow.
 It has no dependencies and is covered by the ordinary `cargo test --workspace`

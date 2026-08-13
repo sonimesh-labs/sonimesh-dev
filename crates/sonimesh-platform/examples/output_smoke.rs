@@ -4,7 +4,9 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     use std::thread;
 
-    use sonimesh_platform::{AudioOutput, CpalOutput, OutputConfig, RenderSource};
+    use sonimesh_platform::{
+        AudioOutput, CpalOutput, OutputConfig, OutputDeviceId, OutputError, RenderSource,
+    };
 
     struct Silence;
 
@@ -15,14 +17,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let mut output = CpalOutput::new();
-    let probe = output.default_device_probe()?;
-    println!("default device: {}", probe.device.display_name);
+    let pinned_id = smoke_device_id()?;
+    let device = pinned_id.as_ref().map(|id| OutputDeviceId::new(id.clone()));
+    let probe = match device.as_ref() {
+        Some(selected) => output
+            .probe_devices()?
+            .into_iter()
+            .find(|candidate| candidate.device.id == *selected)
+            .ok_or(OutputError::DeviceUnavailable)?,
+        None => output.default_device_probe()?,
+    };
+    println!(
+        "device selection: {}",
+        if device.is_some() {
+            "pinned"
+        } else {
+            "default"
+        }
+    );
+    println!("output device: {}", probe.device.display_name);
     println!(
         "default format: {} Hz, {} channels, {}",
         probe.sample_rate_hz, probe.channels, probe.backend_sample_format
     );
     let fixed_config = probe.output_config(Some(480), 8_192)?;
-    let config = match output.start(None, fixed_config, Box::new(Silence)) {
+    let config = match output.start(device.as_ref(), fixed_config, Box::new(Silence)) {
         Ok(()) => fixed_config,
         Err(error) => {
             println!("fixed 480-frame request rejected: {error}");
@@ -30,7 +49,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 requested_callback_frames: None,
                 ..fixed_config
             };
-            output.start(None, default_config, Box::new(Silence))?;
+            output.start(device.as_ref(), default_config, Box::new(Silence))?;
             default_config
         }
     };
@@ -117,6 +136,32 @@ fn smoke_duration_from_value(value: &str) -> Result<std::time::Duration, std::io
     Ok(std::time::Duration::from_secs(seconds))
 }
 
+/// Reads the optional pinned endpoint for this smoke run.
+///
+/// An absent variable selects the current Windows default render endpoint.
+#[cfg(all(windows, feature = "cpal-output"))]
+fn smoke_device_id() -> Result<Option<String>, std::io::Error> {
+    match std::env::var("SONIMESH_OUTPUT_SMOKE_DEVICE_ID") {
+        Ok(value) => validate_smoke_device_id(value).map(Some),
+        Err(std::env::VarError::NotPresent) => Ok(None),
+        Err(std::env::VarError::NotUnicode(_)) => Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "SONIMESH_OUTPUT_SMOKE_DEVICE_ID must be valid Unicode",
+        )),
+    }
+}
+
+#[cfg(all(windows, feature = "cpal-output"))]
+fn validate_smoke_device_id(value: String) -> Result<String, std::io::Error> {
+    if value.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "SONIMESH_OUTPUT_SMOKE_DEVICE_ID must not be empty",
+        ));
+    }
+    Ok(value)
+}
+
 #[cfg(all(test, windows, feature = "cpal-output"))]
 mod tests {
     use super::*;
@@ -128,6 +173,15 @@ mod tests {
         assert!(smoke_duration_from_value("0").is_err());
         assert!(smoke_duration_from_value("28801").is_err());
         assert!(smoke_duration_from_value("ten").is_err());
+    }
+
+    #[test]
+    fn smoke_device_identifier_bounds_are_explicit() {
+        assert_eq!(
+            validate_smoke_device_id("wasapi:endpoint".to_owned()).unwrap(),
+            "wasapi:endpoint"
+        );
+        assert!(validate_smoke_device_id(String::new()).is_err());
     }
 }
 
