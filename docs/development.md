@@ -21,6 +21,7 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-targets --all-features
 cargo run -p sonimesh-network-simulator
 python tools/check_workspace_boundaries.py
+python tools/check_doc_links.py
 python tools/check_fuzz_targets.py
 python tools/check_adr_index.py
 python tools/check_preview_alignment.py
@@ -50,7 +51,9 @@ boundary in pure standard-library Python and cross-check the pins published in t
 protocol docs, the Rust tests, and the Kotlin tests. `check_ci_wiring.py` verifies
 that every `tools/` checker is wired into CI with its required
 mode and that the contributor-facing Core checks block documents the same tools with the
-same modes.
+same modes. `check_doc_links.py` verifies that every relative Markdown link in the
+repository-owned documentation resolves to an existing file, skipping generated directories
+and fenced code blocks.
 
 ## Fuzz checks
 
