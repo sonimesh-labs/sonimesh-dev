@@ -220,9 +220,14 @@ impl PeakLimiter {
 
     /// Advances the gain state toward `required`: instant attack when the
     /// input needs more reduction, smooth exponential release otherwise.
+    ///
+    /// The attack ratio `ceiling / magnitude` can underflow to zero for an
+    /// extreme finite sample against a very low ceiling; flooring at the
+    /// smallest positive subnormal keeps the documented `(0.0, 1.0]` gain bound
+    /// while still reducing that sample to inaudible silence.
     fn advance(&mut self, required: f32) {
         if required < self.gain {
-            self.gain = required;
+            self.gain = required.max(f32::from_bits(1));
         } else {
             self.gain += (1.0 - self.gain) * self.config.release_coefficient;
         }
@@ -408,6 +413,21 @@ mod tests {
         ));
         assert!(samples.iter().all(|sample| (sample - 0.5).abs() < 1e-6));
         assert_close(limiter.gain(), 1.0);
+    }
+
+    #[test]
+    fn extreme_peaks_keep_the_gain_strictly_positive() {
+        // `ceiling / magnitude` underflows to zero for a huge finite sample
+        // against a very low ceiling; the documented (0.0, 1.0] gain bound and
+        // the exact output ceiling must both survive.
+        let config = LimiterConfig::new(1.27e-12, 0.5).unwrap();
+        let mut limiter = PeakLimiter::new(config);
+        let mut samples = [f32::MAX, 1.0];
+        limiter.apply(&mut samples);
+
+        assert!(limiter.gain() > 0.0 && limiter.gain() <= 1.0);
+        assert!(samples.iter().all(|sample| sample.is_finite()));
+        assert!(samples.iter().all(|sample| sample.abs() <= config.ceiling));
     }
 
     #[test]
