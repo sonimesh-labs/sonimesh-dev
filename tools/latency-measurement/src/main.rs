@@ -16,6 +16,7 @@ use sonimesh_latency_measurement::{
 };
 
 /// Top-level parsed command.
+#[derive(Debug)]
 enum Parsed {
     /// Show usage text.
     Help,
@@ -28,6 +29,7 @@ enum Parsed {
 }
 
 /// Arguments for the `generate` subcommand.
+#[derive(Debug)]
 struct GenerateArgs {
     sample_rate_hz: u32,
     seconds: u32,
@@ -36,6 +38,7 @@ struct GenerateArgs {
 }
 
 /// Arguments for the `measure` subcommand.
+#[derive(Debug)]
 struct MeasureArgs {
     max_search_ms: f64,
     coarse_factor: usize,
@@ -56,7 +59,7 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<(), Box<dyn Error>> {
-    match parse_args()? {
+    match parse_args(std::env::args().skip(1))? {
         Parsed::Help => print_usage(),
         Parsed::Generate(args) => run_generate(&args)?,
         Parsed::Measure(args) => run_measure(&args)?,
@@ -163,8 +166,11 @@ fn run_summary() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn parse_args() -> Result<Parsed, Box<dyn Error>> {
-    let mut args = std::env::args().skip(1);
+fn parse_args<I>(args: I) -> Result<Parsed, Box<dyn Error>>
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut args = args.into_iter();
     let Some(first) = args.next() else {
         return Ok(Parsed::Help);
     };
@@ -346,4 +352,271 @@ Options:
   --distinctness-ratio R  Minimum best/second-best peak ratio (default: 3.0).
   --probe-ms N            Correlation probe duration in ms (default: 32768 samples)."
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::{
+        Parsed, parse_args, parse_f64, parse_generate, parse_measure, parse_u32, parse_usize,
+    };
+
+    fn args(items: &[&str]) -> Vec<String> {
+        items.iter().map(|item| (*item).to_owned()).collect()
+    }
+
+    fn assert_close(actual: f64, expected: f64) {
+        assert!(
+            (actual - expected).abs() < 1e-9,
+            "expected {expected}, observed {actual}"
+        );
+    }
+
+    #[test]
+    fn empty_and_help_parse_to_help() {
+        assert!(matches!(parse_args(args(&[])).expect("help"), Parsed::Help));
+        assert!(matches!(
+            parse_args(args(&["--help"])).expect("help"),
+            Parsed::Help
+        ));
+        assert!(matches!(
+            parse_args(args(&["-h"])).expect("help"),
+            Parsed::Help
+        ));
+    }
+
+    #[test]
+    fn generate_uses_defaults() {
+        let Parsed::Generate(generate) =
+            parse_args(args(&["generate", "reference.wav"])).expect("parsed")
+        else {
+            panic!("expected generate");
+        };
+        assert_eq!(generate.sample_rate_hz, 48_000);
+        assert_eq!(generate.seconds, 10);
+        assert_eq!(generate.seed, 7);
+        assert_eq!(generate.output, PathBuf::from("reference.wav"));
+    }
+
+    #[test]
+    fn generate_accepts_all_flags() {
+        let Parsed::Generate(generate) = parse_args(args(&[
+            "generate",
+            "--sample-rate",
+            "44100",
+            "--seconds",
+            "5",
+            "--seed",
+            "11",
+            "ref.wav",
+        ]))
+        .expect("parsed") else {
+            panic!("expected generate");
+        };
+        assert_eq!(generate.sample_rate_hz, 44_100);
+        assert_eq!(generate.seconds, 5);
+        assert_eq!(generate.seed, 11);
+        assert_eq!(generate.output, PathBuf::from("ref.wav"));
+    }
+
+    #[test]
+    fn generate_rejects_missing_output_and_extra_paths() {
+        let error = parse_args(args(&["generate"])).expect_err("missing output");
+        assert!(error.to_string().contains("requires an output path"));
+
+        let error = parse_args(args(&["generate", "a.wav", "b.wav"])).expect_err("extra path");
+        assert!(error.to_string().contains("exactly one output path"));
+    }
+
+    #[test]
+    fn generate_rejects_zero_rate_and_seconds() {
+        let error = parse_args(args(&["generate", "--sample-rate", "0", "ref.wav"]))
+            .expect_err("zero rate");
+        assert!(error.to_string().contains("--sample-rate must be non-zero"));
+
+        let error =
+            parse_args(args(&["generate", "--seconds", "0", "ref.wav"])).expect_err("zero seconds");
+        assert!(error.to_string().contains("--seconds must be non-zero"));
+    }
+
+    #[test]
+    fn generate_rejects_unknown_flag_and_missing_value() {
+        let error =
+            parse_args(args(&["generate", "--bogus", "ref.wav"])).expect_err("unknown flag");
+        assert!(
+            error
+                .to_string()
+                .contains("unknown flag `--bogus` for generate")
+        );
+
+        let error = parse_args(args(&["generate", "--seed"])).expect_err("missing value");
+        assert!(error.to_string().contains("--seed requires a value"));
+    }
+
+    #[test]
+    fn generate_help_short_circuits() {
+        assert!(matches!(
+            parse_args(args(&["generate", "--help", "ref.wav"])).expect("help"),
+            Parsed::Help
+        ));
+    }
+
+    #[test]
+    fn measure_uses_defaults() {
+        let Parsed::Measure(measure) =
+            parse_args(args(&["measure", "reference.wav", "recording.wav"])).expect("parsed")
+        else {
+            panic!("expected measure");
+        };
+        assert_close(measure.max_search_ms, 1_000.0);
+        assert_eq!(measure.coarse_factor, 16);
+        assert_close(measure.distinctness_ratio, 3.0);
+        assert!(measure.probe_ms.is_none());
+        assert_eq!(measure.reference, PathBuf::from("reference.wav"));
+        assert_eq!(measure.recordings, vec![PathBuf::from("recording.wav")]);
+    }
+
+    #[test]
+    fn measure_accepts_all_flags() {
+        let Parsed::Measure(measure) = parse_args(args(&[
+            "measure",
+            "--max-search-ms",
+            "500",
+            "--coarse-factor",
+            "8",
+            "--distinctness-ratio",
+            "2.5",
+            "--probe-ms",
+            "32",
+            "reference.wav",
+            "a.wav",
+            "b.wav",
+        ]))
+        .expect("parsed") else {
+            panic!("expected measure");
+        };
+        assert_close(measure.max_search_ms, 500.0);
+        assert_eq!(measure.coarse_factor, 8);
+        assert_close(measure.distinctness_ratio, 2.5);
+        let probe = measure.probe_ms.expect("probe configured");
+        assert_close(probe, 32.0);
+        assert_eq!(measure.reference, PathBuf::from("reference.wav"));
+        assert_eq!(
+            measure.recordings,
+            vec![PathBuf::from("a.wav"), PathBuf::from("b.wav")]
+        );
+    }
+
+    #[test]
+    fn measure_requires_reference_and_recording() {
+        let error = parse_args(args(&["measure", "reference.wav"])).expect_err("single path");
+        assert!(error.to_string().contains("at least one recording"));
+
+        let error = parse_args(args(&["measure"])).expect_err("no paths");
+        assert!(error.to_string().contains("at least one recording"));
+    }
+
+    #[test]
+    fn measure_rejects_non_positive_bounds() {
+        let error = parse_args(args(&["measure", "--max-search-ms", "0", "r.wav", "c.wav"]))
+            .expect_err("zero search");
+        assert!(
+            error
+                .to_string()
+                .contains("--max-search-ms must be positive")
+        );
+
+        let error = parse_args(args(&["measure", "--coarse-factor", "0", "r.wav", "c.wav"]))
+            .expect_err("zero coarse");
+        assert!(
+            error
+                .to_string()
+                .contains("--coarse-factor must be non-zero")
+        );
+
+        let error = parse_args(args(&[
+            "measure",
+            "--distinctness-ratio",
+            "0",
+            "r.wav",
+            "c.wav",
+        ]))
+        .expect_err("zero ratio");
+        assert!(
+            error
+                .to_string()
+                .contains("--distinctness-ratio must be positive")
+        );
+    }
+
+    #[test]
+    fn measure_rejects_unknown_flag_and_help_short_circuits() {
+        let error =
+            parse_args(args(&["measure", "--bogus", "r.wav", "c.wav"])).expect_err("unknown flag");
+        assert!(
+            error
+                .to_string()
+                .contains("unknown flag `--bogus` for measure")
+        );
+
+        assert!(matches!(
+            parse_args(args(&["measure", "--help"])).expect("help"),
+            Parsed::Help
+        ));
+    }
+
+    #[test]
+    fn summary_accepts_only_no_arguments() {
+        assert!(matches!(
+            parse_args(args(&["summary"])).expect("summary"),
+            Parsed::Summary
+        ));
+
+        let error = parse_args(args(&["summary", "extra"])).expect_err("extra arg");
+        assert!(error.to_string().contains("summary takes no arguments"));
+    }
+
+    #[test]
+    fn unknown_subcommand_is_rejected() {
+        let error = parse_args(args(&["bogus"])).expect_err("unknown command");
+        assert!(error.to_string().contains("unknown subcommand `bogus`"));
+    }
+
+    #[test]
+    fn typed_value_helpers_validate_missing_and_invalid_input() {
+        let none: Option<&String> = None;
+        assert_eq!(
+            parse_u32(none, "--sample-rate").expect_err("missing"),
+            "--sample-rate requires a value"
+        );
+        assert_eq!(
+            parse_u32(Some(&"abc".to_owned()), "--sample-rate").expect_err("invalid"),
+            "--sample-rate expects an integer: invalid digit found in string"
+        );
+        assert_eq!(
+            parse_u32(Some(&"44100".to_owned()), "--sample-rate").expect("value"),
+            44_100
+        );
+        assert_eq!(
+            parse_usize(Some(&"8".to_owned()), "--coarse-factor").expect("value"),
+            8
+        );
+        assert_close(
+            parse_f64(Some(&"2.5".to_owned()), "--distinctness-ratio").expect("value"),
+            2.5,
+        );
+    }
+
+    #[test]
+    fn sub_parsers_reject_missing_flag_values() {
+        assert_eq!(
+            parse_generate(&args(&["--seconds"])).expect_err("missing value"),
+            "--seconds requires a value"
+        );
+        assert_eq!(
+            parse_measure(&args(&["--probe-ms"])).expect_err("missing value"),
+            "--probe-ms requires a value"
+        );
+    }
 }
