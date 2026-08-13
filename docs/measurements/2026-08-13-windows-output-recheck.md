@@ -128,6 +128,33 @@ errors.
 These repeat the same 60-second observations recorded on 2026-07-20 on this
 host. This is an extended silent repeat, not the required eight-hour soak.
 
+## Repeated lifecycle smoke (default and pinned Realtek)
+
+The CPAL lifecycle smoke (`output_lifecycle_smoke`) now accepts
+`SONIMESH_OUTPUT_LIFECYCLE_DEVICE_ID`; an unset variable selects the current
+default render endpoint. Five 250 ms start/stop cycles ran against the default
+endpoint and against the pinned Realtek endpoint on the same boot. Every cycle
+reported a healthy stream with a 480-frame request and zero capacity faults or
+stream errors.
+
+| Field | Default endpoint | Pinned Realtek |
+| --- | ---: | ---: |
+| Cycles | 5 | 5 |
+| Active duration per cycle | 250 ms | 250 ms |
+| Device selection | default | pinned |
+| Format | 48,000 Hz, 8 channels, Float32 | 48,000 Hz, 2 channels, Float32 |
+| Latest observed frames | 480 | 512 |
+| Largest observed frames | 1,056 | 1,126 |
+| Oversized callbacks | 0 | 0 |
+| Stream errors | 0 | 0 |
+
+The retained transcripts validate with `check_output_lifecycle_log.py
+--backend cpal` and both record the exercised `device_selection` header. An
+unknown pinned identifier was rejected with `DeviceUnavailable` before the
+first cycle, confirming the selection fails closed. These are backend-local
+software observations; they do not cover device removal, default-role change,
+sleep/wake, or a long soak.
+
 ## Interpretation and remaining work
 
 The default-endpoint runs reproduce the known backend difference: CPAL received
@@ -136,7 +163,9 @@ a 1,056-frame callback under a 480-frame request while direct WASAPI rendered
 add the first symmetric two-backend comparison on a 512-frame reported endpoint:
 CPAL observed a 1,126-frame maximum callback while direct WASAPI rendered
 512-frame quanta after a 1,126-frame priming buffer. CPAL's largest callback
-therefore matched the direct-WASAPI endpoint buffer on both endpoints. All
+therefore matched the direct-WASAPI endpoint buffer on both endpoints. The
+five-cycle lifecycle runs repeated the same callback-size pattern on both
+endpoints with zero faults across start/stop boundaries. All
 silent runs stayed inside the 8,192-frame source bound with zero capacity
 faults and zero stream errors.
 
