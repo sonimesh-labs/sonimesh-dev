@@ -137,3 +137,83 @@ pub trait OutputSnapshotSource {
     #[must_use]
     fn snapshot(&self) -> OutputSnapshot;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{DesktopControlSnapshot, OutputSnapshot, PairingSnapshotState};
+    use crate::{PairingRecordState, SessionEvent, SessionState};
+
+    fn output(
+        selection_retained: bool,
+        stream_active: bool,
+        fault_reported: bool,
+    ) -> OutputSnapshot {
+        OutputSnapshot::from_health(
+            selection_retained,
+            stream_active,
+            fault_reported,
+            sonimesh_platform::OutputHealth::Healthy,
+        )
+    }
+
+    #[test]
+    fn output_snapshot_accessors_round_trip() {
+        let snapshot = output(true, true, false);
+        assert!(snapshot.selection_retained());
+        assert!(snapshot.stream_active());
+        assert!(!snapshot.fault_reported());
+        assert_eq!(snapshot.health(), sonimesh_platform::OutputHealth::Healthy);
+    }
+
+    #[test]
+    fn pairing_snapshot_defaults_to_inactive() {
+        assert_eq!(
+            PairingSnapshotState::default(),
+            PairingSnapshotState::Inactive
+        );
+    }
+
+    #[test]
+    fn from_pairing_state_projects_every_record_state() {
+        let cases = [
+            (None, PairingSnapshotState::Inactive),
+            (
+                Some(PairingRecordState::Active),
+                PairingSnapshotState::Active,
+            ),
+            (
+                Some(PairingRecordState::Consumed),
+                PairingSnapshotState::Consumed,
+            ),
+            (
+                Some(PairingRecordState::Expired),
+                PairingSnapshotState::Expired,
+            ),
+            (
+                Some(PairingRecordState::Revoked),
+                PairingSnapshotState::Revoked,
+            ),
+        ];
+        for (record, expected) in cases {
+            let snapshot = DesktopControlSnapshot::from_pairing_state(
+                SessionState::IDLE,
+                record,
+                output(false, false, false),
+            );
+            assert_eq!(snapshot.pairing(), expected);
+        }
+    }
+
+    #[test]
+    fn from_pairing_state_projects_the_session_phase() {
+        let mut session = SessionState::IDLE;
+        session.apply(SessionEvent::StartPairing).unwrap();
+
+        let snapshot = DesktopControlSnapshot::from_pairing_state(
+            session,
+            Some(PairingRecordState::Active),
+            output(false, false, false),
+        );
+        assert_eq!(snapshot.session(), crate::SessionPhase::Pairing);
+    }
+}
