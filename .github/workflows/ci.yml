@@ -118,6 +118,8 @@ jobs:
         working-directory: fuzz
         run: |
           cargo +nightly-2026-07-18 fuzz run control_frame -- -runs=512 -max_len=66052 -timeout=5
+          cargo +nightly-2026-07-18 fuzz run adaptive_jitter_target -- -runs=512 -max_len=64 -timeout=5
+
           cargo +nightly-2026-07-18 fuzz run media_packet -- -runs=512 -max_len=1264 -timeout=5
           cargo +nightly-2026-07-18 fuzz run protected_media_ingress -- -runs=512 -max_len=1264 -timeout=5
           cargo +nightly-2026-07-18 fuzz run pairing_binding -- -runs=512 -max_len=4096 -timeout=5

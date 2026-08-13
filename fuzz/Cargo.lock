@@ -590,7 +590,12 @@ name = "sonimesh-audio"
 version = "0.1.0"
 dependencies = [
  "crossbeam-queue",
+ "sonimesh-diagnostics",
 ]
+
+[[package]]
+name = "sonimesh-diagnostics"
+version = "0.1.0"
 
 [[package]]
 name = "sonimesh-fuzz"

@@ -64,3 +64,10 @@ path = "fuzz_targets/stream_decode_worker.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "adaptive_jitter_target"
+path = "fuzz_targets/adaptive_jitter_target.rs"
+test = false
+doc = false
+bench = false

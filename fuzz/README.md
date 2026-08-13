@@ -6,6 +6,11 @@ production workspace so `libfuzzer-sys` never becomes a shipping dependency.
 
 ## Targets
 
+- `adaptive_jitter_target` feeds arbitrary arrival ticks and sender sample
+  timestamps into the relative arrival-jitter estimator and then the adaptive
+  target controller with arbitrary buffered-frame counts, proving adversarial
+  timing cannot panic the controller, move the target outside its bounded
+  `[min, max]` water levels, or corrupt the reset path.
 - `control_frame` feeds arbitrary bytes plus mutations of the five published
   Hello, StartStream, StopStream, StreamStatus, and ControlError frames into the
   length-prefixed Protobuf control decoder.
@@ -43,6 +48,8 @@ Install the pinned nightly source component and run a target from this directory
 rustup toolchain install nightly-2026-07-18 --component rust-src
 cargo +nightly-2026-07-18 install cargo-fuzz --version 0.13.2 --locked
 cargo +nightly-2026-07-18 fuzz run control_frame -- -max_len=66052
+cargo +nightly-2026-07-18 fuzz run adaptive_jitter_target -- -max_len=64
+
 cargo +nightly-2026-07-18 fuzz run media_packet -- -max_len=1264
 cargo +nightly-2026-07-18 fuzz run protected_media_ingress -- -max_len=1264
 cargo +nightly-2026-07-18 fuzz run pairing_binding -- -max_len=4096
