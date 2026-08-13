@@ -407,9 +407,11 @@ mark unauthenticated input as received.
 The receiver pins a UDP source endpoint only after the first packet completes
 authentication, replay admission, and a bounded jitter decision. Later datagrams
 from another endpoint are rejected before parsing and cannot advance replay
-state. Key-epoch rotation preserves the pin; changing the endpoint requires a
-fresh authenticated media session and fresh key material rather than automatic
-address migration.
+state. Key-epoch rotation preserves the pin; changing the pinned source
+endpoint requires a fresh authenticated media session and fresh key material
+rather than automatic address migration. The sender may retarget its routing
+destination freely without rotating media keys: the destination is routing
+metadata only and never authenticates the peer.
 
 The UDP media transport is bounded in both directions. The sender transmits
 through a non-blocking socket and caps every datagram at
