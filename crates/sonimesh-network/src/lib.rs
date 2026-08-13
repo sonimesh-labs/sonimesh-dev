@@ -1,6 +1,7 @@
 //! Network-domain boundaries for SoniMesh.
 
 mod ingress;
+mod media_session_sender;
 mod protected_ingress;
 mod protocol_authenticator;
 mod redacted_endpoint;
@@ -11,6 +12,9 @@ mod udp_sender;
 mod untrusted_control_stream;
 
 pub use ingress::{Authenticator, IngressError, MediaIngress, ReceivedFrame, StreamIdentity};
+pub use media_session_sender::{
+    MediaSessionSendError, MediaSessionSendOutcome, MediaSessionSender, MediaSessionSenderError,
+};
 pub use protected_ingress::{ProtectedIngressError, ProtectedMediaIngress};
 pub use protocol_authenticator::ProtocolAuthenticator;
 pub use source_endpoint_pin::{SourceEndpointAdmissionError, SourceEndpointPin};

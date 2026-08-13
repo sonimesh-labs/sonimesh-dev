@@ -142,6 +142,13 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   datagrams before touching the socket, never blocks (a full OS send buffer is
   reported as backpressure for the caller's own drop or pacing policy), and
   treats the destination as routing metadata only.
+- a bounded session-level UDP media sender that composes the per-epoch sealer
+  and the non-blocking socket for one stream: it seals and sends bounded frames,
+  reports a full send buffer as backpressure without blocking, refuses a frame
+  that exceeds the plaintext limit before touching the socket, rotates to a
+  strictly newer key epoch (fresh sequence at zero, same session/stream/direction),
+  installs a fresh session with a new context, and treats the destination as
+  routing metadata only.
 - an application-domain UDP receiver pipeline that feeds one socket datagram
   through protected ingress, bounded jitter admission, and non-realtime decode;
   control-session and output lifecycle wiring remain separate.
