@@ -9,7 +9,9 @@
 Repeat the CPAL and direct-WASAPI silent smoke on the current Windows 11
 reference host and repeat the CPAL smoke against a pinned Realtek endpoint, the
 explicitly named remaining evidence in
-[2026-07-17-windows-cpal-smoke.md](./2026-07-17-windows-cpal-smoke.md).
+[2026-07-17-windows-cpal-smoke.md](./2026-07-17-windows-cpal-smoke.md). The
+runs also extend the matrix to a pinned virtual endpoint whose shared-mode
+default format is 44,100 Hz, the first non-48 kHz endpoint on this host.
 
 ## Environment
 
@@ -22,6 +24,7 @@ explicitly named remaining evidence in
 | Backends | CPAL 0.18.1 / direct WASAPI via windows 0.62.2 |
 | Default endpoint | Redacted local display name, 48,000 Hz, 8 channels, Float32, 480-frame reported range |
 | Realtek endpoint | Redacted local display name, 48,000 Hz, 2 channels, Float32, 512-frame reported range |
+| Virtual 44.1 kHz endpoint | Redacted local display name, 44,100 Hz, 2 channels, Float32, 441-frame reported range |
 | Requested frames | 480 for all runs; neither backend used its fallback request |
 | Maximum source capacity | 8,192 frames for all runs |
 
@@ -176,6 +179,64 @@ This extends the pinned-Realtek observation from the two-second smoke to a
 sixty-second window on both backends. It is a silent repeat, not the required
 eight-hour soak.
 
+## Virtual 44.1 kHz endpoint silent smokes
+
+The two-second, sixty-second, and lifecycle smokes were repeated against a
+pinned virtual endpoint whose shared-mode default format is 44,100 Hz, 2
+channels, Float32, with a 441-frame reported range. This is the first
+non-48 kHz endpoint in the output evidence on this host. The fixed 480-frame
+request was accepted by both backends, so neither backend used its fallback
+request path.
+
+### Sixty-second silent smoke (both backends)
+
+| Field | CPAL | Direct WASAPI |
+| --- | ---: | ---: |
+| Callback/render count | 5,999 callbacks | 6,001 renders |
+| Latest observed frames | 441 | 441 |
+| Largest observed frames | 970 | 441 |
+| Endpoint buffer frames | Not exposed by this CPAL smoke | 970 |
+| Primed silence frames | n/a | 970 |
+| Latest local offset | 60,123,783,900 ns | 60,065,154,100 ns |
+| Largest local scheduling gap | 20,624,100 ns | 15,379,100 ns |
+| Capacity faults | 0 | 0 |
+| Stream errors | 0 | 0 |
+
+Both backends rendered 441-frame quanta at 44,100 Hz (about 100 renders per
+second) with zero faults or errors over sixty seconds. CPAL's largest callback
+was 970 frames, which again equals the direct-WASAPI endpoint buffer size on
+the same endpoint, matching the pattern seen on the 48 kHz default and Realtek
+endpoints: CPAL's maximum callback tracks the endpoint buffer while direct
+WASAPI renders the reported quantum after priming that buffer. The offsets and
+gaps are backend-local software timing and are not latency results.
+
+### Repeated lifecycle smoke (both backends)
+
+Five 250 ms start/stop cycles ran against the pinned 44.1 kHz endpoint on the
+same boot for each backend. Every cycle reported a healthy stream with a
+480-frame request and zero capacity faults or stream errors.
+
+| Field | CPAL | Direct WASAPI |
+| --- | ---: | ---: |
+| Cycles | 5 | 5 |
+| Device selection | pinned | pinned |
+| Format | 44.1 kHz, 2 ch, F32 | 44.1 kHz, 2 ch, Float32 |
+| Callbacks/renders per cycle | 25 | 25-26 |
+| Latest observed frames | 441 | 441 |
+| Largest observed frames | 970 | 441 |
+| Primed/endpoint buffer | n/a | 970 |
+| Oversized | 0 | 0 |
+| Stream errors | 0 | 0 |
+
+Both retained lifecycle transcripts validate with
+`check_output_lifecycle_log.py` (`--backend cpal` and `--backend wasapi`) and
+record the exercised `device_selection=pinned` header. The 44.1 kHz runs repeat
+the known backend difference at a non-48 kHz rate: CPAL received a 970-frame
+maximum callback under a 480-frame request while direct WASAPI rendered
+441-frame quanta after a 970-frame priming buffer. These are backend-local
+software observations; they do not cover device removal, default-role change,
+sleep/wake, or a long soak.
+
 ## Interpretation and remaining work
 
 The default-endpoint runs reproduce the known backend difference: CPAL received
@@ -188,7 +249,11 @@ therefore matched the direct-WASAPI endpoint buffer on both endpoints. The
 five-cycle lifecycle runs repeated the same callback-size pattern on both
 endpoints with zero faults across start/stop boundaries, and both backends
 stayed healthy over the sixty-second pinned-Realtek repeat with the expected
-512-frame quanta. All
+512-frame quanta. The 44.1 kHz virtual-endpoint runs reproduce the same
+cross-backend pattern at a non-48 kHz rate: the fixed 480-frame request was
+accepted, both backends rendered 441-frame quanta, and CPAL's 970-frame
+maximum callback again matched the direct-WASAPI 970-frame endpoint buffer.
+All
 silent runs stayed inside the 8,192-frame source bound with zero capacity
 faults and zero stream errors.
 
