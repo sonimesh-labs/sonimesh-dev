@@ -604,6 +604,77 @@ fn connection_loss_keeps_streams_and_reconnect_stops_the_mixer() {
 }
 
 #[test]
+fn reconnect_then_renegotiates_and_restarts_the_stream() {
+    let counters = Arc::new(StreamCounters::default());
+    let mut bridge = bridge();
+    let token = authenticated(&mut bridge);
+    let mut pipeline = pipeline_for(1, 1, Arc::clone(&counters));
+    let mut sealer = sealer();
+
+    start_one(
+        &mut bridge,
+        token,
+        1,
+        1,
+        Some(Arc::clone(&counters)),
+        &mut pipeline,
+    );
+    assert_eq!(bridge.state().phase(), SessionPhase::Streaming);
+    assert_eq!(bridge.mixer().stream_count(), 1);
+    assert!(bridge.output_active());
+
+    let rendered_first = feed_cycle(&mut bridge, &mut pipeline, &mut sealer, 0);
+    assert!(
+        rendered_first.iter().any(|sample| *sample > 0.0),
+        "a started stream must render through the bridge"
+    );
+
+    // Control connection lost: the stream keeps playing inside the grace window.
+    bridge
+        .acknowledge_platform_event(SessionEvent::ConnectionLost)
+        .unwrap();
+    bridge.begin_reconnect_grace(1_000, 5_000).unwrap();
+    assert_eq!(bridge.state().phase(), SessionPhase::Reconnecting);
+    assert_eq!(bridge.mixer().stream_count(), 1);
+
+    // Reconnected before the deadline retires the old streams and stops the
+    // mixer, and the lifecycle returns to ready for a fresh control session.
+    bridge
+        .acknowledge_platform_event(SessionEvent::Reconnected)
+        .unwrap();
+    assert_eq!(bridge.state().phase(), SessionPhase::Ready);
+    assert_eq!(bridge.mixer().stream_count(), 0);
+    assert!(!bridge.output_active());
+    assert_eq!(bridge.mixer().output().stop_calls, 1);
+
+    // The reconnected control channel negotiates a fresh session and restarts
+    // the stream through the same composition entry, recreating the output.
+    let fresh_token = authenticated(&mut bridge);
+    let mut fresh_pipeline = pipeline_for(2, 2, Arc::clone(&counters));
+    start_one(
+        &mut bridge,
+        fresh_token,
+        2,
+        2,
+        Some(Arc::clone(&counters)),
+        &mut fresh_pipeline,
+    );
+    assert_eq!(bridge.state().phase(), SessionPhase::Streaming);
+    assert_eq!(bridge.mixer().stream_count(), 1);
+    assert!(bridge.output_active());
+    assert_eq!(bridge.mixer().output().start_calls, 2);
+
+    // The restarted stream renders through the output like the first one.
+    let mut fresh_sealer =
+        MediaSealer::new(&SessionSecret::new([0xA5; 32]), context(2, 2)).unwrap();
+    let rendered = feed_cycle(&mut bridge, &mut fresh_pipeline, &mut fresh_sealer, 0);
+    assert!(
+        rendered.iter().any(|sample| *sample > 0.0),
+        "a restarted stream must render through the bridge"
+    );
+}
+
+#[test]
 fn expire_control_session_stops_the_mixer() {
     let counters = Arc::new(StreamCounters::default());
     let mut bridge = bridge();
