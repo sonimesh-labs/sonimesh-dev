@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Keep the desktop preview state and metrics aligned with the Rust control plane."""
+"""Keep the desktop preview state, metrics, and control replies aligned with the Rust control plane and wire schema."""
 
 from __future__ import annotations
 
@@ -8,9 +8,7 @@ import sys
 import unittest
 from pathlib import Path
 
-TS_UNION_PATTERN = re.compile(
-    r"export type ([A-Za-z_][A-Za-z0-9_]*) = ([^;]*?)(?:;|(?=\n\s*export (?:type|interface|const|function)|\Z))"
-)
+TS_TYPE_LINE_PATTERN = re.compile(r"export type ([A-Za-z_][A-Za-z0-9_]*) = ?(.*)$")
 TS_LITERAL_PATTERN = re.compile(r"'([A-Za-z0-9_]+)'")
 IDENTIFIER_PATTERN = re.compile(r"^[A-Z][A-Za-z0-9_]*$")
 
@@ -30,9 +28,23 @@ STRUCT_ALIGNMENTS = (
     ("OutputSnapshot", "OutputSnapshot", "crates/sonimesh-app/src/control_snapshot.rs"),
 )
 
+# Receiver-generated control-plane replies surface two bounded contracts: the
+# reply kind mirrors the Rust ControlReply variants and the structured error
+# codes mirror the wire ErrorCode enum minus its UNSPECIFIED sentinel. The wire
+# StreamState enum is deliberately not aligned with the preview SessionState
+# union: STOPPED and FAILED have no session-phase analog.
+REPLY_KIND_ALIGNMENT = ("ControlReply", "kind", "ControlReply")
+ERROR_CODE_ALIGNMENT = ("ControlErrorCode", "ErrorCode", "ERROR_CODE_")
+REPLY_RUST_PATH = "crates/sonimesh-app/src/control_stream/reply.rs"
+PROTO_PATH = "proto/control.proto"
+
 
 def rust_enum_variants(source: str, enum_name: str) -> list[str]:
-    """Returns unit-variant names of one Rust enum, in declaration order."""
+    """Returns variant names of one Rust enum, in declaration order.
+
+    Handles unit variants and variants with struct-like or tuple bodies; brace
+    depth is balanced so field lines are never mistaken for variant names.
+    """
     match = re.search(rf"pub enum {re.escape(enum_name)}\s*\{{", source)
     if match is None:
         raise ValueError(f"Rust enum {enum_name} is not declared")
@@ -57,18 +69,38 @@ def rust_enum_variants(source: str, enum_name: str) -> list[str]:
         candidate = stripped.rstrip(",").strip()
         if IDENTIFIER_PATTERN.fullmatch(candidate) is not None:
             variants.append(candidate)
+            continue
+        header = re.match(r"([A-Z][A-Za-z0-9_]*)\s*[{,(]", candidate)
+        if header is not None:
+            variants.append(header.group(1))
     return variants
 
 
 def ts_union_values(source: str, type_name: str) -> list[str]:
-    """Returns literal values of one TypeScript union type, in declaration order."""
-    matches = list(TS_UNION_PATTERN.finditer(source))
-    if not matches:
+    """Returns literal values of one TypeScript union type, in declaration order.
+
+    Continuation lines that start with `|` extend the union, matching the
+    preview formatting conventions for multi-line unions.
+    """
+    declarations: list[tuple[str, str]] = []
+    lines = source.splitlines()
+    for index, line in enumerate(lines):
+        match = TS_TYPE_LINE_PATTERN.match(line)
+        if match is None:
+            continue
+        body = match.group(2)
+        for continuation in lines[index + 1 :]:
+            stripped = continuation.strip()
+            if not stripped.startswith("|"):
+                break
+            body += " " + stripped
+        declarations.append((match.group(1), body))
+    if not declarations:
         raise ValueError("no TypeScript export type declarations found")
-    match = next((item for item in matches if item.group(1) == type_name), None)
+    match = next((item for item in declarations if item[0] == type_name), None)
     if match is None:
         raise ValueError(f"TypeScript union type {type_name} is not declared")
-    return TS_LITERAL_PATTERN.findall(match.group(2))
+    return TS_LITERAL_PATTERN.findall(match[1])
 
 
 def camel(variant: str) -> str:
@@ -134,6 +166,94 @@ def snake_to_camel(field: str) -> str:
     return parts[0] + "".join(part.capitalize() for part in parts[1:])
 
 
+def ts_interface_field_literals(
+    source: str, interface_name: str, field_name: str
+) -> list[str]:
+    """Returns string literals of one inline-union interface field.
+
+    The field may be optional (`kind?`) and the union may continue on
+    `|`-prefixed lines, matching the preview formatting conventions.
+    """
+    match = re.search(rf"export interface {re.escape(interface_name)}\s*\{{", source)
+    if match is None:
+        raise ValueError(f"TypeScript interface {interface_name} is not declared")
+
+    depth = 1
+    body_start = match.end()
+    body_end = len(source)
+    for index in range(body_start, len(source)):
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+            if depth == 0:
+                body_end = index
+                break
+
+    field_pattern = re.compile(rf"^\s*{re.escape(field_name)}\??\s*:")
+    lines = source[body_start:body_end].splitlines()
+    for index, line in enumerate(lines):
+        if field_pattern.match(line) is None:
+            continue
+        value = line.split(":", 1)[1]
+        for continuation in lines[index + 1 :]:
+            stripped = continuation.strip()
+            if not stripped or stripped.startswith("//"):
+                break
+            if stripped.startswith("|"):
+                value += " " + stripped
+                continue
+            break
+        literals = TS_LITERAL_PATTERN.findall(value)
+        if literals:
+            return literals
+    raise ValueError(
+        f"TypeScript interface {interface_name} has no literal field {field_name}"
+    )
+
+
+def proto_enum_values(source: str, enum_name: str, prefix: str) -> list[str]:
+    """Returns values of one Protobuf enum with a common prefix removed.
+
+    The `_UNSPECIFIED` zero sentinel is excluded because the control plane
+    never publishes it in a preview-visible reply.
+    """
+    match = re.search(rf"enum {re.escape(enum_name)}\s*\{{", source)
+    if match is None:
+        raise ValueError(f"proto enum {enum_name} is not declared")
+
+    depth = 1
+    body_start = match.end()
+    body_end = len(source)
+    for index in range(body_start, len(source)):
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+            if depth == 0:
+                body_end = index
+                break
+
+    values: list[str] = []
+    for line in source[body_start:body_end].splitlines():
+        stripped = line.strip().rstrip(";")
+        if not stripped or stripped.startswith("//"):
+            continue
+        entry = re.match(r"([A-Z][A-Z0-9_]*)\s*=\s*\d+", stripped)
+        if entry is None:
+            continue
+        name = entry.group(1)
+        if name.startswith(prefix) and not name.endswith("_UNSPECIFIED"):
+            values.append(name[len(prefix) :])
+    return values
+
+
+def proto_value_to_camel(value: str) -> str:
+    """Converts a SCREAMING_SNAKE proto value to its preview camelCase form."""
+    parts = value.split("_")
+    return parts[0].lower() + "".join(part.capitalize() for part in parts[1:])
+
+
 def validate_sources(rust_source: str, ts_source: str) -> list[str]:
     """Returns deterministic alignment errors across every declared mapping."""
     errors: list[str] = []
@@ -175,17 +295,62 @@ def validate_sources(rust_source: str, ts_source: str) -> list[str]:
     return errors
 
 
+def validate_reply_sources(
+    rust_source: str, ts_source: str, proto_source: str
+) -> list[str]:
+    """Returns deterministic alignment errors for the preview control-reply contract."""
+    errors: list[str] = []
+
+    ts_interface, ts_field, rust_enum = REPLY_KIND_ALIGNMENT
+    try:
+        variants = rust_enum_variants(rust_source, rust_enum)
+        observed = set(ts_interface_field_literals(ts_source, ts_interface, ts_field))
+    except ValueError as error:
+        errors.append(f"preview alignment is invalid: {error}")
+    else:
+        expected = {camel(variant) for variant in variants}
+        label = f"{ts_interface}.{ts_field}"
+        missing = sorted(expected - observed)
+        unexpected = sorted(observed - expected)
+        if missing:
+            errors.append(f"{label} is missing values: {', '.join(missing)}")
+        if unexpected:
+            errors.append(f"{label} has undeclared values: {', '.join(unexpected)}")
+
+    ts_type, proto_enum, prefix = ERROR_CODE_ALIGNMENT
+    try:
+        codes = proto_enum_values(proto_source, proto_enum, prefix)
+        observed = set(ts_union_values(ts_source, ts_type))
+    except ValueError as error:
+        errors.append(f"preview alignment is invalid: {error}")
+    else:
+        expected = {proto_value_to_camel(code) for code in codes}
+        missing = sorted(expected - observed)
+        unexpected = sorted(observed - expected)
+        if missing:
+            errors.append(f"{ts_type} is missing values: {', '.join(missing)}")
+        if unexpected:
+            errors.append(f"{ts_type} has undeclared values: {', '.join(unexpected)}")
+    return errors
+
+
 def validate_workspace(root: Path) -> list[str]:
-    """Returns errors for the checked-in preview and Rust control-plane sources."""
+    """Returns errors for the checked-in preview, Rust, and wire sources."""
     try:
         rust_paths = [path for _, _, path in ALIGNMENTS + STRUCT_ALIGNMENTS]
+        rust_paths.append(REPLY_RUST_PATH)
         rust_source = "".join(
             (root / path).read_text(encoding="utf-8") for path in rust_paths
         )
-        ts_source = (root / "apps" / "desktop-ui" / "src" / "types.ts").read_text(encoding="utf-8")
+        ts_source = (root / "apps" / "desktop-ui" / "src" / "types.ts").read_text(
+            encoding="utf-8"
+        )
+        proto_source = (root / PROTO_PATH).read_text(encoding="utf-8")
     except OSError as error:
         return [f"unable to read preview alignment sources: {error}"]
-    return validate_sources(rust_source, ts_source)
+    return validate_sources(rust_source, ts_source) + validate_reply_sources(
+        rust_source, ts_source, proto_source
+    )
 
 
 def main() -> int:
@@ -411,6 +576,116 @@ export interface OutputSnapshot {
             [
                 "OutputSnapshot is missing fields: selectionRetained",
                 "OutputSnapshot has undeclared fields: inventedField",
+            ],
+        )
+
+
+    RUST_REPLY = """
+pub enum ControlReply {
+    StreamStatus { identity: u64, state: u32, detail: String },
+    Error { code: u32, retryable: bool, detail: String },
+}
+"""
+
+    TS_REPLY = """
+export type ControlErrorCode =
+  | 'invalidRequest'
+  | 'retryLater'
+  | 'unsupportedCapability'
+  | 'incompatibleVersion'
+  | 'streamNotFound'
+
+export interface ControlReply {
+  kind: 'streamStatus' | 'error'
+  requestId: number
+  detail: string
+  state?: SessionState
+  code?: ControlErrorCode
+  retryable?: boolean
+}
+"""
+
+    PROTO = """
+enum ErrorCode {
+  ERROR_CODE_UNSPECIFIED = 0;
+  ERROR_CODE_INCOMPATIBLE_VERSION = 1;
+  ERROR_CODE_UNSUPPORTED_CAPABILITY = 2;
+  ERROR_CODE_INVALID_REQUEST = 3;
+  ERROR_CODE_STREAM_NOT_FOUND = 4;
+  ERROR_CODE_RETRY_LATER = 5;
+}
+"""
+
+    def test_matching_reply_contract_is_valid(self) -> None:
+        self.assertEqual(
+            validate_reply_sources(self.RUST_REPLY, self.TS_REPLY, self.PROTO), []
+        )
+
+    def test_reports_reply_kind_drift(self) -> None:
+        rust = self.RUST_REPLY.replace(
+            "    Error { code: u32, retryable: bool, detail: String },\n", ""
+        )
+        self.assertEqual(
+            validate_reply_sources(rust, self.TS_REPLY, self.PROTO),
+            ["ControlReply.kind has undeclared values: error"],
+        )
+
+        ts = self.TS_REPLY.replace(
+            "kind: 'streamStatus' | 'error'", "kind: 'streamStatus'"
+        )
+        self.assertEqual(
+            validate_reply_sources(self.RUST_REPLY, ts, self.PROTO),
+            ["ControlReply.kind is missing values: error"],
+        )
+
+    def test_reports_error_code_drift(self) -> None:
+        ts = self.TS_REPLY.replace("'streamNotFound'", "'streamGone'")
+        self.assertEqual(
+            validate_reply_sources(self.RUST_REPLY, ts, self.PROTO),
+            [
+                "ControlErrorCode is missing values: streamNotFound",
+                "ControlErrorCode has undeclared values: streamGone",
+            ],
+        )
+
+        proto = self.PROTO.replace("  ERROR_CODE_RETRY_LATER = 5;\n", "")
+        self.assertEqual(
+            validate_reply_sources(self.RUST_REPLY, self.TS_REPLY, proto),
+            ["ControlErrorCode has undeclared values: retryLater"],
+        )
+
+    def test_reports_missing_reply_declarations(self) -> None:
+        self.assertEqual(
+            validate_reply_sources("pub fn unrelated() {}", self.TS_REPLY, self.PROTO),
+            ["preview alignment is invalid: Rust enum ControlReply is not declared"],
+        )
+
+        ts = self.TS_REPLY.replace(
+            "kind: 'streamStatus' | 'error'", "kind: ControlReplyKind"
+        )
+        self.assertEqual(
+            validate_reply_sources(self.RUST_REPLY, ts, self.PROTO),
+            [
+                "preview alignment is invalid: "
+                "TypeScript interface ControlReply has no literal field kind"
+            ],
+        )
+
+        self.assertEqual(
+            validate_reply_sources(
+                self.RUST_REPLY, self.TS_REPLY, 'syntax = "proto3";'
+            ),
+            ["preview alignment is invalid: proto enum ErrorCode is not declared"],
+        )
+
+        ts = self.TS_REPLY.replace(
+            "export type ControlErrorCode =", "export type ControlErrorCodeX ="
+        )
+        self.assertEqual(
+            validate_reply_sources(self.RUST_REPLY, ts, self.PROTO),
+            [
+                "preview alignment is invalid: "
+                "TypeScript union type ControlErrorCode is not declared"
             ],
         )
 
