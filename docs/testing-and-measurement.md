@@ -198,6 +198,13 @@ transport until after the replacement transport installs a fresh local token and
 completes hello negotiation. The old token and stale completion are rejected,
 while the same command through the fresh token is admitted.
 
+A deterministic snapshot scenario now arms a bounded reconnect window after a
+connection loss and then advances only the snapshot clock: a caller that polls
+`desktop_snapshot_at` sees the projected remaining time count down and the
+session retire to idle at the deadline, without a separate grace observation.
+Reconnecting through the same entry point clears the projected countdown and
+returns the session to ready.
+
 A separate deterministic suite feeds the ADR 0016 adaptive jitter target
 from virtual-link arrival jitter and the encoded-frame water level for one
 stream and for two to four streams over one shared link, and a target-gated
