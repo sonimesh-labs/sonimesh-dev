@@ -43,6 +43,13 @@ crates/
   sonimesh-platform/       Audio output and platform adapters
   sonimesh-diagnostics/    Metrics, structured events and redaction
 proto/                     Control-plane Protocol Buffer schemas
+tools/
+  latency-measurement/     Deterministic MLS signal generation and offset estimation
+  network-simulator/       Deterministic network impairment runner
+  windows-*-prototype/     Windows credential, TLS, and WASAPI feasibility spikes
+  check_*.py               Consistency guards for docs, CI, and architecture boundaries
+fuzz/
+  fuzz_targets/            LibFuzzer targets for bounded protocol and audio parsing
 docs/
   architecture.md          Product and system architecture
   security-model.md        Pairing, identity, key derivation and packet security
