@@ -11,7 +11,7 @@ from pathlib import Path
 
 ADR_FILENAME_PATTERN = re.compile(r"^[0-9]{4}-[a-z0-9-]+\.md$")
 RECORD_PATTERN = re.compile(
-    r"^- \[ADR (?P<number>[0-9]{4}): [^\]\r\n]+\]\(\.\/(?P<filename>[0-9]{4}-[a-z0-9-]+\.md)\)"
+    r"^- \[ADR (?P<number>[0-9]{4}): (?P<title>[^\]\r\n]+)\]\(\.\/(?P<filename>[0-9]{4}-[a-z0-9-]+\.md)\)"
 )
 MARKDOWN_HEADING_PATTERN = re.compile(r"^## [^\r\n]+[ \t]*$")
 MARKDOWN_FENCE_PATTERN = re.compile(r"^[ \t]*(`{3,}|~{3,})")
@@ -64,9 +64,9 @@ def markdown_section(source: str, heading: str) -> str:
     return "".join(lines[start:end])
 
 
-def record_entries(source: str) -> tuple[list[tuple[int, str]], list[str]]:
-    """Returns parsed record numbers/filenames and malformed record bullets."""
-    entries: list[tuple[int, str]] = []
+def record_entries(source: str) -> tuple[list[tuple[int, str, str]], list[str]]:
+    """Returns parsed record numbers, filenames, and titles; and malformed bullets."""
+    entries: list[tuple[int, str, str]] = []
     malformed: list[str] = []
     for line in markdown_section(source, RECORDS_HEADING).splitlines():
         stripped = line.rstrip("\r\n")
@@ -78,7 +78,13 @@ def record_entries(source: str) -> tuple[list[tuple[int, str]], list[str]]:
         if match is None:
             malformed.append(stripped)
             continue
-        entries.append((int(match.group("number")), match.group("filename")))
+        entries.append(
+            (
+                int(match.group("number")),
+                match.group("filename"),
+                match.group("title").strip(),
+            )
+        )
     return entries, malformed
 
 
@@ -89,15 +95,37 @@ def missing_numbers(numbers: list[int]) -> list[int]:
     return [number for number in range(1, highest + 1) if number not in present]
 
 
-def duplicate_entries(entries: list[tuple[int, str]]) -> list[str]:
+def duplicate_entries(entries: list[tuple[int, str, str]]) -> list[str]:
     """Returns each filename that appears more than once, in first-duplicate order."""
     seen: set[str] = set()
     duplicates: list[str] = []
-    for _, filename in entries:
+    for _, filename, _ in entries:
         if filename in seen and filename not in duplicates:
             duplicates.append(filename)
         seen.add(filename)
     return duplicates
+
+
+def record_heading(source: str) -> tuple[str | None, str | None, int | None]:
+    """Returns (error, title, heading number) from the record's first heading.
+
+    The canonical heading is `ADR NNNN: <title>`; a heading without the numeric
+    prefix is also accepted, but the title after any optional prefix must match
+    what the index documents. The first non-empty line must be a level-one
+    heading.
+    """
+    for raw in source.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if not line.startswith("# "):
+            return "ADR record has no level-one heading", None, None
+        heading = line[2:].strip()
+        match = re.fullmatch(r"ADR (?P<number>[0-9]{4}): (?P<title>.+)", heading)
+        if match is None:
+            return None, heading, None
+        return None, match.group("title").strip(), int(match.group("number"))
+    return "ADR record has no level-one heading", None, None
 
 
 def validate_sources(readme: str, adr_directory: Path) -> list[str]:
@@ -120,7 +148,7 @@ def validate_sources(readme: str, adr_directory: Path) -> list[str]:
     number_by_filename = {filename: number for number, filename in files}
     entry_by_filename: dict[str, tuple[int, str]] = {}
     seen_numbers: set[int] = set()
-    for number, filename in entries:
+    for number, filename, title in entries:
         if number in seen_numbers:
             errors.append(f"ADR README repeats ADR {number:04d}")
         seen_numbers.add(number)
@@ -133,6 +161,23 @@ def validate_sources(readme: str, adr_directory: Path) -> list[str]:
             errors.append(
                 f"ADR README ADR {number:04d} must link ./{expected_number:04d}-"
                 f"{filename.split('-', 1)[1]}"
+            )
+        try:
+            content = (adr_directory / filename).read_text(encoding="utf-8")
+        except OSError as error:
+            errors.append(f"unable to read ADR record {filename}: {error}")
+            continue
+        heading_error, heading_title, heading_number = record_heading(content)
+        if heading_error is not None:
+            errors.append(f"ADR {number:04d} ({filename}) {heading_error}")
+            continue
+        if heading_number is not None and heading_number != number:
+            errors.append(
+                f"ADR {number:04d} ({filename}) heading number is ADR {heading_number:04d}"
+            )
+        if heading_title != title:
+            errors.append(
+                f"ADR README title for {filename} must match its heading: {heading_title}"
             )
 
     for filename in duplicate_entries(entries):
@@ -167,9 +212,14 @@ def main() -> int:
 
 class AdrIndexTests(unittest.TestCase):
     @staticmethod
-    def write_records(directory: Path, filenames: list[str]) -> None:
+    def write_records(
+        directory: Path,
+        filenames: list[str],
+        headings: dict[str, str] | None = None,
+    ) -> None:
         for filename in filenames:
-            (directory / filename).write_text("# record\n", encoding="utf-8")
+            heading = headings[filename] if headings is not None else "# record"
+            (directory / filename).write_text(heading + "\n", encoding="utf-8")
 
     def test_matching_index_and_files_are_valid(self) -> None:
         readme = """## Priority ADRs
@@ -190,6 +240,11 @@ class AdrIndexTests(unittest.TestCase):
                     "0002-second-decision.md",
                     "0003-third-decision.md",
                 ],
+                {
+                    "0001-first-decision.md": "# ADR 0001: First decision",
+                    "0002-second-decision.md": "# ADR 0002: Second decision",
+                    "0003-third-decision.md": "# ADR 0003: Third decision",
+                },
             )
             self.assertEqual(validate_sources(readme, Path(directory)), [])
 
@@ -203,6 +258,10 @@ class AdrIndexTests(unittest.TestCase):
             self.write_records(
                 Path(directory),
                 ["0001-first-decision.md", "0003-third-decision.md"],
+                {
+                    "0001-first-decision.md": "# ADR 0001: First decision",
+                    "0003-third-decision.md": "# ADR 0003: Third decision",
+                },
             )
             self.assertEqual(
                 validate_sources(readme, Path(directory)),
@@ -217,11 +276,16 @@ class AdrIndexTests(unittest.TestCase):
 - [ADR 0002: Missing decision](./0002-missing-decision.md) - deferred.
 """
         with tempfile.TemporaryDirectory() as directory:
-            self.write_records(Path(directory), ["0001-first-decision.md"])
+            self.write_records(
+                Path(directory),
+                ["0001-first-decision.md"],
+                {"0001-first-decision.md": "# ADR 0001: First decision"},
+            )
             self.assertEqual(
                 validate_sources(readme, Path(directory)),
                 [
                     "ADR README repeats ADR 0001",
+                    "ADR README title for 0001-first-decision.md must match its heading: First decision",
                     "ADR README links missing file: ./0002-missing-decision.md",
                     "ADR README repeats record file: 0001-first-decision.md",
                 ],
@@ -234,12 +298,17 @@ class AdrIndexTests(unittest.TestCase):
 - [ADR 0002: Broken link](./not-a-record.txt) - deferred.
 """
         with tempfile.TemporaryDirectory() as directory:
-            self.write_records(Path(directory), ["0001-first-decision.md"])
+            self.write_records(
+                Path(directory),
+                ["0001-first-decision.md"],
+                {"0001-first-decision.md": "# ADR 0001: Misnumbered"},
+            )
             self.assertEqual(
                 validate_sources(readme, Path(directory)),
                 [
                     "ADR README has a malformed record bullet: - [ADR 0002: Broken link](./not-a-record.txt) - deferred.",
                     "ADR README ADR 0002 must link ./0001-first-decision.md",
+                    "ADR 0002 (0001-first-decision.md) heading number is ADR 0001",
                 ],
             )
 
@@ -256,6 +325,69 @@ class AdrIndexTests(unittest.TestCase):
                 validate_sources("## Overview\n", adr_directory),
                 ["ADR index is invalid: ADR README is missing section: ## Records"],
             )
+
+
+    def test_reports_heading_title_mismatch(self) -> None:
+        readme = """## Records
+
+- [ADR 0001: First decision](./0001-first-decision.md) - accepted.
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            self.write_records(
+                Path(directory),
+                ["0001-first-decision.md"],
+                {"0001-first-decision.md": "# ADR 0001: Renamed decision"},
+            )
+            self.assertEqual(
+                validate_sources(readme, Path(directory)),
+                [
+                    "ADR README title for 0001-first-decision.md must match its heading: Renamed decision"
+                ],
+            )
+
+    def test_reports_heading_number_mismatch(self) -> None:
+        readme = """## Records
+
+- [ADR 0001: First decision](./0001-first-decision.md) - accepted.
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            self.write_records(
+                Path(directory),
+                ["0001-first-decision.md"],
+                {"0001-first-decision.md": "# ADR 0002: First decision"},
+            )
+            self.assertEqual(
+                validate_sources(readme, Path(directory)),
+                ["ADR 0001 (0001-first-decision.md) heading number is ADR 0002"],
+            )
+
+    def test_reports_missing_heading(self) -> None:
+        readme = """## Records
+
+- [ADR 0001: First decision](./0001-first-decision.md) - accepted.
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            (Path(directory) / "0001-first-decision.md").write_text(
+                "Some context.\n\n# First decision\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                validate_sources(readme, Path(directory)),
+                ["ADR 0001 (0001-first-decision.md) ADR record has no level-one heading"],
+            )
+
+    def test_accepts_heading_without_numeric_prefix(self) -> None:
+        readme = """## Records
+
+- [ADR 0001: First decision](./0001-first-decision.md) - accepted.
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            self.write_records(
+                Path(directory),
+                ["0001-first-decision.md"],
+                {"0001-first-decision.md": "# First decision"},
+            )
+            self.assertEqual(validate_sources(readme, Path(directory)), [])
 
 
 if __name__ == "__main__":

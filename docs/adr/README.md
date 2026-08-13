@@ -51,7 +51,7 @@ documented.
   control commands bind stream lifecycle to the AEAD key epoch.
 - [ADR 0007: Bounded PCM occupancy drift control](./0007-drift-control-decision.md) —
   non-realtime per-stream PI control and hard-resynchronization boundary.
-- [ADR 0008: First pairing and device identity](./0008-first-pairing-and-identity.md) —
+- [ADR 0008: First pairing and device identity boundary](./0008-first-pairing-and-identity.md) —
   QR-pinned TLS, transcript binding, OS-protected identity storage, and revocation.
 - [ADR 0009: Opus decoder binding and frame policy](./0009-opus-codec-boundary.md) —
   optional native decoder feature gated by reproducible Windows/Android evidence.
@@ -65,7 +65,7 @@ documented.
   provisional linear conversion separated from drift control and quality claims.
 - [ADR 0014: Android 17 local-network discovery](./0014-android-17-local-network-discovery.md) —
   provisional picker-first discovery design pending Android 17 device evidence.
-- [ADR 0015: Realtime stream membership](./0015-realtime-stream-membership.md) —
+- [ADR 0015: Realtime stream membership boundary](./0015-realtime-stream-membership.md) —
   provisional fixed-slot membership boundary pending Phase 2 mixer evidence.
-- [ADR 0016: Adaptive jitter target](./0016-adaptive-jitter-target.md) —
+- [ADR 0016: Adaptive jitter target control](./0016-adaptive-jitter-target.md) —
   provisional slow bounded target control pending Phase 2 jitter evidence.
