@@ -1189,3 +1189,46 @@ fn desktop_snapshot_projects_reconnecting_after_connection_loss() {
         "output stays alive while the bridge reconnects"
     );
 }
+
+#[test]
+fn snapshot_polling_alone_retires_the_reconnect_window() {
+    // A control-surface caller that only polls desktop snapshots must observe
+    // the bounded reconnect window counting down through the composition entry
+    // point and then retiring to idle, without a separate reconnect-clock
+    // observation or event. This is the exact path a low-rate bridge uses.
+    let counters = Arc::new(StreamCounters::default());
+    let mut session = SessionState::IDLE;
+    let mut pairing = PairingInvitationController::<1>::new();
+    pairing
+        .begin(&mut session, PairingId::new([31; 16]), 100, 50, 1)
+        .unwrap();
+    assert_eq!(
+        pairing.verify_proof(&mut session, 101, PairingSource::new([37; 16]), || {
+            PairingProofVerification::Verified
+        }),
+        Ok(PairingAttemptOutcome::Paired)
+    );
+    let mut bridge = bridge_with(session);
+    let token = authenticated(&mut bridge);
+    let mut pipeline = pipeline_for(1, 1, Arc::clone(&counters));
+    start_one(&mut bridge, token, 1, 1, None, &mut pipeline);
+
+    bridge
+        .acknowledge_platform_event(SessionEvent::ConnectionLost)
+        .unwrap();
+    bridge.begin_reconnect_grace(200, 2_000).unwrap();
+
+    let reconnecting = bridge.desktop_snapshot_at(&mut pairing, 500).unwrap();
+    assert_eq!(reconnecting.session(), SessionPhase::Reconnecting);
+    assert_eq!(reconnecting.pairing(), PairingSnapshotState::Consumed);
+    assert_eq!(reconnecting.reconnect_remaining_ms(), Some(1_700));
+
+    let expired = bridge.desktop_snapshot_at(&mut pairing, 2_200).unwrap();
+    assert_eq!(expired.session(), SessionPhase::Idle);
+    assert_eq!(expired.reconnect_remaining_ms(), None);
+    assert_eq!(bridge.state().phase(), SessionPhase::Idle);
+    assert_eq!(
+        bridge.coordinator().reconnect_grace_state(),
+        sonimesh_app::ReconnectGraceState::Idle
+    );
+}
