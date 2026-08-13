@@ -96,7 +96,7 @@ describe('PreviewDesktopBridge', () => {
   })
 
   it('simulates connection loss from a trusted session and reconnects to ready', async () => {
-    const bridge = new PreviewDesktopBridge()
+    const bridge = fixedTimeBridge()
     await bridge.startStream()
 
     const reconnecting = await bridge.simulateConnectionLost()
@@ -117,6 +117,25 @@ describe('PreviewDesktopBridge', () => {
     const expired = await bridge.simulateSessionExpired()
     expect(expired.session).toBe('idle')
     expect(expired.reconnectRemainingMs).toBeNull()
+  })
+
+  it('decays the reconnect countdown and auto-expires the session on snapshot', async () => {
+    const bridge = fixedTimeBridge()
+    await bridge.startStream()
+    await bridge.simulateConnectionLost()
+    expect((await bridge.snapshot()).reconnectRemainingMs).toBe(30_000)
+
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect((await bridge.snapshot()).reconnectRemainingMs).toBe(20_000)
+
+    await vi.advanceTimersByTimeAsync(20_001)
+    const expired = await bridge.snapshot()
+    expect(expired.session).toBe('idle')
+    expect(expired.reconnectRemainingMs).toBeNull()
+    // The snapshot advanced the reconnect clock without recording a reply.
+    expect(expired.replies).toHaveLength(2)
+    expect(expired.replies[0].kind).toBe('streamStatus')
+    expect(expired.replies[0].detail).toBe('control connection lost')
   })
 
   it('does not simulate connection loss without a trusted session', async () => {

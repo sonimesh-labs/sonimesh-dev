@@ -19,8 +19,10 @@ output loss can be simulated from the session panel (trusted → `reconnecting`,
 `streaming` → `outputUnavailable`), with reconnect and output restore returning
 to `ready` and `streaming`, so recovery UI is exercisable without hardware.
 Connection loss also arms a bounded 30-second reconnect window whose remaining
-seconds the session panel projects while the session is reconnecting, matching
-the Rust snapshot's grace countdown without running a real timer. The
+seconds the session panel projects while the session is reconnecting. The
+countdown decays on each snapshot from the armed instant and auto-expires the
+reconnecting session at the deadline, matching the Rust snapshot entry point
+without running a background timer. The
 session owner's expiry transition is also simulable from the session panel
 (`Simulate session expiry`): a trusted session (ready, streaming, reconnecting,
 or output unavailable) retires to `idle` while the consumed pairing record stays

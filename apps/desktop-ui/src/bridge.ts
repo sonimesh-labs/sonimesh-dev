@@ -92,6 +92,9 @@ const INITIAL_PREVIEW_SNAPSHOT: DesktopSnapshot = {
 export class PreviewDesktopBridge implements DesktopBridge {
   private pairingExpiresAtMillis: number | null = null
 
+  /** Monotonic instant when the preview armed the bounded reconnect window. */
+  private reconnectArmedAtMillis: number | null = null
+
   private nextRequestId = 1
 
   private snapshotState: DesktopSnapshot = structuredClone(INITIAL_PREVIEW_SNAPSHOT)
@@ -186,7 +189,7 @@ export class PreviewDesktopBridge implements DesktopBridge {
       this.snapshotState.pairing.state === 'consumed'
     ) {
       this.setSession('reconnecting')
-      this.snapshotState.reconnectRemainingMs = RECONNECT_GRACE_MILLIS
+      this.reconnectArmedAtMillis = Date.now()
       this.recordStatus('reconnecting', 'control connection lost')
     } else {
       this.recordError('connection loss requires a trusted session')
@@ -297,6 +300,7 @@ export class PreviewDesktopBridge implements DesktopBridge {
   async resetPreview(): Promise<DesktopSnapshot> {
     this.snapshotState = structuredClone(INITIAL_PREVIEW_SNAPSHOT)
     this.pairingExpiresAtMillis = null
+    this.reconnectArmedAtMillis = null
     this.nextRequestId = 1
     return this.copy()
   }
@@ -305,9 +309,10 @@ export class PreviewDesktopBridge implements DesktopBridge {
     this.snapshotState.session = session
     this.snapshotState.output.streamActive = session === 'streaming'
     // The reconnect window is only meaningful while the session reconnects;
-    // leaving that state clears the bounded remaining countdown.
+    // leaving that state clears the bounded remaining countdown and its clock.
     if (session !== 'reconnecting') {
       this.snapshotState.reconnectRemainingMs = null
+      this.reconnectArmedAtMillis = null
     }
   }
 
@@ -328,7 +333,9 @@ export class PreviewDesktopBridge implements DesktopBridge {
   }
 
   private copy(): DesktopSnapshot {
-    this.expireInvitationWhenDue(Date.now())
+    const nowMillis = Date.now()
+    this.expireInvitationWhenDue(nowMillis)
+    this.refreshReconnectCountdown(nowMillis)
     return structuredClone(this.snapshotState)
   }
 
@@ -349,6 +356,24 @@ export class PreviewDesktopBridge implements DesktopBridge {
       state: 'active',
       expiresInSeconds: Math.ceil(remainingMillis / 1_000),
     }
+  }
+
+  private refreshReconnectCountdown(nowMillis: number) {
+    if (this.reconnectArmedAtMillis === null || this.snapshotState.session !== 'reconnecting') {
+      return
+    }
+
+    const remainingMillis = RECONNECT_GRACE_MILLIS - (nowMillis - this.reconnectArmedAtMillis)
+    if (remainingMillis <= 0) {
+      // The reconnect deadline passed without a reconnect; the control session
+      // retires exactly as the Rust snapshot entry point projects. Expiry is a
+      // local lifecycle event, so no receiver-generated reply is recorded.
+      this.reconnectArmedAtMillis = null
+      this.setSession('idle')
+      return
+    }
+
+    this.snapshotState.reconnectRemainingMs = remainingMillis
   }
 }
 

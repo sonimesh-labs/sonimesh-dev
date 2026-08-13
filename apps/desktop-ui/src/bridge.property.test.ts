@@ -120,6 +120,7 @@ interface ModelState {
   session: SessionState
   pairing: PairingState
   pairingExpiresAtMillis: number | null
+  reconnectArmedAtMillis: number | null
   selectedOutputId: string | null
   gain: number
   muted: boolean
@@ -132,6 +133,7 @@ function initialModelState(): ModelState {
     session: 'ready',
     pairing: 'consumed',
     pairingExpiresAtMillis: null,
+    reconnectArmedAtMillis: null,
     selectedOutputId: 'default',
     gain: 1,
     muted: false,
@@ -153,6 +155,7 @@ function initialModelState(): ModelState {
 class PreviewBridgeModel {
   private state: ModelState = initialModelState()
   private nowMillis: number
+  reconnectAutoExpiries = 0
 
   constructor(nowMillis: number) {
     this.nowMillis = nowMillis
@@ -181,6 +184,7 @@ class PreviewBridgeModel {
           s.session === 'outputUnavailable'
         ) {
           s.session = 'ready'
+          s.reconnectArmedAtMillis = null
           s.output.faultReported = false
           s.output.health = 'healthy'
         }
@@ -220,6 +224,7 @@ class PreviewBridgeModel {
       case 'revokePairing':
         if (s.pairing === 'consumed') {
           s.pairingExpiresAtMillis = null
+          s.reconnectArmedAtMillis = null
           s.pairing = 'revoked'
           s.session = 'idle'
         }
@@ -227,11 +232,13 @@ class PreviewBridgeModel {
       case 'simulateConnectionLost':
         if ((s.session === 'ready' || s.session === 'streaming') && s.pairing === 'consumed') {
           s.session = 'reconnecting'
+          s.reconnectArmedAtMillis = this.nowMillis
         }
         return
       case 'simulateReconnected':
         if (s.session === 'reconnecting') {
           s.session = 'ready'
+          s.reconnectArmedAtMillis = null
         }
         return
       case 'simulateSessionExpired':
@@ -243,6 +250,7 @@ class PreviewBridgeModel {
           s.pairing === 'consumed'
         ) {
           s.pairingExpiresAtMillis = null
+          s.reconnectArmedAtMillis = null
           s.session = 'idle'
         }
         return
@@ -302,6 +310,7 @@ class PreviewBridgeModel {
 
   snapshot(): Omit<DesktopSnapshot, 'replies'> {
     this.expireInvitationWhenDue()
+    this.expireReconnectWhenDue()
     const s = this.state
     return {
       session: s.session,
@@ -325,7 +334,7 @@ class PreviewBridgeModel {
         health: s.output.health,
       },
       metrics: structuredClone(s.metrics),
-      reconnectRemainingMs: s.session === 'reconnecting' ? RECONNECT_GRACE_MILLIS : null,
+      reconnectRemainingMs: this.reconnectRemainingMs(),
       previewAdapter: true,
     }
   }
@@ -340,6 +349,26 @@ class PreviewBridgeModel {
       s.pairing = 'expired'
       s.session = 'idle'
     }
+  }
+
+  private expireReconnectWhenDue(): void {
+    const s = this.state
+    if (s.session !== 'reconnecting' || s.reconnectArmedAtMillis === null) {
+      return
+    }
+    if (RECONNECT_GRACE_MILLIS - (this.nowMillis - s.reconnectArmedAtMillis) <= 0) {
+      s.reconnectArmedAtMillis = null
+      s.session = 'idle'
+      this.reconnectAutoExpiries += 1
+    }
+  }
+
+  private reconnectRemainingMs(): number | null {
+    const s = this.state
+    if (s.session !== 'reconnecting' || s.reconnectArmedAtMillis === null) {
+      return null
+    }
+    return Math.max(0, RECONNECT_GRACE_MILLIS - (this.nowMillis - s.reconnectArmedAtMillis))
   }
 }
 
@@ -531,6 +560,10 @@ describe('PreviewDesktopBridge property', () => {
     expect(observedPairings.has('revoked')).toBe(true)
     expect(observedActiveWithCountdown).toBe(true)
     expect(observedAutoExpiry).toBe(true)
+    // The walk must observe the reconnect window decaying to expiry on its
+    // own, mirroring the Rust snapshot entry point, not only via an explicit
+    // session-expiry command.
+    expect(model.reconnectAutoExpiries).toBeGreaterThan(0)
     expect(maxRepliesSeen).toBe(6)
   })
 })
