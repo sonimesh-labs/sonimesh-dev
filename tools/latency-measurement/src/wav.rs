@@ -1,6 +1,6 @@
 //! Minimal RIFF/WAVE reading and writing for measurement recordings.
 //!
-//! Only the subset needed by the latency tool is supported: PCM 16/32-bit and
+//! Only the subset needed by the latency tool is supported: PCM 16/24/32-bit and
 //! IEEE-float 32/64-bit mono or multi-channel WAVE files, including their
 //! WAVE_FORMAT_EXTENSIBLE variants. Multi-channel input is down-mixed to mono
 //! by averaging frames.
@@ -233,6 +233,7 @@ fn parse_format_chunk(chunk: &[u8]) -> Result<FormatInfo, WavError> {
 fn decode_frames(format: &FormatInfo, data: &[u8]) -> Result<Vec<f32>, WavError> {
     let bytes_per_sample = match (format.audio_format, format.bits_per_sample) {
         (1, 16) => 2_usize,
+        (1, 24) => 3_usize,
         (1 | 3, 32) => 4_usize,
         (3, 64) => 8_usize,
         (format, bits) => return Err(WavError::UnsupportedFormat { format, bits }),
@@ -257,6 +258,17 @@ fn decode_frames(format: &FormatInfo, data: &[u8]) -> Result<Vec<f32>, WavError>
                             .expect("fixed slice"),
                     );
                     f64::from(raw) / 32_768.0
+                }
+                (1, 24) => {
+                    let raw = i32::from_le_bytes([
+                        data[sample_offset],
+                        data[sample_offset + 1],
+                        data[sample_offset + 2],
+                        0,
+                    ]);
+                    // Sign-extend the 24-bit sample: an arithmetic shift of the
+                    // left-aligned value restores the sign bits above bit 23.
+                    f64::from((raw << 8) >> 8) / 8_388_608.0
                 }
                 (1, 32) => {
                     let raw = i32::from_le_bytes(
@@ -381,5 +393,115 @@ mod tests {
         bytes.truncate(data_offset + 4);
         bytes[4..8].copy_from_slice(&36_u32.to_le_bytes());
         assert!(matches!(parse_mono(&bytes), Err(WavError::Empty)));
+    }
+
+    #[test]
+    fn twenty_four_bit_mono_decodes_with_sign_extension() {
+        let data: &[u8] = &[
+            0xFF, 0xFF, 0x7F, // +8_388_607 -> ~+1.0
+            0x00, 0x00, 0x80, // -8_388_608 -> -1.0
+            0x00, 0x00, 0x00, // 0 -> 0.0
+            0x00, 0x00, 0x40, // +4_194_304 -> +0.5
+            0x00, 0x00, 0xC0, // -4_194_304 -> -0.5
+        ];
+        let bytes = build_wave(48_000, 1, 24, data);
+        let parsed = parse_mono(&bytes).expect("24-bit wave parses");
+        assert_eq!(parsed.sample_rate_hz, 48_000);
+        let expected = [8_388_607.0 / 8_388_608.0, -1.0, 0.0, 0.5, -0.5];
+        assert_eq!(parsed.samples.len(), expected.len());
+        for (actual, expected) in parsed.samples.iter().zip(expected) {
+            assert!((f64::from(*actual) - expected).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn twenty_four_bit_stereo_averages_to_mono() {
+        let data: &[u8] = &[
+            0x00, 0x00, 0x40, // left +0.5
+            0x00, 0x00, 0x00, // right 0.0
+            0x00, 0x00, 0xC0, // left -0.5
+            0x00, 0x00, 0x40, // right +0.5
+        ];
+        let bytes = build_wave(48_000, 2, 24, data);
+        let parsed = parse_mono(&bytes).expect("24-bit stereo wave parses");
+        assert_eq!(parsed.samples.len(), 2);
+        assert!((f64::from(parsed.samples[0]) - 0.25).abs() < 1e-6);
+        assert!(f64::from(parsed.samples[1]).abs() < 1e-6);
+    }
+
+    #[test]
+    fn twenty_four_bit_extensible_pcm_is_decoded() {
+        let data: &[u8] = &[0x00, 0x00, 0x60]; // +6_291_456 -> +0.75
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"RIFF");
+        bytes.extend_from_slice(&(4_u32 + 48 + 12).to_le_bytes());
+        bytes.extend_from_slice(b"WAVE");
+        bytes.extend_from_slice(b"fmt ");
+        bytes.extend_from_slice(&40_u32.to_le_bytes());
+        bytes.extend_from_slice(&0xFFFE_u16.to_le_bytes());
+        bytes.extend_from_slice(&1_u16.to_le_bytes());
+        bytes.extend_from_slice(&48_000_u32.to_le_bytes());
+        bytes.extend_from_slice(&(48_000_u32 * 3).to_le_bytes());
+        bytes.extend_from_slice(&3_u16.to_le_bytes());
+        bytes.extend_from_slice(&24_u16.to_le_bytes());
+        bytes.extend_from_slice(&22_u16.to_le_bytes()); // cbSize
+        bytes.extend_from_slice(&24_u16.to_le_bytes()); // valid bits
+        bytes.extend_from_slice(&0_u32.to_le_bytes()); // channel mask
+        // Subformat GUID {00000001-0000-0010-8000-00AA00389B71} (PCM).
+        bytes.extend_from_slice(&0x0000_0001_u32.to_le_bytes());
+        bytes.extend_from_slice(&0x0000_u16.to_le_bytes());
+        bytes.extend_from_slice(&0x0010_u16.to_le_bytes());
+        bytes.extend_from_slice(&[0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71]);
+        bytes.extend_from_slice(b"data");
+        bytes.extend_from_slice(&3_u32.to_le_bytes());
+        bytes.extend_from_slice(data);
+
+        let parsed = parse_mono(&bytes).expect("24-bit extensible wave parses");
+        assert_eq!(parsed.sample_rate_hz, 48_000);
+        assert_eq!(parsed.samples.len(), 1);
+        assert!((f64::from(parsed.samples[0]) - 0.75).abs() < 1e-6);
+    }
+
+    #[test]
+    fn rejects_unsupported_bit_depths() {
+        let bytes = build_wave(48_000, 1, 8, &[0x80]);
+        assert!(matches!(
+            parse_mono(&bytes),
+            Err(WavError::UnsupportedFormat { format: 1, bits: 8 })
+        ));
+    }
+
+    fn build_wave(
+        sample_rate_hz: u32,
+        channels: u16,
+        bits_per_sample: u16,
+        data: &[u8],
+    ) -> Vec<u8> {
+        let block_align = channels * (bits_per_sample / 8);
+        let byte_rate = sample_rate_hz * u32::from(block_align);
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"RIFF");
+        bytes.extend_from_slice(
+            &u32::try_from(36 + data.len())
+                .expect("test wave fits u32")
+                .to_le_bytes(),
+        );
+        bytes.extend_from_slice(b"WAVE");
+        bytes.extend_from_slice(b"fmt ");
+        bytes.extend_from_slice(&16_u32.to_le_bytes());
+        bytes.extend_from_slice(&1_u16.to_le_bytes());
+        bytes.extend_from_slice(&channels.to_le_bytes());
+        bytes.extend_from_slice(&sample_rate_hz.to_le_bytes());
+        bytes.extend_from_slice(&byte_rate.to_le_bytes());
+        bytes.extend_from_slice(&block_align.to_le_bytes());
+        bytes.extend_from_slice(&bits_per_sample.to_le_bytes());
+        bytes.extend_from_slice(b"data");
+        bytes.extend_from_slice(
+            &u32::try_from(data.len())
+                .expect("test wave fits u32")
+                .to_le_bytes(),
+        );
+        bytes.extend_from_slice(data);
+        bytes
     }
 }

@@ -36,9 +36,10 @@ cargo run -p sonimesh-latency-measurement -- measure \
   --max-search-ms 1000 reference.wav capture1.wav capture2.wav
 ```
 
-The reference and each recording must share the same sample rate. Each run is
-printed as `offset_ms=...`, and with more than one recording a
-`min/p50/p95/p99/max` summary is printed.
+The reference and each recording must share the same sample rate. The reader
+accepts PCM 16/24/32-bit and IEEE float 32/64-bit WAVE files, including
+WAVE_FORMAT_EXTENSIBLE variants. Each run is printed as `offset_ms=...`, and
+with more than one recording a `min/p50/p95/p99/max` summary is printed.
 
 ### summary
 
