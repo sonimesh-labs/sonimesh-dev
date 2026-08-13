@@ -48,6 +48,23 @@ accepts PCM 16/24/32-bit and IEEE float 32/64-bit WAVE files, including
 WAVE_FORMAT_EXTENSIBLE variants. Each run is printed as `offset_ms=...`, and
 with more than one recording a `min/p50/p95/p99/max` summary is printed.
 
+### info
+
+Report the declared properties of one or more WAVE files without decoding
+their samples:
+
+```sh
+cargo run -p sonimesh-latency-measurement -- info capture1.wav capture2.wav
+```
+
+Each file prints one `key=value` line with `file`, `sample_rate_hz`, `channels`,
+`bits_per_sample`, `audio_format`, `frames`, and `duration_ms`. `audio_format`
+is the declared WAVE tag (`1` = PCM, `3` = IEEE float;
+WAVE_FORMAT_EXTENSIBLE is resolved to its subformat tag). Run this before
+`measure` to confirm recordings share the sample rate and use a supported
+layout. A file that cannot be read is reported on stderr while the remaining
+files are still processed; the command exits non-zero if any file failed.
+
 ### summary
 
 Summarize offsets read from stdin, one number per line:
