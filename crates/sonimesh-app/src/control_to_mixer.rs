@@ -23,8 +23,9 @@ use sonimesh_protocol::{Capability, Envelope};
 
 use crate::{
     ControlOperationToken, ControlSessionToken, ControlStreamAction, ControlStreamCoordinator,
-    ControlStreamError, MediaStreamIdentity, MixerAdmissionError, MixerStreamSession,
-    MixerStreamSessionError, OutputSelection, OutputSnapshot, OutputSnapshotSource,
+    ControlStreamError, DesktopControlSnapshot, MediaStreamIdentity, MixerAdmissionError,
+    MixerStreamSession, MixerStreamSessionError, OutputSelection, OutputSnapshot,
+    OutputSnapshotSource, PairingInvitationController, PairingInvitationError,
     ReceiverPcmProducerInstaller, ReconnectGraceObservation, SessionEvent, SessionPhase,
     SessionState, StartedMixerStream, StreamStartRequest,
 };
@@ -189,6 +190,29 @@ where
             active_streams: self.mixer.stream_count(),
             pending_mixer_commands: self.mixer.pending_commands(),
         }
+    }
+
+    /// Projects the redacted desktop control snapshot from this bridge.
+    ///
+    /// This is the control-surface entry point for the composition path: the
+    /// pairing owner applies its monotonic clock before projecting, and the
+    /// output lifecycle is read from this bridge's own mixer session, so a
+    /// caller cannot present an active invitation or fabricated output state.
+    /// The returned value excludes pairing identifiers, proofs, addresses,
+    /// session material, and audio frames.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PairingInvitationError`] when the pairing clock observation is
+    /// invalid. An owner with no retained invitation still returns a snapshot.
+    pub fn desktop_snapshot_at<const MAX_SOURCES: usize>(
+        &mut self,
+        pairing: &mut PairingInvitationController<MAX_SOURCES>,
+        now_ms: u64,
+    ) -> Result<DesktopControlSnapshot, PairingInvitationError> {
+        let output = self.mixer.snapshot();
+        self.coordinator
+            .snapshot_at(pairing, now_ms, &OwnedSnapshot(output))
     }
 
     /// Borrows the control coordinator for read-only access.
@@ -523,6 +547,19 @@ const fn export_session_phase(phase: SessionPhase) -> ExportSessionPhase {
         SessionPhase::Streaming => ExportSessionPhase::Streaming,
         SessionPhase::Reconnecting => ExportSessionPhase::Reconnecting,
         SessionPhase::OutputUnavailable => ExportSessionPhase::OutputUnavailable,
+    }
+}
+
+/// Presents an already-read output snapshot at the snapshot source boundary.
+///
+/// The bridge reads its mixer output lifecycle once and then feeds the pairing
+/// owner's projection, so the desktop snapshot cannot re-enter the bridge while
+/// the coordinator is being observed.
+struct OwnedSnapshot(OutputSnapshot);
+
+impl OutputSnapshotSource for OwnedSnapshot {
+    fn snapshot(&self) -> OutputSnapshot {
+        self.0
     }
 }
 

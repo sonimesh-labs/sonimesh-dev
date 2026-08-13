@@ -187,7 +187,12 @@ session. The UI/Tauri command layer is not yet wired to the bridge. The bridge
 also projects a redacted low-rate snapshot for a future control-surface
 adapter — lifecycle phase, output lifecycle, output-active flag, active stream
 count, and pending membership commands — and implements `OutputSnapshotSource`
-so existing UI projection code can read its output lifecycle.
+so existing UI projection code can read its output lifecycle. The bridge
+also exposes `desktop_snapshot_at` as the control-surface snapshot entry
+point: it observes the pairing owner's monotonic clock and reads the output
+lifecycle from the bridge's own mixer session before returning the redacted
+`DesktopControlSnapshot`, so a future Tauri command can consume a synchronized
+view.
 
 Evidence produced so far:
 

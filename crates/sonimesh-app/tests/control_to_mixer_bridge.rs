@@ -11,7 +11,7 @@ use sonimesh_app::{
     ControlSessionToken, ControlStreamAction, ControlToMixerBridge, ControlToMixerError,
     DiagnosticExportAction, ExportRetentionPolicy, ExportStore, MixerStreamSessionError,
     PairingAttemptOutcome, PairingId, PairingInvitationController, PairingProofVerification,
-    PairingSource, SessionEvent, SessionPhase, SessionState,
+    PairingSnapshotState, PairingSource, SessionEvent, SessionPhase, SessionState,
 };
 use sonimesh_audio::{FrameDecoder, realtime_pcm_queue};
 use sonimesh_diagnostics::{ExportPlatformFormat, ExportSessionPhase, StreamCounters};
@@ -140,9 +140,9 @@ fn hello(capabilities: &[Capability]) -> Envelope {
     }
 }
 
-fn bridge() -> Bridge {
+fn bridge_with(state: SessionState) -> Bridge {
     ControlToMixerBridge::new(
-        trusted_session(),
+        state,
         capabilities(),
         TestOutput {
             health: OutputHealth::Healthy,
@@ -156,6 +156,10 @@ fn bridge() -> Bridge {
         16,
     )
     .unwrap()
+}
+
+fn bridge() -> Bridge {
+    bridge_with(trusted_session())
 }
 
 fn authenticated(bridge: &mut Bridge) -> ControlSessionToken {
@@ -1017,4 +1021,171 @@ fn export_temp_dir() -> PathBuf {
     let _ = std::fs::remove_dir_all(&path);
     std::fs::create_dir_all(&path).expect("create temporary directory");
     path
+}
+
+#[test]
+fn desktop_snapshot_projects_idle_inactive_from_a_fresh_bridge() {
+    let mut bridge = bridge_with(SessionState::IDLE);
+    let mut pairing = PairingInvitationController::<1>::new();
+
+    let snapshot = bridge.desktop_snapshot_at(&mut pairing, 100).unwrap();
+
+    assert_eq!(snapshot.session(), SessionPhase::Idle);
+    assert_eq!(snapshot.pairing(), PairingSnapshotState::Inactive);
+    assert_eq!(snapshot.output(), bridge.snapshot().output());
+    assert_eq!(snapshot.output().health(), OutputHealth::Healthy);
+    assert!(!snapshot.output().selection_retained());
+    assert!(!snapshot.output().stream_active());
+    assert!(!snapshot.output().fault_reported());
+}
+
+#[test]
+fn desktop_snapshot_projects_an_active_pairing_invitation() {
+    let mut bridge = bridge_with(SessionState::IDLE);
+    let mut pairing = PairingInvitationController::<1>::new();
+    bridge
+        .coordinator_mut()
+        .begin_pairing(&mut pairing, PairingId::new([3; 16]), 100, 50, 1)
+        .unwrap();
+
+    let snapshot = bridge.desktop_snapshot_at(&mut pairing, 101).unwrap();
+
+    assert_eq!(snapshot.session(), SessionPhase::Pairing);
+    assert_eq!(snapshot.pairing(), PairingSnapshotState::Active);
+}
+
+#[test]
+fn desktop_snapshot_expiry_returns_the_bridge_session_to_idle() {
+    let mut bridge = bridge_with(SessionState::IDLE);
+    let mut pairing = PairingInvitationController::<1>::new();
+    bridge
+        .coordinator_mut()
+        .begin_pairing(&mut pairing, PairingId::new([5; 16]), 100, 50, 1)
+        .unwrap();
+
+    let snapshot = bridge.desktop_snapshot_at(&mut pairing, 150).unwrap();
+
+    assert_eq!(snapshot.session(), SessionPhase::Idle);
+    assert_eq!(snapshot.pairing(), PairingSnapshotState::Expired);
+    assert_eq!(bridge.state().phase(), SessionPhase::Idle);
+}
+
+#[test]
+fn desktop_snapshot_after_trusted_session_projects_ready_consumed() {
+    let mut session = SessionState::IDLE;
+    let mut pairing = PairingInvitationController::<1>::new();
+    pairing
+        .begin(&mut session, PairingId::new([7; 16]), 100, 50, 1)
+        .unwrap();
+    assert_eq!(
+        pairing.verify_proof(&mut session, 101, PairingSource::new([9; 16]), || {
+            PairingProofVerification::Verified
+        }),
+        Ok(PairingAttemptOutcome::Paired)
+    );
+    let mut bridge = bridge_with(session);
+    authenticated(&mut bridge);
+
+    let snapshot = bridge.desktop_snapshot_at(&mut pairing, 102).unwrap();
+
+    assert_eq!(snapshot.session(), SessionPhase::Ready);
+    assert_eq!(snapshot.pairing(), PairingSnapshotState::Consumed);
+    assert_eq!(snapshot.output(), bridge.snapshot().output());
+}
+
+#[test]
+fn desktop_snapshot_projects_streaming_with_live_output_lifecycle() {
+    let counters = Arc::new(StreamCounters::default());
+    let mut session = SessionState::IDLE;
+    let mut pairing = PairingInvitationController::<1>::new();
+    pairing
+        .begin(&mut session, PairingId::new([11; 16]), 100, 50, 1)
+        .unwrap();
+    assert_eq!(
+        pairing.verify_proof(&mut session, 101, PairingSource::new([13; 16]), || {
+            PairingProofVerification::Verified
+        }),
+        Ok(PairingAttemptOutcome::Paired)
+    );
+    let mut bridge = bridge_with(session);
+    let token = authenticated(&mut bridge);
+    let mut pipeline = pipeline_for(1, 1, Arc::clone(&counters));
+    start_one(&mut bridge, token, 1, 1, None, &mut pipeline);
+
+    let snapshot = bridge.desktop_snapshot_at(&mut pairing, 102).unwrap();
+
+    assert_eq!(snapshot.session(), SessionPhase::Streaming);
+    assert_eq!(snapshot.pairing(), PairingSnapshotState::Consumed);
+    assert!(snapshot.output().selection_retained());
+    assert!(snapshot.output().stream_active());
+    assert!(!snapshot.output().fault_reported());
+    assert_eq!(snapshot.output().health(), OutputHealth::Healthy);
+}
+
+#[test]
+fn desktop_snapshot_projects_output_unavailable_after_a_fault() {
+    let counters = Arc::new(StreamCounters::default());
+    let mut session = SessionState::IDLE;
+    let mut pairing = PairingInvitationController::<1>::new();
+    pairing
+        .begin(&mut session, PairingId::new([17; 16]), 100, 50, 1)
+        .unwrap();
+    assert_eq!(
+        pairing.verify_proof(&mut session, 101, PairingSource::new([19; 16]), || {
+            PairingProofVerification::Verified
+        }),
+        Ok(PairingAttemptOutcome::Paired)
+    );
+    let mut bridge = bridge_with(session);
+    let token = authenticated(&mut bridge);
+    let mut pipeline = pipeline_for(1, 1, Arc::clone(&counters));
+    start_one(&mut bridge, token, 1, 1, None, &mut pipeline);
+
+    bridge.mixer_mut().output_mut().health = OutputHealth::StreamError;
+    assert!(matches!(
+        bridge.monitor(),
+        Ok(Some(OutputHealth::StreamError))
+    ));
+
+    let snapshot = bridge.desktop_snapshot_at(&mut pairing, 102).unwrap();
+
+    assert_eq!(snapshot.session(), SessionPhase::OutputUnavailable);
+    assert_eq!(snapshot.pairing(), PairingSnapshotState::Consumed);
+    assert!(snapshot.output().selection_retained());
+    assert!(!snapshot.output().stream_active());
+    assert!(snapshot.output().fault_reported());
+    assert_eq!(snapshot.output().health(), OutputHealth::StreamError);
+}
+
+#[test]
+fn desktop_snapshot_projects_reconnecting_after_connection_loss() {
+    let counters = Arc::new(StreamCounters::default());
+    let mut session = SessionState::IDLE;
+    let mut pairing = PairingInvitationController::<1>::new();
+    pairing
+        .begin(&mut session, PairingId::new([23; 16]), 100, 50, 1)
+        .unwrap();
+    assert_eq!(
+        pairing.verify_proof(&mut session, 101, PairingSource::new([29; 16]), || {
+            PairingProofVerification::Verified
+        }),
+        Ok(PairingAttemptOutcome::Paired)
+    );
+    let mut bridge = bridge_with(session);
+    let token = authenticated(&mut bridge);
+    let mut pipeline = pipeline_for(1, 1, Arc::clone(&counters));
+    start_one(&mut bridge, token, 1, 1, None, &mut pipeline);
+
+    bridge
+        .acknowledge_platform_event(SessionEvent::ConnectionLost)
+        .unwrap();
+
+    let snapshot = bridge.desktop_snapshot_at(&mut pairing, 103).unwrap();
+
+    assert_eq!(snapshot.session(), SessionPhase::Reconnecting);
+    assert_eq!(snapshot.pairing(), PairingSnapshotState::Consumed);
+    assert!(
+        snapshot.output().stream_active(),
+        "output stays alive while the bridge reconnects"
+    );
 }

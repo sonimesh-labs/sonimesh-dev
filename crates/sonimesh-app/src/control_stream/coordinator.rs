@@ -6,9 +6,10 @@ use sonimesh_protocol::{
 };
 
 use crate::{
-    PairingAttemptOutcome, PairingId, PairingInvitationController, PairingInvitationError,
-    PairingProofVerification, PairingSource, ReconnectGraceController, ReconnectGraceError,
-    ReconnectGraceObservation, ReconnectGraceState, SessionEvent, SessionState,
+    DesktopControlSnapshot, OutputSnapshotSource, PairingAttemptOutcome, PairingId,
+    PairingInvitationController, PairingInvitationError, PairingProofVerification, PairingSource,
+    ReconnectGraceController, ReconnectGraceError, ReconnectGraceObservation, ReconnectGraceState,
+    SessionEvent, SessionState,
 };
 
 use super::error::ControlStreamError;
@@ -241,6 +242,29 @@ impl ControlStreamCoordinator {
         now_ms: u64,
     ) -> Result<crate::PairingRecordState, PairingInvitationError> {
         let result = pairing.observe(&mut self.state, now_ms);
+        self.retire_if_idle();
+        result
+    }
+
+    /// Projects the current redacted desktop control snapshot through the pairing owner.
+    ///
+    /// The pairing owner applies its monotonic clock before projecting, so a
+    /// bridge cannot present an active invitation without first observing
+    /// expiry. The output snapshot is read directly from the supplied output
+    /// owner, and session-owned state is retired before returning whenever the
+    /// observation moves the lifecycle to idle.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PairingInvitationError`] when the monotonic-clock observation
+    /// is invalid. An owner with no retained invitation still returns a snapshot.
+    pub fn snapshot_at<const MAX_SOURCES: usize>(
+        &mut self,
+        pairing: &mut PairingInvitationController<MAX_SOURCES>,
+        now_ms: u64,
+        output: &impl OutputSnapshotSource,
+    ) -> Result<DesktopControlSnapshot, PairingInvitationError> {
+        let result = pairing.snapshot_at(&mut self.state, now_ms, output);
         self.retire_if_idle();
         result
     }
