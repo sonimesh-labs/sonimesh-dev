@@ -84,7 +84,11 @@ fn send_admit_render(
     frame: u32,
 ) {
     let outcome = sender
-        .send_frame(0, u64::from(frame) * 960, &[u8::try_from(frame).expect("test frame fits one byte")])
+        .send_frame(
+            0,
+            u64::from(frame) * 960,
+            &[u8::try_from(frame).expect("test frame fits one byte")],
+        )
         .unwrap();
     assert_eq!(outcome, MediaSessionSendOutcome::Sent { sequence: frame });
 
@@ -112,7 +116,10 @@ fn send_admit_render(
         consumer.pop_into(&mut output),
         RealtimePcmPopOutcome::Filled { samples: 1, .. }
     ));
-    assert!((output[0] - f32::from(u8::try_from(frame).expect("test frame fits one byte"))).abs() < f32::EPSILON);
+    assert!(
+        (output[0] - f32::from(u8::try_from(frame).expect("test frame fits one byte"))).abs()
+            < f32::EPSILON
+    );
 }
 
 #[test]
@@ -241,4 +248,3 @@ fn fresh_session_rebinds_the_same_source_after_the_pin_is_cleared() {
     assert!(pipeline.pinned_source().is_some());
     assert_eq!(counters.snapshot().authenticated_packets, 2);
 }
-
