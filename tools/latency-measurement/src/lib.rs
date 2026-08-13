@@ -14,4 +14,7 @@ pub mod wav;
 pub use offset::{OffsetConfig, OffsetError, OffsetEstimate, estimate_offset_ms};
 pub use signal::{MLS_PERIOD, mls_sequence, test_signal};
 pub use stats::{LatencySummary, percentile, summarize_ms};
-pub use wav::{MonoWav, WavError, encode_mono_16bit, parse_mono, read_mono, write_mono_16bit};
+pub use wav::{
+    MonoWav, SampleFormat, WavError, encode_mono, encode_mono_16bit, parse_mono, read_mono,
+    write_mono, write_mono_16bit,
+};

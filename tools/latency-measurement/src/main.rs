@@ -12,7 +12,8 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use sonimesh_latency_measurement::{
-    OffsetConfig, estimate_offset_ms, read_mono, summarize_ms, test_signal, write_mono_16bit,
+    OffsetConfig, SampleFormat, estimate_offset_ms, read_mono, summarize_ms, test_signal,
+    write_mono,
 };
 
 /// SoniMesh control-plane sample-rate bounds the `generate` command accepts.
@@ -43,6 +44,7 @@ struct GenerateArgs {
     sample_rate_hz: u32,
     seconds: u32,
     seed: u32,
+    format: SampleFormat,
     output: PathBuf,
 }
 
@@ -79,14 +81,15 @@ fn run() -> Result<(), Box<dyn Error>> {
 
 fn run_generate(args: &GenerateArgs) -> Result<(), Box<dyn Error>> {
     let signal = test_signal(args.sample_rate_hz, args.seconds, args.seed);
-    write_mono_16bit(&args.output, args.sample_rate_hz, &signal)
+    write_mono(&args.output, args.sample_rate_hz, &signal, args.format)
         .map_err(|error| format!("write {}: {error}", args.output.display()))?;
     println!(
-        "wrote {} sample_rate={}Hz seconds={} seed={} samples={}",
+        "wrote {} sample_rate={}Hz seconds={} seed={} format={} samples={}",
         args.output.display(),
         args.sample_rate_hz,
         args.seconds,
         args.seed,
+        args.format.name(),
         signal.len()
     );
     Ok(())
@@ -219,6 +222,7 @@ fn parse_generate(rest: &[String]) -> Result<Option<GenerateArgs>, String> {
     let mut sample_rate_hz = 48_000_u32;
     let mut seconds = 10_u32;
     let mut seed = 7_u32;
+    let mut format = SampleFormat::Pcm16;
     let mut output: Option<PathBuf> = None;
     let mut index = 0;
     while index < rest.len() {
@@ -235,6 +239,10 @@ fn parse_generate(rest: &[String]) -> Result<Option<GenerateArgs>, String> {
             "--seed" => {
                 index += 1;
                 seed = parse_u32(rest.get(index), "--seed")?;
+            }
+            "--bits" => {
+                index += 1;
+                format = parse_sample_format(rest.get(index))?;
             }
             flag if flag.starts_with('-') => {
                 return Err(format!("unknown flag `{flag}` for generate"));
@@ -265,6 +273,7 @@ fn parse_generate(rest: &[String]) -> Result<Option<GenerateArgs>, String> {
         sample_rate_hz,
         seconds,
         seed,
+        format,
         output,
     }))
 }
@@ -356,12 +365,18 @@ fn parse_f64(value: Option<&String>, flag: &str) -> Result<f64, String> {
         .map_err(|error| format!("{flag} expects a number: {error}"))
 }
 
+fn parse_sample_format(value: Option<&String>) -> Result<SampleFormat, String> {
+    let value = value.ok_or_else(|| "--bits requires a value".to_owned())?;
+    SampleFormat::parse(value)
+        .ok_or_else(|| format!("--bits expects one of 16, 24, 32, f32, f64: `{value}`"))
+}
+
 fn print_usage() {
     println!(
         r"SoniMesh latency measurement tool
 
 Usage:
-  sonimesh-latency-measurement generate [--sample-rate N] [--seconds N] [--seed N] <output.wav>
+  sonimesh-latency-measurement generate [--sample-rate N] [--seconds N] [--seed N] [--bits FMT] <output.wav>
   sonimesh-latency-measurement measure [--max-search-ms N] [--coarse-factor N] [--distinctness-ratio R] [--probe-ms N] <reference.wav> <recording.wav>...
   sonimesh-latency-measurement summary
   sonimesh-latency-measurement --help
@@ -375,6 +390,7 @@ Options:
   --sample-rate N         Reference sample rate in Hz (default: 48000).
   --seconds N             Reference length in seconds (default: 10).
   --seed N                MLS generator seed (default: 7).
+  --bits FMT              Sample format: 16, 24, 32, f32, or f64 (default: 16).
   --max-search-ms N       Search window after the recording start, in ms (default: 1000).
   --coarse-factor N       Coarse-search downsampling factor (default: 16).
   --distinctness-ratio R  Minimum best/second-best peak ratio (default: 3.0).
@@ -388,8 +404,8 @@ mod tests {
     use std::path::PathBuf;
 
     use super::{
-        Parsed, parse_args, parse_f64, parse_generate, parse_measure, parse_u32, parse_usize,
-        summarize_lines,
+        Parsed, SampleFormat, parse_args, parse_f64, parse_generate, parse_measure, parse_u32,
+        parse_usize, summarize_lines,
     };
 
     fn args(items: &[&str]) -> Vec<String> {
@@ -426,6 +442,7 @@ mod tests {
         assert_eq!(generate.sample_rate_hz, 48_000);
         assert_eq!(generate.seconds, 10);
         assert_eq!(generate.seed, 7);
+        assert_eq!(generate.format, SampleFormat::Pcm16);
         assert_eq!(generate.output, PathBuf::from("reference.wav"));
     }
 
@@ -439,6 +456,8 @@ mod tests {
             "5",
             "--seed",
             "11",
+            "--bits",
+            "24",
             "ref.wav",
         ]))
         .expect("parsed") else {
@@ -447,6 +466,7 @@ mod tests {
         assert_eq!(generate.sample_rate_hz, 44_100);
         assert_eq!(generate.seconds, 5);
         assert_eq!(generate.seed, 11);
+        assert_eq!(generate.format, SampleFormat::Pcm24);
         assert_eq!(generate.output, PathBuf::from("ref.wav"));
     }
 
@@ -513,6 +533,38 @@ mod tests {
                 .to_string()
                 .contains("115200000-sample reference bound")
         );
+    }
+
+    #[test]
+    fn generate_parses_every_sample_format() {
+        for (token, expected) in [
+            ("16", SampleFormat::Pcm16),
+            ("24", SampleFormat::Pcm24),
+            ("32", SampleFormat::Pcm32),
+            ("f32", SampleFormat::Float32),
+            ("f64", SampleFormat::Float64),
+        ] {
+            let Parsed::Generate(generate) =
+                parse_args(args(&["generate", "--bits", token, "ref.wav"])).expect("parsed")
+            else {
+                panic!("expected generate");
+            };
+            assert_eq!(generate.format, expected, "token `{token}`");
+        }
+    }
+
+    #[test]
+    fn generate_rejects_invalid_bits() {
+        let error =
+            parse_args(args(&["generate", "--bits", "20", "ref.wav"])).expect_err("bad bits");
+        assert!(
+            error
+                .to_string()
+                .contains("--bits expects one of 16, 24, 32, f32, f64")
+        );
+
+        let error = parse_args(args(&["generate", "--bits"])).expect_err("missing value");
+        assert!(error.to_string().contains("--bits requires a value"));
     }
 
     #[test]

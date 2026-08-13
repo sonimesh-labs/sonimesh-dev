@@ -25,7 +25,11 @@ cargo run -p sonimesh-latency-measurement -- generate \
 
 The reference is one full period of a degree-17 maximal-length sequence
 (`x^17 + x^3 + 1`, period 131071 samples, about 2.7 seconds at 48 kHz) followed
-by silence, normalized to ±1.0 and stored as 16-bit PCM.
+by silence, normalized to ±1.0 and stored as 16-bit PCM by default.
+
+`--bits` selects the WAVE sample layout the generator writes: `16`, `24`, `32`
+(signed PCM), or `f32`, `f64` (IEEE float). The reader accepts every format the
+generator writes.
 
 The generator rejects sample rates outside 8–192 kHz, durations above one hour,
 and combinations exceeding 115,200,000 samples before allocating any signal.
