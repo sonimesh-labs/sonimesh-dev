@@ -4,7 +4,7 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     use std::thread;
 
-    use sonimesh_platform::{AudioOutput, OutputConfig, RenderSource};
+    use sonimesh_platform::{AudioOutput, OutputConfig, OutputDeviceId, RenderSource};
     use windows_wasapi_prototype::WasapiOutput;
 
     struct Silence;
@@ -16,8 +16,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let mut output = WasapiOutput::new();
-    let fixed_config = output.default_output_config(Some(480), 8_192)?;
-    let config = match output.start(None, fixed_config, Box::new(Silence)) {
+    let pinned_id = smoke_device_id()?;
+    let device = pinned_id.as_ref().map(|id| OutputDeviceId::new(id.clone()));
+    let fixed_config = output.output_config_for_device(device.as_ref(), Some(480), 8_192)?;
+    let config = match output.start(device.as_ref(), fixed_config, Box::new(Silence)) {
         Ok(()) => fixed_config,
         Err(error) => {
             println!("fixed 480-frame request rejected: {error}");
@@ -25,10 +27,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 requested_callback_frames: None,
                 ..fixed_config
             };
-            output.start(None, default_config, Box::new(Silence))?;
+            output.start(device.as_ref(), default_config, Box::new(Silence))?;
             default_config
         }
     };
+    println!(
+        "device selection: {}",
+        if device.is_some() {
+            "pinned"
+        } else {
+            "default"
+        }
+    );
+    println!(
+        "configured format: {} Hz, {} channels, {:?}",
+        config.sample_rate_hz, config.channels, config.sample_format
+    );
 
     let active_duration = smoke_duration()?;
     thread::sleep(active_duration);
@@ -61,6 +75,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("direct WASAPI silent output smoke test did not remain active".into());
     }
     Ok(())
+}
+
+/// Reads the optional pinned endpoint for this smoke run.
+///
+/// An absent variable selects the current Windows default render endpoint.
+#[cfg(windows)]
+fn smoke_device_id() -> Result<Option<String>, std::io::Error> {
+    match std::env::var("SONIMESH_OUTPUT_SMOKE_DEVICE_ID") {
+        Ok(value) => validate_smoke_device_id(value).map(Some),
+        Err(std::env::VarError::NotPresent) => Ok(None),
+        Err(std::env::VarError::NotUnicode(_)) => Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "SONIMESH_OUTPUT_SMOKE_DEVICE_ID must be valid Unicode",
+        )),
+    }
+}
+
+#[cfg(windows)]
+fn validate_smoke_device_id(value: String) -> Result<String, std::io::Error> {
+    if value.is_empty() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "SONIMESH_OUTPUT_SMOKE_DEVICE_ID must not be empty",
+        ));
+    }
+    Ok(value)
 }
 
 #[cfg(windows)]
@@ -112,6 +152,15 @@ mod tests {
         assert!(smoke_duration_from_value("0").is_err());
         assert!(smoke_duration_from_value("28801").is_err());
         assert!(smoke_duration_from_value("ten").is_err());
+    }
+
+    #[test]
+    fn smoke_device_identifier_bounds_are_explicit() {
+        assert_eq!(
+            validate_smoke_device_id("wasapi:endpoint".to_owned()).unwrap(),
+            "wasapi:endpoint"
+        );
+        assert!(validate_smoke_device_id(String::new()).is_err());
     }
 }
 

@@ -11,8 +11,8 @@ use sonimesh_platform::{
 use windows::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT};
 use windows::Win32::Media::Audio::{
     AUDCLNT_BUFFERFLAGS_SILENT, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
-    IAudioClient, IAudioRenderClient, IMMDevice, IMMDeviceEnumerator, MMDeviceEnumerator,
-    WAVE_FORMAT_PCM, WAVEFORMATEX, WAVEFORMATEXTENSIBLE, eConsole, eRender,
+    DEVICE_STATE_ACTIVE, IAudioClient, IAudioRenderClient, IMMDevice, IMMDeviceEnumerator,
+    MMDeviceEnumerator, WAVE_FORMAT_PCM, WAVEFORMATEX, WAVEFORMATEXTENSIBLE, eConsole, eRender,
 };
 use windows::Win32::Media::KernelStreaming::WAVE_FORMAT_EXTENSIBLE;
 use windows::Win32::Media::Multimedia::WAVE_FORMAT_IEEE_FLOAT;
@@ -77,8 +77,28 @@ impl WasapiOutput {
         requested_callback_frames: Option<u32>,
         maximum_callback_frames: u32,
     ) -> Result<OutputConfig, OutputError> {
+        self.output_config_for_device(None, requested_callback_frames, maximum_callback_frames)
+    }
+
+    /// Builds a bounded configuration from the mix format of the selected endpoint.
+    ///
+    /// `None` selects the current Windows default render endpoint; a supplied
+    /// opaque endpoint identifier is resolved among the active render endpoints.
+    ///
+    /// # Errors
+    ///
+    /// Returns an output error when the selected endpoint, its mix format, or
+    /// the requested SoniMesh bounds cannot be read or validated.
+    pub fn output_config_for_device(
+        &self,
+        device: Option<&OutputDeviceId>,
+        requested_callback_frames: Option<u32>,
+        maximum_callback_frames: u32,
+    ) -> Result<OutputConfig, OutputError> {
+        let selected = device.map(|value| value.as_str().to_owned());
         run_in_mta(move || {
-            let mix = default_mix_format()?;
+            let endpoint = selected_render_endpoint(selected.as_deref())?;
+            let mix = mix_format_for(&endpoint)?;
             output_config_from_mix(mix, requested_callback_frames, maximum_callback_frames)
         })
     }
@@ -425,11 +445,7 @@ fn open_render_stream(
     status: &WasapiStatus,
 ) -> Result<RenderStream, OutputError> {
     let apartment = ComApartment::initialize()?;
-    let device = default_device()?;
-    let current_id = endpoint_id(&device)?;
-    if requested_id.is_some_and(|requested| requested != current_id) {
-        return Err(OutputError::DeviceUnavailable);
-    }
+    let device = selected_render_endpoint(requested_id)?;
 
     let client: IAudioClient =
         unsafe { device.Activate(CLSCTX_ALL, None) }.map_err(|error| backend_error(&error))?;
@@ -484,13 +500,42 @@ fn default_device_info() -> Result<OutputDeviceInfo, OutputError> {
     })
 }
 
-fn default_mix_format() -> Result<MixFormat, OutputError> {
-    let device = default_device()?;
+fn mix_format_for(endpoint: &IMMDevice) -> Result<MixFormat, OutputError> {
     let client: IAudioClient =
-        unsafe { device.Activate(CLSCTX_ALL, None) }.map_err(|error| backend_error(&error))?;
+        unsafe { endpoint.Activate(CLSCTX_ALL, None) }.map_err(|error| backend_error(&error))?;
     let raw_format = unsafe { client.GetMixFormat() }.map_err(|error| backend_error(&error))?;
     let format = WaveFormatAllocation(raw_format);
     parse_mix_format(format.as_ptr())
+}
+
+fn normalize_endpoint_id(requested: &str) -> &str {
+    requested.strip_prefix("wasapi:").unwrap_or(requested)
+}
+
+fn selected_render_endpoint(requested: Option<&str>) -> Result<IMMDevice, OutputError> {
+    let Some(requested) = requested else {
+        return default_device();
+    };
+    // Accept either the raw IMMDevice endpoint id or the CPAL-style
+    // "wasapi:"-prefixed form so one identifier works for both smoke commands.
+    let requested = normalize_endpoint_id(requested);
+    let default = default_device()?;
+    if endpoint_id(&default)? == requested {
+        return Ok(default);
+    }
+    let enumerator: IMMDeviceEnumerator =
+        unsafe { CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL) }
+            .map_err(|error| backend_error(&error))?;
+    let collection = unsafe { enumerator.EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE) }
+        .map_err(|error| backend_error(&error))?;
+    let count = unsafe { collection.GetCount() }.map_err(|error| backend_error(&error))?;
+    for index in 0..count {
+        let device = unsafe { collection.Item(index) }.map_err(|error| backend_error(&error))?;
+        if endpoint_id(&device)? == requested {
+            return Ok(device);
+        }
+    }
+    Err(OutputError::DeviceUnavailable)
 }
 
 fn default_device() -> Result<IMMDevice, OutputError> {
@@ -656,6 +701,12 @@ mod tests {
             validate_mix_config(mix(), changed_rate),
             Err(OutputError::UnsupportedFormat)
         );
+    }
+
+    #[test]
+    fn endpoint_id_normalization_accepts_both_forms() {
+        assert_eq!(normalize_endpoint_id("wasapi:{endpoint}"), "{endpoint}");
+        assert_eq!(normalize_endpoint_id("{endpoint}"), "{endpoint}");
     }
 
     #[test]
