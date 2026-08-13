@@ -161,6 +161,21 @@ rendered 480/512-frame quanta after a matching priming buffer. These are
 backend-local software observations; they do not cover device removal,
 default-role change, sleep/wake, or a long soak.
 
+## Sixty-second pinned-Realtek silent smoke repeat
+
+Both backends repeated the silent smoke for sixty seconds against the pinned
+Realtek endpoint on the same boot. With a 512-frame render quantum, CPAL
+reported 5,626 callbacks, 512-frame latest and 1,126-frame maximum callbacks,
+a 61,226,803,700 ns latest local offset, an 11,334,900 ns largest scheduling
+gap, and zero capacity faults or stream errors. Direct WASAPI reported 5,626
+renders, 512-frame latest and maximum renders, a 1,126-frame endpoint and
+priming buffer, a 61,253,429,700 ns latest local offset, a 17,304,600 ns
+largest scheduling gap, and zero capacity faults or stream errors.
+
+This extends the pinned-Realtek observation from the two-second smoke to a
+sixty-second window on both backends. It is a silent repeat, not the required
+eight-hour soak.
+
 ## Interpretation and remaining work
 
 The default-endpoint runs reproduce the known backend difference: CPAL received
@@ -171,7 +186,9 @@ CPAL observed a 1,126-frame maximum callback while direct WASAPI rendered
 512-frame quanta after a 1,126-frame priming buffer. CPAL's largest callback
 therefore matched the direct-WASAPI endpoint buffer on both endpoints. The
 five-cycle lifecycle runs repeated the same callback-size pattern on both
-endpoints with zero faults across start/stop boundaries. All
+endpoints with zero faults across start/stop boundaries, and both backends
+stayed healthy over the sixty-second pinned-Realtek repeat with the expected
+512-frame quanta. All
 silent runs stayed inside the 8,192-frame source bound with zero capacity
 faults and zero stream errors.
 
