@@ -53,6 +53,7 @@ const INITIAL_PREVIEW_SNAPSHOT: DesktopSnapshot = {
     health: 'healthy',
   },
   pairing: { state: 'consumed', expiresInSeconds: null },
+  reconnectRemainingMs: null,
   metrics: {
     authenticatedPackets: '12844',
     duplicatePackets: '6',
@@ -185,6 +186,7 @@ export class PreviewDesktopBridge implements DesktopBridge {
       this.snapshotState.pairing.state === 'consumed'
     ) {
       this.setSession('reconnecting')
+      this.snapshotState.reconnectRemainingMs = RECONNECT_GRACE_MILLIS
       this.recordStatus('reconnecting', 'control connection lost')
     } else {
       this.recordError('connection loss requires a trusted session')
@@ -302,6 +304,11 @@ export class PreviewDesktopBridge implements DesktopBridge {
   private setSession(session: SessionState) {
     this.snapshotState.session = session
     this.snapshotState.output.streamActive = session === 'streaming'
+    // The reconnect window is only meaningful while the session reconnects;
+    // leaving that state clears the bounded remaining countdown.
+    if (session !== 'reconnecting') {
+      this.snapshotState.reconnectRemainingMs = null
+    }
   }
 
   private recordReply(reply: Omit<ControlReply, 'requestId'>): void {
@@ -347,6 +354,9 @@ export class PreviewDesktopBridge implements DesktopBridge {
 
 const PAIRING_INVITATION_LIFETIME_SECONDS = 300
 const PAIRING_INVITATION_LIFETIME_MILLIS = PAIRING_INVITATION_LIFETIME_SECONDS * 1_000
+
+/** Fixed preview reconnect window in milliseconds until a simulated reconnect. */
+const RECONNECT_GRACE_MILLIS = 30_000
 
 export const desktopBridge: DesktopBridge = new PreviewDesktopBridge()
 

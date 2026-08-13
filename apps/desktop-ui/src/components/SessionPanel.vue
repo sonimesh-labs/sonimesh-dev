@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { ArrowUpRight, Radio, ShieldCheck, Square } from '@lucide/vue'
+import { ArrowUpRight, Radio, RefreshCw, ShieldCheck, Square } from '@lucide/vue'
 
 import type { PairingState, SessionState } from '../types'
 
@@ -9,8 +9,10 @@ const props = withDefaults(defineProps<{
   pairingState: PairingState
   preview?: boolean
   busy: boolean
+  reconnectRemainingMs?: number | null
 }>(), {
   preview: false,
+  reconnectRemainingMs: null,
 })
 
 const emit = defineEmits<{
@@ -72,6 +74,9 @@ const displayLabel = computed(() => (props.preview ? previewLabels[props.state] 
 const displaySummary = computed(() => (props.preview ? previewSummaries[props.state] : summaries[props.state]))
 const displayControl = computed(() => (props.preview ? 'Preview state' : controlLabels[props.pairingState]))
 const displayState = computed(() => (props.preview ? `Preview ${props.state}` : props.state))
+const reconnectSeconds = computed(() =>
+  props.reconnectRemainingMs === null ? 0 : Math.ceil(props.reconnectRemainingMs / 1_000),
+)
 </script>
 
 <template>
@@ -108,6 +113,11 @@ const displayState = computed(() => (props.preview ? `Preview ${props.state}` : 
         <ArrowUpRight :size="17" aria-hidden="true" />
         <dt>Mode</dt>
         <dd>{{ preview ? 'Preview adapter' : 'Receiver' }}</dd>
+      </div>
+      <div v-if="state === 'reconnecting' && reconnectRemainingMs !== null">
+        <RefreshCw :size="17" aria-hidden="true" />
+        <dt>Reconnect window</dt>
+        <dd>{{ reconnectSeconds }}s remaining</dd>
       </div>
     </dl>
 

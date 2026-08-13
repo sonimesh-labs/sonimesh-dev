@@ -99,6 +99,42 @@ describe('SessionPanel', () => {
     expect(unavailable.emitted('simulateOutputRestored')).toHaveLength(1)
   })
 
+  it('shows the bounded reconnect countdown only while reconnecting', () => {
+    const reconnecting = mount(SessionPanel, {
+      props: {
+        state: 'reconnecting',
+        pairingState: 'consumed',
+        preview: true,
+        busy: false,
+        reconnectRemainingMs: 30_000,
+      },
+    })
+    expect(reconnecting.text()).toContain('Reconnect window')
+    expect(reconnecting.text()).toContain('30s remaining')
+
+    const expired = mount(SessionPanel, {
+      props: {
+        state: 'reconnecting',
+        pairingState: 'consumed',
+        preview: true,
+        busy: false,
+        reconnectRemainingMs: null,
+      },
+    })
+    expect(expired.text()).not.toContain('Reconnect window')
+
+    const ready = mount(SessionPanel, {
+      props: {
+        state: 'ready',
+        pairingState: 'consumed',
+        preview: true,
+        busy: false,
+        reconnectRemainingMs: 30_000,
+      },
+    })
+    expect(ready.text()).not.toContain('Reconnect window')
+  })
+
   it('hides fault simulation from the live receiver view', () => {
     const wrapper = mount(SessionPanel, {
       props: {

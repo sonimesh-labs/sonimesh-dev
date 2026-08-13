@@ -75,6 +75,7 @@ const { busy, createPairing, error, expirePairing, refresh, resetPreview, revoke
             :pairing-state="snapshot.pairing.state"
             :preview="snapshot.previewAdapter"
             :busy="busy"
+            :reconnect-remaining-ms="snapshot.reconnectRemainingMs"
             @start="start"
             @stop="stop"
             @simulate-connection-lost="simulateConnectionLost"

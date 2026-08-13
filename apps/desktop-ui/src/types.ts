@@ -98,6 +98,8 @@ export interface DesktopSnapshot {
   /** Redacted output lifecycle mirrored from the Rust control snapshot. */
   output: OutputSnapshot
   pairing: PairingStatus
+  /** Bounded milliseconds remaining before the control session expires while reconnecting; null otherwise. */
+  reconnectRemainingMs: number | null
   metrics: StreamMetrics
   /** Bounded, most-recent-first receiver-generated control-plane replies. */
   replies: ControlReply[]

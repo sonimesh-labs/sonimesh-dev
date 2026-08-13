@@ -57,6 +57,7 @@ function previewSnapshot(): DesktopSnapshot {
       health: 'healthy',
     },
     pairing: { state: 'consumed', expiresInSeconds: null },
+    reconnectRemainingMs: null,
     metrics: {
       authenticatedPackets: '12844',
       duplicatePackets: '6',

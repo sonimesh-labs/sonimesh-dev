@@ -102,9 +102,21 @@ describe('PreviewDesktopBridge', () => {
     const reconnecting = await bridge.simulateConnectionLost()
     expect(reconnecting.session).toBe('reconnecting')
     expect(reconnecting.pairing.state).toBe('consumed')
+    expect(reconnecting.reconnectRemainingMs).toBe(30_000)
 
     const reconnected = await bridge.simulateReconnected()
     expect(reconnected.session).toBe('ready')
+    expect(reconnected.reconnectRemainingMs).toBeNull()
+  })
+
+  it('clears the reconnect countdown when a reconnecting session expires', async () => {
+    const bridge = new PreviewDesktopBridge()
+    await bridge.startStream()
+    await bridge.simulateConnectionLost()
+
+    const expired = await bridge.simulateSessionExpired()
+    expect(expired.session).toBe('idle')
+    expect(expired.reconnectRemainingMs).toBeNull()
   })
 
   it('does not simulate connection loss without a trusted session', async () => {

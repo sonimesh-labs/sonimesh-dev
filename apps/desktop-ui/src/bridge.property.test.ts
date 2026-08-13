@@ -42,6 +42,8 @@ const PREVIEW_DEVICES: OutputDevice[] = [
 
 const INVITATION_LIFETIME_MILLIS = 300_000
 
+const RECONNECT_GRACE_MILLIS = 30_000
+
 type Command =
   | { kind: 'snapshot' }
   | { kind: 'startStream' }
@@ -323,6 +325,7 @@ class PreviewBridgeModel {
         health: s.output.health,
       },
       metrics: structuredClone(s.metrics),
+      reconnectRemainingMs: s.session === 'reconnecting' ? RECONNECT_GRACE_MILLIS : null,
       previewAdapter: true,
     }
   }

@@ -17,7 +17,10 @@ without a page reload. The
 preview also mirrors the session owner's platform events: connection loss and
 output loss can be simulated from the session panel (trusted → `reconnecting`,
 `streaming` → `outputUnavailable`), with reconnect and output restore returning
-to `ready` and `streaming`, so recovery UI is exercisable without hardware. The
+to `ready` and `streaming`, so recovery UI is exercisable without hardware.
+Connection loss also arms a bounded 30-second reconnect window whose remaining
+seconds the session panel projects while the session is reconnecting, matching
+the Rust snapshot's grace countdown without running a real timer. The
 session owner's expiry transition is also simulable from the session panel
 (`Simulate session expiry`): a trusted session (ready, streaming, reconnecting,
 or output unavailable) retires to `idle` while the consumed pairing record stays
@@ -33,9 +36,10 @@ must never receive PCM, Opus frames, keys, or realtime callbacks.
 
 The future bridge should project the Rust `DesktopControlSnapshot` after the
 pairing owner's low-rate `snapshot_at(session, now_ms, &output_controller)` call. That
-entry point observes the invitation clock before projection and reads output
-state from its lifecycle owner, then returns only
-session phase, a redacted invitation lifecycle, and redacted output lifecycle.
+entry point observes both the invitation clock and the reconnect-grace clock
+before projection and reads output state from its lifecycle owner, then returns
+only session phase, a redacted invitation lifecycle, the bounded remaining
+reconnect time, and redacted output lifecycle.
 Metrics remain separate `StreamCounters` snapshots, and device lists stay on
 their own low-rate API. Cumulative counters cross this preview contract as
 unsigned decimal strings, including distinct PCM underflow and callback
