@@ -170,3 +170,106 @@ impl std::error::Error for ControlStreamError {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::error::Error;
+
+    use sonimesh_protocol::ControlFrameError;
+
+    use super::ControlStreamError;
+    use crate::{ReconnectGraceError, SessionEvent, SessionState, SessionTransitionError};
+
+    #[test]
+    fn display_messages_are_actionable_without_secrets() {
+        assert_eq!(
+            ControlStreamError::InvalidEpoch.to_string(),
+            "control epoch cannot fit media key context"
+        );
+        assert_eq!(
+            ControlStreamError::UnsupportedFrameDuration(20).to_string(),
+            "frame duration 20 ms was not negotiated"
+        );
+        assert_eq!(
+            ControlStreamError::StaleEpoch {
+                active: 3,
+                requested: 1,
+            }
+            .to_string(),
+            "media key epoch 1 is older than active epoch 3"
+        );
+        assert_eq!(
+            ControlStreamError::ControlSessionAlreadyInstalled.to_string(),
+            "an authenticated control session is already installed"
+        );
+        assert_eq!(
+            ControlStreamError::GraceRequiresReconnecting(SessionState::RECONNECTING).to_string(),
+            format!(
+                "reconnect grace requires Reconnecting state, found {:?}",
+                SessionState::RECONNECTING
+            )
+        );
+    }
+
+    #[test]
+    fn debug_output_stays_structured_for_wrapped_protocol_errors() {
+        // ControlStreamError composes ControlFrameError's structured Debug, so
+        // the wrapped variant stays identifiable while any arbitrary decoder or
+        // encoder text remains redacted by the protocol layer.
+        assert_eq!(
+            format!(
+                "{:?}",
+                ControlStreamError::Protocol(ControlFrameError::InvalidStartStream)
+            ),
+            "Protocol(InvalidStartStream)"
+        );
+        assert_eq!(
+            format!(
+                "{:?}",
+                ControlStreamError::Protocol(ControlFrameError::UnsupportedVersion(999))
+            ),
+            "Protocol(UnsupportedVersion(999))"
+        );
+        assert_eq!(
+            format!("{:?}", ControlStreamError::InvalidEpoch),
+            "InvalidEpoch"
+        );
+    }
+
+    #[test]
+    fn wrapped_errors_retain_their_source_and_leaves_report_none() {
+        let protocol = ControlStreamError::Protocol(ControlFrameError::FrameTooLarge);
+        assert!(
+            Error::source(&protocol)
+                .and_then(|source| source.downcast_ref::<ControlFrameError>())
+                .is_some()
+        );
+
+        let transition = ControlStreamError::Transition(SessionTransitionError {
+            state: SessionState::IDLE,
+            event: SessionEvent::StartStream,
+        });
+        assert!(
+            Error::source(&transition)
+                .and_then(|source| source.downcast_ref::<SessionTransitionError>())
+                .is_some()
+        );
+
+        let grace = ControlStreamError::ReconnectGrace(ReconnectGraceError::TimeRegressed);
+        assert!(
+            Error::source(&grace)
+                .and_then(|source| source.downcast_ref::<ReconnectGraceError>())
+                .is_some()
+        );
+
+        for leaf in [
+            ControlStreamError::InvalidEpoch,
+            ControlStreamError::ActiveStreamLimit,
+            ControlStreamError::MissingNegotiation,
+            ControlStreamError::ControlSessionTokenExhausted,
+            ControlStreamError::OperationTokenExhausted,
+        ] {
+            assert!(Error::source(&leaf).is_none(), "{leaf:?} reports a source");
+        }
+    }
+}

@@ -128,3 +128,71 @@ impl PendingStreamChange {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use sonimesh_protocol::{MediaCryptoError, MediaDirection};
+
+    use super::{
+        ControlOperationToken, ControlSessionToken, ControlStreamAction, MediaStreamIdentity,
+        PendingStreamChange, StreamStartRequest,
+    };
+
+    fn identity(session_id: u64, stream_id: u32, key_epoch: u16) -> MediaStreamIdentity {
+        MediaStreamIdentity {
+            session_id,
+            stream_id,
+            key_epoch,
+        }
+    }
+
+    #[test]
+    fn media_key_context_round_trips_exact_fields_for_both_directions() {
+        let identity = identity(0x0102_0304_0506_0708, 0x0001_0002, 3);
+        for direction in [
+            MediaDirection::AndroidToDesktop,
+            MediaDirection::DesktopToAndroid,
+        ] {
+            let context = identity
+                .media_key_context(direction)
+                .expect("non-zero media identity is a valid context");
+            assert_eq!(context.session_id, identity.session_id);
+            assert_eq!(context.stream_id, identity.stream_id);
+            assert_eq!(context.key_epoch, identity.key_epoch);
+            assert_eq!(context.direction, direction);
+        }
+    }
+
+    #[test]
+    fn media_key_context_rejects_zero_session_or_stream_identifiers() {
+        for direction in [
+            MediaDirection::AndroidToDesktop,
+            MediaDirection::DesktopToAndroid,
+        ] {
+            assert!(matches!(
+                identity(0, 1, 0).media_key_context(direction),
+                Err(MediaCryptoError::InvalidContext)
+            ));
+            assert!(matches!(
+                identity(1, 0, 0).media_key_context(direction),
+                Err(MediaCryptoError::InvalidContext)
+            ));
+            assert!(identity(1, 1, 0).media_key_context(direction).is_ok());
+        }
+    }
+
+    #[test]
+    fn coordinator_values_remain_copy_so_actions_can_be_repeated() {
+        // The coordinator returns these by value to a platform owner that must
+        // be able to acknowledge the same operation later, so every value that
+        // crosses that boundary must stay Copy rather than silently becoming a
+        // clone-only type.
+        fn assert_copy<T: Copy>() {}
+        assert_copy::<ControlSessionToken>();
+        assert_copy::<ControlOperationToken>();
+        assert_copy::<MediaStreamIdentity>();
+        assert_copy::<StreamStartRequest>();
+        assert_copy::<ControlStreamAction>();
+        assert_copy::<PendingStreamChange>();
+    }
+}
