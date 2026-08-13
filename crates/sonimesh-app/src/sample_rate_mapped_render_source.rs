@@ -378,3 +378,133 @@ impl RenderSource for SampleRateMappedRenderSource {
         }
     }
 }
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use sonimesh_audio::{MAX_DRIFT_ADJUSTMENT_PPM, ResamplerError};
+    use sonimesh_diagnostics::StreamCounters;
+    use sonimesh_platform::{MAX_CALLBACK_FRAMES, RenderSource};
+
+    use super::{SampleRateMappedRenderSource, SampleRateMappedRenderSourceError};
+    use crate::{DriftAdjustmentError, DriftAdjustmentHandle};
+
+    struct FakeSource {
+        value: f32,
+    }
+
+    impl RenderSource for FakeSource {
+        fn render(&mut self, output: &mut [f32]) {
+            output.fill(self.value);
+        }
+    }
+
+    fn source() -> Box<dyn RenderSource> {
+        Box::new(FakeSource { value: 0.5 })
+    }
+
+    fn mapped() -> SampleRateMappedRenderSource {
+        SampleRateMappedRenderSource::new(source(), 48_000, 48_000, 2, 1_024)
+            .expect("fixed test source is valid")
+    }
+
+    #[test]
+    fn new_rejects_an_invalid_channel_count() {
+        assert!(matches!(
+            SampleRateMappedRenderSource::new(source(), 48_000, 48_000, 0, 1_024),
+            Err(SampleRateMappedRenderSourceError::Resampler(
+                ResamplerError::InvalidChannelCount
+            ))
+        ));
+    }
+
+    #[test]
+    fn new_rejects_zero_or_oversized_callback_frames() {
+        assert!(matches!(
+            SampleRateMappedRenderSource::new(source(), 48_000, 48_000, 2, 0),
+            Err(SampleRateMappedRenderSourceError::InvalidMaximumCallbackFrames)
+        ));
+        assert!(matches!(
+            SampleRateMappedRenderSource::new(source(), 48_000, 48_000, 2, MAX_CALLBACK_FRAMES + 1),
+            Err(SampleRateMappedRenderSourceError::InvalidMaximumCallbackFrames)
+        ));
+    }
+
+    #[test]
+    fn construction_publishes_nominal_rates_to_metrics() {
+        let metrics = Arc::new(StreamCounters::default());
+        let handle = DriftAdjustmentHandle::new(Some(Arc::clone(&metrics)));
+        let mapped = SampleRateMappedRenderSource::new_with_drift_handle(
+            source(),
+            44_100,
+            48_000,
+            2,
+            1_024,
+            &handle,
+        )
+        .unwrap();
+
+        assert_eq!(mapped.channels(), 2);
+        let snapshot = metrics.snapshot();
+        assert_eq!(snapshot.nominal_input_sample_rate_hz, 44_100);
+        assert_eq!(snapshot.nominal_output_sample_rate_hz, 48_000);
+    }
+
+    #[test]
+    fn render_converts_an_identity_rate_without_changing_samples() {
+        let mut mapped = mapped();
+
+        let mut output = [0.0; 256];
+        mapped.render(&mut output);
+
+        assert!(output.iter().all(|sample| (sample - 0.5).abs() < 1e-6));
+    }
+
+    #[test]
+    fn render_applies_a_published_drift_correction() {
+        let (mut mapped, handle) = SampleRateMappedRenderSource::new_with_drift_control(
+            source(),
+            48_000,
+            48_000,
+            2,
+            1_024,
+        )
+        .unwrap();
+        handle.set_ppm(1_000).unwrap();
+
+        let mut output = [0.0; 256];
+        mapped.render(&mut output);
+
+        assert!(output.iter().all(|sample| sample.is_finite()));
+        assert!(output.iter().all(|sample| (sample - 0.5).abs() < 1e-3));
+        assert_eq!(handle.current_ppm(), 1_000);
+    }
+
+    #[test]
+    fn set_ppm_rejects_an_out_of_bound_correction() {
+        let (_, handle) = SampleRateMappedRenderSource::new_with_drift_control(
+            source(),
+            48_000,
+            48_000,
+            2,
+            1_024,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            handle.set_ppm(MAX_DRIFT_ADJUSTMENT_PPM + 1),
+            Err(DriftAdjustmentError::InvalidPpm)
+        ));
+        assert_eq!(handle.current_ppm(), 0);
+    }
+
+    #[test]
+    fn render_writes_silence_when_the_callback_exceeds_the_bound() {
+        let mut mapped = SampleRateMappedRenderSource::new(source(), 48_000, 48_000, 2, 4).unwrap();
+
+        let mut output = [1.0; 16];
+        mapped.render(&mut output);
+
+        assert!(output.iter().all(|sample| sample.abs() < 1e-6));
+    }
+}
