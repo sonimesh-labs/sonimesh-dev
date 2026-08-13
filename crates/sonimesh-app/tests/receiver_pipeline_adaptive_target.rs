@@ -14,7 +14,7 @@ use sonimesh_app::{AdaptiveTargetConfig, ReceiverStreamPipeline};
 use sonimesh_audio::{
     DecodeStep, FrameDecoder, InsertOutcome, JitterMode, JitterTargetConfig, realtime_pcm_queue,
 };
-use sonimesh_diagnostics::StreamCounters;
+use sonimesh_diagnostics::{ExportSessionSnapshot, StreamCounters, build_export_bundle};
 use sonimesh_protocol::{MediaDirection, MediaKeyContext, MediaSealer, SessionSecret};
 
 const JITTER_CAPACITY: usize = 4;
@@ -283,4 +283,51 @@ fn receives_authenticated_udp_media_into_the_adaptive_controller() {
     // The first packet only establishes the arrival baseline, but the target
     // configuration is already published for the active epoch.
     assert_eq!(target_state(&counters), (2, 4, 3, 0, 0, 0));
+}
+
+#[test]
+fn published_target_state_reaches_the_export_bundle() {
+    let counters = Arc::new(StreamCounters::default());
+    let mut ticks = (1_u64..=4).map(|frame| frame * 20).collect::<Vec<_>>();
+    let mut next = ticks[3];
+    for _ in 0..32 {
+        next += 100;
+        ticks.push(next);
+    }
+    let (mut pipeline, mut sealer, _queue) = adaptive_pipeline(&ticks, Arc::clone(&counters));
+
+    for frame in 0_u64..36 {
+        send(&mut pipeline, &mut sealer, frame * 960);
+    }
+    let (min, max, target, smoothed, raised, lowered) = target_state(&counters);
+    assert!(smoothed > 0 && raised >= 1, "the controller must respond");
+
+    let snapshot = counters.snapshot();
+    let bundle = build_export_bundle(&ExportSessionSnapshot {
+        software_version: "0.1.0",
+        endpoint: None,
+        platform_format: None,
+        buffer_policy: None,
+        session_phase: None,
+        streams: std::slice::from_ref(&snapshot),
+    })
+    .unwrap();
+
+    // The full chain is proven: live packets drive the controller, the
+    // controller publishes through the stream counters, and the export
+    // bundle carries the same values verbatim.
+    assert!(bundle.contains(&format!("\"target_min_frames\":{min}")));
+    assert!(bundle.contains(&format!("\"target_max_frames\":{max}")));
+    assert!(bundle.contains(&format!("\"target_frames\":{target}")));
+    assert!(bundle.contains(&format!("\"target_raised_steps\":{raised}")));
+    assert!(bundle.contains(&format!("\"target_lowered_steps\":{lowered}")));
+
+    let marker = "\"target_smoothed_jitter_ms\":";
+    let start = bundle
+        .find(marker)
+        .expect("smoothed jitter must be exported");
+    let tail = &bundle[start + marker.len()..];
+    let digits: String = tail.chars().take_while(char::is_ascii_digit).collect();
+    let exported_smoothed: u32 = digits.parse().expect("smoothed jitter must be numeric");
+    assert_eq!(exported_smoothed, smoothed);
 }

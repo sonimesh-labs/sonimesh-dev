@@ -1,12 +1,14 @@
 //! Deterministic property coverage for the stream diagnostics counters.
 //!
-//! `StreamCounters` publishes two distinct state machines: fourteen cumulative
-//! saturating counters and two packed (occupancy, high-water) epoch pairs —
-//! the PCM queue and the jitter buffer. This test drives a real counter
-//! instance under seeded operation walks against independent models — a plain
-//! saturating `u64` struct for the cumulative counters and separate
-//! `(occupancy, high_water)` pairs for the epochs — and compares every
-//! published snapshot field after each step.
+//! `StreamCounters` publishes three distinct state machines: fourteen
+//! cumulative saturating counters, two packed (occupancy, high-water) epoch
+//! pairs — the PCM queue and the jitter buffer — and a six-field adaptive
+//! target-state epoch. This test drives a real counter instance under seeded
+//! operation walks against independent models — a plain saturating `u64`
+//! struct for the cumulative counters, separate `(occupancy, high_water)`
+//! pairs for the epochs, and a `(min, max, target, smoothed, raised, lowered)`
+//! struct for the target state — and compares every published snapshot field
+//! after each step.
 
 use sonimesh_diagnostics::{StreamCounters, StreamMetricsSnapshot};
 
@@ -346,5 +348,148 @@ fn jitter_epoch_matches_an_independent_high_water_model() {
     assert!(
         observed_reset_after_activity,
         "the walk must reset a populated jitter epoch"
+    );
+}
+
+/// Independent model of the adaptive-target state epoch.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct TargetEpochModel {
+    min_frames: u16,
+    max_frames: u16,
+    target_frames: u16,
+    smoothed_jitter_ms: u32,
+    raised_steps: u32,
+    lowered_steps: u32,
+}
+
+/// Drives `publish_target_state` and `reset_target_state` against an
+/// independent six-field model: every published value must match the latest
+/// write, the minimum must never exceed the maximum, the target must stay
+/// inside its water levels, and a reset must retire all six fields to zero.
+#[allow(clippy::too_many_lines)]
+#[test]
+fn target_epoch_matches_an_independent_model() {
+    const STEPS: usize = 20_000;
+    let mut rng = XorShift64(0xD1A6_0000_2026_0017);
+    let counters = StreamCounters::default();
+    let mut model = TargetEpochModel::default();
+
+    let mut observed_published_state = false;
+    let mut observed_min_below_max = false;
+    let mut observed_reset_after_activity = false;
+
+    for _ in 0..STEPS {
+        if rng.next_usize(10) == 0 {
+            counters.reset_target_state();
+            if model != TargetEpochModel::default() {
+                observed_reset_after_activity = true;
+            }
+            model = TargetEpochModel::default();
+        } else {
+            let min_frames = match rng.next_usize(4) {
+                0 => 0,
+                1 => u16::try_from(rng.next_u32() % 16 + 1).expect("small bound"),
+                2 => u16::try_from(rng.next_u32() % 65_536).expect("full-range bound"),
+                _ => u16::try_from(rng.next_u32() % 1_024).expect("medium bound"),
+            };
+            let span = match rng.next_usize(4) {
+                0 => 0,
+                1 => u16::try_from(rng.next_u32() % 16 + 1).expect("small span"),
+                2 => u16::MAX - min_frames,
+                _ => u16::try_from(rng.next_u32() % 1_024).expect("medium span"),
+            };
+            let max_frames = min_frames.saturating_add(span);
+            let target_frames = if max_frames == min_frames {
+                min_frames
+            } else {
+                let offset = match rng.next_usize(4) {
+                    0 => 0,
+                    1 => max_frames - min_frames,
+                    2 => (max_frames - min_frames) / 2,
+                    _ => u16::try_from(rng.next_u32() % (u32::from(max_frames - min_frames) + 1))
+                        .expect("bounded offset"),
+                };
+                min_frames + offset
+            };
+            let smoothed_jitter_ms = match rng.next_usize(4) {
+                0 => 0,
+                1 => rng.next_u32() % 128,
+                2 => rng.next_u32() % 65_536,
+                _ => u32::MAX,
+            };
+            let raised_steps = match rng.next_usize(4) {
+                0 => 0,
+                1 => rng.next_u32() % 16,
+                2 => rng.next_u32() % 1_024,
+                _ => u32::MAX,
+            };
+            let lowered_steps = match rng.next_usize(4) {
+                0 => 0,
+                1 => rng.next_u32() % 16,
+                2 => rng.next_u32() % 1_024,
+                _ => u32::MAX,
+            };
+
+            counters.publish_target_state(
+                min_frames,
+                max_frames,
+                target_frames,
+                smoothed_jitter_ms,
+                raised_steps,
+                lowered_steps,
+            );
+            model = TargetEpochModel {
+                min_frames,
+                max_frames,
+                target_frames,
+                smoothed_jitter_ms,
+                raised_steps,
+                lowered_steps,
+            };
+            if model != TargetEpochModel::default() {
+                observed_published_state = true;
+            }
+            if min_frames < max_frames {
+                observed_min_below_max = true;
+            }
+        }
+
+        let snapshot = counters.snapshot();
+        assert_eq!(snapshot.target_min_frames, model.min_frames, "target min");
+        assert_eq!(snapshot.target_max_frames, model.max_frames, "target max");
+        assert_eq!(snapshot.target_frames, model.target_frames, "target frames");
+        assert_eq!(
+            snapshot.target_smoothed_jitter_ms, model.smoothed_jitter_ms,
+            "target smoothed jitter"
+        );
+        assert_eq!(
+            snapshot.target_raised_steps, model.raised_steps,
+            "target raised"
+        );
+        assert_eq!(
+            snapshot.target_lowered_steps, model.lowered_steps,
+            "target lowered"
+        );
+        assert!(
+            model.min_frames <= model.max_frames,
+            "generated minimum must never exceed the maximum"
+        );
+        assert!(
+            model.min_frames <= model.target_frames && model.target_frames <= model.max_frames,
+            "the target must stay inside its water levels"
+        );
+    }
+
+    assert!(
+        observed_published_state,
+        "the walk must publish a populated target state"
+    );
+    assert!(
+        observed_min_below_max,
+        "the walk must publish a strict min/max span"
+    );
+    assert!(
+        observed_reset_after_activity,
+        "the walk must reset a populated target epoch"
     );
 }
