@@ -21,6 +21,7 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-targets --all-features
 cargo run -p sonimesh-network-simulator
 python tools/check_workspace_boundaries.py
+python tools/check_workspace_members.py
 python tools/check_doc_links.py
 python tools/check_doc_dates.py
 python tools/check_fuzz_targets.py
@@ -57,7 +58,9 @@ repository-owned documentation resolves to an existing file, skipping generated 
 and fenced code blocks. `check_doc_dates.py` verifies that every `> Updated:` date
 declared by a design or measurement document is not older than the newest git commit that
 changed the document's content, treating pure date-line refreshes as non-content so a date
-edit does not immediately look stale.
+edit does not immediately look stale. `check_workspace_members.py` keeps the Cargo
+`[workspace] members` list in sync with the package manifests on disk so a new crate cannot
+silently fall out of the workspace-wide test and lint gates.
 
 ## Fuzz checks
 
