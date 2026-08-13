@@ -10,7 +10,11 @@ The tool is intentionally dependency-free (standard library only).
 
 ```sh
 cargo run -p sonimesh-latency-measurement -- --help
+cargo run -p sonimesh-latency-measurement -- --version
 ```
+
+`--version` prints the tool version so a measurement report can cite the exact
+software build.
 
 ## Commands
 

@@ -31,6 +31,8 @@ const MAX_GENERATE_SAMPLES: u32 = MAX_GENERATE_SAMPLE_RATE_HZ * 600;
 enum Parsed {
     /// Show usage text.
     Help,
+    /// Print the tool version.
+    Version,
     /// Write a reference WAVE file.
     Generate(GenerateArgs),
     /// Estimate offsets for one or more recordings.
@@ -86,6 +88,7 @@ fn main() -> ExitCode {
 fn run() -> Result<(), Box<dyn Error>> {
     match parse_args(std::env::args().skip(1))? {
         Parsed::Help => print_usage(),
+        Parsed::Version => print_version(),
         Parsed::Generate(args) => run_generate(&args)?,
         Parsed::Measure(args) => run_measure(&args)?,
         Parsed::Info(args) => run_info(&args)?,
@@ -271,6 +274,7 @@ where
     let rest: Vec<String> = args.collect();
     match first.as_str() {
         "-h" | "--help" => Ok(Parsed::Help),
+        "-V" | "--version" => Ok(Parsed::Version),
         "generate" => match parse_generate(&rest)? {
             Some(args) => Ok(Parsed::Generate(args)),
             None => Ok(Parsed::Help),
@@ -484,6 +488,7 @@ Usage:
   sonimesh-latency-measurement info [--check] <wave.wav>...
   sonimesh-latency-measurement summary
   sonimesh-latency-measurement --help
+  sonimesh-latency-measurement --version
 
 Commands:
   generate  Write a deterministic MLS reference WAVE file.
@@ -506,6 +511,10 @@ Options:
 Info output:
   audio_format  Declared WAVE tag: 1 = PCM, 3 = IEEE float."
     );
+}
+
+fn print_version() {
+    println!("sonimesh-latency-measurement {}", env!("CARGO_PKG_VERSION"));
 }
 
 #[cfg(test)]
@@ -539,6 +548,18 @@ mod tests {
         assert!(matches!(
             parse_args(args(&["-h"])).expect("help"),
             Parsed::Help
+        ));
+    }
+
+    #[test]
+    fn version_flags_parse_to_version() {
+        assert!(matches!(
+            parse_args(args(&["--version"])).expect("version"),
+            Parsed::Version
+        ));
+        assert!(matches!(
+            parse_args(args(&["-V"])).expect("version"),
+            Parsed::Version
         ));
     }
 

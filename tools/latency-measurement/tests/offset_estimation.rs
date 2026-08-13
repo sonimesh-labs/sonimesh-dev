@@ -479,6 +479,26 @@ fn cli_measure_offsets_only_pipes_into_summary() {
 }
 
 #[test]
+fn cli_reports_its_version() {
+    let bin = env!("CARGO_BIN_EXE_sonimesh-latency-measurement");
+    let output = Command::new(bin)
+        .arg("--version")
+        .output()
+        .expect("version runs");
+    assert!(
+        output.status.success(),
+        "version failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("utf8 stdout");
+    assert!(
+        stdout.starts_with("sonimesh-latency-measurement ")
+            && stdout.contains(env!("CARGO_PKG_VERSION")),
+        "unexpected version output: {stdout}"
+    );
+}
+
+#[test]
 fn cli_summary_rejects_empty_stdin() {
     let bin = env!("CARGO_BIN_EXE_sonimesh-latency-measurement");
     let mut child = Command::new(bin)
