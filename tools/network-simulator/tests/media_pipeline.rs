@@ -591,3 +591,119 @@ fn authenticated_pipeline_stays_bounded_under_bandwidth_capacity_pressure() {
     );
     assert!(network.queued_copies() <= profile.max_in_flight_packets);
 }
+
+#[test]
+fn send_buffer_backpressure_conceals_rejected_frames_end_to_end() {
+    // A finite link plus a sender-side socket buffer that admits only the
+    // first few frames: the sender reports backpressure before scheduling,
+    // and the receiver conceals every rejected frame with PLC while admitted
+    // frames still decode in sequence. This pins the architecture boundary
+    // where a full OS send buffer becomes a drop/pacing decision.
+    let mut profile = NetworkProfile::stable(0x8A55_2026);
+    profile.loss_percent = 0;
+    profile.duplicate_percent = 0;
+    profile.reorder_percent = 0;
+    profile.base_delay_ms = 1;
+    profile.jitter_ms = 0;
+    profile.reorder_delay_ms = 0;
+    profile.max_in_flight_packets = 32;
+    let secret = SessionSecret::new([0xA5; 32]);
+    let context = context();
+    let mut probe = MediaSealer::new(&secret, context).unwrap();
+    let datagram_bytes = u64::try_from(media_datagram(&mut probe, 0).len()).unwrap();
+    // The link drains half a datagram per 20 ms frame period, so the bounded
+    // sender buffer admits several frames and then reports backpressure for
+    // the remainder of the stream.
+    profile.bandwidth_bytes_per_second = datagram_bytes.saturating_mul(25);
+    profile.send_buffer_bytes = Some(datagram_bytes.saturating_mul(8));
+    let mut network = VirtualNetwork::new(profile).unwrap();
+    let mut sealer = MediaSealer::new(&secret, context).unwrap();
+    let mut ingress = ProtectedMediaIngress::new(&secret, context).unwrap();
+    let (pcm_producer, mut pcm_consumer) = realtime_pcm_queue::<1>(4).unwrap();
+    let mut worker = StreamDecodeWorker::<LabDecoder, 16, 8, 1>::new(LabDecoder, pcm_producer, 0);
+    let mut plaintext = [0_u8; 8];
+    let mut next_send = 0_u32;
+    let mut next_playout = 0_u32;
+    let mut rejected = 0_u32;
+    let mut plc_frames = 0_u32;
+    let mut decoded_frames = 0_u32;
+    let mut rendered = 0_u32;
+    let mut backpressure = 0_u32;
+    let mut jitter_resets = 0_u32;
+    let end_ms = TARGET_MS + u64::from(FRAMES - 1) * FRAME_MS + 1_000;
+
+    for now_ms in 0..=end_ms {
+        if next_send < FRAMES && now_ms == u64::from(next_send) * FRAME_MS {
+            let datagram = media_datagram(&mut sealer, next_send);
+            let payload_bytes = u64::try_from(datagram.len()).unwrap_or(u64::MAX);
+            if network.send(now_ms, datagram, payload_bytes) == SendOutcome::SendBufferFull {
+                backpressure += 1;
+            }
+            next_send += 1;
+        }
+
+        for delivery in network.drain_ready(now_ms) {
+            match ingress.receive(&delivery.payload, &mut plaintext) {
+                Ok(frame) => {
+                    match worker
+                        .admit(
+                            frame.header.sequence,
+                            frame.header.sample_timestamp,
+                            frame.opus_payload,
+                        )
+                        .unwrap()
+                    {
+                        InsertOutcome::Inserted | InsertOutcome::Reordered => {}
+                        InsertOutcome::Resynchronized { .. } => {
+                            worker.reset_after_jitter_resynchronization();
+                            jitter_resets += 1;
+                        }
+                        InsertOutcome::Duplicate | InsertOutcome::Late => rejected += 1,
+                        InsertOutcome::SequenceExhausted => {
+                            panic!("test sequence range must not exhaust")
+                        }
+                        InsertOutcome::Disabled => panic!("test jitter buffer must be enabled"),
+                    }
+                }
+                Err(_) => rejected += 1,
+            }
+        }
+
+        if next_playout < FRAMES && now_ms == TARGET_MS + u64::from(next_playout) * FRAME_MS {
+            if decode_and_render(&mut worker, &mut pcm_consumer, next_playout) {
+                plc_frames += 1;
+            } else {
+                decoded_frames += 1;
+            }
+            rendered += 1;
+            next_playout += 1;
+        }
+    }
+
+    let stats = network.stats();
+    assert_eq!((next_send, rendered, jitter_resets), (FRAMES, FRAMES, 0));
+    assert!(
+        backpressure > 0,
+        "bounded sender buffer must report backpressure"
+    );
+    assert_eq!(
+        stats.send_buffer_full_packets,
+        u64::from(backpressure),
+        "every backpressured send is counted exactly once"
+    );
+    assert!(decoded_frames > 0, "at least one admitted frame decodes");
+    assert!(plc_frames > 0, "rejected frames are concealed with PLC");
+    assert_eq!(
+        plc_frames + decoded_frames,
+        rendered,
+        "every playout slot renders decoded audio or PLC"
+    );
+    // No loss, duplicates, or capacity drops: every frame is either admitted,
+    // admitted-then-late, or rejected by the sender-side socket buffer.
+    assert_eq!(
+        stats.send_buffer_full_packets + u64::from(rejected) + u64::from(decoded_frames),
+        stats.submitted_packets,
+        "send-buffer backpressure conserves every submission"
+    );
+    assert!(network.queued_copies() <= profile.max_in_flight_packets);
+}
