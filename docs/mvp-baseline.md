@@ -32,6 +32,10 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   blocks, initializes callback underflow to silence, records refill-budget
   exhaustion separately, caps refill attempts, and fades in after queue
   discontinuities;
+  A seeded property walk and a byte-driven libFuzzer target drive queue
+  pushes, epoch retirements, render lengths, gain, and mute scripts against
+  an independent queue-plus-render model, asserting every rendered output
+  slice and every published counter stays in sync after each step.
 - a lock-free atomic gain and mute handle shared by a stream's realtime render
   source and the desktop control domain; published targets ramp over a fixed
   128-sample window only when the target changes, apply without allocation or

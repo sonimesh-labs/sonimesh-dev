@@ -112,8 +112,13 @@ The realtime audio targets feed adversarial rate metadata, sample payloads,
 occupancy snapshots, arrival ticks, and membership scripts into the bounded
 nominal resampler, peak limiter, channel mapper, drift controller, fixed-slot
 mixer, arrival-jitter estimator, adaptive target controller, and per-stream
-decode worker, asserting the fixed capacity, consumed/produced, gain, and
-initialized-output guarantees hold on every accepted or rejected step.
+decode worker, and the realtime PCM render source, asserting the fixed
+capacity, consumed/produced, gain, and initialized-output guarantees hold
+on every accepted or rejected step.
+The render-source target additionally compares every rendered output slice
+and the published underflow, discontinuity, and refill-limit counters
+against an independent queue-plus-render model under arbitrary queue
+pushes, epoch retirements, render lengths, gain, and mute scripts.
 Separate lifecycle targets drive arbitrary start, monitor, recover, stop,
 health, and fail-start scripts through the single-stream receiver output
 controller and the Phase 2 mixer output controller, asserting after every
