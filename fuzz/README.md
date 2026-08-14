@@ -105,6 +105,14 @@ production workspace so `libfuzzer-sys` never becomes a shipping dependency.
   step counters below the observation count, and stays deterministic
   while a rejected configuration returns a clean scenario error rather
   than panicking.
+- `mixer_membership_scenario` drives arbitrary bounded scenario
+  configurations through the fixed-slot mixer membership simulation,
+  proving an accepted configuration consumes every frame through playout
+  or PLC, submits exactly one packet per stream per frame, keeps both
+  streams active after the mid-session remove/reinsert, publishes the
+  two starts plus one reinsert and one remove, and renders a finite bus
+  while a rejected configuration returns a clean scenario error rather
+  than panicking.
 - `protected_media_ingress` exercises raw input, valid authenticated arbitrary
   payloads, duplicate replay, undersized output buffers, and deterministic
   single-byte flags-byte and tag tampering plus ciphertext tampering for
@@ -167,6 +175,7 @@ cargo +nightly-2026-07-18 fuzz run multi_stream -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run multi_stream_jitter_target -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run jitter_scheduler -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run jitter_target -- -max_len=1024
+cargo +nightly-2026-07-18 fuzz run mixer_membership_scenario -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run protected_media_ingress -- -max_len=1264
 cargo +nightly-2026-07-18 fuzz run pairing_binding -- -max_len=4096
 cargo +nightly-2026-07-18 fuzz run untrusted_control_stream -- -max_len=65540
