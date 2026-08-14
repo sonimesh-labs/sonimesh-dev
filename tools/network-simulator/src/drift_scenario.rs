@@ -101,18 +101,42 @@ pub fn simulate_drift(
     validate(config)?;
     let mut controller =
         DriftController::new(config.controller).map_err(DriftScenarioError::Controller)?;
-    let mut occupancy_quanta = i64::from(config.initial_occupancy_blocks) * BLOCK_QUANTA;
+    Ok(simulate_plant(
+        config.ticks,
+        config.initial_occupancy_blocks,
+        config.source_rate_ppm,
+        config.controller.target_blocks,
+        &mut controller,
+    ))
+}
+
+/// Runs one integerized PCM-occupancy control loop for one source stream.
+///
+/// Shared by [`simulate_drift`] and the multi-stream mixer-drift scenario: one
+/// tick produces and consumes one nominal PCM block, only the difference
+/// between `source_rate_ppm` and the controller decision changes occupancy,
+/// and a hard resynchronization resets the synthetic occupancy to
+/// `target_blocks`. Production stream code owns the actual flush, fade, and
+/// ASRC reset work.
+pub(crate) fn simulate_plant(
+    ticks: u32,
+    initial_occupancy_blocks: u16,
+    source_rate_ppm: i32,
+    target_blocks: u16,
+    controller: &mut DriftController,
+) -> DriftSimulationReport {
+    let mut occupancy_quanta = i64::from(initial_occupancy_blocks) * BLOCK_QUANTA;
     let mut report = DriftSimulationReport {
-        minimum_occupancy_blocks: config.initial_occupancy_blocks,
-        maximum_occupancy_blocks: config.initial_occupancy_blocks,
-        final_occupancy_blocks: config.initial_occupancy_blocks,
+        minimum_occupancy_blocks: initial_occupancy_blocks,
+        maximum_occupancy_blocks: initial_occupancy_blocks,
+        final_occupancy_blocks: initial_occupancy_blocks,
         final_adjustment_ppm: 0,
         hard_resynchronizations: 0,
         low_resynchronizations: 0,
         high_resynchronizations: 0,
     };
 
-    for _ in 0..config.ticks {
+    for _ in 0..ticks {
         let occupancy = rounded_occupancy(occupancy_quanta);
         report.minimum_occupancy_blocks = report.minimum_occupancy_blocks.min(occupancy);
         report.maximum_occupancy_blocks = report.maximum_occupancy_blocks.max(occupancy);
@@ -124,17 +148,17 @@ pub fn simulate_drift(
                     DriftResyncDirection::Low => report.low_resynchronizations += 1,
                     DriftResyncDirection::High => report.high_resynchronizations += 1,
                 }
-                occupancy_quanta = i64::from(config.controller.target_blocks) * BLOCK_QUANTA;
+                occupancy_quanta = i64::from(target_blocks) * BLOCK_QUANTA;
                 continue;
             }
         };
-        occupancy_quanta = occupancy_quanta
-            .saturating_add(i64::from(config.source_rate_ppm) - i64::from(adjustment_ppm));
+        occupancy_quanta =
+            occupancy_quanta.saturating_add(i64::from(source_rate_ppm) - i64::from(adjustment_ppm));
     }
 
     report.final_occupancy_blocks = rounded_occupancy(occupancy_quanta);
     report.final_adjustment_ppm = controller.adjustment_ppm();
-    Ok(report)
+    report
 }
 
 fn validate(config: DriftScenarioConfig) -> Result<(), DriftScenarioError> {

@@ -6,12 +6,14 @@ use sonimesh_network_simulator::{
     DEFAULT_MIXER_JITTER_PCM_BLOCK, DEFAULT_MIXER_JITTER_SLOTS, DEFAULT_MIXER_MEMBERSHIP_PCM_BLOCK,
     DEFAULT_MIXER_MEMBERSHIP_SLOTS, DriftScenarioConfig, JitterSchedulerScenarioConfig,
     JitterTargetScenarioConfig, MixerControllerGainScript, MixerControllerScenarioConfig,
-    MixerJitterGainScript, MixerJitterSchedulerScenarioConfig, MixerMembershipScenarioConfig,
+    MixerDriftScenarioConfig, MixerDriftStreamConfig, MixerJitterGainScript,
+    MixerJitterSchedulerScenarioConfig, MixerMembershipScenarioConfig,
     MultiStreamJitterTargetScenarioConfig, MultiStreamScenarioConfig, NetworkProfile,
     ScenarioConfig, opus_experiment_cases, simulate, simulate_control_reconnect, simulate_drift,
     simulate_jitter_scheduler, simulate_jitter_target, simulate_mixer_controller_membership,
-    simulate_mixer_jitter_scheduler, simulate_mixer_membership, simulate_multi_stream,
-    simulate_multi_stream_jitter_target, simulate_opus_experiment, simulate_opus_worker_experiment,
+    simulate_mixer_drift, simulate_mixer_jitter_scheduler, simulate_mixer_membership,
+    simulate_multi_stream, simulate_multi_stream_jitter_target, simulate_opus_experiment,
+    simulate_opus_worker_experiment,
 };
 
 fn main() {
@@ -109,6 +111,7 @@ fn main() {
 
     run_multi_stream_suite();
     run_mixer_membership_suite();
+    run_mixer_drift_suite();
     run_mixer_controller_membership_suite();
     run_mixer_jitter_scheduler_suite();
     run_jitter_target_suite();
@@ -163,6 +166,48 @@ fn run_mixer_membership_suite() {
         report.mixer.slot_underflows.iter().sum::<u64>(),
         report.mixer.output_finite,
     );
+}
+
+fn run_mixer_drift_suite() {
+    println!("SoniMesh multi-stream mixer-drift suite");
+    let report = simulate_mixer_drift(MixerDriftScenarioConfig {
+        ticks: 20_000,
+        controller: DriftConfig {
+            target_blocks: 4,
+            low_resync_blocks: 0,
+            high_resync_blocks: 8,
+            proportional_ppm_per_block: 25,
+            integral_ppm_per_block_tick: 1,
+            max_adjustment_ppm: 500,
+            max_step_ppm: 25,
+            max_integral_block_ticks: 256,
+        },
+        streams: [
+            MixerDriftStreamConfig {
+                initial_occupancy_blocks: 5,
+                source_rate_ppm: 100,
+            },
+            MixerDriftStreamConfig {
+                initial_occupancy_blocks: 3,
+                source_rate_ppm: -80,
+            },
+            MixerDriftStreamConfig {
+                initial_occupancy_blocks: 4,
+                source_rate_ppm: 1_000,
+            },
+        ],
+    })
+    .expect("built-in mixer-drift profile is valid");
+    for (index, stream) in report.streams.iter().enumerate() {
+        println!(
+            "mixer_drift stream={index} final_occupancy={} final_adjustment={}ppm resyncs={} (low={} high={})",
+            stream.final_occupancy_blocks,
+            stream.final_adjustment_ppm,
+            stream.hard_resynchronizations,
+            stream.low_resynchronizations,
+            stream.high_resynchronizations,
+        );
+    }
 }
 
 fn run_mixer_controller_membership_suite() {

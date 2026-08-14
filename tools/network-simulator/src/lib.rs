@@ -6,6 +6,7 @@ mod drift_scenario;
 mod jitter_scheduler_scenario;
 mod jitter_target_scenario;
 mod mixer_controller_membership_scenario;
+mod mixer_drift_scenario;
 mod mixer_jitter_scheduler_scenario;
 mod mixer_membership_scenario;
 mod multi_stream_jitter_target_scenario;
@@ -36,6 +37,11 @@ pub use mixer_controller_membership_scenario::{
     MixerControllerMixerReport, MixerControllerScenarioConfig, MixerControllerScenarioError,
     MixerControllerSimulationReport, MixerControllerStreamQuality, MixerControllerStreamReport,
     simulate_mixer_controller_membership,
+};
+pub use mixer_drift_scenario::{
+    MAX_MIXER_DRIFT_STREAMS, MIN_MIXER_DRIFT_STREAMS, MixerDriftScenarioConfig,
+    MixerDriftScenarioError, MixerDriftSimulationReport, MixerDriftStreamConfig,
+    simulate_mixer_drift,
 };
 pub use mixer_jitter_scheduler_scenario::{
     DEFAULT_MIXER_JITTER_PCM_BLOCK, DEFAULT_MIXER_JITTER_SLOTS, MixerJitterGainScript,
