@@ -120,6 +120,13 @@ to the fixed-slot mixer over one shared link and additionally publishes
 bounded per-source gain, mute, and quality evidence
 ([ADR 0015](./0015-realtime-stream-membership.md)); the product playout
 scheduler remains Phase 2 work.
+Deterministic property walks (`jitter_scheduler_property.rs`,
+`multi_stream_jitter_target_property.rs`) and libFuzzer targets
+(`jitter_scheduler`, `multi_stream_jitter_target`) now drive the
+target-gated scheduler and multi-stream adaptive-target scenarios from
+seeded and arbitrary byte inputs and assert the same bounded-target,
+step-count, and completion invariants on every report.
+
 A bounded relative arrival-jitter estimator in `sonimesh-audio`
 (`ArrivalJitter`) measures per-packet inter-arrival deviation from a
 monotonic arrival clock and the sender sample timestamps, so a real packet
