@@ -4,7 +4,11 @@
 //! The estimator correlates a leading probe of the reference against the
 //! recording over a bounded search window. A coarse boxcar-downsampled pass
 //! localizes the peak, a fine full-resolution pass finds the integer lag, and a
-//! parabolic fit refines the result to a fractional sample.
+//! parabolic fit refines the result to a fractional sample. The offset is only
+//! accepted when the peak is distinct by `distinctness_ratio`: at full
+//! resolution within the fine window around the peak and within the strongest
+//! coarse regions across the whole search window, so a strong secondary peak
+//! elsewhere in the window rejects the estimate.
 
 use std::fmt;
 
@@ -20,8 +24,10 @@ pub struct OffsetConfig {
     pub coarse_factor: usize,
     /// Number of leading reference samples to correlate against the recording.
     pub probe_len: usize,
-    /// Minimum ratio between the best and the second-best correlation score
-    /// before an offset is reported as reliable.
+    /// Minimum ratio between the best and the strongest competing correlation
+    /// score before an offset is reported as reliable. The competing score is
+    /// measured at full resolution within the fine window around the peak and
+    /// within the strongest coarse regions across the whole search window.
     pub distinctness_ratio: f64,
 }
 
@@ -52,8 +58,11 @@ pub struct OffsetEstimate {
     pub offset_ms: f64,
     /// Raw correlation score at the best lag.
     pub peak_score: f64,
-    /// Best score divided by the best score found away from the peak, or
-    /// infinity when no positive away-score exists.
+    /// Best score divided by the strongest competing score found away from the
+    /// peak, or infinity when no positive competing score exists. The competing
+    /// score is measured at full resolution within the fine window around the
+    /// peak and within the strongest coarse regions across the whole search
+    /// window.
     pub distinctness_ratio: f64,
 }
 
@@ -153,6 +162,11 @@ const PEAK_SEPARATION_SAMPLES: usize = 16;
 /// the exact lag is then found at full resolution around that location. The
 /// returned lag includes a parabolic sub-sample refinement.
 ///
+/// The estimate is only accepted when the peak is distinct by
+/// `config.distinctness_ratio`: at full resolution within the fine window
+/// around the peak and within the strongest coarse regions across the whole
+/// search window.
+///
 /// # Errors
 ///
 /// Returns [`OffsetError`] when the configuration uses non-finite or negative
@@ -210,7 +224,7 @@ pub fn estimate_offset_ms(
     // Saturating arithmetic keeps an extreme caller-supplied coarse factor
     // from overflowing; the fine search remains bounded by the recording.
     let twice_coarse = 2_usize.saturating_mul(coarse_factor);
-    let (low, high) = if search_lags > 4_usize.saturating_mul(coarse_factor) {
+    let (coarse, low, high) = if search_lags > 4_usize.saturating_mul(coarse_factor) {
         if probe_len < coarse_factor {
             return Err(OffsetError::ProbeTooShort {
                 probe_len,
@@ -219,18 +233,19 @@ pub fn estimate_offset_ms(
         }
         let coarse_probe = downsample(probe, coarse_factor);
         let coarse_recording = downsample(&recording[..search_lags + probe_len], coarse_factor);
-        let coarse_best = coarse_search(
+        let coarse = coarse_search(
             &coarse_probe,
             &coarse_recording,
             search_lags / coarse_factor,
         );
-        let center = coarse_best.saturating_mul(coarse_factor);
+        let center = coarse.best_lag.saturating_mul(coarse_factor);
         (
+            Some(coarse),
             center.saturating_sub(twice_coarse),
             center.saturating_add(twice_coarse).min(search_lags),
         )
     } else {
-        (0, search_lags)
+        (None, 0, search_lags)
     };
 
     let mut best_lag = low;
@@ -247,6 +262,22 @@ pub fn estimate_offset_ms(
     for lag in low..=high {
         if lag.abs_diff(best_lag) >= PEAK_SEPARATION_SAMPLES {
             second_best = second_best.max(score(probe, &recording[lag..lag + probe_len]));
+        }
+    }
+    // The fine scan above only covered the fine window around the coarse peak.
+    // Refine the strongest coarse regions away from the peak at full
+    // resolution so a secondary peak anywhere in the search window competes
+    // for the distinctness baseline. When the coarse pass did not run, the
+    // fine scan already covered every lag in the window.
+    if let Some(coarse) = &coarse {
+        for &bucket in &coarse.away_buckets {
+            let first = bucket.saturating_mul(coarse_factor);
+            let last = first.saturating_add(coarse_factor).min(search_lags);
+            for lag in first..last {
+                if lag.abs_diff(best_lag) >= PEAK_SEPARATION_SAMPLES {
+                    second_best = second_best.max(score(probe, &recording[lag..lag + probe_len]));
+                }
+            }
         }
     }
     if best_score <= 0.0
@@ -304,9 +335,32 @@ fn downsample(samples: &[f32], factor: usize) -> Vec<f32> {
         .collect()
 }
 
-/// Finds the coarse lag with the highest correlation score.
+/// How many coarse regions away from the peak are refined at full resolution
+/// to catch a secondary peak elsewhere in the search window.
+const TOP_AWAY_BUCKETS: usize = 4;
+
+/// Result of the coarse full-window search pass.
+struct CoarseResult {
+    /// Coarse lag (in coarse samples) with the highest correlation score.
+    best_lag: usize,
+    /// The [`TOP_AWAY_BUCKETS`] strongest coarse lags at least two buckets away
+    /// from the peak, ordered by descending score. The caller refines these at
+    /// full resolution for the distinctness baseline.
+    away_buckets: [usize; TOP_AWAY_BUCKETS],
+}
+
+/// Finds the coarse lag with the highest correlation score and the strongest
+/// [`TOP_AWAY_BUCKETS`] regions away from it.
+///
+/// Buckets adjacent to the peak bucket are skipped because the full-resolution
+/// fine pass covers that neighborhood; every other bucket is a candidate
+/// secondary peak anywhere in the search window.
 #[must_use]
-fn coarse_search(coarse_probe: &[f32], coarse_recording: &[f32], max_coarse_lag: usize) -> usize {
+fn coarse_search(
+    coarse_probe: &[f32],
+    coarse_recording: &[f32],
+    max_coarse_lag: usize,
+) -> CoarseResult {
     let probe_len = coarse_probe.len();
     let max_valid = coarse_recording
         .len()
@@ -321,5 +375,25 @@ fn coarse_search(coarse_probe: &[f32], coarse_recording: &[f32], max_coarse_lag:
             best_lag = lag;
         }
     }
-    best_lag
+    let mut away_buckets = [0_usize; TOP_AWAY_BUCKETS];
+    let mut away_scores = [f64::NEG_INFINITY; TOP_AWAY_BUCKETS];
+    for lag in 0..=max_valid {
+        if lag.abs_diff(best_lag) < 2 {
+            continue;
+        }
+        let candidate = score(coarse_probe, &coarse_recording[lag..lag + probe_len]);
+        for index in 0..TOP_AWAY_BUCKETS {
+            if candidate > away_scores[index] {
+                away_scores.copy_within(index..TOP_AWAY_BUCKETS - 1, index + 1);
+                away_buckets.copy_within(index..TOP_AWAY_BUCKETS - 1, index + 1);
+                away_scores[index] = candidate;
+                away_buckets[index] = lag;
+                break;
+            }
+        }
+    }
+    CoarseResult {
+        best_lag,
+        away_buckets,
+    }
 }

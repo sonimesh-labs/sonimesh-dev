@@ -75,6 +75,67 @@ fn delay_with_attenuation_and_noise_is_recovered() {
     );
 }
 
+/// A strong echo far outside the fine window but inside the search window
+/// competes for the distinctness baseline: the estimate is rejected instead of
+/// silently reporting the stronger copy as the offset.
+#[test]
+fn strong_far_echo_within_search_window_is_rejected() {
+    let reference = test_signal(SAMPLE_RATE, 3, 7);
+    let mut recording = delayed_recording(5_000, &reference);
+    // A second copy at 0.8 amplitude, 2000 samples (about 42 ms) later; the
+    // echo sits well outside the +/-32-sample fine window around the peak.
+    for (index, sample) in recording.iter_mut().enumerate().skip(7_000) {
+        if index - 7_000 < reference.len() {
+            *sample += 0.8 * reference[index - 7_000];
+        }
+    }
+    let config = OffsetConfig::new(SAMPLE_RATE);
+    let error = estimate_offset_ms(&config, &reference, &recording).expect_err("echo is ambiguous");
+    match error {
+        OffsetError::NoDistinctPeak {
+            best_lag_samples,
+            best_score,
+            second_best_score,
+        } => {
+            assert!(
+                best_lag_samples.abs_diff(5_000) < 64,
+                "best lag {best_lag_samples}"
+            );
+            assert!(best_score > 0.0, "peak score is positive");
+            assert!(
+                best_score / second_best_score < config.distinctness_ratio,
+                "the echo must compete for the baseline"
+            );
+        }
+        other => panic!("expected NoDistinctPeak, got {other}"),
+    }
+}
+
+/// A weak far echo stays below the distinctness ratio and the estimate is
+/// still accepted at the direct-path lag.
+#[test]
+fn weak_far_echo_still_accepts_the_direct_lag() {
+    let reference = test_signal(SAMPLE_RATE, 3, 7);
+    let mut recording = delayed_recording(5_000, &reference);
+    for (index, sample) in recording.iter_mut().enumerate().skip(7_000) {
+        if index - 7_000 < reference.len() {
+            *sample += 0.2 * reference[index - 7_000];
+        }
+    }
+    let config = OffsetConfig::new(SAMPLE_RATE);
+    let estimate =
+        estimate_offset_ms(&config, &reference, &recording).expect("weak echo is accepted");
+    assert!(
+        (estimate.lag_samples - 5_000.0).abs() < 1.0,
+        "lag_samples={}",
+        estimate.lag_samples
+    );
+    assert!(
+        estimate.distinctness_ratio >= config.distinctness_ratio,
+        "distinctness meets the configured threshold"
+    );
+}
+
 #[test]
 fn silent_recording_is_rejected() {
     let reference = test_signal(SAMPLE_RATE, 3, 7);

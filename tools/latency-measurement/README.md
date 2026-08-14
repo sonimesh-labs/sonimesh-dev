@@ -111,8 +111,11 @@ file cannot silently pass as a successful summary.
    around the coarse peak finds the integer lag.
 3. A parabolic fit around the integer peak gives a sub-sample refinement.
 4. The offset is accepted only when the best correlation score is at least
-   `--distinctness-ratio` (default 3.0) times the best score away from the
-   peak.
+   `--distinctness-ratio` (default 3.0) times the strongest competing score.
+   That competition is measured at full resolution within the fine window
+   around the peak and within the strongest coarse regions across the whole
+   search window, so a strong secondary peak (for example an echo) elsewhere
+   in the window rejects the estimate.
 
 ## Limitations
 
