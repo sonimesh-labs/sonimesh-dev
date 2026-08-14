@@ -181,6 +181,14 @@ production workspace so `libfuzzer-sys` never becomes a shipping dependency.
   independent replay oracle and counter model, proving failed AEAD never
   advances the replay window and only authenticated in-window packets reach
   the decoder.
+- `export_retention_journal` drives a deterministic edge prologue and
+  arbitrary record-size scripts through the bounded export retention journal
+  (ADR 0011) under input-selected count and byte bounds, comparing the
+  result, retained count, retained bytes, and next sequence against an
+  independent spec model that computes the retained set as the longest
+  newest-first suffix, proving oversized bundles are rejected before any
+  record, eviction keeps the newest exports within both fixed bounds, and
+  sequence order stays FIFO on every accepted step.
 - `untrusted_control_stream` feeds arbitrary bytes through the bounded
   length-prefixed control framing state machine in a deterministic per-input
   chunk size, exercising partial length and payload reads, oversize and
@@ -226,6 +234,7 @@ cargo +nightly-2026-07-18 fuzz run mixer_output_controller -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run receiver_output_controller -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run pcm_render_source -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run receiver_pipeline -- -max_len=1024
+cargo +nightly-2026-07-18 fuzz run export_retention_journal -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run stream_decode_worker -- -max_len=64
 ```
 

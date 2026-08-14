@@ -248,3 +248,9 @@ path = "fuzz_targets/receiver_pipeline.rs"
 test = false
 doc = false
 bench = false
+[[bin]]
+name = "export_retention_journal"
+path = "fuzz_targets/export_retention_journal.rs"
+test = false
+doc = false
+bench = false
