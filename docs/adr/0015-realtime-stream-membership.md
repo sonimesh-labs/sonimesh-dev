@@ -275,6 +275,13 @@ Evidence produced so far:
   lifecycle scripts through the real pairing path and the tokenized
   completion contract and asserting the same cross-domain invariants and
   the fixed slot bound on every input;
+- a deterministic mixer-output property walk
+  (`mixer_output_controller_property.rs`) driving 250k seeded start,
+  monitor, recover, and stop steps against an independent spec model and
+  asserting after every step that the membership handle and the output
+  format exist exactly while the stream is active, that a fault is
+  reported at most once and retires both, and that recovery reuses the
+  last successful selection;
 
 Still open before Phase 2 can claim multi-source streaming: the roadmap's 24-hour
 soak and hardware callback timing on actual WASAPI devices.
