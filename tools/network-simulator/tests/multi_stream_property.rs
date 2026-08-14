@@ -148,9 +148,9 @@ fn check_stream_count<const S: usize>() {
     let mut random = XorShift64(0x5A17_2026);
     for _ in 0..STEPS {
         let config = random_config(&mut random);
-        // A stream whose first packet is lost before the jitter buffer starts
-        // reports NotReady and is rejected as an unready target; accepted
-        // reports must satisfy the invariants.
+        // Playout is pre-armed at the negotiated start sequence, so a lost or
+        // late first packet conceals via PLC rather than reporting NotReady;
+        // accepted reports must satisfy the invariants.
         if let Ok(first) = simulate_multi_stream::<S>(config) {
             let second = simulate_multi_stream::<S>(config)
                 .expect("an accepted configuration must stay accepted");

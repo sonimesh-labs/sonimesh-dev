@@ -60,9 +60,9 @@ fuzz_target!(|data: &[u8]| {
         network,
     };
 
-    // A stream whose first packet is lost before the jitter buffer starts
-    // reports NotReady and is rejected as an unready target; accepted
-    // configurations must satisfy the invariants.
+    // Playout is pre-armed at the negotiated start sequence, so a lost or
+    // late first packet conceals via PLC rather than reporting NotReady;
+    // accepted configurations must satisfy the invariants.
     if let Ok(first) = simulate_multi_stream::<STREAMS>(config) {
         let second = simulate_multi_stream::<STREAMS>(config)
             .expect("an accepted configuration must stay accepted");
