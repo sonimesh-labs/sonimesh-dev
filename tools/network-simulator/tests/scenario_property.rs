@@ -99,6 +99,14 @@ fn scenario_walk_preserves_cross_layer_invariants() {
             u64::from(first.duplicate_frames) <= first.network.duplicate_copies,
             "jitter duplicates are a subset of network duplicate copies"
         );
+        // Late is not a subset of PLC: a duplicate copy arriving after its
+        // frame's slot played counts as Late even when that slot rendered the
+        // original frame. The excess over PLC is bounded by duplicate copies.
+        assert!(
+            u64::from(first.late_frames)
+                <= u64::from(first.plc_frames) + first.network.duplicate_copies,
+            "late arrivals beyond PLC come only from duplicate copies"
+        );
         assert!(
             first.network.delivered_copies <= first.network.scheduled_copies,
             "delivered copies never exceed scheduled copies"
@@ -250,7 +258,14 @@ fn shaped_walk_preserves_sender_side_and_conservation_invariants() {
             u64::from(first.duplicate_frames) <= first.network.duplicate_copies,
             "jitter duplicates are a subset of network duplicate copies"
         );
-
+        // Late is not a subset of PLC: a duplicate copy arriving after its
+        // frame's slot played counts as Late even when that slot rendered the
+        // original frame. The excess over PLC is bounded by duplicate copies.
+        assert!(
+            u64::from(first.late_frames)
+                <= u64::from(first.plc_frames) + first.network.duplicate_copies,
+            "late arrivals beyond PLC come only from duplicate copies"
+        );
         let bandwidth = config.network.bandwidth_bytes_per_second;
         if bandwidth == 0 {
             assert_eq!(first.network.bandwidth_shaped_copies, 0);
