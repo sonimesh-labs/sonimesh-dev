@@ -133,6 +133,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "mixer_controller_membership"
+path = "fuzz_targets/mixer_controller_membership.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "control_stream_coordinator"
 path = "fuzz_targets/control_stream_coordinator.rs"
 test = false

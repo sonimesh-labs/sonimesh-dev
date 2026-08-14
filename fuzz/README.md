@@ -60,6 +60,14 @@ production workspace so `libfuzzer-sys` never becomes a shipping dependency.
   consume-every-frame, target-bounds, step-counter, all-streams-active, and
   finite-bus invariants hold at the upper bound while a rejected
   configuration returns a clean scenario error rather than panicking.
+- `mixer_controller_membership` drives arbitrary bounded scenario
+  configurations through the controller-driven mixer membership simulation,
+  proving an accepted configuration consumes every frame through playout or
+  PLC, publishes bounded per-stream gain and mute events, keeps every
+  per-source quality ratio within its bound, keeps the controller projection
+  matched to the mixer's actual slot table through the mid-session churn,
+  and renders a finite bus while a rejected configuration returns a clean
+  scenario error rather than panicking.
 - `protected_media_ingress` exercises raw input, valid authenticated arbitrary
   payloads, duplicate replay, undersized output buffers, and deterministic
   single-byte flags-byte and tag tampering plus ciphertext tampering for
@@ -116,6 +124,7 @@ cargo +nightly-2026-07-18 fuzz run fixed_slot_mixer -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run mixer_membership -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run mixer_jitter_scheduler -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run mixer_jitter_scheduler_4s -- -max_len=1024
+cargo +nightly-2026-07-18 fuzz run mixer_controller_membership -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run protected_media_ingress -- -max_len=1264
 cargo +nightly-2026-07-18 fuzz run pairing_binding -- -max_len=4096
 cargo +nightly-2026-07-18 fuzz run untrusted_control_stream -- -max_len=65540
