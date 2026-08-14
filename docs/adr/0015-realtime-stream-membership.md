@@ -293,8 +293,13 @@ Evidence produced so far:
   remove/re-admit churn, asserting after every render that the controller
   projection matches the mixer's actual slot table exactly (active count,
   per-slot membership, and pending commands), that shared-link loss leaves a
-  starved slot silent without blocking the others, and that render output
-  stays bounded and finite;
+  starved slot silent without blocking the others, that bounded per-source
+  gain and mute scripts applied through each admitted slot's real
+  `GainControlHandle` publish without stalling membership and survive the
+  churn (the scenario retains one handle per stream and clones it into every
+  admission), and that the bus is exactly silent once every muted slot has
+  rendered its bounded gain ramp, and that render output stays bounded and
+  finite;
 - a deterministic network-simulator scenario
   (`mixer_membership_scenario.rs`) driving two source streams over one
   shared virtual link into a fixed eight-slot `CommandDrivenMixer` with a
@@ -304,6 +309,23 @@ Evidence produced so far:
   transitions publish through the bounded queue (three inserts, one
   remove), that the active slot count returns to the full stream count
   after the reinsert, and that render output stays bounded and finite;
+- a deterministic combined jitter-scheduler and mixer scenario
+  (`mixer_jitter_scheduler_scenario.rs`) driving two source streams over one
+  shared virtual link through ADR 0016's target-gated playout into the same
+  fixed-slot `CommandDrivenMixer`, asserting that a gated or starved slot
+  never blocks the other slots, that bounded per-source gain and mute scripts
+  applied through each slot's real `GainControlHandle` publish without
+  stalling playout, and that the bus is exactly silent once every muted slot
+  has rendered its bounded gain ramp;
+- deterministic per-source quality ratios on both shared-link scenarios (PLC,
+  late, reorder, duplicate, PCM-underflow, and discontinuity, plus
+  forced-playout where the gate deadline exists) derived exactly from the
+  per-slot raw counters and reported in milli-units, with unit, property
+  (`mixer_controller_membership_property.rs`,
+  `mixer_jitter_scheduler_property.rs`), and libFuzzer
+  (`mixer_controller_membership`, `mixer_jitter_scheduler`,
+  `mixer_jitter_scheduler_4s`) coverage asserting every ratio stays within
+  its bound and that a clean link reports zero concealment;
 - a libFuzzer target (`control_to_mixer`) feeding arbitrary byte-driven
   lifecycle scripts through the real pairing path and the tokenized
   completion contract and asserting the same cross-domain invariants and
