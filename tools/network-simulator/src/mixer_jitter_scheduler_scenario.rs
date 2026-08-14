@@ -102,6 +102,78 @@ impl<const STREAMS: usize> Default for MixerJitterSchedulerScenarioConfig<STREAM
     }
 }
 
+/// Bounded per-source quality ratios for one combined run.
+///
+/// Each field is an exact fixed-point ratio in milli-units (`0..=1_000`),
+/// derived from the raw playout, scheduler, and per-slot counters so reports
+/// stay comparable across profiles without floating-point drift.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct MixerJitterStreamQuality {
+    /// Decoder-side concealment frames per sender frame.
+    pub plc_ratio_milli: u16,
+    /// Frames arriving behind the playout sequence per sender frame.
+    pub late_ratio_milli: u16,
+    /// Accepted reordered arrivals per sender frame.
+    pub reorder_ratio_milli: u16,
+    /// Duplicate frames rejected by jitter storage per sender frame.
+    pub duplicate_ratio_milli: u16,
+    /// Gate-deadline playouts per sender frame.
+    pub forced_playout_ratio_milli: u16,
+    /// Per-slot PCM underflow renders per mixer render.
+    pub underflow_ratio_milli: u16,
+    /// Per-slot discontinuity renders per mixer render.
+    pub discontinuity_ratio_milli: u16,
+}
+
+impl MixerJitterStreamQuality {
+    /// Derives the bounded quality ratios from one run's raw counters.
+    fn from_counters(
+        frames: u32,
+        renders: u32,
+        playout: &SimulationReport,
+        forced_playouts: u32,
+        underflows: u64,
+        discontinuities: u64,
+    ) -> Self {
+        Self {
+            plc_ratio_milli: ratio_milli(u64::from(playout.plc_frames), u64::from(frames)),
+            late_ratio_milli: ratio_milli(u64::from(playout.late_frames), u64::from(frames)),
+            reorder_ratio_milli: ratio_milli(
+                u64::from(playout.reordered_arrivals),
+                u64::from(frames),
+            ),
+            duplicate_ratio_milli: ratio_milli(
+                u64::from(playout.duplicate_frames),
+                u64::from(frames),
+            ),
+            forced_playout_ratio_milli: ratio_milli(u64::from(forced_playouts), u64::from(frames)),
+            underflow_ratio_milli: ratio_milli(underflows, u64::from(renders)),
+            discontinuity_ratio_milli: ratio_milli(discontinuities, u64::from(renders)),
+        }
+    }
+
+    /// True when every ratio stays within the bounded `0..=1_000` range.
+    #[must_use]
+    pub const fn within_bounds(&self) -> bool {
+        self.plc_ratio_milli <= 1_000
+            && self.late_ratio_milli <= 1_000
+            && self.reorder_ratio_milli <= 1_000
+            && self.duplicate_ratio_milli <= 1_000
+            && self.forced_playout_ratio_milli <= 1_000
+            && self.underflow_ratio_milli <= 1_000
+            && self.discontinuity_ratio_milli <= 1_000
+    }
+}
+
+/// One exact fixed-point ratio in milli-units, bounded by unity.
+fn ratio_milli(numerator: u64, denominator: u64) -> u16 {
+    if denominator == 0 {
+        return 0;
+    }
+    let scaled = numerator.saturating_mul(1_000) / denominator;
+    u16::try_from(scaled.min(1_000)).unwrap_or(1_000)
+}
+
 /// Deterministic per-stream target-gated scheduler counters.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct StreamJitterSchedulerReport {
@@ -135,6 +207,8 @@ pub struct StreamJitterSchedulerReport {
     pub gain_changes: u32,
     /// Linear gain target published at the end, in milli-units.
     pub final_gain_milli: u16,
+    /// Bounded per-source quality ratios derived from the run's counters.
+    pub quality: MixerJitterStreamQuality,
 }
 
 /// Deterministic mixer-bus counters for one combined run.
@@ -344,6 +418,7 @@ pub fn simulate_mixer_jitter_scheduler<
         muted: false,
         gain_changes: 0,
         final_gain_milli: MAX_GAIN_MILLI,
+        quality: MixerJitterStreamQuality::default(),
     });
     for stream in 0..STREAMS {
         streams[stream].min_frames = targets[stream].min_frames();
@@ -546,6 +621,14 @@ pub fn simulate_mixer_jitter_scheduler<
             slot_refill_limit_hits[stream] = snapshot.pcm_refill_limit_hits;
             slot_discontinuities[stream] = snapshot.pcm_discontinuities;
         }
+        streams[stream].quality = MixerJitterStreamQuality::from_counters(
+            config.frames,
+            renders,
+            &streams[stream].playout,
+            streams[stream].forced_playouts,
+            slot_underflows[stream],
+            slot_discontinuities[stream],
+        );
     }
 
     Ok(MixerJitterSchedulerSimulationReport {
@@ -813,6 +896,17 @@ mod tests {
         assert_eq!(first.mixer.slots, SLOTS);
         assert!(first.mixer.renders > 0);
         assert!(first.mixer.output_finite);
+        for stream in &first.streams {
+            assert!(stream.quality.within_bounds());
+            assert_eq!(
+                stream.quality.plc_ratio_milli, 0,
+                "a clean link must not need decoder-side concealment"
+            );
+            assert_eq!(
+                stream.quality.forced_playout_ratio_milli, 0,
+                "a clean link must not force playouts past the gate deadline"
+            );
+        }
     }
 
     #[test]
@@ -870,6 +964,73 @@ mod tests {
         );
         assert_eq!(report.mixer.active_streams, 2);
         assert!(report.mixer.output_finite);
+    }
+
+    #[test]
+    fn derived_quality_ratios_stay_bounded_and_reflect_impairment() {
+        let mut network = NetworkProfile::stable(7);
+        network.burst_interval_packets = 20;
+        network.burst_length_packets = 18;
+        let config = MixerJitterSchedulerScenarioConfig {
+            frames: 100,
+            network,
+            ..MixerJitterSchedulerScenarioConfig::default()
+        };
+
+        let report = simulate_mixer_jitter_scheduler::<2, SLOTS, PCM_BLOCK>(config).unwrap();
+
+        let total_plc: u32 = report
+            .streams
+            .iter()
+            .map(|stream| stream.playout.plc_frames)
+            .sum();
+        assert!(
+            total_plc > 0,
+            "shared-link loss must produce concealment frames"
+        );
+        assert!(
+            report
+                .streams
+                .iter()
+                .any(|stream| stream.quality.underflow_ratio_milli > 0),
+            "a starved slot must record PCM underflows"
+        );
+        for stream in 0..report.streams.len() {
+            let quality = report.streams[stream].quality;
+            assert!(quality.within_bounds());
+            assert_eq!(
+                quality.plc_ratio_milli,
+                ratio_milli(
+                    u64::from(report.streams[stream].playout.plc_frames),
+                    u64::from(config.frames)
+                ),
+                "the plc ratio must be derived exactly from the raw counter"
+            );
+            assert_eq!(
+                quality.forced_playout_ratio_milli,
+                ratio_milli(
+                    u64::from(report.streams[stream].forced_playouts),
+                    u64::from(config.frames)
+                ),
+                "the forced-playout ratio must be derived exactly from the raw counter"
+            );
+            assert_eq!(
+                quality.underflow_ratio_milli,
+                ratio_milli(
+                    report.mixer.slot_underflows[stream],
+                    u64::from(report.mixer.renders)
+                ),
+                "the underflow ratio must be derived exactly from the slot counter"
+            );
+            assert_eq!(
+                quality.discontinuity_ratio_milli,
+                ratio_milli(
+                    report.mixer.slot_discontinuities[stream],
+                    u64::from(report.mixer.renders)
+                ),
+                "the discontinuity ratio must be derived exactly from the slot counter"
+            );
+        }
     }
 
     #[test]

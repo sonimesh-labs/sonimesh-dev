@@ -103,6 +103,10 @@ fuzz_target!(|data: &[u8]| {
                 stream.final_gain_milli <= 1_000,
                 "published gain must stay within the bounded linear range"
             );
+            assert!(
+                stream.quality.within_bounds(),
+                "every per-source quality ratio must stay within its bound"
+            );
         }
         assert_eq!(
             report.mixer.active_streams, STREAMS,

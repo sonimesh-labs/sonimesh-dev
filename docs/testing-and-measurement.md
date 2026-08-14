@@ -296,7 +296,12 @@ asserts the bus is exactly silent once every muted slot has rendered its
 bounded gain ramp — the ramp advances only as the slot renders queued content,
 so a starved slot may resume it without breaking the invariant — and a gain
 event publishes its target without stalling playout, so per-source gain
-control is exercised through the same lossy receiver chain. The scenario
+control is exercised through the same lossy receiver chain. The report also
+carries bounded per-source quality ratios (PLC, late, reorder, duplicate,
+forced-playout, PCM-underflow, and discontinuity in milli-units) derived
+exactly from the raw counters, and unit, property, and fuzz coverage assert
+every ratio stays within its bound while a clean link reports zero
+concealment and forced playouts. The scenario
 is exercised at both ends of the Phase 2 stream range (two and four
 independent sources) with a shared burst that starves every stream past the
 gate deadline, so the four-stream upper bound keeps every slot active and

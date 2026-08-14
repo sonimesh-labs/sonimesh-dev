@@ -228,7 +228,7 @@ fn run_mixer_jitter_scheduler_suite() {
     })
     .expect("built-in mixer jitter scheduler profile is valid");
     println!(
-        "mixer_jitter_scheduler streams=2 slots={} submitted={} burst_loss={} active={} renders={} stream0_plc={} stream1_plc={} stream0_forced={} stream1_forced={} underflows={} muted0={} muted1={} silent_ticks={} finite={}",
+        "mixer_jitter_scheduler streams=2 slots={} submitted={} burst_loss={} active={} renders={} stream0_plc={} stream1_plc={} stream0_plc_ratio={} stream1_plc_ratio={} stream0_forced={} stream1_forced={} underflows={} muted0={} muted1={} silent_ticks={} finite={}",
         report.mixer.slots,
         report.network.submitted_packets,
         report.network.burst_loss_packets,
@@ -236,6 +236,8 @@ fn run_mixer_jitter_scheduler_suite() {
         report.mixer.renders,
         report.streams[0].playout.plc_frames,
         report.streams[1].playout.plc_frames,
+        report.streams[0].quality.plc_ratio_milli,
+        report.streams[1].quality.plc_ratio_milli,
         report.streams[0].forced_playouts,
         report.streams[1].forced_playouts,
         report.mixer.slot_underflows.iter().sum::<u64>(),
