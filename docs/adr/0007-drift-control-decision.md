@@ -71,8 +71,14 @@ resynchronization must not affect other streams.
 
 Tests must cover configuration bounds, sign convention, slew limiting,
 anti-windup, and history reset after either hard resynchronization direction.
-Deterministic closed-loop simulation remains required before selecting gain
-defaults; hardware tests are still required before making drift or latency claims.
+A deterministic integerized closed-loop simulation now exists in
+`tools/network-simulator` (`drift_scenario.rs`), with a seeded property walk
+(`drift_scenario_property.rs`) and a `drift_scenario` libFuzzer target
+asserting every accepted report stays deterministic, keeps occupancy within
+the bounded PCM queue, keeps the final ratio within the configured cap, and
+keeps each hard resync exactly one low- or high-side reset. Hardware tests
+are still required before selecting gain defaults or making drift or latency
+claims.
 
 ## Rollback plan
 
