@@ -278,6 +278,19 @@ checks that the controller projection matches the mixer's actual slot table
 exactly (active count, per-slot membership, and pending commands), so the
 cross-domain invariant is shown to hold under shared-link loss and churn
 while a starved slot never blocks the other slots.
+
+A deterministic combined jitter-scheduler and mixer scenario
+(`mixer_jitter_scheduler_scenario.rs`) ties ADR 0016 to that same fixed-slot
+mixer over one shared link: each stream's adaptive target gates playout, the
+gate deadline forces a playout once starvation crosses the configured
+`max_gate_ticks`, and every played-out frame is decoded to a finite PCM block
+and pushed into that stream's slot while the callback renders the bus every
+tick. The report carries per-stream target and scheduler counters (gated
+ticks, forced playouts) and per-slot underflow, refill-limit, and
+discontinuity counters, so shared-link loss is shown to exercise both the
+adaptive target and the gate deadline while a gated or starved slot never
+blocks the other slots and the bus stays bounded and finite.
+
 This is evidence for deterministic core behavior and host loopback composition
 only. It does not yet model socket buffers, real TLS/socket reconnection, real
 ASRC/device clocks, operating-system scheduling, NAT rebinding, or physical
