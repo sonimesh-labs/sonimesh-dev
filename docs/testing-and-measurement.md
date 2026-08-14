@@ -228,6 +228,16 @@ fault or a connection loss is rejected with both domains unchanged, the stream
 keeps playing inside the reconnect grace window, and recovery re-admits the
 same identity the coordinator still tracks.
 
+Output recovery fails closed in both directions. The coordinator acknowledges
+the restoration before the mixer recreates its backend, because recreation
+cannot be rolled back: when the lifecycle retires (for example the control
+session expires) while the output is still down, a later `recover_output` is
+rejected with both domains unchanged and the mixer output still retired. When
+the backend cannot be recreated after the coordinator committed, the
+coordinator rolls back to `OutputUnavailable` so both domains keep agreeing
+the output is still down and the retried recovery can succeed once the backend
+is available again.
+
 A separate deterministic suite feeds the ADR 0016 adaptive jitter target
 from virtual-link arrival jitter and the encoded-frame water level for one
 stream and for two to four streams over one shared link, and a target-gated
