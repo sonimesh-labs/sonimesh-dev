@@ -266,3 +266,10 @@ path = "fuzz_targets/mixer_membership_controller.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "media_session_sender"
+path = "fuzz_targets/media_session_sender.rs"
+test = false
+doc = false
+bench = false
