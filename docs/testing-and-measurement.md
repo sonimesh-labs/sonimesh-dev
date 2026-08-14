@@ -114,6 +114,14 @@ nominal resampler, peak limiter, channel mapper, drift controller, fixed-slot
 mixer, arrival-jitter estimator, adaptive target controller, and per-stream
 decode worker, asserting the fixed capacity, consumed/produced, gain, and
 initialized-output guarantees hold on every accepted or rejected step.
+Separate lifecycle targets drive arbitrary start, monitor, recover, stop,
+health, and fail-start scripts through the single-stream receiver output
+controller and the Phase 2 mixer output controller, asserting after every
+step that the platform call counts, producer replacements, membership-handle
+and published-format presence, published output-format diagnostics, and
+redacted snapshot match an independent state model, that a fault is reported
+at most once and retires the stream, and that recovery reuses the last
+successful selection.
 
 `tools/check_fuzz_targets.py` keeps the manifest registration, fuzz README
 inventory and runnable commands, and finite CI smoke list synchronized. Linux

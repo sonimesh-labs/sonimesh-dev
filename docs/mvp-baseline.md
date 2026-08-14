@@ -54,6 +54,11 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   projection trait, and the pairing invitation controller reads the desktop
   control snapshot directly from either output owner, so a bridge cannot
   fabricate output lifecycle state.
+  A seeded property walk and a byte-driven libFuzzer target drive
+  adversarial start, monitor, recover, stop, health, and fail-start scripts
+  against an independent state model, asserting the platform call counters,
+  producer replacements, published output-format diagnostics, and redacted
+  snapshot stay in sync after every step.
 - allocation-free gain smoothing, saturating atomic stream and output-status
   counters, endpoint redaction, output adapter contracts, and a tested desktop
   session state machine;
