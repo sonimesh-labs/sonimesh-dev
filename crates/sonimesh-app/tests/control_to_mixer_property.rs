@@ -44,7 +44,7 @@ impl XorShift64 {
     }
 
     fn next_u8(&mut self) -> u8 {
-        self.next_u32() as u8
+        self.next_u32().to_le_bytes()[0]
     }
 
     fn next_u64(&mut self) -> u64 {
@@ -60,6 +60,13 @@ impl XorShift64 {
             return 0;
         }
         self.next_u32() as usize % bound
+    }
+
+    /// Random stream identifier in `1..=SLOTS`.
+    fn next_stream_id(&mut self) -> u32 {
+        // The slot bound is a small compile-time constant that always fits u32.
+        let bound = u32::try_from(SLOTS).expect("slot count fits u32");
+        1 + self.next_u32() % bound
     }
 }
 
@@ -273,8 +280,8 @@ fn assert_invariants(bridge: &Bridge) {
 
 /// Feeds one StartStream envelope and commits or aborts the produced action.
 fn op_start(harness: &mut Harness, rng: &mut XorShift64, commit: bool) {
-    let stream_id = 1 + rng.next_usize(SLOTS) as u32;
-    let epoch = (rng.next_u8() % 4) as u32;
+    let stream_id = rng.next_stream_id();
+    let epoch = u32::from(rng.next_u8() % 4);
     let envelope = start_for(SESSION_ID, stream_id, epoch);
     let Ok(action) = harness.bridge.accept(harness.token, &envelope) else {
         return;
@@ -312,8 +319,8 @@ fn op_start(harness: &mut Harness, rng: &mut XorShift64, commit: bool) {
 
 /// Feeds one StopStream envelope and commits or aborts the produced action.
 fn op_stop(harness: &mut Harness, rng: &mut XorShift64, commit: bool) {
-    let stream_id = 1 + rng.next_usize(SLOTS) as u32;
-    let epoch = (rng.next_u8() % 4) as u32;
+    let stream_id = rng.next_stream_id();
+    let epoch = u32::from(rng.next_u8() % 4);
     let envelope = stop_for(SESSION_ID, stream_id, epoch);
     let Ok(action) = harness.bridge.accept(harness.token, &envelope) else {
         return;
@@ -336,23 +343,20 @@ fn op_fault_and_recover(harness: &mut Harness, rng: &mut XorShift64) {
             assert!(!harness.bridge.output_active());
             assert!(!harness.bridge.mixer().snapshot().stream_active());
             harness.bridge.mixer_mut().output_mut().fail_start = rng.next_u8() % 4 == 0;
-            match harness.bridge.recover_output() {
-                Ok(identities) => {
-                    harness.bridge.mixer_mut().output_mut().fail_start = false;
-                    for identity in identities {
-                        let _ = harness
-                            .bridge
-                            .recover_stream::<FuzzPipeline, BLOCK>(identity, &mut harness.pipeline);
-                    }
-                    assert!(harness.bridge.output_active());
-                    assert!(harness.bridge.mixer().snapshot().stream_active());
+            if let Ok(identities) = harness.bridge.recover_output() {
+                harness.bridge.mixer_mut().output_mut().fail_start = false;
+                for identity in identities {
+                    let _ = harness
+                        .bridge
+                        .recover_stream::<FuzzPipeline, BLOCK>(identity, &mut harness.pipeline);
                 }
-                Err(_) => {
-                    // Recovery crossed a retired lifecycle: both domains must
-                    // agree the output is still down.
-                    assert!(!harness.bridge.output_active());
-                    assert!(!harness.bridge.mixer().snapshot().stream_active());
-                }
+                assert!(harness.bridge.output_active());
+                assert!(harness.bridge.mixer().snapshot().stream_active());
+            } else {
+                // Recovery crossed a retired lifecycle: both domains must
+                // agree the output is still down.
+                assert!(!harness.bridge.output_active());
+                assert!(!harness.bridge.mixer().snapshot().stream_active());
             }
         }
         Ok(None) => {}
@@ -434,8 +438,8 @@ fn run_walk(seed: u64) {
             7 => op_expire(&mut harness),
             _ => {
                 // Randomly rotate one active stream to a newer key epoch.
-                let stream_id = 1 + rng.next_usize(SLOTS) as u32;
-                let epoch = 1 + (rng.next_u8() % 4) as u32;
+                let stream_id = rng.next_stream_id();
+                let epoch = 1 + u32::from(rng.next_u8() % 4);
                 let envelope = start_for(SESSION_ID, stream_id, epoch);
                 let Ok(action) = harness.bridge.accept(harness.token, &envelope) else {
                     continue;
