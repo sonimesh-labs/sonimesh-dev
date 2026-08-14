@@ -268,6 +268,16 @@ and discontinuity counters, and the published membership transitions, so a
 slot starved by shared-link loss is shown to go silent without blocking the
 other slots while the bus stays bounded and finite.
 
+A deterministic controller-driven membership scenario
+(`mixer_controller_membership_scenario.rs`) now ties the app-side admission
+boundary to that same mixer over one shared link: every stream is admitted
+through the real `MixerMembershipController`, playout pushes finite PCM into
+the admitted slot queues, the callback renders the bus every tick, and a
+mid-session remove/re-admit exercises churn. After every render the report
+checks that the controller projection matches the mixer's actual slot table
+exactly (active count, per-slot membership, and pending commands), so the
+cross-domain invariant is shown to hold under shared-link loss and churn
+while a starved slot never blocks the other slots.
 This is evidence for deterministic core behavior and host loopback composition
 only. It does not yet model socket buffers, real TLS/socket reconnection, real
 ASRC/device clocks, operating-system scheduling, NAT rebinding, or physical

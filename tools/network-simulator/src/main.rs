@@ -2,13 +2,14 @@
 
 use sonimesh_audio::{DriftConfig, JitterMode, JitterTargetConfig};
 use sonimesh_network_simulator::{
+    DEFAULT_MIXER_CONTROLLER_PCM_BLOCK, DEFAULT_MIXER_CONTROLLER_SLOTS,
     DEFAULT_MIXER_MEMBERSHIP_PCM_BLOCK, DEFAULT_MIXER_MEMBERSHIP_SLOTS, DriftScenarioConfig,
-    JitterSchedulerScenarioConfig, JitterTargetScenarioConfig, MixerMembershipScenarioConfig,
-    MultiStreamJitterTargetScenarioConfig, MultiStreamScenarioConfig, NetworkProfile,
-    ScenarioConfig, opus_experiment_cases, simulate, simulate_control_reconnect, simulate_drift,
-    simulate_jitter_scheduler, simulate_jitter_target, simulate_mixer_membership,
-    simulate_multi_stream, simulate_multi_stream_jitter_target, simulate_opus_experiment,
-    simulate_opus_worker_experiment,
+    JitterSchedulerScenarioConfig, JitterTargetScenarioConfig, MixerControllerScenarioConfig,
+    MixerMembershipScenarioConfig, MultiStreamJitterTargetScenarioConfig,
+    MultiStreamScenarioConfig, NetworkProfile, ScenarioConfig, opus_experiment_cases, simulate,
+    simulate_control_reconnect, simulate_drift, simulate_jitter_scheduler, simulate_jitter_target,
+    simulate_mixer_controller_membership, simulate_mixer_membership, simulate_multi_stream,
+    simulate_multi_stream_jitter_target, simulate_opus_experiment, simulate_opus_worker_experiment,
 };
 
 fn main() {
@@ -106,6 +107,7 @@ fn main() {
 
     run_multi_stream_suite();
     run_mixer_membership_suite();
+    run_mixer_controller_membership_suite();
     run_jitter_target_suite();
     run_multi_stream_jitter_target_suite();
     run_jitter_scheduler_suite();
@@ -155,6 +157,37 @@ fn run_mixer_membership_suite() {
         report.mixer.published_inserts,
         report.mixer.published_removes,
         report.mixer.renders,
+        report.mixer.slot_underflows.iter().sum::<u64>(),
+        report.mixer.output_finite,
+    );
+}
+
+fn run_mixer_controller_membership_suite() {
+    println!("SoniMesh controller-driven mixer membership suite");
+    let mut network = NetworkProfile::stable(0x5A17_2026);
+    network.burst_interval_packets = 20;
+    network.burst_length_packets = 3;
+    let report = simulate_mixer_controller_membership::<
+        2,
+        DEFAULT_MIXER_CONTROLLER_SLOTS,
+        DEFAULT_MIXER_CONTROLLER_PCM_BLOCK,
+    >(MixerControllerScenarioConfig {
+        frames: 200,
+        network,
+        ..MixerControllerScenarioConfig::default()
+    })
+    .expect("built-in mixer controller membership profile is valid");
+    println!(
+        "mixer_controller_membership streams=2 slots={} submitted={} burst_loss={} active={} projected={} inserts={} removes={} renders={} projection_matched={} underflows={} finite={}",
+        report.mixer.slots,
+        report.network.submitted_packets,
+        report.network.burst_loss_packets,
+        report.mixer.active_streams,
+        report.mixer.projected_streams,
+        report.mixer.published_inserts,
+        report.mixer.published_removes,
+        report.mixer.renders,
+        report.mixer.projection_matched,
         report.mixer.slot_underflows.iter().sum::<u64>(),
         report.mixer.output_finite,
     );

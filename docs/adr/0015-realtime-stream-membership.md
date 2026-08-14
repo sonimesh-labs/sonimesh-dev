@@ -286,6 +286,15 @@ Evidence produced so far:
   the mixer actual slot table exactly (active count, per-slot membership,
   and pending command count), that fail-closed admission and removal leave
   both sides unchanged, and that render output stays finite;
+- a deterministic controller-driven network-simulator scenario
+  (`mixer_controller_membership_scenario.rs`) driving two source streams over
+  one shared virtual link into the same fixed-slot `CommandDrivenMixer`
+  through the real `MixerMembershipController`, with a mid-session
+  remove/re-admit churn, asserting after every render that the controller
+  projection matches the mixer's actual slot table exactly (active count,
+  per-slot membership, and pending commands), that shared-link loss leaves a
+  starved slot silent without blocking the others, and that render output
+  stays bounded and finite;
 - a deterministic network-simulator scenario
   (`mixer_membership_scenario.rs`) driving two source streams over one
   shared virtual link into a fixed eight-slot `CommandDrivenMixer` with a
