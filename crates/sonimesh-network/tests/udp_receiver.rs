@@ -74,3 +74,22 @@ fn returns_the_untrusted_source_endpoint_with_the_payload() {
     }
     panic!("loopback datagram was not delivered");
 }
+
+#[test]
+fn bind_rejects_an_already_used_local_endpoint() {
+    let receiver = loopback_receiver();
+    let occupied = receiver.local_addr().unwrap();
+
+    let Err(bind_error) = UdpMediaReceiver::bind(occupied) else {
+        panic!("second bind unexpectedly succeeded");
+    };
+    assert_eq!(bind_error.kind(), std::io::ErrorKind::AddrInUse);
+}
+
+#[test]
+fn from_socket_switches_to_nonblocking_mode() {
+    let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let mut receiver = UdpMediaReceiver::from_socket(socket).unwrap();
+
+    assert_eq!(receiver.poll().unwrap(), None);
+}
