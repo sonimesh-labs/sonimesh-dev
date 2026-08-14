@@ -80,6 +80,11 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
 - a cross-crate protected pipeline covering AEAD parse/authentication, replay
   rejection, jitter/PLC decisions, non-realtime decode scheduling, and realtime
   PCM transfer without claiming an Opus backend or physical audio result.
+  A seeded property walk and a byte-driven libFuzzer target drive in-order
+  deliveries, duplicates, tampered ciphertext, retired-epoch packets, and
+  rotations against an independent replay oracle and counter model,
+  asserting failed AEAD never advances the replay window and only
+  authenticated in-window packets reach the decoder.
 - a generated, length-prefixed Protobuf control envelope with hard frame and
   field limits for controlled-lab command exchange.
 - symmetric bounded control framing proven over one real TCP connection: both

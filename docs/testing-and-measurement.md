@@ -221,6 +221,12 @@ rejected input cannot pin, a changed endpoint is rejected before consuming
 replay state, epoch rotation preserves the binding, failed session replacement
 preserves it, and successful fresh-session replacement permits rebinding.
 Separate loopback UDP tests exercise the same policy through real host sockets.
+A libFuzzer target (`receiver_pipeline`) drives byte-selected in-order
+deliveries, duplicates, tampered ciphertext with a valid-twin probe,
+retired-epoch packets, and rotations through the same protected pipeline,
+asserting every outcome, plaintext zeroing, decoded PCM, and the
+authenticated, duplicate, rejected, and stream-reset counters against an
+independent replay oracle and counter model.
 
 A deterministic control reconnect scenario now delays a command from the old
 transport until after the replacement transport installs a fresh local token and
