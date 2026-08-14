@@ -258,6 +258,23 @@ Evidence produced so far:
   rejected, output-start and admission failures roll back without
   partial changes, output fault and recovery re-admit persisted streams,
   and connection loss with reconnect or control expiry stops the mixer;
+- app-side bridge honesty tests proving a lifecycle fault is never
+  misrepresented: a platform fault that crosses reconnect grace retires
+  the output and the snapshot reports it down, a reconnect-grace clock
+  regression force-expires the mixer together with the session so the
+  snapshot never claims a live stream or an active output under an idle
+  lifecycle, and a recovery that crosses a retired lifecycle fails closed
+  with both domains agreeing the output is down;
+- a deterministic bridge property walk (`control_to_mixer_property.rs`)
+  driving six seeds by 1,500 authenticated start, rotation, stop,
+  output-fault recovery, reconnect-grace, and session-expiry steps and
+  asserting after every step that the coordinator and the mixer report the
+  same bounded stream count and that the bridge output-active flag never
+  diverges from the mixer output snapshot;
+- a libFuzzer target (`control_to_mixer`) feeding arbitrary byte-driven
+  lifecycle scripts through the real pairing path and the tokenized
+  completion contract and asserting the same cross-domain invariants and
+  the fixed slot bound on every input;
 
 Still open before Phase 2 can claim multi-source streaming: the roadmap's 24-hour
 soak and hardware callback timing on actual WASAPI devices.
