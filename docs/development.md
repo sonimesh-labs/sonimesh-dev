@@ -107,6 +107,7 @@ cargo +nightly-2026-07-18 fuzz run receiver_output_controller -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run pcm_render_source -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run receiver_pipeline -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run udp_receiver_pipeline -- -max_len=1024
+cargo +nightly-2026-07-18 fuzz run media_session_sender -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run export_retention_journal -- -max_len=1024
 ~~~
 

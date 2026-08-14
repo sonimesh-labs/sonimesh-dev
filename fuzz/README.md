@@ -199,6 +199,16 @@ production workspace so `libfuzzer-sys` never becomes a shipping dependency.
   rejected before any protected work and never moves the pin, failed
   processing never binds an unbound source, and only a fresh authenticated
   session clears the binding.
+- `media_session_sender` drives byte-selected sends, oversized-frame
+  rejection, valid and fail-closed key-epoch rotation, fresh-session
+  installation, and routing migration over real loopback sockets through the
+  bounded media session sender boundary and asserts after every step that the
+  sender context matches an independent model, that every accepted seal
+  consumed exactly the next per-epoch sequence and reached the current peer's
+  protected ingress with the expected header and plaintext, that an oversized
+  frame is rejected before touching the socket without consuming a sequence,
+  and that failed rotation or fresh-session replacement leaves the model
+  unchanged or exactly as installed.
 - `export_retention_journal` drives a deterministic edge prologue and
   arbitrary record-size scripts through the bounded export retention journal
   (ADR 0011) under input-selected count and byte bounds, comparing the
@@ -254,6 +264,7 @@ cargo +nightly-2026-07-18 fuzz run receiver_output_controller -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run pcm_render_source -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run receiver_pipeline -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run udp_receiver_pipeline -- -max_len=1024
+cargo +nightly-2026-07-18 fuzz run media_session_sender -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run export_retention_journal -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run stream_decode_worker -- -max_len=64
 ```

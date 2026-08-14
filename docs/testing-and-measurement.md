@@ -137,6 +137,16 @@ real slot table exactly, that pending commands drain to zero, and that
 fail-closed admission (format mismatch, table full, command queue full)
 leaves both sides unchanged.
 
+A network-domain sender target drives the bounded media session
+sender boundary (`media_session_sender`): byte-selected sends, oversized
+frames, valid and fail-closed key-epoch rotation, fresh-session
+installation, and routing migration over real loopback sockets, asserting
+after every step that every accepted seal consumed exactly the next
+per-epoch sequence and reached the current peer's protected ingress with
+the expected header and plaintext, that an oversized frame is rejected
+before touching the socket without consuming a sequence, and that failed
+rotation leaves the context and sequence unchanged.
+
 The bounded diagnostic export journal (ADR 0011) has a dedicated target that
 drives arbitrary record sizes and input-selected count and byte bounds,
 comparing the result, retained count, retained bytes, and next sequence
