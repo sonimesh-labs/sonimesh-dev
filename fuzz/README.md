@@ -40,6 +40,13 @@ production workspace so `libfuzzer-sys` never becomes a shipping dependency.
   through the preallocated realtime slot table, proving membership churn cannot
   panic the mixer, bypass the fixed slot bound, or leave render output
   non-finite while the producers carry finite samples.
+- `mixer_membership` publishes arbitrary insert/remove commands into the
+  bounded lock-free queue shared with the callback `CommandDrivenMixer` and
+  interleaves renders, finite producer pushes, and bounded gain/mute changes,
+  proving the handoff boundary cannot panic, applies commands at callback
+  granularity with the lowest-free-slot FIFO policy, fails closed on a full
+  queue and on out-of-range removes, never exceeds the fixed slot bound, and
+  keeps render output finite while producers carry finite samples.
 - `protected_media_ingress` exercises raw input, valid authenticated arbitrary
   payloads, duplicate replay, undersized output buffers, and deterministic
   single-byte flags-byte and tag tampering plus ciphertext tampering for
@@ -93,6 +100,7 @@ cargo +nightly-2026-07-18 fuzz run channel_mapper -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run peak_limiter -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run drift_controller -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run fixed_slot_mixer -- -max_len=1024
+cargo +nightly-2026-07-18 fuzz run mixer_membership -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run protected_media_ingress -- -max_len=1264
 cargo +nightly-2026-07-18 fuzz run pairing_binding -- -max_len=4096
 cargo +nightly-2026-07-18 fuzz run untrusted_control_stream -- -max_len=65540

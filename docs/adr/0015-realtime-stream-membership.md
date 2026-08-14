@@ -271,6 +271,14 @@ Evidence produced so far:
   asserting after every step that the coordinator and the mixer report the
   same bounded stream count and that the bridge output-active flag never
   diverges from the mixer output snapshot;
+- a libFuzzer target (`mixer_membership`) publishing arbitrary insert/remove
+  commands into the bounded lock-free queue shared with the callback
+  `CommandDrivenMixer` and interleaving renders, finite producer pushes, and
+  bounded gain/mute changes, asserting the handoff boundary cannot panic,
+  applies commands at callback granularity with the lowest-free-slot FIFO
+  policy, fails closed on a full queue and on out-of-range removes, never
+  exceeds the fixed slot bound, and keeps render output finite while
+  producers carry finite samples;
 - a libFuzzer target (`control_to_mixer`) feeding arbitrary byte-driven
   lifecycle scripts through the real pairing path and the tokenized
   completion contract and asserting the same cross-domain invariants and
