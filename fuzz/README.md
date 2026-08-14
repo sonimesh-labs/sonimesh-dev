@@ -174,6 +174,13 @@ production workspace so `libfuzzer-sys` never becomes a shipping dependency.
   proving partial-block preservation, the per-callback refill cap, bounded
   underflow silence, discontinuity fade-in, and gain-ramp behavior hold on
   every accepted or rejected step.
+- `receiver_pipeline` drives byte-selected in-order deliveries, duplicates,
+  tampered ciphertext with a valid-twin probe, retired-epoch packets, and
+  rotations through the protected receiver pipeline and compares every
+  outcome, plaintext zeroing, decoded PCM, and published counter against an
+  independent replay oracle and counter model, proving failed AEAD never
+  advances the replay window and only authenticated in-window packets reach
+  the decoder.
 - `untrusted_control_stream` feeds arbitrary bytes through the bounded
   length-prefixed control framing state machine in a deterministic per-input
   chunk size, exercising partial length and payload reads, oversize and
@@ -218,6 +225,7 @@ cargo +nightly-2026-07-18 fuzz run reconnect_grace -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run mixer_output_controller -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run receiver_output_controller -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run pcm_render_source -- -max_len=1024
+cargo +nightly-2026-07-18 fuzz run receiver_pipeline -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run stream_decode_worker -- -max_len=64
 ```
 

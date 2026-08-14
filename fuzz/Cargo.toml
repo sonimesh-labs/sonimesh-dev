@@ -242,3 +242,9 @@ path = "fuzz_targets/pcm_render_source.rs"
 test = false
 doc = false
 bench = false
+[[bin]]
+name = "receiver_pipeline"
+path = "fuzz_targets/receiver_pipeline.rs"
+test = false
+doc = false
+bench = false
