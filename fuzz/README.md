@@ -4,7 +4,7 @@ This independent Cargo workspace contains the LibFuzzer entry points for bounded
 untrusted protocol and media ingress. It is intentionally separate from the
 production workspace so `libfuzzer-sys` never becomes a shipping dependency.
 
-The network-scenario targets (`jitter_target`, `jitter_scheduler`, `multi_stream`, `multi_stream_jitter_target`, `mixer_membership_scenario`, `mixer_jitter_scheduler`, `mixer_jitter_scheduler_4s`, and `mixer_controller_membership`) derive their virtual-link profiles from input bytes, including a serial-link bandwidth, an in-flight bound, and a bounded sender-side socket buffer, so arbitrary inputs also exercise finite-link serialization and backpressure alongside loss, reorder, and duplication.
+The network-scenario targets (`jitter_target`, `jitter_scheduler`, `multi_stream`, `multi_stream_jitter_target`, `mixer_membership_scenario`, `mixer_jitter_scheduler`, `mixer_jitter_scheduler_4s`, and `mixer_controller_membership`) derive their virtual-link profiles from input bytes, including a serial-link bandwidth, an in-flight bound, and a bounded sender-side socket buffer, so arbitrary inputs also exercise finite-link serialization and backpressure alongside loss, reorder, and duplication. Every accepted report also asserts the serialization accounting (one media datagram per scheduled copy) and the no-link/no-buffer backpressure semantics, matching the seeded property walks.
 
 ## Targets
 

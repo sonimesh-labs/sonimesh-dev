@@ -18,7 +18,7 @@
 use libfuzzer_sys::fuzz_target;
 use sonimesh_audio::{JitterMode, JitterTargetConfig};
 use sonimesh_network_simulator::{
-    JitterSchedulerScenarioConfig, JitterSchedulerSimulationReport, NetworkProfile,
+    JitterSchedulerScenarioConfig, JitterSchedulerSimulationReport, NetworkProfile, NetworkStats,
     simulate_jitter_scheduler,
 };
 use sonimesh_protocol::MAX_MEDIA_DATAGRAM_LEN;
@@ -106,6 +106,11 @@ fn assert_scenario_invariants(
     report: &JitterSchedulerSimulationReport,
     config: &JitterSchedulerScenarioConfig,
 ) {
+    assert_network_accounting(
+        &report.network,
+        &config.network,
+        config.media_datagram_bytes,
+    );
     let consumed = report.playout.playout_frames + report.playout.plc_frames;
     assert_eq!(
         consumed, config.frames,
@@ -158,6 +163,55 @@ fn mode_from_byte(byte: u8) -> JitterMode {
         0 => JitterMode::LowLatency,
         1 => JitterMode::Stable,
         _ => JitterMode::Balanced,
+    }
+}
+
+/// Asserts the finite-link serialization and sender-side backpressure
+/// accounting that must hold on every accepted report, mirroring the seeded
+/// property walks: every scheduled copy is serialized as exactly one media
+/// datagram, and without a finite link or a socket buffer the sender never
+/// reports backpressure.
+fn assert_network_accounting(
+    stats: &NetworkStats,
+    profile: &NetworkProfile,
+    media_datagram_bytes: u16,
+) {
+    let bandwidth = profile.bandwidth_bytes_per_second;
+    if bandwidth == 0 {
+        assert_eq!(
+            stats.bandwidth_shaped_copies, 0,
+            "an unshaped link must not serialize any copy"
+        );
+        assert_eq!(
+            stats.bandwidth_serialized_bytes, 0,
+            "an unshaped link must not place bytes on a link"
+        );
+    } else {
+        assert_eq!(
+            stats.bandwidth_shaped_copies, stats.scheduled_copies,
+            "every scheduled copy is serialized on the finite link"
+        );
+        assert_eq!(
+            stats.bandwidth_serialized_bytes,
+            stats.scheduled_copies * u64::from(media_datagram_bytes),
+            "serialized bytes equal one datagram per scheduled copy"
+        );
+    }
+
+    if profile.send_buffer_bytes.is_none() || bandwidth == 0 {
+        assert_eq!(
+            stats.send_buffer_full_packets, 0,
+            "no finite link or no socket buffer means no backpressure"
+        );
+        assert_eq!(
+            stats.send_buffer_queued_bytes, 0,
+            "no finite link or no socket buffer means no queued bytes"
+        );
+    } else if let Some(capacity) = profile.send_buffer_bytes {
+        assert!(
+            stats.send_buffer_queued_bytes <= capacity,
+            "sender-side queued bytes never exceed the configured socket-buffer capacity"
+        );
     }
 }
 
