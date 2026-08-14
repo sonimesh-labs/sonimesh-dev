@@ -174,7 +174,10 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   that exceeds the plaintext limit before touching the socket, rotates to a
   strictly newer key epoch (fresh sequence at zero, same session/stream/direction),
   installs a fresh session with a new context, and treats the destination as
-  routing metadata only.
+  routing metadata only. An OS `WouldBlock` result classifies as backpressure
+  with the consumed sequence, and the bounded sender-side socket-buffer model
+  is pinned by the deterministic harness in
+  [testing-and-measurement.md](./testing-and-measurement.md).
 - an application-domain UDP receiver pipeline that feeds one socket datagram
   through protected ingress, bounded jitter admission, and non-realtime decode;
   control-session and output lifecycle wiring remain separate.
