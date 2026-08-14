@@ -139,5 +139,39 @@ fn profile_from_bytes(data: &[u8]) -> NetworkProfile {
         u16::try_from(u32::from(data.get(13).copied().unwrap_or(0)) % burst_interval_packets + 1)
             .expect("burst length fits u16")
     };
+    // Occasionally shape the shared link and bound the sender-side socket
+    // buffer so fuzz inputs exercise finite-link serialization and
+    // backpressure, mirroring the seeded property walks. The reads use fixed
+    // high offsets that no other field in this target consumes.
+    let shaped = data.get(40).copied().unwrap_or(0) % 100 >= 10;
+    let bw_mode = data.get(41).copied().unwrap_or(0) % 100;
+    let bandwidth_raw = u16::from_le_bytes([
+        data.get(42).copied().unwrap_or(0),
+        data.get(43).copied().unwrap_or(0),
+    ]);
+    profile.bandwidth_bytes_per_second = if !shaped {
+        0
+    } else if bw_mode < 30 {
+        u64::from(bandwidth_raw % 4_801 + 200) // 200..=5_000 bytes/s
+    } else {
+        u64::from(bandwidth_raw) * 30 + 5_000 // 5_000..=~1_971_050 bytes/s
+    };
+    profile.max_in_flight_packets = usize::from(data.get(44).copied().unwrap_or(0) % 15 + 2);
+    let buffer_sel = data.get(45).copied().unwrap_or(0) % 100;
+    profile.send_buffer_bytes = if !shaped || buffer_sel < 30 {
+        None
+    } else if buffer_sel < 50 {
+        Some(u64::from(
+            u32::from(data.get(46).copied().unwrap_or(0)) % 9_601 + 1,
+        ))
+    } else {
+        let capacity = u32::from_le_bytes([
+            data.get(47).copied().unwrap_or(0),
+            data.get(48).copied().unwrap_or(0),
+            data.get(49).copied().unwrap_or(0),
+            data.get(50).copied().unwrap_or(0),
+        ]);
+        Some(u64::from(capacity % 2_000_000 + 1))
+    };
     profile
 }
