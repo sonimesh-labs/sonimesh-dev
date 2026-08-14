@@ -289,7 +289,11 @@ tick. The report carries per-stream target and scheduler counters (gated
 ticks, forced playouts) and per-slot underflow, refill-limit, and
 discontinuity counters, so shared-link loss is shown to exercise both the
 adaptive target and the gate deadline while a gated or starved slot never
-blocks the other slots and the bus stays bounded and finite.
+blocks the other slots and the bus stays bounded and finite. The scenario is
+exercised at both ends of the Phase 2 stream range (two and four independent
+sources) with a shared burst that starves every stream past the gate
+deadline, so the four-stream upper bound keeps every slot active and the bus
+finite.
 
 This is evidence for deterministic core behavior and host loopback composition
 only. It does not yet model socket buffers, real TLS/socket reconnection, real

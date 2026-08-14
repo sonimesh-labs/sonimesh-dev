@@ -6,8 +6,10 @@
 //! count, each stream's adaptive target remains inside its `[min, max]` water
 //! levels, scheduler step counters never exceed the observation count, every
 //! playout tick either consumes a frame or gates (so gated ticks plus frames
-//! equal observations), both streams stay active in the fixed-slot mixer, and
-//! the rendered bus stays finite. This test drives seeded random profiles,
+//! equal observations), every stream stays active in the fixed-slot mixer, and
+//! the rendered bus stays finite. The same seeded profiles drive both ends of
+//! the Phase 2 range (two and four independent sources). This test drives
+//! seeded random profiles,
 //! frame durations, delays, and gate deadlines over a long run and asserts
 //! those invariants on every report, mirroring the deterministic property
 //! pattern used for the sibling scheduler scenarios and the
@@ -51,9 +53,7 @@ const JITTER_BUFFER_CAPACITY: usize = 64;
 const MAX_FRAMES: u32 = 48;
 /// Number of seeded configurations per property run.
 const STEPS: usize = 256;
-/// Streams in each scenario run.
-const STREAMS: usize = 2;
-/// Fixed slot count of the mixer table.
+/// Fixed slot count of the mixer table (also the four-stream slot count).
 const SLOTS: usize = 4;
 /// Output-format PCM block size used by the mixer callback.
 const PCM_BLOCK: usize = 64;
@@ -90,6 +90,15 @@ fn random_profile(random: &mut XorShift64) -> NetworkProfile {
 
 #[test]
 fn every_valid_configuration_stays_bounded_and_consumes_every_frame() {
+    // Phase 2 admits two to four independent sources; verify both ends of the
+    // range over the same seeded profiles.
+    check_stream_count::<2>();
+    check_stream_count::<4>();
+}
+
+/// Drives `STEPS` seeded configurations at a fixed stream count and asserts
+/// the scenario invariants on every report.
+fn check_stream_count<const S: usize>() {
     let mut random = XorShift64(0x5A17_2026);
     for _ in 0..STEPS {
         let frame_duration_ms = if random.next_usize(2) == 0 {
@@ -102,7 +111,7 @@ fn every_valid_configuration_stays_bounded_and_consumes_every_frame() {
             1 => JitterMode::Stable,
             _ => JitterMode::Balanced,
         };
-        let config = MixerJitterSchedulerScenarioConfig {
+        let config = MixerJitterSchedulerScenarioConfig::<S> {
             frames: random.next_in(1, MAX_FRAMES + 1),
             frame_duration_ms: u64::from(frame_duration_ms),
             initial_playout_ms: u64::from(random.next_in(0, 1_001)),
@@ -115,7 +124,7 @@ fn every_valid_configuration_stays_bounded_and_consumes_every_frame() {
             max_gate_ticks: random.next_in(1, 65),
         };
 
-        let report = simulate_mixer_jitter_scheduler::<STREAMS, SLOTS, PCM_BLOCK>(config)
+        let report = simulate_mixer_jitter_scheduler::<S, SLOTS, PCM_BLOCK>(config)
             .expect("the seeded configuration must be valid");
         for stream in &report.streams {
             assert_eq!(
@@ -138,8 +147,8 @@ fn every_valid_configuration_stays_bounded_and_consumes_every_frame() {
             );
         }
         assert_eq!(
-            report.mixer.active_streams, STREAMS,
-            "both streams must stay active in the fixed-slot mixer"
+            report.mixer.active_streams, S,
+            "every stream must stay active in the fixed-slot mixer"
         );
         assert!(report.mixer.renders > 0, "the callback must render the bus");
         assert!(report.mixer.output_finite, "the bus must stay finite");

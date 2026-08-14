@@ -690,6 +690,64 @@ mod tests {
     }
 
     #[test]
+    fn four_stream_shared_burst_gates_every_stream_without_stalling_the_bus() {
+        let mut network = NetworkProfile::stable(7);
+        // Four streams share one link, so a burst of `N` consecutive dropped
+        // packets starves each stream for about `N/4` ticks. The default gate
+        // deadline is 8 ticks: a 36/40 burst starves each stream ~9 ticks and
+        // must force playouts on all four streams, while shorter bursts
+        // (<= 32/40, about <= 8 ticks per stream) never expire the deadline.
+        // This pins the Phase 2 upper bound (four independent sources) on the
+        // same shared link without stalling any slot.
+        network.burst_interval_packets = 40;
+        network.burst_length_packets = 36;
+        let config = MixerJitterSchedulerScenarioConfig {
+            frames: 100,
+            network,
+            ..MixerJitterSchedulerScenarioConfig::default()
+        };
+
+        let first = simulate_mixer_jitter_scheduler::<4, SLOTS, PCM_BLOCK>(config).unwrap();
+        let second = simulate_mixer_jitter_scheduler::<4, SLOTS, PCM_BLOCK>(config).unwrap();
+
+        assert_eq!(first, second, "the simulation must be deterministic");
+        for stream in &first.streams {
+            assert_eq!(
+                stream.playout.playout_frames + stream.playout.plc_frames,
+                config.frames,
+                "every frame must be consumed by playout or PLC"
+            );
+            assert!(
+                (stream.min_frames..=stream.max_frames).contains(&stream.final_target_frames),
+                "the adaptive target must stay within its explicit bounds"
+            );
+            assert!(
+                stream.forced_playouts > 0,
+                "the shared burst must exercise forced playouts on every stream"
+            );
+        }
+        let total_plc: u32 = first
+            .streams
+            .iter()
+            .map(|stream| stream.playout.plc_frames)
+            .sum();
+        assert!(
+            total_plc > 0,
+            "shared-link loss must reach the jitter buffers"
+        );
+        assert!(
+            first
+                .mixer
+                .slot_underflows
+                .iter()
+                .any(|&underflows| underflows > 0),
+            "a gated or starved slot must record PCM underflows"
+        );
+        assert_eq!(first.mixer.active_streams, 4);
+        assert!(first.mixer.output_finite);
+    }
+
+    #[test]
     fn rejects_invalid_scenario_configuration() {
         assert_eq!(
             simulate_mixer_jitter_scheduler::<2, SLOTS, PCM_BLOCK>(

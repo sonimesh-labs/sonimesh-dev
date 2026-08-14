@@ -227,6 +227,40 @@ fn run_mixer_jitter_scheduler_suite() {
         report.mixer.slot_underflows.iter().sum::<u64>(),
         report.mixer.output_finite,
     );
+
+    let mut four_stream_network = NetworkProfile::stable(7);
+    // Four streams share one link, so a burst of `N` consecutive dropped
+    // packets starves each stream for about `N/4` ticks; 36/40 starves each
+    // stream ~9 ticks, past the 8-tick gate deadline, exercising forced
+    // playouts on the Phase 2 upper bound.
+    four_stream_network.burst_interval_packets = 40;
+    four_stream_network.burst_length_packets = 36;
+    let four_stream_report = simulate_mixer_jitter_scheduler::<
+        4,
+        DEFAULT_MIXER_JITTER_SLOTS,
+        DEFAULT_MIXER_JITTER_PCM_BLOCK,
+    >(MixerJitterSchedulerScenarioConfig {
+        frames: 200,
+        network: four_stream_network,
+        ..MixerJitterSchedulerScenarioConfig::default()
+    })
+    .expect("built-in four-stream mixer jitter scheduler profile is valid");
+    let four_stream_forced: u32 = four_stream_report
+        .streams
+        .iter()
+        .map(|stream| stream.forced_playouts)
+        .sum();
+    println!(
+        "mixer_jitter_scheduler streams=4 slots={} submitted={} burst_loss={} active={} renders={} forced={} underflows={} finite={}",
+        four_stream_report.mixer.slots,
+        four_stream_report.network.submitted_packets,
+        four_stream_report.network.burst_loss_packets,
+        four_stream_report.mixer.active_streams,
+        four_stream_report.mixer.renders,
+        four_stream_forced,
+        four_stream_report.mixer.slot_underflows.iter().sum::<u64>(),
+        four_stream_report.mixer.output_finite,
+    );
 }
 
 fn run_jitter_target_suite() {
