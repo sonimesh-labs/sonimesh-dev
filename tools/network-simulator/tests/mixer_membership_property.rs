@@ -12,11 +12,18 @@
 //! profiles over a long run and asserts those invariants on every report,
 //! mirroring the deterministic property pattern used for the other mixer
 //! scenarios.
+//!
+//! Profiles also vary the media datagram size and occasionally configure a
+//! finite serial link and a bounded sender-side socket buffer shared by both
+//! streams, so the walk pins the bandwidth-serialization accounting (every
+//! scheduled copy is serialized as one datagram) and the no-link/no-buffer
+//! backpressure semantics.
 
 use sonimesh_network_simulator::{
     MixerMembershipScenarioConfig, MixerMembershipSimulationReport, NetworkProfile,
     simulate_mixer_membership,
 };
+use sonimesh_protocol::MAX_MEDIA_DATAGRAM_LEN;
 
 /// Small deterministic xorshift64 generator; no external dependency.
 struct XorShift64(u64);
@@ -31,9 +38,21 @@ impl XorShift64 {
         (x >> 32) as u32
     }
 
+    fn next_usize(&mut self, bound: usize) -> usize {
+        if bound == 0 {
+            return 0;
+        }
+        self.next_u32() as usize % bound
+    }
+
     /// Returns a value in `low..high_exclusive` for `low < high_exclusive`.
     fn next_in(&mut self, low: u32, high_exclusive: u32) -> u32 {
         low + self.next_u32() % (high_exclusive - low)
+    }
+
+    /// Returns a value in `0..=100`.
+    fn percent(&mut self) -> usize {
+        self.next_usize(101)
     }
 }
 
@@ -47,7 +66,10 @@ const SLOTS: usize = 4;
 const PCM_BLOCK: usize = 64;
 
 /// Builds a validated network profile within the scenario impairment range.
-fn random_profile(random: &mut XorShift64) -> NetworkProfile {
+///
+/// The media datagram size is passed in so a tight sender-side socket buffer
+/// can be sized relative to the datagram the scenario actually transmits.
+fn random_profile(random: &mut XorShift64, media_datagram_bytes: u16) -> NetworkProfile {
     let mut network = NetworkProfile::stable(u64::from(random.next_u32()));
     network.loss_percent = u8::try_from(random.next_in(0, 16)).unwrap();
     network.duplicate_percent = u8::try_from(random.next_in(0, 11)).unwrap();
@@ -61,17 +83,39 @@ fn random_profile(random: &mut XorShift64) -> NetworkProfile {
         network.burst_length_packets =
             u16::try_from(random.next_in(1, (interval - 1).min(6) + 1)).unwrap();
     }
+    // Occasionally shape the link and bound the sender-side socket buffer so
+    // the walk exercises finite-link serialization and backpressure. Slow
+    // links guarantee shaping pressure; tight buffers guarantee backpressure.
+    let shaped = random.percent() >= 10;
+    network.bandwidth_bytes_per_second = if shaped && random.percent() < 30 {
+        u64::try_from(random.next_usize(4_801) + 200).unwrap() // 200..=5_000 bytes/s
+    } else if shaped {
+        u64::try_from(random.next_usize(1_995_001) + 5_000).unwrap() // 5_000..=2_000_000 bytes/s
+    } else {
+        0
+    };
+    network.max_in_flight_packets = random.next_usize(15) + 2;
+    // Mix bufferless, tight, and roomy sender-side socket buffers.
+    network.send_buffer_bytes = if !shaped || random.percent() < 30 {
+        None
+    } else if random.percent() < 50 {
+        Some(u64::try_from(random.next_usize(usize::from(media_datagram_bytes) * 8) + 1).unwrap())
+    } else {
+        Some(u64::try_from(random.next_usize(2_000_000) + 1).unwrap())
+    };
     network
 }
 
 /// Builds one valid configuration from the seeded random stream.
 fn random_config(random: &mut XorShift64) -> MixerMembershipScenarioConfig<STREAMS> {
+    let media_datagram_bytes =
+        u16::try_from(random.next_usize(MAX_MEDIA_DATAGRAM_LEN) + 1).unwrap();
     MixerMembershipScenarioConfig {
         frames: random.next_in(30, 201),
         frame_duration_ms: if random.next_u32() % 2 == 0 { 10 } else { 20 },
         target_buffer_ms: u64::from(random.next_in(10, 301)),
-        media_datagram_bytes: 256,
-        network: random_profile(random),
+        media_datagram_bytes,
+        network: random_profile(random, media_datagram_bytes),
     }
 }
 
@@ -107,19 +151,76 @@ fn assert_invariants(
     assert_eq!(report.mixer.published_removes, 1, "the mid-session remove");
     assert!(report.mixer.renders > 0, "the callback must render the bus");
     assert!(report.mixer.output_finite, "the bus must stay finite");
+
+    // Finite-link serialization accounting: every scheduled copy (original or
+    // duplicate) is serialized as exactly one media datagram, and an unshaped
+    // link serializes nothing.
+    let bandwidth = config.network.bandwidth_bytes_per_second;
+    if bandwidth == 0 {
+        assert_eq!(
+            report.network.bandwidth_shaped_copies, 0,
+            "an unshaped link must not serialize any copy"
+        );
+        assert_eq!(
+            report.network.bandwidth_serialized_bytes, 0,
+            "an unshaped link must not place bytes on a link"
+        );
+    } else {
+        assert_eq!(
+            report.network.bandwidth_shaped_copies, report.network.scheduled_copies,
+            "every scheduled copy is serialized on the finite link"
+        );
+        assert_eq!(
+            report.network.bandwidth_serialized_bytes,
+            report.network.scheduled_copies * u64::from(config.media_datagram_bytes),
+            "serialized bytes equal one datagram per scheduled copy"
+        );
+    }
+
+    // Without a finite link or without a socket buffer the sender never
+    // reports backpressure, by construction of the model.
+    if config.network.send_buffer_bytes.is_none() || bandwidth == 0 {
+        assert_eq!(
+            report.network.send_buffer_full_packets, 0,
+            "no finite link or no socket buffer means no backpressure"
+        );
+        assert_eq!(
+            report.network.send_buffer_queued_bytes, 0,
+            "no finite link or no socket buffer means no queued bytes"
+        );
+    } else {
+        let capacity = config.network.send_buffer_bytes.expect("checked Some");
+        assert!(
+            report.network.send_buffer_queued_bytes <= capacity,
+            "sender-side queued bytes never exceed the configured socket-buffer capacity"
+        );
+    }
 }
 
 #[test]
 fn every_configuration_completes_with_bounded_mixer_bus() {
+    let mut shaped_runs = 0_u32;
+    let mut backpressure_runs = 0_u32;
     for seed in [0x5EED_2026_0814_0002, 0xABCD_EF01_2345_6792] {
         let mut random = XorShift64(seed);
         for _ in 0..STEPS {
             let config = random_config(&mut random);
+            if config.network.bandwidth_bytes_per_second > 0 {
+                shaped_runs += 1;
+            }
             let report = simulate_mixer_membership::<STREAMS, SLOTS, PCM_BLOCK>(config)
                 .unwrap_or_else(|error| panic!("configuration {config:?} failed: {error}"));
+            if report.network.send_buffer_full_packets > 0 {
+                backpressure_runs += 1;
+            }
             assert_invariants(&config, &report);
         }
     }
+    assert!(shaped_runs > 0, "walk must exercise the finite-link path");
+    assert!(
+        backpressure_runs > 0,
+        "walk must exercise sender-side backpressure"
+    );
 }
 
 #[test]
