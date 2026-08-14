@@ -12,9 +12,7 @@
 //! start fresh.
 
 use libfuzzer_sys::fuzz_target;
-use sonimesh_audio::{
-    AdaptiveJitterTarget, ArrivalJitter, JitterMode, JitterTargetConfig,
-};
+use sonimesh_audio::{AdaptiveJitterTarget, ArrivalJitter, JitterMode, JitterTargetConfig};
 
 const SAMPLE_RATE_HZ: u32 = 48_000;
 const TICKS_PER_SECOND: u64 = 1_000_000_000;

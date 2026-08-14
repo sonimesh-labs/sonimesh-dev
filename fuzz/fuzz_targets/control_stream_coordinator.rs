@@ -121,10 +121,10 @@ fn feed_mutated<const N: usize>(
     for (target, mutation) in near_valid.iter_mut().zip(mutations) {
         *target ^= mutation;
     }
-    if let Ok(envelope) = decode_control_frame(&near_valid) {
-        if let Some(action) = ready.accept(&envelope) {
-            ready.settle(action, commit);
-        }
+    if let Ok(envelope) = decode_control_frame(&near_valid)
+        && let Some(action) = ready.accept(&envelope)
+    {
+        ready.settle(action, commit);
     }
 }
 

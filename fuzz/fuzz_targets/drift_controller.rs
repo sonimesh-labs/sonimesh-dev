@@ -62,10 +62,10 @@ fuzz_target!(|data: &[u8]| {
             max_step_ppm: i32::from(data[31]),
             max_integral_block_ticks: 1,
         };
-        if raw.validate().is_ok() {
-            if let Ok(mut raw_controller) = DriftController::new(raw) {
-                let _ = raw_controller.update(u16::from_le_bytes([data[0], data[1]]));
-            }
+        if raw.validate().is_ok()
+            && let Ok(mut raw_controller) = DriftController::new(raw)
+        {
+            let _ = raw_controller.update(u16::from_le_bytes([data[0], data[1]]));
         }
     }
 
