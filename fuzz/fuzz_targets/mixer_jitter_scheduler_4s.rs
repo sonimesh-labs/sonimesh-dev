@@ -8,13 +8,15 @@
 //! an accepted configuration must consume every frame through playout or PLC,
 //! keep every adaptive target inside its bounded water levels, keep scheduler
 //! step counters below the observation count, keep all four streams active in
-//! the fixed-slot mixer, and render a finite bus; a rejected configuration
-//! must return a clean scenario error rather than panic.
+//! the fixed-slot mixer, publish bounded per-stream gain and mute events, and
+//! render a finite bus; a rejected configuration must return a clean scenario
+//! error rather than panic.
 
 use libfuzzer_sys::fuzz_target;
 use sonimesh_audio::{JitterMode, JitterTargetConfig};
 use sonimesh_network_simulator::{
-    MixerJitterSchedulerScenarioConfig, NetworkProfile, simulate_mixer_jitter_scheduler,
+    MixerJitterGainScript, MixerJitterSchedulerScenarioConfig, NetworkProfile,
+    simulate_mixer_jitter_scheduler,
 };
 use sonimesh_protocol::MAX_MEDIA_DATAGRAM_LEN;
 
@@ -44,8 +46,22 @@ fuzz_target!(|data: &[u8]| {
         1 => JitterMode::Stable,
         _ => JitterMode::Balanced,
     };
+    let frames = u32::from(data.get(2).copied().unwrap_or(0)) % MAX_FUZZ_FRAMES + 1;
+    let gain_scripts = [MixerJitterGainScript {
+        mute_at_frame: data
+            .get(14)
+            .and_then(|byte| (*byte != 0).then_some(u32::from(*byte) % frames)),
+        unmute_at_frame: data
+            .get(15)
+            .and_then(|byte| (*byte != 0).then_some(u32::from(*byte) % frames)),
+        gain_at_frame: data
+            .get(16)
+            .and_then(|byte| (*byte != 0).then_some(u32::from(*byte) % frames)),
+        gain_milli: u16::try_from(u32::from(data.get(17).copied().unwrap_or(0)) % 1_001)
+            .expect("gain milli fits u16"),
+    }; STREAMS];
     let config = MixerJitterSchedulerScenarioConfig {
-        frames: u32::from(data.get(2).copied().unwrap_or(0)) % MAX_FUZZ_FRAMES + 1,
+        frames,
         frame_duration_ms: u64::from(frame_duration_ms),
         initial_playout_ms: u64::from(data.get(3).copied().unwrap_or(0))
             % (MAX_INITIAL_PLAYOUT_MS + 1),
@@ -56,6 +72,7 @@ fuzz_target!(|data: &[u8]| {
         network: profile_from_bytes(data),
         target: JitterTargetConfig::preset(mode, frame_duration_ms, JITTER_BUFFER_CAPACITY),
         max_gate_ticks: u32::from(data.get(5).copied().unwrap_or(1)) % MAX_GATE_TICKS + 1,
+        gain_scripts,
     };
 
     if let Ok(report) = simulate_mixer_jitter_scheduler::<STREAMS, SLOTS, PCM_BLOCK>(config) {
@@ -77,6 +94,14 @@ fuzz_target!(|data: &[u8]| {
                 stream.gated_ticks + config.frames,
                 stream.observations,
                 "every playout tick either consumed a frame or gated"
+            );
+            assert!(
+                stream.gain_changes <= 3,
+                "at most one mute, one unmute, and one gain event per stream"
+            );
+            assert!(
+                stream.final_gain_milli <= 1_000,
+                "published gain must stay within the bounded linear range"
             );
         }
         assert_eq!(
