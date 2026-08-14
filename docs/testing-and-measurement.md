@@ -238,6 +238,12 @@ coordinator rolls back to `OutputUnavailable` so both domains keep agreeing
 the output is still down and the retried recovery can succeed once the backend
 is available again.
 
+A fault during reconnect grace is represented honestly: the state machine
+cannot move to `OutputUnavailable` from `Reconnecting`, so `monitor` surfaces
+a control error, but the mixer already stopped the output and the bridge marks
+its own output down, so the snapshot never claims an active output. Reconnecting
+afterwards resolves to ready, retires the stream, and keeps the output down.
+
 A separate deterministic suite feeds the ADR 0016 adaptive jitter target
 from virtual-link arrival jitter and the encoded-frame water level for one
 stream and for two to four streams over one shared link, and a target-gated
