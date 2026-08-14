@@ -310,5 +310,42 @@ fn smoke_output_is_deterministic_and_reports_consistent_accounting() {
             Some("true"),
             "{line}"
         );
+        if parsed.get("projection_matched").map(String::as_str) == Some("true") {
+            assert_eq!(
+                number(&parsed, "active"),
+                number(&parsed, "projected"),
+                "projection matches the real slot table: {line}"
+            );
+        }
+        if line.contains("stream0_plc_ratio") {
+            assert!(
+                number(&parsed, "stream0_plc_ratio") <= 1_000,
+                "PLC ratio stays within milli-unit bound: {line}"
+            );
+        }
+        if line.contains("stream1_plc_ratio") {
+            assert!(
+                number(&parsed, "stream1_plc_ratio") <= 1_000,
+                "PLC ratio stays within milli-unit bound: {line}"
+            );
+        }
+        if line.contains("stream0_forced") {
+            assert!(
+                number(&parsed, "stream0_forced") <= number(&parsed, "submitted"),
+                "forced playouts stay within the frame count: {line}"
+            );
+        }
+        if line.contains("stream1_forced") {
+            assert!(
+                number(&parsed, "stream1_forced") <= number(&parsed, "submitted"),
+                "forced playouts stay within the frame count: {line}"
+            );
+        }
+        if line.starts_with("mixer_jitter_scheduler streams=4") {
+            assert!(
+                number(&parsed, "forced") <= number(&parsed, "submitted"),
+                "forced playouts stay within the frame count: {line}"
+            );
+        }
     }
 }
