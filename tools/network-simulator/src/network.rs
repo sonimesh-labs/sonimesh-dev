@@ -57,6 +57,8 @@ pub struct NetworkStats {
     pub bandwidth_queue_delay_ms: u64,
     /// Original packets rejected because the sender-side socket buffer was full.
     pub send_buffer_full_packets: u64,
+    /// Bytes still reserved in the bounded sender-side socket buffer.
+    pub send_buffer_queued_bytes: u64,
 }
 
 /// Bounded deterministic virtual packet transport.
@@ -171,8 +173,12 @@ impl<T: Clone> VirtualNetwork<T> {
 
     /// Snapshot of deterministic counters.
     #[must_use]
-    pub const fn stats(&self) -> NetworkStats {
-        self.stats
+    pub fn stats(&self) -> NetworkStats {
+        let mut stats = self.stats;
+        if let Some(buffer) = &self.send_buffer {
+            stats.send_buffer_queued_bytes = buffer.queued_bytes();
+        }
+        stats
     }
 
     /// Bytes currently reserved in the bounded sender-side socket buffer.

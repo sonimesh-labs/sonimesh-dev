@@ -315,6 +315,10 @@ fn shaped_walk_preserves_sender_side_and_conservation_invariants() {
                 model.full_packets, first.network.send_buffer_full_packets,
                 "independent byte-credit model reproduces sender backpressure"
             );
+            assert_eq!(
+                model.queued_bytes, first.network.send_buffer_queued_bytes,
+                "independent byte-credit model reproduces the final sender-side queued bytes"
+            );
         }
 
         if first.network.send_buffer_full_packets > 0 {

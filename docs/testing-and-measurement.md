@@ -217,8 +217,14 @@ monotonic clock, bounded in-flight event queue, seeded random and burst loss,
 jitter, duplication, reorder delay, byte-counted bandwidth serialization,
 queue-capacity pressure, and bounded sender-side socket-buffer backpressure.
 Its audio scenario accepts an explicit complete media datagram size bounded by
-the protocol limit and uses the negotiated 10/20 ms
-frame timing model. A cross-crate
+the protocol limit and uses the negotiated 10/20 ms frame timing model. A
+seeded property walk (`scenario_property.rs`) drives that audio scenario
+under random bounded profiles, first with loss, reorder, duplication, and
+jitter alone and then with a finite serial link and a bounded sender-side
+socket buffer, and asserts determinism, playout-or-PLC accounting,
+submission conservation, serialization and backpressure accounting
+cross-checked against an independent byte-credit model, and the bounded
+late/duplicate arrival relations. A cross-crate
 test exercises bounded packet parsing, reviewed AEAD authentication and replay
 rejection, jitter/PLC decisions, controlled jitter resynchronization, the
 non-realtime decode worker, and realtime PCM transfer. An independent integerized
