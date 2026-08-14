@@ -596,4 +596,82 @@ mod tests {
         assert_eq!(network.send(0, 2_u32, 1), SendOutcome::SendBufferFull);
         assert_eq!(network.stats().send_buffer_full_packets, u64::MAX);
     }
+
+    #[test]
+    fn send_buffer_reservation_is_kept_by_loss_drops() {
+        let mut profile = NetworkProfile::stable(1);
+        profile.send_buffer_bytes = Some(100);
+        profile.bandwidth_bytes_per_second = 1_000; // one byte per millisecond
+        profile.loss_percent = 100;
+        let mut network = VirtualNetwork::new(profile).unwrap();
+
+        // The sender reserves bytes in the socket buffer before loss applies,
+        // so a loss-dropped packet keeps its reservation until the next drain.
+        assert_eq!(network.send(0, 1_u32, 100), SendOutcome::DroppedByLoss);
+        assert_eq!(network.send_buffer_queued_bytes(), 100);
+        assert_eq!(network.stats().send_buffer_full_packets, 0);
+
+        // The stale reservation can still backpressure the next submission.
+        assert_eq!(network.send(0, 2_u32, 1), SendOutcome::SendBufferFull);
+        assert_eq!(network.stats().send_buffer_full_packets, 1);
+
+        // Advancing virtual time drains the reservation at link bandwidth.
+        assert!(network.drain_ready(1_000).is_empty());
+        assert_eq!(network.send_buffer_queued_bytes(), 0);
+    }
+
+    #[test]
+    fn send_buffer_backpressure_precedes_duplication() {
+        let mut profile = NetworkProfile::stable(1);
+        profile.send_buffer_bytes = Some(100);
+        profile.bandwidth_bytes_per_second = 1_000; // one byte per millisecond
+        profile.duplicate_percent = 100;
+        let mut network = VirtualNetwork::new(profile).unwrap();
+
+        // The first submission schedules original plus duplicate while the
+        // buffer holds one hundred reserved bytes.
+        assert_eq!(
+            network.send(0, 1_u32, 100),
+            SendOutcome::Scheduled { copies: 2 }
+        );
+        assert_eq!(network.stats().scheduled_copies, 2);
+        assert_eq!(network.stats().duplicate_copies, 1);
+
+        // Backpressure rejects the next submission before any duplicate copy
+        // can be admitted.
+        assert_eq!(network.send(0, 2_u32, 1), SendOutcome::SendBufferFull);
+        assert_eq!(network.stats().send_buffer_full_packets, 1);
+        assert_eq!(network.stats().scheduled_copies, 2);
+        assert_eq!(network.stats().duplicate_copies, 1);
+    }
+
+    #[test]
+    fn send_buffer_reservation_is_kept_by_capacity_drops() {
+        let mut profile = NetworkProfile::stable(1);
+        profile.send_buffer_bytes = Some(1_000);
+        profile.bandwidth_bytes_per_second = 1_000; // one byte per millisecond
+        profile.max_in_flight_packets = 1;
+        let mut network = VirtualNetwork::new(profile).unwrap();
+
+        assert_eq!(
+            network.send(0, 1_u32, 100),
+            SendOutcome::Scheduled { copies: 1 }
+        );
+        assert_eq!(network.send(0, 2_u32, 100), SendOutcome::DroppedByCapacity);
+        assert_eq!(network.send_buffer_queued_bytes(), 200);
+
+        // The in-flight queue stays full, so further submissions keep being
+        // capacity-dropped while their reservations accumulate.
+        assert_eq!(network.send(0, 3_u32, 100), SendOutcome::DroppedByCapacity);
+        assert_eq!(network.send_buffer_queued_bytes(), 300);
+        assert_eq!(network.stats().send_buffer_full_packets, 0);
+
+        // Virtual time drains the reservation at link bandwidth, but a still
+        // full in-flight queue keeps dropping submissions with new reservations.
+        assert!(network.drain_ready(50).is_empty());
+        assert_eq!(network.send_buffer_queued_bytes(), 250);
+        assert_eq!(network.send(50, 4_u32, 100), SendOutcome::DroppedByCapacity);
+        assert_eq!(network.send_buffer_queued_bytes(), 350);
+        assert_eq!(network.stats().capacity_dropped_copies, 3);
+    }
 }
