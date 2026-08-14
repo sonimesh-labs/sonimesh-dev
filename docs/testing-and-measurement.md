@@ -243,6 +243,10 @@ cannot move to `OutputUnavailable` from `Reconnecting`, so `monitor` surfaces
 a control error, but the mixer already stopped the output and the bridge marks
 its own output down, so the snapshot never claims an active output. Reconnecting
 afterwards resolves to ready, retires the stream, and keeps the output down.
+A reconnect-grace clock regression is force-expiry, not a transient error: the
+coordinator retires the session and its streams on a time regression, so the
+bridge retires the mixer with it. The snapshot therefore never claims a live
+stream or an active output under an idle lifecycle.
 
 A separate deterministic suite feeds the ADR 0016 adaptive jitter target
 from virtual-link arrival jitter and the encoded-frame water level for one
