@@ -66,6 +66,11 @@ production workspace so `libfuzzer-sys` never becomes a shipping dependency.
   cannot panic the worker, exceed the fixed frame capacity, or grow the PCM
   queue past its bound.
 - `replay_window` drives the authenticated replay window with deterministic u32 and window-width edge sequences plus fuzz-derived forward, reorder, duplicate, and far-behind operations, comparing every decision against an independent set-based model so bit-rotation or window-width bugs cannot silently change the packet-dedup admission contract.
+- `reconnect_grace` drives arbitrary begin/observe/reconnected/cancel scripts
+  through the bounded reconnect-grace owner with adversarial u64 clocks and
+  durations, comparing every decision against an independent deadline model so
+  the controller cannot panic, cannot revive a force-expired window, and always
+  returns to idle after expiry, regression, reconnect, or cancel.
 - `untrusted_control_stream` feeds arbitrary bytes through the bounded
   length-prefixed control framing state machine in a deterministic per-input
   chunk size, exercising partial length and payload reads, oversize and
@@ -94,6 +99,7 @@ cargo +nightly-2026-07-18 fuzz run negotiation -- -max_len=66052
 cargo +nightly-2026-07-18 fuzz run control_stream_coordinator -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run replay_window -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run pairing_invitation -- -max_len=1024
+cargo +nightly-2026-07-18 fuzz run reconnect_grace -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run stream_decode_worker -- -max_len=64
 ```
 

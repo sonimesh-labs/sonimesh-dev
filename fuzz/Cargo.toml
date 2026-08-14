@@ -128,3 +128,10 @@ path = "fuzz_targets/pairing_invitation.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "reconnect_grace"
+path = "fuzz_targets/reconnect_grace.rs"
+test = false
+doc = false
+bench = false
