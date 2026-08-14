@@ -154,6 +154,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "multi_stream_jitter_target"
+path = "fuzz_targets/multi_stream_jitter_target.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "control_stream_coordinator"
 path = "fuzz_targets/control_stream_coordinator.rs"
 test = false

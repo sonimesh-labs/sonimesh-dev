@@ -80,6 +80,14 @@ production workspace so `libfuzzer-sys` never becomes a shipping dependency.
   accounts for every playout decision (play out or conceal exactly the
   configured frame count), and stays deterministic while a rejected
   configuration returns a clean scenario error rather than panicking.
+- `multi_stream_jitter_target` drives arbitrary bounded scenario
+  configurations through the shared-link adaptive-target simulation,
+  proving an accepted configuration submits exactly one packet per stream
+  per frame, consumes every frame through playout or PLC, observes once per
+  frame, keeps every adaptive target inside its bounded `[min, max]` water
+  levels, keeps step counters below the observation count, and stays
+  deterministic while a rejected configuration returns a clean scenario
+  error rather than panicking.
 - `protected_media_ingress` exercises raw input, valid authenticated arbitrary
   payloads, duplicate replay, undersized output buffers, and deterministic
   single-byte flags-byte and tag tampering plus ciphertext tampering for
@@ -139,6 +147,7 @@ cargo +nightly-2026-07-18 fuzz run mixer_jitter_scheduler -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run mixer_jitter_scheduler_4s -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run mixer_controller_membership -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run multi_stream -- -max_len=1024
+cargo +nightly-2026-07-18 fuzz run multi_stream_jitter_target -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run protected_media_ingress -- -max_len=1264
 cargo +nightly-2026-07-18 fuzz run pairing_binding -- -max_len=4096
 cargo +nightly-2026-07-18 fuzz run untrusted_control_stream -- -max_len=65540
