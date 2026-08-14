@@ -390,6 +390,67 @@ mod tests {
     }
 
     #[test]
+    fn jitter_reorder_and_duplicate_delivery_stays_accounted_at_scenario_level() {
+        // A bounded jitter and reorder profile with duplicate delivery: the
+        // target buffer absorbs every arrival, so no PLC or hard
+        // resynchronization occurs, every network duplicate copy is rejected by
+        // jitter storage, and reordered arrivals stay within the network count.
+        let mut network = NetworkProfile::stable(0x4A32_2026);
+        network.loss_percent = 0;
+        network.base_delay_ms = 5;
+        network.jitter_ms = 15;
+        network.duplicate_percent = 12;
+        network.reorder_percent = 25;
+        network.reorder_delay_ms = 10;
+        let config = ScenarioConfig {
+            frames: 300,
+            target_buffer_ms: 80,
+            network,
+            ..ScenarioConfig::default()
+        };
+
+        let first = simulate(config).unwrap();
+        let second = simulate(config).unwrap();
+
+        assert_eq!(first, second, "scenario stays deterministic");
+        assert_eq!(
+            first.playout_frames + first.plc_frames,
+            config.frames,
+            "every playout slot renders decoded audio or PLC"
+        );
+        assert_eq!(
+            first.plc_frames, 0,
+            "the target buffer absorbs jitter, reorder, and duplicate delivery"
+        );
+        assert_eq!(
+            first.resynchronizations, 0,
+            "bounded jitter and reorder never force a hard reset"
+        );
+        assert!(
+            first.duplicate_frames > 0,
+            "duplicate delivery must be rejected by jitter storage"
+        );
+        assert!(
+            first.reordered_arrivals > 0,
+            "reorder delay must perturb arrival order"
+        );
+        // Every duplicate copy arrives while its original is still buffered
+        // (worst-case delay is below the target buffer), so jitter storage
+        // rejects it as a duplicate instead of admitting it as a new frame.
+        assert_eq!(
+            u64::from(first.duplicate_frames),
+            first.network.duplicate_copies,
+            "every network duplicate copy is rejected by jitter storage"
+        );
+        // A reordered arrival comes only from a packet that received the
+        // configured reorder delay; not every delayed packet is inserted out
+        // of order, so the jitter counter is a subset of the network counter.
+        assert!(
+            u64::from(first.reordered_arrivals) <= first.network.reordered_packets,
+            "jitter reordered arrivals are a subset of network reordered packets"
+        );
+    }
+    #[test]
     fn rejects_unnegotiated_frame_duration() {
         let config = ScenarioConfig {
             frame_duration_ms: 15,
