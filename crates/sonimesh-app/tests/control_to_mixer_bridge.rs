@@ -722,6 +722,48 @@ fn session_expiry_keeps_the_consumed_pairing_record_for_audit() {
 }
 
 #[test]
+fn expired_session_rejects_a_delayed_start_and_rolls_back_the_output() {
+    let counters = Arc::new(StreamCounters::default());
+    let mut bridge = bridge();
+    let token = authenticated(&mut bridge);
+
+    // A start command is issued and its operation token is held by the
+    // platform while the trusted session retires before completion.
+    let ControlStreamAction::Start {
+        token: operation,
+        request,
+    } = bridge.accept(token, &start_for(0, 1, 1)).unwrap()
+    else {
+        panic!("expected a stream start action");
+    };
+    bridge.expire_control_session();
+    assert_eq!(bridge.state().phase(), SessionPhase::Idle);
+
+    let mut pipeline = pipeline_for(1, 1, Arc::clone(&counters));
+    let result = bridge.execute_start::<_, BLOCK>(
+        operation,
+        request,
+        Some(Arc::clone(&counters)),
+        &mut pipeline,
+    );
+    assert!(
+        matches!(result, Err(ControlToMixerError::Control(_))),
+        "a delayed start must fail closed after the session expires"
+    );
+    // The delayed start must not revive the retired lifecycle: the stream the
+    // call briefly admitted is removed and the output it started is rolled back.
+    assert_eq!(bridge.state().phase(), SessionPhase::Idle);
+    assert_eq!(bridge.mixer().stream_count(), 0);
+    assert!(!bridge.output_active());
+    assert_eq!(bridge.mixer().output().start_calls, 1);
+    assert_eq!(
+        bridge.mixer().output().stop_calls,
+        2,
+        "expiry stops the mixer once and the delayed-start rollback stops it again"
+    );
+}
+
+#[test]
 fn export_snapshot_before_start_omits_format_and_streams() {
     let bridge = bridge();
     let mut metrics = Vec::new();
