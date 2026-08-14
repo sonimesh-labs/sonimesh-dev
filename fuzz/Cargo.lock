@@ -615,7 +615,9 @@ dependencies = [
  "libfuzzer-sys",
  "sonimesh-app",
  "sonimesh-audio",
+ "sonimesh-diagnostics",
  "sonimesh-network",
+ "sonimesh-network-simulator",
  "sonimesh-platform",
  "sonimesh-protocol",
 ]
@@ -624,6 +626,17 @@ dependencies = [
 name = "sonimesh-network"
 version = "0.1.0"
 dependencies = [
+ "sonimesh-protocol",
+]
+
+[[package]]
+name = "sonimesh-network-simulator"
+version = "0.1.0"
+dependencies = [
+ "sonimesh-app",
+ "sonimesh-audio",
+ "sonimesh-diagnostics",
+ "sonimesh-network",
  "sonimesh-protocol",
 ]
 

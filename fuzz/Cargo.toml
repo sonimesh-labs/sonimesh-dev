@@ -11,7 +11,9 @@ cargo-fuzz = true
 libfuzzer-sys = "0.4"
 sonimesh-audio = { path = "../crates/sonimesh-audio" }
 sonimesh-app = { path = "../crates/sonimesh-app" }
+sonimesh-diagnostics = { path = "../crates/sonimesh-diagnostics" }
 sonimesh-network = { path = "../crates/sonimesh-network" }
+sonimesh-network-simulator = { path = "../tools/network-simulator" }
 sonimesh-platform = { path = "../crates/sonimesh-platform" }
 sonimesh-protocol = { path = "../crates/sonimesh-protocol" }
 
@@ -112,6 +114,13 @@ bench = false
 [[bin]]
 name = "mixer_membership"
 path = "fuzz_targets/mixer_membership.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "mixer_jitter_scheduler"
+path = "fuzz_targets/mixer_jitter_scheduler.rs"
 test = false
 doc = false
 bench = false
