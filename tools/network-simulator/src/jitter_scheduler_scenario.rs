@@ -364,6 +364,8 @@ fn apply_playout_tick(
         match jitter.take_next() {
             PlayoutOutcome::Frame(_) => report.playout.playout_frames += 1,
             PlayoutOutcome::Missing { .. } => report.playout.plc_frames += 1,
+            // Playout is pre-armed at the negotiated sequence, so this
+            // no-op is defensive and unreachable.
             PlayoutOutcome::NotReady => {}
         }
         took = report.playout.playout_frames + report.playout.plc_frames > state.consumed_frames;

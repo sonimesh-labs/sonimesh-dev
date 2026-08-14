@@ -312,7 +312,10 @@ fn decode_and_consume<const PCM_SAMPLES_PER_BLOCK: usize>(
             }
             report.plc_frames += 1;
         }
-        DecodeStep::NotReady => return Err(ScenarioError::InvalidTargetBuffer),
+        // The worker is pre-armed at the negotiated sequence, so a decode
+        // before the first frame arrives conceals via PLC; reaching NotReady
+        // here means the wiring lost the start sequence.
+        DecodeStep::NotReady => return Err(ScenarioError::InternalCapacityInvariant),
     }
     report.queued_pcm_high_water_blocks = report.queued_pcm_high_water_blocks.max(
         u16::try_from(worker.queued_blocks())

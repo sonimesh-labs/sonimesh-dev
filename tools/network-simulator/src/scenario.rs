@@ -181,7 +181,10 @@ pub fn simulate(config: ScenarioConfig) -> Result<SimulationReport, ScenarioErro
                 PlayoutOutcome::Frame(_) => report.playout_frames += 1,
                 PlayoutOutcome::Missing { .. } => report.plc_frames += 1,
                 PlayoutOutcome::NotReady => {
-                    return Err(ScenarioError::InvalidTargetBuffer);
+                    // Playout is pre-armed at the negotiated sequence, so a
+                    // playout before the first frame arrives conceals via PLC;
+                    // reaching NotReady here means the wiring lost the start sequence.
+                    return Err(ScenarioError::InternalCapacityInvariant);
                 }
             }
             playout_decisions += 1;

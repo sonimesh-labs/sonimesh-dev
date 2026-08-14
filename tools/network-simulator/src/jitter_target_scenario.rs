@@ -264,7 +264,10 @@ pub fn simulate_jitter_target(
                 PlayoutOutcome::Frame(_) => report.playout.playout_frames += 1,
                 PlayoutOutcome::Missing { .. } => report.playout.plc_frames += 1,
                 PlayoutOutcome::NotReady => {
-                    return Err(JitterTargetScenarioError::InvalidTargetBuffer);
+                    // Playout is pre-armed at the negotiated sequence, so a
+                    // playout before the first frame arrives conceals via PLC;
+                    // reaching NotReady here means the wiring lost the start sequence.
+                    return Err(JitterTargetScenarioError::InternalCapacityInvariant);
                 }
             }
             playout_decisions += 1;

@@ -211,7 +211,10 @@ pub fn simulate_multi_stream<const STREAMS: usize>(
                     PlayoutOutcome::Frame(_) => streams[stream].playout_frames += 1,
                     PlayoutOutcome::Missing { .. } => streams[stream].plc_frames += 1,
                     PlayoutOutcome::NotReady => {
-                        return Err(MultiStreamScenarioError::InvalidTargetBuffer);
+                        // Playout is pre-armed at the negotiated sequence, so a
+                        // playout before the first frame arrives conceals via PLC;
+                        // reaching NotReady here means the wiring lost the start sequence.
+                        return Err(MultiStreamScenarioError::InternalCapacityInvariant);
                     }
                 }
                 playout_decisions[stream] += 1;

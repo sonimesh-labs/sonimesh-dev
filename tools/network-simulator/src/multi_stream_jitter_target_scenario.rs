@@ -321,7 +321,10 @@ fn apply_playout(
         PlayoutOutcome::Frame(_) => report.playout.playout_frames += 1,
         PlayoutOutcome::Missing { .. } => report.playout.plc_frames += 1,
         PlayoutOutcome::NotReady => {
-            return Err(MultiStreamJitterTargetScenarioError::InvalidTargetBuffer);
+            // Playout is pre-armed at the negotiated sequence, so a
+            // playout before the first frame arrives conceals via PLC;
+            // reaching NotReady here means the wiring lost the start sequence.
+            return Err(MultiStreamJitterTargetScenarioError::InternalCapacityInvariant);
         }
     }
     report.observations += 1;

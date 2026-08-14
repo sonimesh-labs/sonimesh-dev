@@ -524,7 +524,10 @@ pub fn simulate_mixer_controller_membership<
                     }
                     PlayoutOutcome::Missing { .. } => streams[stream].playout.plc_frames += 1,
                     PlayoutOutcome::NotReady => {
-                        return Err(MixerControllerScenarioError::InvalidTargetBuffer);
+                        // Playout is pre-armed at the negotiated sequence, so a
+                        // playout before the first frame arrives conceals via PLC;
+                        // reaching NotReady here means the wiring lost the start sequence.
+                        return Err(MixerControllerScenarioError::InternalCapacityInvariant);
                     }
                 }
                 playout_decisions[stream] += 1;
