@@ -235,6 +235,14 @@ asserting every outcome, plaintext zeroing, decoded PCM, and the
 authenticated, duplicate, rejected, and stream-reset counters against an
 independent replay oracle and counter model.
 
+The UDP-backed composition has a dedicated target (`udp_receiver_pipeline`)
+that adds real loopback sockets and the fail-closed source pin to the same
+byte-driven mix, asserting every poll outcome, pin state, decoded PCM, and
+diagnostic counter against an independent pin, replay, and counter model:
+a changed endpoint is rejected before any protected work and never moves
+the pin, failed processing never binds an unbound source, and only a fresh
+authenticated session clears the binding.
+
 A deterministic control reconnect scenario now delays a command from the old
 transport until after the replacement transport installs a fresh local token and
 completes hello negotiation. The old token and stale completion are rejected,

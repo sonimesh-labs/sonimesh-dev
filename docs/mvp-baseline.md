@@ -1,7 +1,7 @@
 # MVP implementation baseline
 
 > Status: foundation implemented; platform feasibility remains open
-> Updated: 2026-08-14
+> Updated: 2026-08-15
 
 This baseline turns the architecture documents into a buildable core without
 claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
@@ -157,6 +157,13 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   state, and permits rebinding only after fresh-session installation. The
   authenticated control-plane reconnection that supplies that fresh session
   remains unimplemented.
+  A seeded property walk and a byte-driven libFuzzer target drive in-order
+  deliveries, duplicates, tampered ciphertext, retired-epoch packets,
+  oversized datagrams, rotations, and fresh sessions over real loopback
+  sockets against an independent pin, replay, and counter model, asserting
+  the source pin binds only to the first successful protected endpoint, a
+  changed endpoint never moves the pin, and only a fresh authenticated
+  session clears the binding.
 - a non-blocking fixed-capacity UDP media sender that rejects oversized
   datagrams before touching the socket, never blocks (a full OS send buffer is
   reported as backpressure for the caller's own drop or pacing policy), and
