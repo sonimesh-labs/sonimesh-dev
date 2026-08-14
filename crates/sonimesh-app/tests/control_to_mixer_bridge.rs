@@ -826,6 +826,48 @@ fn delayed_rotation_after_output_fault_rolls_back_the_rotated_stream() {
 }
 
 #[test]
+fn delayed_stop_after_connection_loss_keeps_the_stream_in_grace() {
+    let counters = Arc::new(StreamCounters::default());
+    let mut bridge = bridge();
+    let token = authenticated(&mut bridge);
+    let mut pipeline = pipeline_for(1, 1, Arc::clone(&counters));
+
+    let request = start_one(&mut bridge, token, 1, 1, None, &mut pipeline);
+    let ControlStreamAction::Stop { token, identity } =
+        bridge.accept(token, &stop_for(0, 1, 1)).unwrap()
+    else {
+        panic!("expected a stream stop action");
+    };
+    assert_eq!(identity, request.identity);
+
+    // The control connection is lost before the accepted stop is executed; the
+    // stream keeps playing inside the reconnect grace window.
+    bridge
+        .acknowledge_platform_event(SessionEvent::ConnectionLost)
+        .unwrap();
+    assert_eq!(bridge.state().phase(), SessionPhase::Reconnecting);
+
+    // The delayed stop must fail closed without mutating the mixer, so the
+    // stream survives the grace window.
+    assert!(matches!(
+        bridge.execute_stop(token, identity),
+        Err(ControlToMixerError::Control(_))
+    ));
+    assert_eq!(bridge.state().phase(), SessionPhase::Reconnecting);
+    assert_eq!(bridge.mixer().stream_count(), 1);
+    assert_eq!(bridge.coordinator().stream_count(), 1);
+    assert!(bridge.output_active());
+
+    // Reconnection retires the stream and stops the output as usual.
+    bridge
+        .acknowledge_platform_event(SessionEvent::Reconnected)
+        .unwrap();
+    assert_eq!(bridge.state().phase(), SessionPhase::Ready);
+    assert_eq!(bridge.mixer().stream_count(), 0);
+    assert!(!bridge.output_active());
+}
+
+#[test]
 fn delayed_start_rejected_after_connection_loss_leaves_no_pending_block() {
     let counters = Arc::new(StreamCounters::default());
     let mut bridge = bridge();
@@ -878,6 +920,49 @@ fn delayed_start_rejected_after_connection_loss_leaves_no_pending_block() {
     assert_eq!(bridge.state().phase(), SessionPhase::Streaming);
     assert_eq!(bridge.mixer().stream_count(), 1);
     assert!(bridge.output_active());
+}
+
+#[test]
+fn delayed_stop_after_output_fault_fails_closed_and_keeps_both_domains_in_agreement() {
+    let counters = Arc::new(StreamCounters::default());
+    let mut bridge = bridge();
+    let token = authenticated(&mut bridge);
+    let mut pipeline = pipeline_for(1, 1, Arc::clone(&counters));
+
+    let request = start_one(&mut bridge, token, 1, 1, None, &mut pipeline);
+    assert_eq!(request.identity.key_epoch, 0);
+
+    // A stop is accepted while streaming, then the output faults before the
+    // stop is executed.
+    let ControlStreamAction::Stop { token, identity } =
+        bridge.accept(token, &stop_for(0, 1, 1)).unwrap()
+    else {
+        panic!("expected a stream stop action");
+    };
+    assert_eq!(identity, request.identity);
+    bridge.mixer_mut().output_mut().health = OutputHealth::StreamError;
+    assert_eq!(bridge.monitor().unwrap(), Some(OutputHealth::StreamError));
+    assert_eq!(bridge.state().phase(), SessionPhase::OutputUnavailable);
+
+    // The delayed stop must fail closed without mutating the mixer, so both
+    // domains still agree and recovery re-admits the persisted stream.
+    assert!(matches!(
+        bridge.execute_stop(token, identity),
+        Err(ControlToMixerError::Control(_))
+    ));
+    assert_eq!(bridge.state().phase(), SessionPhase::OutputUnavailable);
+    assert_eq!(bridge.mixer().stream_count(), 1);
+    assert_eq!(bridge.coordinator().stream_count(), 1);
+    assert_eq!(bridge.coordinator().active(), Some(identity));
+
+    // Recovery re-admits the same stream and it keeps rendering.
+    let identities = bridge.recover_output().unwrap();
+    assert_eq!(identities, vec![identity]);
+    assert_eq!(bridge.state().phase(), SessionPhase::Streaming);
+    bridge
+        .recover_stream::<_, BLOCK>(identity, &mut pipeline)
+        .unwrap();
+    assert_eq!(bridge.mixer().stream_count(), 1);
 }
 
 #[test]

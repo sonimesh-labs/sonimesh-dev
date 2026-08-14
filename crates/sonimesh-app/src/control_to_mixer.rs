@@ -433,25 +433,34 @@ where
 
     /// Removes one stream and commits the stop.
     ///
-    /// When the last active stream stops, the platform output is stopped and
-    /// the lifecycle returns to `Ready`.
+    /// The control domain commits the stop before the mixer removes the
+    /// stream. A removal cannot be rolled back at the mixer without the
+    /// stream's decode pipeline, so a rejected completion (for example an
+    /// output fault or connection loss between accept and execute) must fail
+    /// closed with both domains unchanged. When the last active stream stops,
+    /// the platform output is stopped and the lifecycle returns to `Ready`.
     ///
     /// # Errors
     ///
-    /// Returns a control or mixer error without changing active media when the
-    /// stream is unknown to the mixer or the coordinator rejects the completion.
+    /// Returns a control error without changing active media when the
+    /// coordinator rejects the completion, or a mixer error when the removal
+    /// fails for a reason other than the identity being already absent.
     pub fn execute_stop(
         &mut self,
         token: ControlOperationToken,
         identity: MediaStreamIdentity,
     ) -> Result<(), ControlToMixerError> {
-        if let Err(error) = self.mixer.remove_stream(identity) {
-            let _ = self.coordinator.abort_pending(token);
-            return Err(ControlToMixerError::Mixer(error));
-        }
         self.coordinator
             .complete_stop(token, identity)
             .map_err(ControlToMixerError::Control)?;
+        match self.mixer.remove_stream(identity) {
+            Ok(()) | Err(MixerStreamSessionError::UnknownStream(_)) => {
+                // The control domain committed the removal. An unknown identity
+                // is already absent from the mixer, so the stop is already
+                // effective in both domains.
+            }
+            Err(error) => return Err(ControlToMixerError::Mixer(error)),
+        }
         if self.coordinator.stream_count() == 0 {
             self.mixer.stop();
             self.output_active = false;
