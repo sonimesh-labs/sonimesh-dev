@@ -10,6 +10,12 @@
 //! the full Phase 2 stream range (two, three, and four independent sources) and
 //! asserts those invariants on every accepted report, mirroring the
 //! deterministic property pattern used for the sibling scenarios.
+//!
+//! Profiles also vary the media datagram size and occasionally configure a
+//! finite serial link and a bounded sender-side socket buffer shared by all
+//! streams, so the walk pins the bandwidth-serialization accounting (every
+//! scheduled copy is serialized as one datagram) and the no-link/no-buffer
+//! backpressure semantics.
 
 use sonimesh_network_simulator::{
     MAX_MULTI_STREAM_STREAMS, MIN_MULTI_STREAM_STREAMS, MultiStreamScenarioConfig,
@@ -41,6 +47,11 @@ impl XorShift64 {
     fn next_in(&mut self, low: u32, high_exclusive: u32) -> u32 {
         low + self.next_u32() % (high_exclusive - low)
     }
+
+    /// Returns a value in `0..=100`.
+    fn percent(&mut self) -> usize {
+        self.next_usize(101)
+    }
 }
 
 /// Number of seeded configurations per property run.
@@ -51,8 +62,10 @@ const MAX_FRAMES: u32 = 200;
 /// Builds a validated network profile within the scenario impairment range.
 ///
 /// The ranges mirror the mixer scenario property tests and fuzz targets so the
-/// seeded run covers the same shared-link configuration space.
-fn random_profile(random: &mut XorShift64) -> NetworkProfile {
+/// seeded run covers the same shared-link configuration space. The media
+/// datagram size is passed in so a tight sender-side socket buffer can be sized
+/// relative to the datagram the scenario actually transmits.
+fn random_profile(random: &mut XorShift64, media_datagram_bytes: u16) -> NetworkProfile {
     let mut network = NetworkProfile::stable(u64::from(random.next_u32()));
     network.base_delay_ms = u64::from(random.next_in(0, 101));
     network.jitter_ms = u64::from(random.next_in(0, 41));
@@ -78,6 +91,26 @@ fn random_profile(random: &mut XorShift64) -> NetworkProfile {
     } else {
         u16::try_from(random.next_in(1, burst_interval_packets + 1)).unwrap()
     };
+    // Occasionally shape the link and bound the sender-side socket buffer so
+    // the walk exercises finite-link serialization and backpressure. Slow
+    // links guarantee shaping pressure; tight buffers guarantee backpressure.
+    let shaped = random.percent() >= 10;
+    network.bandwidth_bytes_per_second = if shaped && random.percent() < 30 {
+        u64::try_from(random.next_usize(4_801) + 200).unwrap() // 200..=5_000 bytes/s
+    } else if shaped {
+        u64::try_from(random.next_usize(1_995_001) + 5_000).unwrap() // 5_000..=2_000_000 bytes/s
+    } else {
+        0
+    };
+    network.max_in_flight_packets = random.next_usize(15) + 2;
+    // Mix bufferless, tight, and roomy sender-side socket buffers.
+    network.send_buffer_bytes = if !shaped || random.percent() < 30 {
+        None
+    } else if random.percent() < 50 {
+        Some(u64::try_from(random.next_usize(usize::from(media_datagram_bytes) * 8) + 1).unwrap())
+    } else {
+        Some(u64::try_from(random.next_usize(2_000_000) + 1).unwrap())
+    };
     network
 }
 
@@ -90,7 +123,10 @@ fn random_config(random: &mut XorShift64) -> MultiStreamScenarioConfig {
     } else {
         20_u64
     };
-    let network = random_profile(random);
+    let media_datagram_bytes =
+        u16::try_from(random.next_in(1, u32::try_from(MAX_MEDIA_DATAGRAM_LEN).unwrap() + 1))
+            .unwrap();
+    let network = random_profile(random, media_datagram_bytes);
     let worst_case_first_arrival_ms =
         network.base_delay_ms + network.jitter_ms + network.reorder_delay_ms;
     let target_buffer_ms = worst_case_first_arrival_ms
@@ -102,10 +138,7 @@ fn random_config(random: &mut XorShift64) -> MultiStreamScenarioConfig {
         frames: random.next_in(1, MAX_FRAMES + 1),
         frame_duration_ms,
         target_buffer_ms,
-        media_datagram_bytes: u16::try_from(
-            random.next_in(1, u32::try_from(MAX_MEDIA_DATAGRAM_LEN).unwrap() + 1),
-        )
-        .unwrap(),
+        media_datagram_bytes,
         network,
     }
 }
@@ -140,18 +173,71 @@ fn assert_scenario_invariants<const STREAMS: usize>(
             "a stream cannot conceal more frames than it sends"
         );
     }
+
+    // Finite-link serialization accounting: every scheduled copy (original or
+    // duplicate) is serialized as exactly one media datagram, and an unshaped
+    // link serializes nothing.
+    let bandwidth = config.network.bandwidth_bytes_per_second;
+    if bandwidth == 0 {
+        assert_eq!(
+            report.network.bandwidth_shaped_copies, 0,
+            "an unshaped link must not serialize any copy"
+        );
+        assert_eq!(
+            report.network.bandwidth_serialized_bytes, 0,
+            "an unshaped link must not place bytes on a link"
+        );
+    } else {
+        assert_eq!(
+            report.network.bandwidth_shaped_copies, report.network.scheduled_copies,
+            "every scheduled copy is serialized on the finite link"
+        );
+        assert_eq!(
+            report.network.bandwidth_serialized_bytes,
+            report.network.scheduled_copies * u64::from(config.media_datagram_bytes),
+            "serialized bytes equal one datagram per scheduled copy"
+        );
+    }
+
+    // Without a finite link or without a socket buffer the sender never
+    // reports backpressure, by construction of the model.
+    if config.network.send_buffer_bytes.is_none() || bandwidth == 0 {
+        assert_eq!(
+            report.network.send_buffer_full_packets, 0,
+            "no finite link or no socket buffer means no backpressure"
+        );
+        assert_eq!(
+            report.network.send_buffer_queued_bytes, 0,
+            "no finite link or no socket buffer means no queued bytes"
+        );
+    } else {
+        let capacity = config.network.send_buffer_bytes.expect("checked Some");
+        assert!(
+            report.network.send_buffer_queued_bytes <= capacity,
+            "sender-side queued bytes never exceed the configured socket-buffer capacity"
+        );
+    }
 }
 
-/// Drives `STEPS` seeded configurations at a fixed stream count and asserts the
-/// scenario invariants on every accepted report.
-fn check_stream_count<const S: usize>() {
+/// Drives `STEPS` seeded configurations at a fixed stream count, asserts the
+/// scenario invariants on every accepted report, and returns how many accepted
+/// reports exercised the finite-link and sender-side backpressure paths.
+fn check_stream_count<const S: usize>() -> (u32, u32) {
     let mut random = XorShift64(0x5A17_2026);
+    let mut shaped_runs = 0_u32;
+    let mut backpressure_runs = 0_u32;
     for _ in 0..STEPS {
         let config = random_config(&mut random);
         // Playout is pre-armed at the negotiated start sequence, so a lost or
         // late first packet conceals via PLC rather than reporting NotReady;
         // accepted reports must satisfy the invariants.
         if let Ok(first) = simulate_multi_stream::<S>(config) {
+            if config.network.bandwidth_bytes_per_second > 0 {
+                shaped_runs += 1;
+            }
+            if first.network.send_buffer_full_packets > 0 {
+                backpressure_runs += 1;
+            }
             let second = simulate_multi_stream::<S>(config)
                 .expect("an accepted configuration must stay accepted");
             assert_eq!(
@@ -161,17 +247,27 @@ fn check_stream_count<const S: usize>() {
             assert_scenario_invariants(&first, &config);
         }
     }
+    (shaped_runs, backpressure_runs)
 }
 
 #[test]
 fn every_accepted_configuration_stays_bounded_deterministic_and_accounted() {
     // Phase 2 admits two to four independent sources; verify every stream count
     // in the range over the same seeded profiles.
+    let mut shaped_runs = 0_u32;
+    let mut backpressure_runs = 0_u32;
     for streams in MIN_MULTI_STREAM_STREAMS..=MAX_MULTI_STREAM_STREAMS {
-        match streams {
+        let (shaped, backpressure) = match streams {
             2 => check_stream_count::<2>(),
             3 => check_stream_count::<3>(),
             _ => check_stream_count::<4>(),
-        }
+        };
+        shaped_runs += shaped;
+        backpressure_runs += backpressure;
     }
+    assert!(shaped_runs > 0, "walk must exercise the finite-link path");
+    assert!(
+        backpressure_runs > 0,
+        "walk must exercise sender-side backpressure"
+    );
 }
