@@ -147,6 +147,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "multi_stream"
+path = "fuzz_targets/multi_stream.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "control_stream_coordinator"
 path = "fuzz_targets/control_stream_coordinator.rs"
 test = false
