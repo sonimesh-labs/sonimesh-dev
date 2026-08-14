@@ -229,3 +229,10 @@ path = "fuzz_targets/mixer_output_controller.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "receiver_output_controller"
+path = "fuzz_targets/receiver_output_controller.rs"
+test = false
+doc = false
+bench = false

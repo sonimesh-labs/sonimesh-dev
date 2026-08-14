@@ -160,6 +160,13 @@ production workspace so `libfuzzer-sys` never becomes a shipping dependency.
   membership handle and output format exist exactly while the stream is
   active, a fault is reported at most once and retires both, and recovery
   reuses the last successful selection.
+- `receiver_output_controller` drives arbitrary start, monitor, recover, stop,
+  health, and fail-start scripts through the single-stream output recovery
+  seam and compares every result against an independent state model, proving
+  the platform call counts, producer replacements, published output-format
+  diagnostics, and redacted snapshot stay in sync, a fault is reported at
+  most once and clears the published format, and recovery reuses the last
+  successful selection.
 - `untrusted_control_stream` feeds arbitrary bytes through the bounded
   length-prefixed control framing state machine in a deterministic per-input
   chunk size, exercising partial length and payload reads, oversize and
@@ -202,6 +209,7 @@ cargo +nightly-2026-07-18 fuzz run replay_window -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run pairing_invitation -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run reconnect_grace -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run mixer_output_controller -- -max_len=1024
+cargo +nightly-2026-07-18 fuzz run receiver_output_controller -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run stream_decode_worker -- -max_len=64
 ```
 
