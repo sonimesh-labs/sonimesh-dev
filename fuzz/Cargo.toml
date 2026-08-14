@@ -12,6 +12,7 @@ libfuzzer-sys = "0.4"
 sonimesh-audio = { path = "../crates/sonimesh-audio" }
 sonimesh-app = { path = "../crates/sonimesh-app" }
 sonimesh-network = { path = "../crates/sonimesh-network" }
+sonimesh-platform = { path = "../crates/sonimesh-platform" }
 sonimesh-protocol = { path = "../crates/sonimesh-protocol" }
 
 [workspace]
@@ -111,6 +112,13 @@ bench = false
 [[bin]]
 name = "control_stream_coordinator"
 path = "fuzz_targets/control_stream_coordinator.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "control_to_mixer"
+path = "fuzz_targets/control_to_mixer.rs"
 test = false
 doc = false
 bench = false

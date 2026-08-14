@@ -616,6 +616,7 @@ dependencies = [
  "sonimesh-app",
  "sonimesh-audio",
  "sonimesh-network",
+ "sonimesh-platform",
  "sonimesh-protocol",
 ]
 

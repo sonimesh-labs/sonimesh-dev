@@ -12,6 +12,7 @@ production workspace so `libfuzzer-sys` never becomes a shipping dependency.
   timing cannot panic the controller, move the target outside its bounded
   `[min, max]` water levels, or corrupt the reset path.
 - `control_stream_coordinator` drives the real pairing path to a trusted ready session, installs one authenticated transport, and feeds arbitrary decoded control frames plus mutations of the published Hello, StartStream, and StopStream frames through the coordinator, committing or aborting every produced Start, Rotate, and Stop action with its token. It proves authenticated adversarial bytes cannot panic the coordinator, admit media past `MAX_ACTIVE_STREAMS`, or complete work across a session-expiry or reconnect boundary.
+- `control_to_mixer` establishes one trusted, negotiated control session and then drives arbitrary start, rotation, stop, output-fault recovery, reconnect-grace, and session-expiry scripts through the bridge composition (ADR 0015), committing or aborting every produced action. It proves adversarial lifecycle interleavings cannot panic the bridge, admit media past the fixed slot bound, or let the snapshot claim live streams or an active output that the coordinator no longer tracks.
 - `control_frame` feeds arbitrary bytes plus mutations of the five published
   Hello, StartStream, StopStream, StreamStatus, and ControlError frames into the
   length-prefixed Protobuf control decoder.
@@ -97,6 +98,7 @@ cargo +nightly-2026-07-18 fuzz run pairing_binding -- -max_len=4096
 cargo +nightly-2026-07-18 fuzz run untrusted_control_stream -- -max_len=65540
 cargo +nightly-2026-07-18 fuzz run negotiation -- -max_len=66052
 cargo +nightly-2026-07-18 fuzz run control_stream_coordinator -- -max_len=1024
+cargo +nightly-2026-07-18 fuzz run control_to_mixer -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run replay_window -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run pairing_invitation -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run reconnect_grace -- -max_len=1024

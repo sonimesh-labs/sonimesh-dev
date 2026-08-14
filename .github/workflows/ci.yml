@@ -140,6 +140,7 @@ jobs:
           cargo +nightly-2026-07-18 fuzz run negotiation -- -runs=512 -max_len=66052 -timeout=5
           cargo +nightly-2026-07-18 fuzz run stream_decode_worker -- -runs=512 -max_len=64 -timeout=5
           cargo +nightly-2026-07-18 fuzz run control_stream_coordinator -- -runs=512 -max_len=1024 -timeout=5
+          cargo +nightly-2026-07-18 fuzz run control_to_mixer -- -runs=512 -max_len=1024 -timeout=5
           cargo +nightly-2026-07-18 fuzz run replay_window -- -runs=512 -max_len=1024 -timeout=5
           cargo +nightly-2026-07-18 fuzz run pairing_invitation -- -runs=512 -max_len=1024 -timeout=5
           cargo +nightly-2026-07-18 fuzz run reconnect_grace -- -runs=512 -max_len=1024 -timeout=5
