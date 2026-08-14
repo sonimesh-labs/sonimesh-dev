@@ -764,6 +764,123 @@ fn expired_session_rejects_a_delayed_start_and_rolls_back_the_output() {
 }
 
 #[test]
+fn delayed_rotation_after_output_fault_rolls_back_the_rotated_stream() {
+    let counters = Arc::new(StreamCounters::default());
+    let mut bridge = bridge();
+    let session = authenticated(&mut bridge);
+    let mut pipeline = pipeline_for(1, 1, Arc::clone(&counters));
+
+    let request = start_one(
+        &mut bridge,
+        session,
+        1,
+        1,
+        Some(Arc::clone(&counters)),
+        &mut pipeline,
+    );
+    assert_eq!(request.identity.key_epoch, 0);
+
+    // A rotation to a newer epoch is accepted while the session streams, then
+    // the platform output faults before the rotation is executed.
+    let ControlStreamAction::Rotate {
+        token,
+        previous,
+        next,
+    } = bridge.accept(session, &start_for(1, 1, 1)).unwrap()
+    else {
+        panic!("expected a rotation action");
+    };
+    assert_eq!(previous, request.identity);
+    bridge.mixer_mut().output_mut().health = OutputHealth::StreamError;
+    assert_eq!(bridge.monitor().unwrap(), Some(OutputHealth::StreamError));
+    assert_eq!(bridge.state().phase(), SessionPhase::OutputUnavailable);
+
+    // The delayed rotation must fail closed and must not leave the mixer on the
+    // rotated identity while the coordinator still tracks the previous one.
+    assert!(matches!(
+        bridge.execute_rotation(token, previous, next),
+        Err(ControlToMixerError::Control(_))
+    ));
+    assert_eq!(bridge.state().phase(), SessionPhase::OutputUnavailable);
+    assert_eq!(bridge.mixer().stream_count(), 1);
+    assert_eq!(bridge.coordinator().active(), Some(previous));
+
+    // Recovery re-admits the original identity, so control and mixer stay in
+    // agreement, and the failed rotation does not block a fresh one.
+    let identities = bridge.recover_output().unwrap();
+    assert_eq!(identities, vec![previous]);
+    assert_eq!(bridge.state().phase(), SessionPhase::Streaming);
+    bridge
+        .recover_stream::<_, BLOCK>(previous, &mut pipeline)
+        .unwrap();
+    let ControlStreamAction::Rotate {
+        token,
+        previous,
+        next,
+    } = bridge.accept(session, &start_for(1, 1, 1)).unwrap()
+    else {
+        panic!("expected a fresh rotation action");
+    };
+    bridge.execute_rotation(token, previous, next).unwrap();
+    assert_eq!(bridge.coordinator().active().unwrap().key_epoch, 1);
+}
+
+#[test]
+fn delayed_start_rejected_after_connection_loss_leaves_no_pending_block() {
+    let counters = Arc::new(StreamCounters::default());
+    let mut bridge = bridge();
+    let token = authenticated(&mut bridge);
+
+    // A first-stream start is accepted while ready, then the control connection
+    // is lost before the platform work is executed.
+    let ControlStreamAction::Start { token, request } =
+        bridge.accept(token, &start_for(0, 1, 1)).unwrap()
+    else {
+        panic!("expected a stream start action");
+    };
+    bridge
+        .acknowledge_platform_event(SessionEvent::ConnectionLost)
+        .unwrap();
+    assert_eq!(bridge.state().phase(), SessionPhase::Reconnecting);
+
+    // The delayed start must fail closed and roll back the partial output and
+    // admission work it briefly performed.
+    let mut pipeline = pipeline_for(1, 1, Arc::clone(&counters));
+    assert!(matches!(
+        bridge.execute_start::<_, BLOCK>(
+            token,
+            request,
+            Some(Arc::clone(&counters)),
+            &mut pipeline
+        ),
+        Err(ControlToMixerError::Control(_))
+    ));
+    assert_eq!(bridge.state().phase(), SessionPhase::Reconnecting);
+    assert_eq!(bridge.mixer().stream_count(), 0);
+    assert!(!bridge.output_active());
+    assert_eq!(bridge.mixer().output().start_calls, 1);
+    assert_eq!(bridge.mixer().output().stop_calls, 1);
+
+    // Reconnection returns to ready, and the same start is accepted as a fresh
+    // action: the rejected completion left no dangling pending command.
+    bridge
+        .acknowledge_platform_event(SessionEvent::Reconnected)
+        .unwrap();
+    let fresh_token = authenticated(&mut bridge);
+    let ControlStreamAction::Start { token, request } =
+        bridge.accept(fresh_token, &start_for(0, 1, 1)).unwrap()
+    else {
+        panic!("expected a fresh stream start action");
+    };
+    bridge
+        .execute_start::<_, BLOCK>(token, request, Some(Arc::clone(&counters)), &mut pipeline)
+        .unwrap();
+    assert_eq!(bridge.state().phase(), SessionPhase::Streaming);
+    assert_eq!(bridge.mixer().stream_count(), 1);
+    assert!(bridge.output_active());
+}
+
+#[test]
 fn export_snapshot_before_start_omits_format_and_streams() {
     let bridge = bridge();
     let mut metrics = Vec::new();

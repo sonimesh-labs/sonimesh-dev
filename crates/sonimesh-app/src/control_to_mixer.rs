@@ -381,6 +381,9 @@ where
                 self.mixer.stop();
                 self.output_active = false;
             }
+            // A rejected completion is a dead operation: never leave a dangling
+            // pending command that could block a later accept after recovery.
+            let _ = self.coordinator.abort_pending(token);
             return Err(ControlToMixerError::Control(error));
         }
         Ok(())
@@ -390,7 +393,10 @@ where
     ///
     /// The mixer keeps the stream's slot, gain, and counters; the caller is
     /// responsible for rotating the matching decode pipeline. On mixer failure
-    /// the pending operation is aborted without changing active media.
+    /// the pending operation is aborted without changing active media. When the
+    /// coordinator rejects the completion the rotated identity is rolled back
+    /// and the pending operation is aborted, so control and mixer stay in
+    /// agreement.
     ///
     /// # Errors
     ///
@@ -406,9 +412,23 @@ where
             let _ = self.coordinator.abort_pending(token);
             return Err(ControlToMixerError::Mixer(error));
         }
-        self.coordinator
-            .complete_rotation(token, previous, next)
-            .map_err(ControlToMixerError::Control)
+        if let Err(error) = self.coordinator.complete_rotation(token, previous, next) {
+            // The coordinator rejected the completion, for example because the
+            // output faulted or the session retired between accept and execute.
+            // Rotate the mixer back to the previous identity and clear the dead
+            // pending operation so the control and mixer domains keep the same
+            // stream and recovery can accept fresh commands.
+            let _ = self.mixer.rotate_stream(
+                next.identity,
+                StreamStartRequest {
+                    identity: previous,
+                    ..next
+                },
+            );
+            let _ = self.coordinator.abort_pending(token);
+            return Err(ControlToMixerError::Control(error));
+        }
+        Ok(())
     }
 
     /// Removes one stream and commits the stop.
