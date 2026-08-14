@@ -445,6 +445,55 @@ mod tests {
     }
 
     #[test]
+    fn late_arrivals_are_rejected_without_breaking_playout_accounting() {
+        // A tight target buffer with symmetric jitter around the base delay:
+        // some frames arrive behind their playout slot, so that slot renders
+        // PLC and the arrival is counted late instead of being decoded or
+        // admitted. Nothing is lost or duplicated, so every missed slot's
+        // frame arrives exactly once afterward and is counted late.
+        let mut network = NetworkProfile::stable(0xBEEF_2026);
+        network.loss_percent = 0;
+        network.base_delay_ms = 30;
+        network.jitter_ms = 25;
+        let config = ScenarioConfig {
+            frames: 300,
+            target_buffer_ms: 40,
+            network,
+            ..ScenarioConfig::default()
+        };
+
+        let first = simulate(config).unwrap();
+        let second = simulate(config).unwrap();
+
+        assert_eq!(first, second, "scenario stays deterministic");
+        assert_eq!(
+            first.playout_frames + first.plc_frames,
+            config.frames,
+            "every playout slot renders decoded audio or PLC"
+        );
+        assert!(
+            first.plc_frames > 0,
+            "a tight target buffer must produce PLC under jitter"
+        );
+        assert_eq!(
+            first.late_frames, first.plc_frames,
+            "every missed frame arrives once afterward and is counted late"
+        );
+        assert_eq!(first.network.random_loss_packets, 0);
+        assert_eq!(first.network.burst_loss_packets, 0);
+        assert_eq!(first.network.capacity_dropped_copies, 0);
+        assert_eq!(first.network.duplicate_copies, 0);
+        assert_eq!(
+            first.resynchronizations, 0,
+            "late frames are rejected without forcing a hard reset"
+        );
+        // Symmetric jitter alone (no configured reorder delay) can admit a
+        // later frame before an earlier one, so the jitter-buffer reorder
+        // counter stays active even when no network packet is reordered.
+        assert!(first.reordered_arrivals > 0);
+        assert_eq!(first.network.reordered_packets, 0);
+    }
+    #[test]
     fn rejects_unnegotiated_frame_duration() {
         let config = ScenarioConfig {
             frame_duration_ms: 15,
