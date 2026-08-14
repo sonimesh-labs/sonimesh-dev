@@ -88,6 +88,7 @@ cargo +nightly-2026-07-18 fuzz run mixer_controller_membership -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run multi_stream -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run multi_stream_jitter_target -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run jitter_scheduler -- -max_len=1024
+cargo +nightly-2026-07-18 fuzz run jitter_target -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run protected_media_ingress -- -max_len=1264
 cargo +nightly-2026-07-18 fuzz run pairing_binding -- -max_len=4096
 cargo +nightly-2026-07-18 fuzz run untrusted_control_stream -- -max_len=65540
