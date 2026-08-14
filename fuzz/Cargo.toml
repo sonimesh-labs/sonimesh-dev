@@ -112,6 +112,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "mixer_drift_scenario"
+path = "fuzz_targets/mixer_drift_scenario.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "fixed_slot_mixer"
 path = "fuzz_targets/fixed_slot_mixer.rs"
 test = false

@@ -42,6 +42,15 @@ production workspace so `libfuzzer-sys` never becomes a shipping dependency.
   requested ratio within the configured cap, keeps each hard resync exactly
   one low- or high-side reset, and stays deterministic while arbitrary raw
   scenario fields return a clean error or satisfy the same invariants.
+- `mixer_drift_scenario` drives arbitrary bounded scenario configurations
+  through the multi-stream mixer-drift model at the Phase 2 four-stream upper
+  bound, proving an accepted configuration keeps every stream's occupancy
+  observation within the bounded PCM queue, keeps every final requested ratio
+  within the configured cap, keeps each hard resync exactly one low- or
+  high-side reset, keeps every stream's report equal to the single-stream
+  drift-scenario result for that stream's own configuration, and stays
+  deterministic while arbitrary raw scenario fields return a clean error or
+  satisfy the same invariants.
 - `fixed_slot_mixer` drives arbitrary insert/remove/render/push/gain scripts
   through the preallocated realtime slot table, proving membership churn cannot
   panic the mixer, bypass the fixed slot bound, or leave render output
@@ -166,6 +175,7 @@ cargo +nightly-2026-07-18 fuzz run channel_mapper -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run peak_limiter -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run drift_controller -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run drift_scenario -- -max_len=1024
+cargo +nightly-2026-07-18 fuzz run mixer_drift_scenario -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run fixed_slot_mixer -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run mixer_membership -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run mixer_jitter_scheduler -- -max_len=1024

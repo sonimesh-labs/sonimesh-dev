@@ -80,6 +80,7 @@ cargo +nightly-2026-07-18 fuzz run channel_mapper -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run peak_limiter -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run drift_controller -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run drift_scenario -- -max_len=1024
+cargo +nightly-2026-07-18 fuzz run mixer_drift_scenario -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run fixed_slot_mixer -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run mixer_membership -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run mixer_jitter_scheduler -- -max_len=1024
