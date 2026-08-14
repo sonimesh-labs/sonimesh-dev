@@ -5,13 +5,13 @@ use sonimesh_network_simulator::{
     DEFAULT_MIXER_CONTROLLER_PCM_BLOCK, DEFAULT_MIXER_CONTROLLER_SLOTS,
     DEFAULT_MIXER_JITTER_PCM_BLOCK, DEFAULT_MIXER_JITTER_SLOTS, DEFAULT_MIXER_MEMBERSHIP_PCM_BLOCK,
     DEFAULT_MIXER_MEMBERSHIP_SLOTS, DriftScenarioConfig, JitterSchedulerScenarioConfig,
-    JitterTargetScenarioConfig, MixerControllerScenarioConfig, MixerJitterSchedulerScenarioConfig,
-    MixerMembershipScenarioConfig, MultiStreamJitterTargetScenarioConfig,
-    MultiStreamScenarioConfig, NetworkProfile, ScenarioConfig, opus_experiment_cases, simulate,
-    simulate_control_reconnect, simulate_drift, simulate_jitter_scheduler, simulate_jitter_target,
-    simulate_mixer_controller_membership, simulate_mixer_jitter_scheduler,
-    simulate_mixer_membership, simulate_multi_stream, simulate_multi_stream_jitter_target,
-    simulate_opus_experiment, simulate_opus_worker_experiment,
+    JitterTargetScenarioConfig, MixerControllerScenarioConfig, MixerJitterGainScript,
+    MixerJitterSchedulerScenarioConfig, MixerMembershipScenarioConfig,
+    MultiStreamJitterTargetScenarioConfig, MultiStreamScenarioConfig, NetworkProfile,
+    ScenarioConfig, opus_experiment_cases, simulate, simulate_control_reconnect, simulate_drift,
+    simulate_jitter_scheduler, simulate_jitter_target, simulate_mixer_controller_membership,
+    simulate_mixer_jitter_scheduler, simulate_mixer_membership, simulate_multi_stream,
+    simulate_multi_stream_jitter_target, simulate_opus_experiment, simulate_opus_worker_experiment,
 };
 
 fn main() {
@@ -210,11 +210,25 @@ fn run_mixer_jitter_scheduler_suite() {
     >(MixerJitterSchedulerScenarioConfig {
         frames: 200,
         network,
+        // Muting every stream mid-session proves the all-muted bus goes
+        // exactly silent once the bounded ramp converges, then stream 0
+        // unmutes to prove per-source control does not stall the others.
+        gain_scripts: [
+            MixerJitterGainScript {
+                mute_at_frame: Some(150),
+                unmute_at_frame: Some(180),
+                ..MixerJitterGainScript::default()
+            },
+            MixerJitterGainScript {
+                mute_at_frame: Some(150),
+                ..MixerJitterGainScript::default()
+            },
+        ],
         ..MixerJitterSchedulerScenarioConfig::default()
     })
     .expect("built-in mixer jitter scheduler profile is valid");
     println!(
-        "mixer_jitter_scheduler streams=2 slots={} submitted={} burst_loss={} active={} renders={} stream0_plc={} stream1_plc={} stream0_forced={} stream1_forced={} underflows={} finite={}",
+        "mixer_jitter_scheduler streams=2 slots={} submitted={} burst_loss={} active={} renders={} stream0_plc={} stream1_plc={} stream0_forced={} stream1_forced={} underflows={} muted0={} muted1={} silent_ticks={} finite={}",
         report.mixer.slots,
         report.network.submitted_packets,
         report.network.burst_loss_packets,
@@ -225,6 +239,9 @@ fn run_mixer_jitter_scheduler_suite() {
         report.streams[0].forced_playouts,
         report.streams[1].forced_playouts,
         report.mixer.slot_underflows.iter().sum::<u64>(),
+        report.streams[0].muted,
+        report.streams[1].muted,
+        report.mixer.all_muted_silent_ticks,
         report.mixer.output_finite,
     );
 

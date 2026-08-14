@@ -26,7 +26,10 @@ pub const DEFAULT_MIXER_SLOTS: usize = 8;
 const DISCONTINUITY_FADE_SAMPLES: u16 = 128;
 
 /// Samples used for a per-slot gain or mute ramp.
-const GAIN_RAMP_SAMPLES: u16 = 128;
+///
+/// Public so deterministic scenarios can bound how many renders a mute or
+/// gain ramp needs before the slot contributes its exact target.
+pub const MIXER_GAIN_RAMP_SAMPLES: u16 = 128;
 
 /// Failure while constructing a [`FixedSlotMixer`].
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -202,7 +205,7 @@ fn apply_slot_gain(
     // Both values originate from the handle's atomic bit storage, so a
     // bit-exact comparison is the same as an exact value comparison.
     if target.to_bits() != gain_smoother.target().to_bits() {
-        gain_smoother.set_target(target, GAIN_RAMP_SAMPLES);
+        gain_smoother.set_target(target, MIXER_GAIN_RAMP_SAMPLES);
     }
     gain_smoother.apply(samples);
 }

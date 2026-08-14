@@ -26,7 +26,9 @@ pub use drift::{
     DriftConfig, DriftConfigError, DriftController, DriftDecision, DriftResyncDirection,
     MAX_DRIFT_ADJUSTMENT_PPM, MAX_DRIFT_INTEGRAL_BLOCK_TICKS,
 };
-pub use fixed_slot_mixer::{DEFAULT_MIXER_SLOTS, FixedSlotMixer, MixerConfigError, MixerError};
+pub use fixed_slot_mixer::{
+    DEFAULT_MIXER_SLOTS, FixedSlotMixer, MIXER_GAIN_RAMP_SAMPLES, MixerConfigError, MixerError,
+};
 pub use gain::GainSmoother;
 pub use gain_control::{GainControlError, GainControlHandle, GainControlState, MAX_GAIN_LINEAR};
 pub use jitter::{EncodedFrame, FrameError, InsertOutcome, JitterBuffer, PlayoutOutcome};

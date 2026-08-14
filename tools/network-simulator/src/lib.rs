@@ -37,8 +37,8 @@ pub use mixer_controller_membership_scenario::{
     simulate_mixer_controller_membership,
 };
 pub use mixer_jitter_scheduler_scenario::{
-    DEFAULT_MIXER_JITTER_PCM_BLOCK, DEFAULT_MIXER_JITTER_SLOTS, MixerJitterMixerReport,
-    MixerJitterSchedulerScenarioConfig, MixerJitterSchedulerScenarioError,
+    DEFAULT_MIXER_JITTER_PCM_BLOCK, DEFAULT_MIXER_JITTER_SLOTS, MixerJitterGainScript,
+    MixerJitterMixerReport, MixerJitterSchedulerScenarioConfig, MixerJitterSchedulerScenarioError,
     MixerJitterSchedulerSimulationReport, StreamJitterSchedulerReport,
     simulate_mixer_jitter_scheduler,
 };

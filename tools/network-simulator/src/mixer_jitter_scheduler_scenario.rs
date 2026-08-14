@@ -17,10 +17,10 @@ use std::fmt;
 use std::sync::Arc;
 
 use sonimesh_audio::{
-    AdaptiveJitterTarget, CommandDrivenMixer, EncodedFrame, GainControlHandle, InsertOutcome,
-    JitterBuffer, JitterMode, JitterTargetConfig, JitterTargetConfigError, JitterTargetStep,
-    OPUS_CHANNELS, OPUS_SAMPLE_RATE_HZ, OpusFrameConfig, PlayoutOutcome, RealtimePcmProducer,
-    RealtimeQueueConfigError, realtime_pcm_queue,
+    AdaptiveJitterTarget, CommandDrivenMixer, EncodedFrame, GainControlError, GainControlHandle,
+    InsertOutcome, JitterBuffer, JitterMode, JitterTargetConfig, JitterTargetConfigError,
+    JitterTargetStep, MIXER_GAIN_RAMP_SAMPLES, OPUS_CHANNELS, OPUS_SAMPLE_RATE_HZ, OpusFrameConfig,
+    PlayoutOutcome, RealtimePcmProducer, RealtimeQueueConfigError, realtime_pcm_queue,
 };
 use sonimesh_diagnostics::StreamCounters;
 use sonimesh_protocol::MAX_MEDIA_DATAGRAM_LEN;
@@ -37,10 +37,29 @@ const DEFAULT_MEDIA_DATAGRAM_BYTES: u16 = 256;
 const JITTER_BUFFER_CAPACITY: usize = 64;
 /// Hard bound on consecutive gated playout ticks before a forced playout.
 const MAX_GATE_TICKS_BOUND: u32 = 64;
+/// Unity gain in milli-units; per-stream gain scripts stay within this bound.
+const MAX_GAIN_MILLI: u16 = 1_000;
 /// Default fixed slot count of the mixer membership table.
 pub const DEFAULT_MIXER_JITTER_SLOTS: usize = 8;
 /// Default output-format PCM block size (20 ms at 48 kHz stereo).
 pub const DEFAULT_MIXER_JITTER_PCM_BLOCK: usize = 960;
+
+/// Bounded per-stream gain and mute events for the combined scenario.
+///
+/// Each event applies once, on the playout tick where the stream has played
+/// out that many frames. A `None` frame disables the event. Gain is expressed
+/// in milli-units so the script stays exact and comparable.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct MixerJitterGainScript {
+    /// Playout frame count after which the stream's slot is muted.
+    pub mute_at_frame: Option<u32>,
+    /// Playout frame count after which the stream's slot is unmuted again.
+    pub unmute_at_frame: Option<u32>,
+    /// Playout frame count after which the linear gain target is published.
+    pub gain_at_frame: Option<u32>,
+    /// Linear gain target in milli-units, bounded by `0..=1_000` (unity).
+    pub gain_milli: u16,
+}
 
 /// One deterministic combined jitter-scheduler and mixer configuration.
 ///
@@ -64,6 +83,8 @@ pub struct MixerJitterSchedulerScenarioConfig<const STREAMS: usize> {
     pub target: JitterTargetConfig,
     /// Consecutive gated ticks allowed before the scheduler plays out anyway.
     pub max_gate_ticks: u32,
+    /// Per-stream gain and mute script applied at playout frame boundaries.
+    pub gain_scripts: [MixerJitterGainScript; STREAMS],
 }
 
 impl<const STREAMS: usize> Default for MixerJitterSchedulerScenarioConfig<STREAMS> {
@@ -76,6 +97,7 @@ impl<const STREAMS: usize> Default for MixerJitterSchedulerScenarioConfig<STREAM
             network: NetworkProfile::default(),
             target: JitterTargetConfig::preset(JitterMode::Balanced, 20, JITTER_BUFFER_CAPACITY),
             max_gate_ticks: 8,
+            gain_scripts: [MixerJitterGainScript::default(); STREAMS],
         }
     }
 }
@@ -107,6 +129,12 @@ pub struct StreamJitterSchedulerReport {
     pub forced_playouts: u32,
     /// Encoded frames buffered when the simulation ended.
     pub final_buffered_frames: usize,
+    /// Whether the stream's slot is muted at the end of the simulation.
+    pub muted: bool,
+    /// Gain and mute events applied to the stream's slot.
+    pub gain_changes: u32,
+    /// Linear gain target published at the end, in milli-units.
+    pub final_gain_milli: u16,
 }
 
 /// Deterministic mixer-bus counters for one combined run.
@@ -126,6 +154,9 @@ pub struct MixerJitterMixerReport<const SLOTS: usize> {
     pub slot_discontinuities: [u64; SLOTS],
     /// True when every rendered sample stayed finite.
     pub output_finite: bool,
+    /// Rendered ticks after every muted stream's gain ramp converged where
+    /// the bus was exactly silent.
+    pub all_muted_silent_ticks: u32,
 }
 
 /// One deterministic combined jitter-scheduler and mixer report.
@@ -170,6 +201,14 @@ pub enum MixerJitterSchedulerScenarioError {
     CommandQueueFull,
     /// A compile-time simulation capacity contradicted its runtime use.
     InternalCapacityInvariant,
+    /// A gain event frame must be below the configured frame count.
+    InvalidGainEvent,
+    /// Published gain must stay within the bounded linear range.
+    InvalidGainMilli,
+    /// A validated gain publication failed.
+    GainControl(GainControlError),
+    /// The all-muted bus was not exactly silent after the bounded ramp.
+    MutedBusNotSilent,
     /// The hard deadline elapsed before every stream consumed every frame.
     SimulationDidNotFinish,
 }
@@ -213,6 +252,18 @@ impl fmt::Display for MixerJitterSchedulerScenarioError {
             Self::InternalCapacityInvariant => formatter.write_str(
                 "invalid mixer jitter scenario: a compile-time capacity contradicted its runtime use",
             ),
+            Self::InvalidGainEvent => formatter.write_str(
+                "invalid mixer jitter scenario: a gain event frame is outside the sender frame count",
+            ),
+            Self::InvalidGainMilli => formatter.write_str(
+                "invalid mixer jitter scenario: gain exceeds the bounded linear range",
+            ),
+            Self::GainControl(error) => {
+                write!(formatter, "invalid mixer jitter scenario: {error}")
+            }
+            Self::MutedBusNotSilent => formatter.write_str(
+                "invalid mixer jitter scenario: the all-muted bus was not exactly silent",
+            ),
             Self::SimulationDidNotFinish => formatter.write_str(
                 "invalid mixer jitter scenario: the hard deadline elapsed before every frame was consumed",
             ),
@@ -226,6 +277,7 @@ impl std::error::Error for MixerJitterSchedulerScenarioError {
             Self::Target(error) => Some(error),
             Self::Profile(error) => Some(error),
             Self::Clock(error) => Some(error),
+            Self::GainControl(error) => Some(error),
             _ => None,
         }
     }
@@ -289,6 +341,9 @@ pub fn simulate_mixer_jitter_scheduler<
         gated_ticks: 0,
         forced_playouts: 0,
         final_buffered_frames: 0,
+        muted: false,
+        gain_changes: 0,
+        final_gain_milli: MAX_GAIN_MILLI,
     });
     for stream in 0..STREAMS {
         streams[stream].min_frames = targets[stream].min_frames();
@@ -300,6 +355,19 @@ pub fn simulate_mixer_jitter_scheduler<
     let mut next_send_sequence = [0_u32; STREAMS];
     let mut next_send_ms = [0_u64; STREAMS];
     let mut next_playout_ms = [config.initial_playout_ms; STREAMS];
+    let mut scripts = config.gain_scripts;
+    let mut stream_muted = [false; STREAMS];
+    let mut stream_gain_milli = [MAX_GAIN_MILLI; STREAMS];
+    let mut gain_changes = [0_u32; STREAMS];
+    // A gain or mute event restarts that slot's bounded ramp, which advances
+    // only as the slot renders queued content; under starvation the ramp can
+    // span many ticks. `post_event_rendered_blocks` counts rendered blocks
+    // since each stream's last event, and the all-muted bus is asserted
+    // exactly silent only after every muted slot rendered the full ramp plus
+    // one block of render lag.
+    let converged_blocks = muted_slot_converged_blocks::<PCM_SAMPLES_PER_BLOCK>();
+    let mut post_event_rendered_blocks = [0_u32; STREAMS];
+    let mut all_muted_silent_ticks = 0_u32;
 
     let mut mixer = CommandDrivenMixer::<SLOTS, PCM_SAMPLES_PER_BLOCK>::new()
         .map_err(|_| MixerJitterSchedulerScenarioError::InternalCapacityInvariant)?;
@@ -307,6 +375,8 @@ pub fn simulate_mixer_jitter_scheduler<
     let mut producers: [Option<RealtimePcmProducer<PCM_SAMPLES_PER_BLOCK>>; STREAMS] =
         std::array::from_fn(|_| None);
     let mut slot_counters: [Option<Arc<StreamCounters>>; STREAMS] = std::array::from_fn(|_| None);
+    let gain_handles: [GainControlHandle; STREAMS] =
+        std::array::from_fn(|_| GainControlHandle::new());
     for stream in 0..STREAMS {
         let counters = Arc::new(StreamCounters::default());
         let (producer, consumer) = realtime_pcm_queue::<PCM_SAMPLES_PER_BLOCK>(
@@ -322,7 +392,7 @@ pub fn simulate_mixer_jitter_scheduler<
         membership
             .insert(
                 consumer,
-                GainControlHandle::new(),
+                gain_handles[stream].clone(),
                 Some(Arc::clone(&counters)),
             )
             .map_err(|_| MixerJitterSchedulerScenarioError::CommandQueueFull)?;
@@ -393,6 +463,16 @@ pub fn simulate_mixer_jitter_scheduler<
 
         for stream in 0..STREAMS {
             if states[stream].consumed_frames < config.frames && now_ms == next_playout_ms[stream] {
+                if apply_gain_events(
+                    &mut scripts[stream],
+                    &gain_handles[stream],
+                    &mut stream_muted[stream],
+                    &mut stream_gain_milli[stream],
+                    &mut gain_changes[stream],
+                    states[stream].consumed_frames,
+                ) {
+                    post_event_rendered_blocks[stream] = 0;
+                }
                 let arrivals_pending = next_send_sequence[stream] < config.frames
                     || network.stats().scheduled_copies > network.stats().delivered_copies;
                 apply_playout_tick::<PCM_SAMPLES_PER_BLOCK>(
@@ -411,11 +491,36 @@ pub fn simulate_mixer_jitter_scheduler<
             }
         }
 
+        let mut queued_before = [0_u32; STREAMS];
+        for stream in 0..STREAMS {
+            queued_before[stream] = u32::try_from(
+                producers[stream]
+                    .as_ref()
+                    .map_or(0, RealtimePcmProducer::len),
+            )
+            .unwrap_or(u32::MAX);
+        }
         let mut output = [0.0f32; PCM_SAMPLES_PER_BLOCK];
         mixer.render(&mut output);
         renders += 1;
         if !output.iter().all(|sample| sample.is_finite()) {
             output_finite = false;
+        }
+        for stream in 0..STREAMS {
+            if queued_before[stream] > 0 {
+                post_event_rendered_blocks[stream] += 1;
+            }
+        }
+        if stream_muted.iter().all(|muted| *muted)
+            && post_event_rendered_blocks
+                .iter()
+                .all(|rendered| *rendered >= converged_blocks)
+        {
+            if output.iter().all(|sample| *sample == 0.0) {
+                all_muted_silent_ticks += 1;
+            } else {
+                return Err(MixerJitterSchedulerScenarioError::MutedBusNotSilent);
+            }
         }
         clock
             .advance_by(1)
@@ -432,6 +537,9 @@ pub fn simulate_mixer_jitter_scheduler<
         streams[stream].final_target_frames = targets[stream].target_frames();
         streams[stream].final_smoothed_jitter_ms = targets[stream].smoothed_jitter_ms();
         streams[stream].final_buffered_frames = jitters[stream].len();
+        streams[stream].muted = stream_muted[stream];
+        streams[stream].gain_changes = gain_changes[stream];
+        streams[stream].final_gain_milli = stream_gain_milli[stream];
         if let Some(counters) = slot_counters[stream].as_ref() {
             let snapshot = counters.snapshot();
             slot_underflows[stream] = snapshot.pcm_underflows;
@@ -451,6 +559,7 @@ pub fn simulate_mixer_jitter_scheduler<
             slot_refill_limit_hits,
             slot_discontinuities,
             output_finite,
+            all_muted_silent_ticks,
         },
     })
 }
@@ -504,6 +613,61 @@ fn apply_playout_tick<const PCM_SAMPLES_PER_BLOCK: usize>(
     }
 }
 
+/// PCM blocks a muted slot must render after its last gain or mute event
+/// before every later rendered block is exactly zero.
+///
+/// The per-slot ramp spans [`MIXER_GAIN_RAMP_SAMPLES`] applied samples and
+/// advances only when the slot renders queued content, so under starvation it
+/// can span many ticks. The scenario asserts silence only after every muted
+/// slot rendered the full ramp plus one block of render lag, so a starved
+/// slot that resumes its ramp cannot be mistaken for a broken bus.
+fn muted_slot_converged_blocks<const PCM_SAMPLES_PER_BLOCK: usize>() -> u32 {
+    let ramp_samples = u32::from(MIXER_GAIN_RAMP_SAMPLES);
+    let block_samples = u32::try_from(PCM_SAMPLES_PER_BLOCK).unwrap_or(u32::MAX);
+    ramp_samples.div_ceil(block_samples).saturating_add(1)
+}
+
+/// Applies any gain or mute event scheduled at the current consumed frame.
+///
+/// Returns whether an event applied; a changed target restarts that slot's
+/// bounded ramp, so the caller resets the rendered-block convergence counter.
+#[allow(clippy::too_many_arguments)]
+fn apply_gain_events(
+    script: &mut MixerJitterGainScript,
+    handle: &GainControlHandle,
+    muted: &mut bool,
+    gain_milli: &mut u16,
+    changes: &mut u32,
+    consumed_frames: u32,
+) -> bool {
+    let mut applied = false;
+    if script.mute_at_frame == Some(consumed_frames) {
+        handle.set_muted(true);
+        *muted = true;
+        *changes += 1;
+        script.mute_at_frame = None;
+        applied = true;
+    }
+    if script.unmute_at_frame == Some(consumed_frames) {
+        handle.set_muted(false);
+        *muted = false;
+        *changes += 1;
+        script.unmute_at_frame = None;
+        applied = true;
+    }
+    if script.gain_at_frame == Some(consumed_frames) {
+        let gain = f32::from(script.gain_milli) / f32::from(MAX_GAIN_MILLI);
+        handle
+            .set_gain(gain)
+            .expect("validated gain milli stays within the linear bound");
+        *gain_milli = script.gain_milli;
+        *changes += 1;
+        script.gain_at_frame = None;
+        applied = true;
+    }
+    applied
+}
+
 fn validate<const STREAMS: usize, const SLOTS: usize>(
     config: MixerJitterSchedulerScenarioConfig<STREAMS>,
 ) -> Result<(OpusFrameConfig, [AdaptiveJitterTarget; STREAMS]), MixerJitterSchedulerScenarioError> {
@@ -536,6 +700,23 @@ fn validate<const STREAMS: usize, const SLOTS: usize>(
     if config.max_gate_ticks == 0 || config.max_gate_ticks > MAX_GATE_TICKS_BOUND {
         return Err(MixerJitterSchedulerScenarioError::InvalidMaxGateTicks);
     }
+    for script in &config.gain_scripts {
+        for frame in [
+            script.mute_at_frame,
+            script.unmute_at_frame,
+            script.gain_at_frame,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if frame >= config.frames {
+                return Err(MixerJitterSchedulerScenarioError::InvalidGainEvent);
+            }
+        }
+        if script.gain_milli > MAX_GAIN_MILLI {
+            return Err(MixerJitterSchedulerScenarioError::InvalidGainMilli);
+        }
+    }
     if config.media_datagram_bytes == 0
         || usize::from(config.media_datagram_bytes) > MAX_MEDIA_DATAGRAM_LEN
     {
@@ -555,7 +736,9 @@ fn validate<const STREAMS: usize, const SLOTS: usize>(
 mod tests {
     use std::error::Error;
 
-    use sonimesh_audio::{JitterMode, JitterTargetConfig, JitterTargetConfigError};
+    use sonimesh_audio::{
+        GainControlError, JitterMode, JitterTargetConfig, JitterTargetConfigError,
+    };
 
     use crate::{ClockError, MAX_BANDWIDTH_BYTES_PER_SECOND, ProfileError};
 
@@ -748,6 +931,80 @@ mod tests {
     }
 
     #[test]
+    fn per_source_mute_makes_the_bus_exactly_silent() {
+        let config = MixerJitterSchedulerScenarioConfig {
+            frames: 40,
+            network: clean_profile(),
+            gain_scripts: [
+                MixerJitterGainScript {
+                    mute_at_frame: Some(10),
+                    unmute_at_frame: Some(30),
+                    ..MixerJitterGainScript::default()
+                },
+                MixerJitterGainScript {
+                    mute_at_frame: Some(12),
+                    ..MixerJitterGainScript::default()
+                },
+            ],
+            ..MixerJitterSchedulerScenarioConfig::default()
+        };
+
+        let report = simulate_mixer_jitter_scheduler::<2, SLOTS, PCM_BLOCK>(config).unwrap();
+
+        for stream in &report.streams {
+            assert_eq!(
+                stream.playout.playout_frames + stream.playout.plc_frames,
+                config.frames,
+                "mute must not stall playout"
+            );
+        }
+        assert!(
+            report.mixer.all_muted_silent_ticks > 0,
+            "once every stream is muted and the ramp converges, the bus must be exactly silent"
+        );
+        assert!(!report.streams[0].muted, "stream 0 unmutes at frame 30");
+        assert_eq!(report.streams[0].gain_changes, 2);
+        assert_eq!(report.streams[0].final_gain_milli, 1_000);
+        assert!(report.streams[1].muted, "stream 1 stays muted to the end");
+        assert_eq!(report.streams[1].gain_changes, 1);
+        assert!(report.mixer.output_finite);
+    }
+
+    #[test]
+    fn per_source_gain_events_publish_without_stalling_the_bus() {
+        let config = MixerJitterSchedulerScenarioConfig {
+            frames: 30,
+            network: clean_profile(),
+            gain_scripts: [
+                MixerJitterGainScript {
+                    gain_at_frame: Some(10),
+                    gain_milli: 250,
+                    ..MixerJitterGainScript::default()
+                },
+                MixerJitterGainScript::default(),
+            ],
+            ..MixerJitterSchedulerScenarioConfig::default()
+        };
+
+        let report = simulate_mixer_jitter_scheduler::<2, SLOTS, PCM_BLOCK>(config).unwrap();
+
+        assert_eq!(report.streams[0].final_gain_milli, 250);
+        assert_eq!(report.streams[0].gain_changes, 1);
+        assert!(!report.streams[0].muted);
+        assert_eq!(report.streams[1].final_gain_milli, 1_000);
+        assert_eq!(report.streams[1].gain_changes, 0);
+        for stream in &report.streams {
+            assert_eq!(
+                stream.playout.playout_frames + stream.playout.plc_frames,
+                config.frames,
+                "gain events must not stall playout"
+            );
+        }
+        assert!(report.mixer.output_finite);
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
     fn rejects_invalid_scenario_configuration() {
         assert_eq!(
             simulate_mixer_jitter_scheduler::<2, SLOTS, PCM_BLOCK>(
@@ -802,6 +1059,31 @@ mod tests {
                 }
             ),
             Err(MixerJitterSchedulerScenarioError::InvalidMediaDatagramBytes)
+        );
+        assert_eq!(
+            simulate_mixer_jitter_scheduler::<2, SLOTS, PCM_BLOCK>(
+                MixerJitterSchedulerScenarioConfig {
+                    frames: 10,
+                    gain_scripts: [MixerJitterGainScript {
+                        mute_at_frame: Some(10),
+                        ..MixerJitterGainScript::default()
+                    }; 2],
+                    ..MixerJitterSchedulerScenarioConfig::default()
+                }
+            ),
+            Err(MixerJitterSchedulerScenarioError::InvalidGainEvent)
+        );
+        assert_eq!(
+            simulate_mixer_jitter_scheduler::<2, SLOTS, PCM_BLOCK>(
+                MixerJitterSchedulerScenarioConfig {
+                    gain_scripts: [MixerJitterGainScript {
+                        gain_milli: 1_001,
+                        ..MixerJitterGainScript::default()
+                    }; 2],
+                    ..MixerJitterSchedulerScenarioConfig::default()
+                }
+            ),
+            Err(MixerJitterSchedulerScenarioError::InvalidGainMilli)
         );
         assert_eq!(
             simulate_mixer_jitter_scheduler::<2, SLOTS, PCM_BLOCK>(
@@ -861,6 +1143,13 @@ mod tests {
         assert!(
             Error::source(&clock)
                 .and_then(|source| source.downcast_ref::<ClockError>())
+                .is_some()
+        );
+
+        let gain = MixerJitterSchedulerScenarioError::GainControl(GainControlError::InvalidGain);
+        assert!(
+            Error::source(&gain)
+                .and_then(|source| source.downcast_ref::<GainControlError>())
                 .is_some()
         );
 

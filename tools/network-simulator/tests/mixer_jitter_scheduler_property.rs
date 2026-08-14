@@ -7,9 +7,10 @@
 //! levels, scheduler step counters never exceed the observation count, every
 //! playout tick either consumes a frame or gates (so gated ticks plus frames
 //! equal observations), every stream stays active in the fixed-slot mixer, and
-//! the rendered bus stays finite. The same seeded profiles drive both ends of
-//! the Phase 2 range (two and four independent sources). This test drives
-//! seeded random profiles,
+//! the rendered bus stays finite. Seeded gain and mute scripts are applied per
+//! stream and must publish a bounded gain without stalling playout or the bus.
+//! The same seeded profiles drive both ends of the Phase 2 range (two and four
+//! independent sources). This test drives seeded random profiles,
 //! frame durations, delays, and gate deadlines over a long run and asserts
 //! those invariants on every report, mirroring the deterministic property
 //! pattern used for the sibling scheduler scenarios and the
@@ -17,7 +18,8 @@
 
 use sonimesh_audio::{JitterMode, JitterTargetConfig};
 use sonimesh_network_simulator::{
-    MixerJitterSchedulerScenarioConfig, NetworkProfile, simulate_mixer_jitter_scheduler,
+    MixerJitterGainScript, MixerJitterSchedulerScenarioConfig, NetworkProfile,
+    simulate_mixer_jitter_scheduler,
 };
 use sonimesh_protocol::MAX_MEDIA_DATAGRAM_LEN;
 
@@ -111,8 +113,22 @@ fn check_stream_count<const S: usize>() {
             1 => JitterMode::Stable,
             _ => JitterMode::Balanced,
         };
+        let frames = random.next_in(1, MAX_FRAMES + 1);
+        let mut gain_scripts = [MixerJitterGainScript::default(); S];
+        for script in &mut gain_scripts {
+            if random.next_usize(2) == 0 {
+                script.mute_at_frame = Some(random.next_in(0, frames));
+            }
+            if random.next_usize(2) == 0 {
+                script.unmute_at_frame = Some(random.next_in(0, frames));
+            }
+            if random.next_usize(2) == 0 {
+                script.gain_at_frame = Some(random.next_in(0, frames));
+                script.gain_milli = u16::try_from(random.next_in(0, 1_001)).unwrap();
+            }
+        }
         let config = MixerJitterSchedulerScenarioConfig::<S> {
-            frames: random.next_in(1, MAX_FRAMES + 1),
+            frames,
             frame_duration_ms: u64::from(frame_duration_ms),
             initial_playout_ms: u64::from(random.next_in(0, 1_001)),
             media_datagram_bytes: u16::try_from(
@@ -122,6 +138,7 @@ fn check_stream_count<const S: usize>() {
             network: random_profile(&mut random),
             target: JitterTargetConfig::preset(mode, frame_duration_ms, JITTER_BUFFER_CAPACITY),
             max_gate_ticks: random.next_in(1, 65),
+            gain_scripts,
         };
 
         let report = simulate_mixer_jitter_scheduler::<S, SLOTS, PCM_BLOCK>(config)
@@ -144,6 +161,14 @@ fn check_stream_count<const S: usize>() {
                 stream.gated_ticks + config.frames,
                 stream.observations,
                 "every playout tick either consumed a frame or gated"
+            );
+            assert!(
+                stream.gain_changes <= 3,
+                "at most one mute, one unmute, and one gain event per stream"
+            );
+            assert!(
+                stream.final_gain_milli <= 1_000,
+                "published gain must stay within the bounded linear range"
             );
         }
         assert_eq!(
