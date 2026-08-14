@@ -254,3 +254,9 @@ path = "fuzz_targets/export_retention_journal.rs"
 test = false
 doc = false
 bench = false
+[[bin]]
+name = "udp_receiver_pipeline"
+path = "fuzz_targets/udp_receiver_pipeline.rs"
+test = false
+doc = false
+bench = false

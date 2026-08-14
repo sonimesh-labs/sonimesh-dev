@@ -181,6 +181,16 @@ production workspace so `libfuzzer-sys` never becomes a shipping dependency.
   independent replay oracle and counter model, proving failed AEAD never
   advances the replay window and only authenticated in-window packets reach
   the decoder.
+- `udp_receiver_pipeline` drives byte-selected deliveries, rotations, fresh
+  sessions, tampered ciphertext with a valid-twin probe, duplicates,
+  retired-epoch packets, and oversized datagrams over real loopback sockets
+  through the UDP-backed protected receiver composition and compares every
+  poll outcome, pin state, decoded PCM, and diagnostic counter against an
+  independent pin, replay, and counter model, proving the source pin binds
+  only to the first successful protected endpoint, a changed endpoint is
+  rejected before any protected work and never moves the pin, failed
+  processing never binds an unbound source, and only a fresh authenticated
+  session clears the binding.
 - `export_retention_journal` drives a deterministic edge prologue and
   arbitrary record-size scripts through the bounded export retention journal
   (ADR 0011) under input-selected count and byte bounds, comparing the
@@ -234,6 +244,7 @@ cargo +nightly-2026-07-18 fuzz run mixer_output_controller -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run receiver_output_controller -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run pcm_render_source -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run receiver_pipeline -- -max_len=1024
+cargo +nightly-2026-07-18 fuzz run udp_receiver_pipeline -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run export_retention_journal -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run stream_decode_worker -- -max_len=64
 ```
