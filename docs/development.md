@@ -13,6 +13,13 @@ The portable Rust workspace builds without an Android SDK, audio device, or
 network service. The capture-only Android prototype requires the checked-in
 Gradle wrapper, Java 21, Android API 36, and Android Build Tools 35.0.0.
 
+When a local SDK is missing one of those components, install the same set the
+Android CI job installs before running the Gradle commands:
+`sdkmanager "platform-tools" "platforms;android-36" "build-tools;35.0.0"`
+(after accepting the licenses). Android Gradle Plugin 8.9.1 defaults to Build
+Tools 35.0.0, so a missing local build-tools component fails the build even
+when the platforms packages are present.
+
 ## Core checks
 
 ~~~powershell
