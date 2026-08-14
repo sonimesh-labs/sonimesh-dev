@@ -426,8 +426,12 @@ through a non-blocking socket and caps every datagram at
 `MAX_MEDIA_DATAGRAM_LEN` (1200 bytes) to avoid IP fragmentation. An oversized
 payload is rejected before touching the socket, and the sender never blocks:
 a full OS send buffer is reported as backpressure so the caller applies its
-own drop or pacing policy. The destination address is routing metadata only
-and does not authenticate the peer.
+own drop or pacing policy. The classification is unit-tested, but a
+non-blocking UDP send under sustained overload can also be dropped silently
+by the operating system instead of reporting `WouldBlock`; the OS-level
+property is environment-dependent and must be validated on the hardware lab
+matrix, not assumed from the classification tests. The destination address is
+routing metadata only and does not authenticate the peer.
 
 ## 11. Jitter, loss, and clock drift
 
