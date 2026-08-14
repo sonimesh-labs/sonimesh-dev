@@ -236,3 +236,9 @@ path = "fuzz_targets/receiver_output_controller.rs"
 test = false
 doc = false
 bench = false
+[[bin]]
+name = "pcm_render_source"
+path = "fuzz_targets/pcm_render_source.rs"
+test = false
+doc = false
+bench = false

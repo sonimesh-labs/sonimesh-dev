@@ -167,6 +167,13 @@ production workspace so `libfuzzer-sys` never becomes a shipping dependency.
   diagnostics, and redacted snapshot stay in sync, a fault is reported at
   most once and clears the published format, and recovery reuses the last
   successful selection.
+- `pcm_render_source` drives arbitrary queue pushes, epoch retirements,
+  render lengths, gain, and mute scripts through the realtime PCM render
+  source and its lock-free queue and compares every output slice and every
+  published stream counter against an independent queue-plus-render model,
+  proving partial-block preservation, the per-callback refill cap, bounded
+  underflow silence, discontinuity fade-in, and gain-ramp behavior hold on
+  every accepted or rejected step.
 - `untrusted_control_stream` feeds arbitrary bytes through the bounded
   length-prefixed control framing state machine in a deterministic per-input
   chunk size, exercising partial length and payload reads, oversize and
@@ -210,6 +217,7 @@ cargo +nightly-2026-07-18 fuzz run pairing_invitation -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run reconnect_grace -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run mixer_output_controller -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run receiver_output_controller -- -max_len=1024
+cargo +nightly-2026-07-18 fuzz run pcm_render_source -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run stream_decode_worker -- -max_len=64
 ```
 
