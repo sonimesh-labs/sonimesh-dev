@@ -30,6 +30,7 @@ export function useDesktopState() {
   const selectOutput = (id: string) => run(() => desktopBridge.selectOutput(id))
   const setGain = (gain: number) => run(() => desktopBridge.setGain(gain))
   const setMuted = (muted: boolean) => run(() => desktopBridge.setMuted(muted))
+  const exportDiagnostics = () => run(() => desktopBridge.exportDiagnostics())
   const createPairing = () => run(() => desktopBridge.createPairing())
   const expirePairing = () => run(() => desktopBridge.expirePairing())
   const revokePairing = () => run(() => desktopBridge.revokePairing())
@@ -56,6 +57,7 @@ export function useDesktopState() {
     selectOutput,
     setGain,
     setMuted,
+    exportDiagnostics,
     createPairing,
     expirePairing,
     revokePairing,

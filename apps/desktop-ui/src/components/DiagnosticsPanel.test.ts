@@ -126,4 +126,65 @@ describe('DiagnosticsPanel', () => {
     expect(value('Target raised')).toBe('1')
     expect(value('Target lowered')).toBe('2')
   })
+
+  it('emits a diagnostic-export request from the preview-only action', async () => {
+    const wrapper = mount(DiagnosticsPanel, {
+      props: {
+        metrics: metrics(),
+        preview: true,
+        busy: false,
+      },
+    })
+
+    await wrapper.get('.export-section button').trigger('click')
+
+    expect(wrapper.emitted('exportDiagnostics')).toHaveLength(1)
+  })
+
+  it('renders bounded diagnostic export receipts with formatted bytes', () => {
+    const wrapper = mount(DiagnosticsPanel, {
+      props: {
+        metrics: metrics(),
+        preview: true,
+        diagnosticExports: [
+          { sequence: '3', bytes: '16384' },
+          { sequence: '2', bytes: '16384' },
+          { sequence: '1', bytes: '16384' },
+          { sequence: '0', bytes: '16384' },
+        ],
+      },
+    })
+
+    const receipts = wrapper.findAll('.export-receipts li')
+    expect(receipts.map((row) => row.text())).toEqual([
+      'Export #3 · 16.0 KiB',
+      'Export #2 · 16.0 KiB',
+      'Export #1 · 16.0 KiB',
+      'Export #0 · 16.0 KiB',
+    ])
+  })
+
+  it('shows an empty export state before any preview export is issued', () => {
+    const wrapper = mount(DiagnosticsPanel, {
+      props: {
+        metrics: metrics(),
+        preview: true,
+        diagnosticExports: [],
+      },
+    })
+
+    expect(wrapper.find('.export-receipts').exists()).toBe(false)
+    expect(wrapper.text()).toContain('No diagnostic exports issued in this preview session.')
+  })
+
+  it('hides the diagnostic-export action outside the preview adapter', () => {
+    const wrapper = mount(DiagnosticsPanel, {
+      props: {
+        metrics: metrics(),
+        preview: false,
+      },
+    })
+
+    expect(wrapper.find('.export-section').exists()).toBe(false)
+  })
 })

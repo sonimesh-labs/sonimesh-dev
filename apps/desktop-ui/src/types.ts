@@ -87,6 +87,14 @@ export interface StreamMetrics {
   playoutDelayMs: number
 }
 
+/** One issued diagnostic-export receipt mirroring the Rust ExportReceipt (ADR 0011). */
+export interface DiagnosticExportReceipt {
+  /** Monotonic export sequence starting at zero; encoded as a string so it never loses u64 precision. */
+  sequence: string
+  /** Serialized bundle byte size; encoded as a string so it never loses precision. */
+  bytes: string
+}
+
 export interface DesktopSnapshot {
   session: SessionState
   outputDevices: OutputDevice[]
@@ -103,5 +111,7 @@ export interface DesktopSnapshot {
   metrics: StreamMetrics
   /** Bounded, most-recent-first receiver-generated control-plane replies. */
   replies: ControlReply[]
+  /** Bounded, most-recent-first issued diagnostic-export receipts (preview-owned). */
+  diagnosticExports: DiagnosticExportReceipt[]
   previewAdapter: boolean
 }

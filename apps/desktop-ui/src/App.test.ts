@@ -6,6 +6,7 @@ import type { DesktopSnapshot } from './types'
 const desktopBridgeMock = vi.hoisted(() => ({
   createPairing: vi.fn(),
   expirePairing: vi.fn(),
+  exportDiagnostics: vi.fn(),
   revokePairing: vi.fn(),
   resetPreview: vi.fn(),
   selectOutput: vi.fn(),
@@ -90,6 +91,7 @@ function previewSnapshot(): DesktopSnapshot {
       playoutDelayMs: 64,
     },
     replies: [],
+    diagnosticExports: [],
     previewAdapter: true,
   }
 }
@@ -324,6 +326,27 @@ describe('App', () => {
     expect(wrapper.get('#replies-heading').text()).toContain('Recent control replies')
     expect(wrapper.text()).toContain('stream started')
     expect(wrapper.text()).toContain('retryLater · retryable')
+  })
+
+  it('issues a preview diagnostic export from the diagnostics panel', async () => {
+    desktopBridgeMock.snapshot.mockResolvedValueOnce(previewSnapshot())
+    const wrapper = mount(App)
+    await flushPromises()
+
+    desktopBridgeMock.exportDiagnostics.mockResolvedValueOnce({
+      ...previewSnapshot(),
+      diagnosticExports: [{ sequence: '0', bytes: '16384' }],
+    })
+
+    await wrapper
+      .findAll('button')
+      .find((button) => button.text() === 'Export diagnostics')!
+      .trigger('click')
+    await flushPromises()
+
+    expect(desktopBridgeMock.exportDiagnostics).toHaveBeenCalledTimes(1)
+    expect(wrapper.text()).toContain('Export #0')
+    expect(wrapper.text()).toContain('16.0 KiB')
   })
 
 

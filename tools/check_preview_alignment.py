@@ -25,7 +25,8 @@ PREVIEW_ONLY_STREAM_FIELDS = frozenset({"currentJitterMs", "playoutDelayMs"})
 
 # DesktopSnapshot fields owned by the preview adapter or by separate low-rate
 # APIs rather than by the Rust control snapshot: output-device lists, volume
-# controls, the StreamCounters metrics, the reply log, and the adapter flag.
+# controls, the StreamCounters metrics, the reply log, the diagnostic-export
+# receipt log, and the adapter flag.
 PREVIEW_ONLY_SNAPSHOT_FIELDS = frozenset(
     {
         "outputDevices",
@@ -34,6 +35,7 @@ PREVIEW_ONLY_SNAPSHOT_FIELDS = frozenset(
         "muted",
         "metrics",
         "replies",
+        "diagnosticExports",
         "previewAdapter",
     }
 )

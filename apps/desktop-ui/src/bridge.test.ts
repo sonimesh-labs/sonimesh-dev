@@ -489,5 +489,41 @@ describe('PreviewDesktopBridge', () => {
     expect(started.replies[0].requestId).toBe(1)
   })
 
+  it('issues bounded diagnostic export receipts with a monotonic sequence', async () => {
+    const bridge = new PreviewDesktopBridge()
+
+    const first = await bridge.exportDiagnostics()
+    expect(first.diagnosticExports[0]).toEqual({ sequence: '0', bytes: '16384' })
+
+    const second = await bridge.exportDiagnostics()
+    expect(second.diagnosticExports.map((receipt) => receipt.sequence)).toEqual(['1', '0'])
+  })
+
+  it('retains at most eight diagnostic export receipts, most recent first', async () => {
+    const bridge = new PreviewDesktopBridge()
+
+    let snapshot = await bridge.snapshot()
+    for (let index = 0; index < 10; index += 1) {
+      snapshot = await bridge.exportDiagnostics()
+    }
+
+    expect(snapshot.diagnosticExports).toHaveLength(8)
+    expect(snapshot.diagnosticExports.map((receipt) => receipt.sequence)).toEqual([
+      '9', '8', '7', '6', '5', '4', '3', '2',
+    ])
+  })
+
+  it('clears issued diagnostic exports and restarts their sequence on reset', async () => {
+    const bridge = new PreviewDesktopBridge()
+    await bridge.exportDiagnostics()
+    await bridge.exportDiagnostics()
+
+    const reset = await bridge.resetPreview()
+    expect(reset.diagnosticExports).toEqual([])
+
+    const first = await bridge.exportDiagnostics()
+    expect(first.diagnosticExports[0].sequence).toBe('0')
+  })
+
 
 })

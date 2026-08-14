@@ -29,7 +29,12 @@ or output unavailable) retires to `idle` while the consumed pairing record stays
 retained for audit, so the revoke path remains reachable. The
 diagnostics panel can simulate a burst of transport and recovery activity
 (`Simulate metrics burst`), so the cumulative-counter formatting and health
-cards can be exercised without live audio. A preview
+cards can be exercised without live audio. An
+`Export diagnostics` action issues one bounded diagnostic-export receipt
+(monotonic sequence and 16 KiB bundle size) into a most-recent-first receipt
+log capped at eight, mirroring the Rust ADR 0011 export journal, so the
+retention bound and receipt formatting can be exercised without writing
+files. A preview
 `Simulate command rejection` action rejects like a real bridge command so the
 control error banner and its recovery can be exercised. A
 `Reset preview` action restores the initial synthetic session and counters so

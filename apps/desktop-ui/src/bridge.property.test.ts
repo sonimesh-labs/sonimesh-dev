@@ -61,6 +61,7 @@ type Command =
   | { kind: 'simulateOutputRestored' }
   | { kind: 'simulatePairingConsumed' }
   | { kind: 'simulateMetricsBurst' }
+  | { kind: 'exportDiagnostics' }
   | { kind: 'resetPreview' }
 
 /** Small deterministic mulberry32 generator; no external dependency. */
@@ -302,13 +303,18 @@ class PreviewBridgeModel {
         m.playoutDelayMs += 4
         return
       }
+      case 'exportDiagnostics':
+        // Issuing a diagnostic export is a preview-owned surface with no
+        // lifecycle state change; the model pins the state machine while the
+        // bounded receipt log is asserted separately in the walk.
+        return
       case 'resetPreview':
         this.state = initialModelState()
         return
     }
   }
 
-  snapshot(): Omit<DesktopSnapshot, 'replies'> {
+  snapshot(): Omit<DesktopSnapshot, 'replies' | 'diagnosticExports'> {
     this.expireInvitationWhenDue()
     this.expireReconnectWhenDue()
     const s = this.state
@@ -409,6 +415,8 @@ function runBridgeCommand(
       return bridge.simulatePairingConsumed()
     case 'simulateMetricsBurst':
       return bridge.simulateMetricsBurst()
+    case 'exportDiagnostics':
+      return bridge.exportDiagnostics()
     case 'resetPreview':
       return bridge.resetPreview()
   }
@@ -460,6 +468,7 @@ describe('PreviewDesktopBridge property', () => {
       'simulateOutputRestored',
       'simulatePairingConsumed',
       'simulateMetricsBurst',
+      'exportDiagnostics',
       'resetPreview',
     ]
 
@@ -492,14 +501,32 @@ describe('PreviewDesktopBridge property', () => {
       // outcomes, not part of the reachable lifecycle contract. The independent
       // model pins the state machine while dedicated bridge tests pin the exact
       // reply content; here we verify the log stays bounded and ordered.
-      const { replies: _observedReplies, ...observedState } = observed
+      const {
+        replies: _observedReplies,
+        diagnosticExports: _observedExports,
+        ...observedState
+      } = observed
       void _observedReplies
+      void _observedExports
       expect(observedState).toEqual(expected)
       expect(observed.replies.length).toBeLessThanOrEqual(6)
       for (let index = 1; index < observed.replies.length; index += 1) {
         expect(observed.replies[index - 1].requestId).toBeGreaterThan(
           observed.replies[index].requestId,
         )
+      }
+      // The diagnostic-export receipt log is likewise an append-only preview
+      // surface derived from export commands: it stays bounded and newest
+      // first with decimal sequence and byte strings.
+      expect(observed.diagnosticExports.length).toBeLessThanOrEqual(8)
+      for (let index = 1; index < observed.diagnosticExports.length; index += 1) {
+        expect(BigInt(observed.diagnosticExports[index - 1].sequence)).toBeGreaterThan(
+          BigInt(observed.diagnosticExports[index].sequence),
+        )
+      }
+      for (const receipt of observed.diagnosticExports) {
+        expect(receipt.sequence).toMatch(/^\d+$/)
+        expect(receipt.bytes).toMatch(/^\d+$/)
       }
       for (const reply of observed.replies) {
         expect(typeof reply.detail).toBe('string')

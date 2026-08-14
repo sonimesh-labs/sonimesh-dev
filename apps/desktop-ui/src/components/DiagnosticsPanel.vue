@@ -1,16 +1,20 @@
 <script setup lang="ts">
-import { Activity, Gauge, Layers, RefreshCcwDot, ShieldCheck, Target, Waves } from '@lucide/vue'
+import { Activity, FileDown, Gauge, Layers, RefreshCcwDot, ShieldCheck, Target, Waves } from '@lucide/vue'
 
-import type { StreamMetrics } from '../types'
+import type { DiagnosticExportReceipt, StreamMetrics } from '../types'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   metrics: StreamMetrics
+  diagnosticExports?: DiagnosticExportReceipt[]
   preview?: boolean
   busy?: boolean
-}>()
+}>(), {
+  diagnosticExports: () => [],
+})
 
 const emit = defineEmits<{
   simulateMetricsBurst: []
+  exportDiagnostics: []
 }>()
 
 function formatRate(sampleRateHz: number) {
@@ -31,6 +35,13 @@ function formatPpm(ppm: number) {
 function formatCounter(counter: string) {
   if (!/^\d+$/.test(counter)) return 'Unavailable'
   return counter.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+}
+
+function formatBytes(bytes: string) {
+  if (!/^\d+$/.test(bytes)) return 'Unavailable'
+  const value = Number(bytes)
+  if (value >= 1024) return `${(value / 1024).toFixed(1)} KiB`
+  return `${value} B`
 }
 </script>
 
@@ -122,6 +133,19 @@ function formatCounter(counter: string) {
       <div><Gauge :size="17" aria-hidden="true" /><span>Resampling</span><strong>{{ formatRate(metrics.nominalInputSampleRateHz) }} → {{ formatRate(metrics.nominalOutputSampleRateHz) }}</strong></div>
       <div><RefreshCcwDot :size="17" aria-hidden="true" /><span>Effective ratio</span><strong>{{ formatRatio() }}</strong></div>
       <div><Layers :size="17" aria-hidden="true" /><span>Queue policy</span><strong>Bounded</strong></div>
+    </div>
+
+    <div v-if="preview" class="export-section" aria-label="Preview diagnostic export">
+      <button class="preview-action" :disabled="busy" @click="emit('exportDiagnostics')">
+        <FileDown :size="17" aria-hidden="true" />
+        Export diagnostics
+      </button>
+      <ul v-if="diagnosticExports.length > 0" class="export-receipts">
+        <li v-for="receipt in diagnosticExports" :key="receipt.sequence">
+          <span>Export #{{ receipt.sequence }} · {{ formatBytes(receipt.bytes) }}</span>
+        </li>
+      </ul>
+      <p v-else class="export-empty">No diagnostic exports issued in this preview session.</p>
     </div>
 
     <div v-if="preview" class="simulate-actions diagnostics-simulate" aria-label="Preview metrics simulation">

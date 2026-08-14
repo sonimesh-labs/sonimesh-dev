@@ -7,6 +7,7 @@ import type { DesktopSnapshot } from './types'
 const desktopBridgeMock = vi.hoisted(() => ({
   createPairing: vi.fn(),
   expirePairing: vi.fn(),
+  exportDiagnostics: vi.fn(),
   revokePairing: vi.fn(),
   resetPreview: vi.fn(),
   selectOutput: vi.fn(),
@@ -82,6 +83,7 @@ function receiverSnapshot(session: DesktopSnapshot['session']): DesktopSnapshot 
       playoutDelayMs: 0,
     },
     replies: [],
+    diagnosticExports: [],
     reconnectRemainingMs: null,
     previewAdapter: true,
   }
@@ -208,6 +210,22 @@ describe('useDesktopState', () => {
 
     expect(desktopBridgeMock.simulateMetricsBurst).toHaveBeenCalledTimes(1)
     expect(wrapper.vm.snapshot?.session).toBe('streaming')
+  })
+
+  it('forwards a preview diagnostic export and projects its snapshot', async () => {
+    desktopBridgeMock.snapshot.mockResolvedValueOnce(receiverSnapshot('ready'))
+    const wrapper = mount(StateHarness)
+    await flushPromises()
+
+    desktopBridgeMock.exportDiagnostics.mockResolvedValueOnce({
+      ...receiverSnapshot('ready'),
+      diagnosticExports: [{ sequence: '0', bytes: '16384' }],
+    })
+
+    await wrapper.vm.exportDiagnostics()
+
+    expect(desktopBridgeMock.exportDiagnostics).toHaveBeenCalledTimes(1)
+    expect(wrapper.vm.snapshot?.diagnosticExports).toEqual([{ sequence: '0', bytes: '16384' }])
   })
 
   it('surfaces a rejected bridge command as the control error banner', async () => {

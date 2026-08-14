@@ -1,4 +1,12 @@
-import type { ControlErrorCode, ControlReply, DesktopSnapshot, MetricCounter, OutputDevice, SessionState } from './types'
+import type {
+  ControlErrorCode,
+  ControlReply,
+  DesktopSnapshot,
+  DiagnosticExportReceipt,
+  MetricCounter,
+  OutputDevice,
+  SessionState,
+} from './types'
 
 export interface DesktopBridge {
   snapshot(): Promise<DesktopSnapshot>
@@ -9,6 +17,8 @@ export interface DesktopBridge {
   setGain(gain: number): Promise<DesktopSnapshot>
   /** Publishes the per-stream mute flag. */
   setMuted(muted: boolean): Promise<DesktopSnapshot>
+  /** Issues one bounded diagnostic export and returns the updated snapshot. */
+  exportDiagnostics(): Promise<DesktopSnapshot>
   createPairing(): Promise<DesktopSnapshot>
   expirePairing(): Promise<DesktopSnapshot>
   revokePairing(): Promise<DesktopSnapshot>
@@ -86,6 +96,7 @@ const INITIAL_PREVIEW_SNAPSHOT: DesktopSnapshot = {
     playoutDelayMs: 64,
   },
   replies: [],
+  diagnosticExports: [],
   previewAdapter: true,
 }
 
@@ -96,6 +107,9 @@ export class PreviewDesktopBridge implements DesktopBridge {
   private reconnectArmedAtMillis: number | null = null
 
   private nextRequestId = 1
+
+  /** Monotonic preview export sequence, mirroring the Rust journal's u64 receipt. */
+  private nextExportSequence = 0
 
   private snapshotState: DesktopSnapshot = structuredClone(INITIAL_PREVIEW_SNAPSHOT)
 
@@ -144,6 +158,21 @@ export class PreviewDesktopBridge implements DesktopBridge {
 
   async setMuted(muted: boolean): Promise<DesktopSnapshot> {
     this.snapshotState.muted = muted
+    return this.copy()
+  }
+
+  async exportDiagnostics(): Promise<DesktopSnapshot> {
+    const receipt: DiagnosticExportReceipt = {
+      sequence: String(this.nextExportSequence),
+      bytes: String(PREVIEW_EXPORT_BYTES),
+    }
+    this.nextExportSequence += 1
+    // The ADR 0011 journal keeps the newest receipts under a fixed retention
+    // bound while the sequence itself keeps increasing monotonically.
+    this.snapshotState.diagnosticExports = [receipt, ...this.snapshotState.diagnosticExports].slice(
+      0,
+      MAX_PREVIEW_DIAGNOSTIC_EXPORTS,
+    )
     return this.copy()
   }
 
@@ -302,6 +331,7 @@ export class PreviewDesktopBridge implements DesktopBridge {
     this.pairingExpiresAtMillis = null
     this.reconnectArmedAtMillis = null
     this.nextRequestId = 1
+    this.nextExportSequence = 0
     return this.copy()
   }
 
@@ -382,6 +412,12 @@ const PAIRING_INVITATION_LIFETIME_MILLIS = PAIRING_INVITATION_LIFETIME_SECONDS *
 
 /** Fixed preview reconnect window in milliseconds until a simulated reconnect. */
 const RECONNECT_GRACE_MILLIS = 30_000
+
+/** Fixed preview bundle size mirroring the Rust MAX_EXPORT_BYTES (16 KiB). */
+const PREVIEW_EXPORT_BYTES = 16 * 1024
+
+/** Fixed preview retention bound mirroring the Rust DEFAULT_MAX_RETAINED_EXPORTS. */
+const MAX_PREVIEW_DIAGNOSTIC_EXPORTS = 8
 
 export const desktopBridge: DesktopBridge = new PreviewDesktopBridge()
 

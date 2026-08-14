@@ -8,7 +8,7 @@ import RepliesPanel from './components/RepliesPanel.vue'
 import SessionPanel from './components/SessionPanel.vue'
 import { useDesktopState } from './useDesktopState'
 
-const { busy, createPairing, error, expirePairing, refresh, resetPreview, revokePairing, selectOutput, setGain, setMuted, simulateCommandRejection, simulateConnectionLost, simulateMetricsBurst, simulateOutputLost, simulateOutputRestored, simulatePairingConsumed, simulateReconnected, simulateSessionExpired, snapshot, start, stop } = useDesktopState()
+const { busy, createPairing, error, expirePairing, refresh, resetPreview, revokePairing, selectOutput, setGain, setMuted, simulateCommandRejection, simulateConnectionLost, simulateMetricsBurst, simulateOutputLost, simulateOutputRestored, simulatePairingConsumed, simulateReconnected, simulateSessionExpired, snapshot, start, stop, exportDiagnostics } = useDesktopState()
 </script>
 
 <template>
@@ -91,7 +91,7 @@ const { busy, createPairing, error, expirePairing, refresh, resetPreview, revoke
           </div>
         </div>
         <RepliesPanel :replies="snapshot.replies" :preview="snapshot.previewAdapter" />
-        <DiagnosticsPanel id="diagnostics" :metrics="snapshot.metrics" :preview="snapshot.previewAdapter" :busy="busy" @simulate-metrics-burst="simulateMetricsBurst" />
+        <DiagnosticsPanel id="diagnostics" :metrics="snapshot.metrics" :diagnostic-exports="snapshot.diagnosticExports" :preview="snapshot.previewAdapter" :busy="busy" @simulate-metrics-burst="simulateMetricsBurst" @export-diagnostics="exportDiagnostics" />
       </template>
       <div v-else class="loading-state">
         <span class="loading-orbit" aria-hidden="true"></span>
