@@ -279,6 +279,13 @@ Evidence produced so far:
   policy, fails closed on a full queue and on out-of-range removes, never
   exceeds the fixed slot bound, and keeps render output finite while
   producers carry finite samples;
+- a deterministic membership-controller property walk
+  (`mixer_membership_controller_property.rs`) driving six seeds by 3,000
+  admission, adapted-admission, removal, render, and drain steps and
+  asserting after every drain that the controller slot projection matches
+  the mixer actual slot table exactly (active count, per-slot membership,
+  and pending command count), that fail-closed admission and removal leave
+  both sides unchanged, and that render output stays finite;
 - a libFuzzer target (`control_to_mixer`) feeding arbitrary byte-driven
   lifecycle scripts through the real pairing path and the tokenized
   completion contract and asserting the same cross-domain invariants and
