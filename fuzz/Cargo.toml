@@ -126,6 +126,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "mixer_jitter_scheduler_4s"
+path = "fuzz_targets/mixer_jitter_scheduler_4s.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "control_stream_coordinator"
 path = "fuzz_targets/control_stream_coordinator.rs"
 test = false

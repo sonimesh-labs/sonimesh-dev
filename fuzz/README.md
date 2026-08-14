@@ -54,6 +54,12 @@ production workspace so `libfuzzer-sys` never becomes a shipping dependency.
   scheduler step counters below the observation count, keeps every stream
   active in the fixed-slot mixer, and renders a finite bus while a rejected
   configuration returns a clean scenario error rather than panicking.
+- `mixer_jitter_scheduler_4s` drives the same bounded scenario
+  configurations at the Phase 2 four-stream upper bound: all four sources
+  share one link and the full four-slot mixer table, proving the same
+  consume-every-frame, target-bounds, step-counter, all-streams-active, and
+  finite-bus invariants hold at the upper bound while a rejected
+  configuration returns a clean scenario error rather than panicking.
 - `protected_media_ingress` exercises raw input, valid authenticated arbitrary
   payloads, duplicate replay, undersized output buffers, and deterministic
   single-byte flags-byte and tag tampering plus ciphertext tampering for
@@ -109,6 +115,7 @@ cargo +nightly-2026-07-18 fuzz run drift_controller -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run fixed_slot_mixer -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run mixer_membership -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run mixer_jitter_scheduler -- -max_len=1024
+cargo +nightly-2026-07-18 fuzz run mixer_jitter_scheduler_4s -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run protected_media_ingress -- -max_len=1264
 cargo +nightly-2026-07-18 fuzz run pairing_binding -- -max_len=4096
 cargo +nightly-2026-07-18 fuzz run untrusted_control_stream -- -max_len=65540
