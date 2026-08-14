@@ -214,9 +214,10 @@ the first regression signal in CI.
 
 The buildable harness in `tools/network-simulator` currently provides a virtual
 monotonic clock, bounded in-flight event queue, seeded random and burst loss,
-jitter, duplication, reorder delay, byte-counted bandwidth serialization, and
-queue-capacity pressure. Its audio scenario accepts an explicit complete media
-datagram size bounded by the protocol limit and uses the negotiated 10/20 ms
+jitter, duplication, reorder delay, byte-counted bandwidth serialization,
+queue-capacity pressure, and bounded sender-side socket-buffer backpressure.
+Its audio scenario accepts an explicit complete media datagram size bounded by
+the protocol limit and uses the negotiated 10/20 ms
 frame timing model. A cross-crate
 test exercises bounded packet parsing, reviewed AEAD authentication and replay
 rejection, jitter/PLC decisions, controlled jitter resynchronization, the
@@ -392,8 +393,9 @@ gate deadline, so the four-stream upper bound keeps every slot active and
 the bus finite.
 
 This is evidence for deterministic core behavior and host loopback composition
-only. It does not yet model socket buffers, real TLS/socket reconnection, real
-ASRC/device clocks, operating-system scheduling, NAT rebinding, or physical
+only. It models a bounded sender-side socket buffer as backpressure, but not
+real OS socket-buffer behavior, TLS/socket reconnection, real ASRC/device
+clocks, operating-system scheduling, NAT rebinding, or physical
 network-interface changes, and it is not physical WLAN evidence.
 
 ## Stability and compatibility matrix

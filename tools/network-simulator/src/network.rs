@@ -25,6 +25,9 @@ pub enum SendOutcome {
     DroppedByLoss,
     /// In-flight queue had no capacity for the original packet.
     DroppedByCapacity,
+    /// Sender-side socket buffer had no capacity; the packet was not
+    /// scheduled and the caller applies its own backpressure policy.
+    SendBufferFull,
 }
 
 /// Accumulated deterministic network counters.
@@ -52,6 +55,8 @@ pub struct NetworkStats {
     pub bandwidth_serialized_bytes: u64,
     /// Total sender-side serialization wait before transfer began.
     pub bandwidth_queue_delay_ms: u64,
+    /// Original packets rejected because the sender-side socket buffer was full.
+    pub send_buffer_full_packets: u64,
 }
 
 /// Bounded deterministic virtual packet transport.
@@ -63,6 +68,7 @@ pub struct VirtualNetwork<T> {
     next_transmit_available_ms: u64,
     burst_remaining: u16,
     stats: NetworkStats,
+    send_buffer: Option<SendBufferState>,
 }
 
 impl<T: Clone> VirtualNetwork<T> {
@@ -81,6 +87,7 @@ impl<T: Clone> VirtualNetwork<T> {
             next_transmit_available_ms: 0,
             burst_remaining: 0,
             stats: NetworkStats::default(),
+            send_buffer: profile.send_buffer_bytes.map(SendBufferState::new),
         })
     }
 
@@ -88,6 +95,14 @@ impl<T: Clone> VirtualNetwork<T> {
     pub fn send(&mut self, now_ms: u64, payload: T, payload_bytes: u64) -> SendOutcome {
         let ordinal = self.stats.submitted_packets;
         saturating_increment(&mut self.stats.submitted_packets);
+
+        let bandwidth_bytes_per_second = self.profile.bandwidth_bytes_per_second;
+        if let Some(buffer) = &mut self.send_buffer {
+            if !buffer.try_enqueue(now_ms, payload_bytes, bandwidth_bytes_per_second) {
+                saturating_increment(&mut self.stats.send_buffer_full_packets);
+                return SendOutcome::SendBufferFull;
+            }
+        }
 
         if self.should_drop_burst(ordinal) {
             saturating_increment(&mut self.stats.burst_loss_packets);
@@ -126,6 +141,9 @@ impl<T: Clone> VirtualNetwork<T> {
 
     /// Removes every copy whose delivery time is no later than `now_ms`.
     pub fn drain_ready(&mut self, now_ms: u64) -> Vec<Delivery<T>> {
+        if let Some(buffer) = &mut self.send_buffer {
+            buffer.drain_to(now_ms, self.profile.bandwidth_bytes_per_second);
+        }
         let mut ready = Vec::new();
         while self
             .events
@@ -155,6 +173,15 @@ impl<T: Clone> VirtualNetwork<T> {
     #[must_use]
     pub const fn stats(&self) -> NetworkStats {
         self.stats
+    }
+
+    /// Bytes currently reserved in the bounded sender-side socket buffer.
+    #[must_use]
+    pub fn send_buffer_queued_bytes(&self) -> u64 {
+        match &self.send_buffer {
+            Some(buffer) => buffer.queued_bytes(),
+            None => 0,
+        }
     }
 
     fn should_drop_burst(&mut self, ordinal: u64) -> bool {
@@ -226,6 +253,60 @@ impl<T: Clone> VirtualNetwork<T> {
             });
         self.queued_copies += 1;
         saturating_increment(&mut self.stats.scheduled_copies);
+    }
+}
+
+/// Bounded sender-side socket buffer modeled as a byte credit.
+///
+/// Bytes admitted by [`VirtualNetwork::send`] stay reserved until the virtual
+/// clock advances and the configured link bandwidth drains them; a full buffer
+/// reports backpressure instead of scheduling the packet. A packet rejected by
+/// loss or in-flight capacity keeps its reservation until the next drain, a
+/// conservative approximation of a socket buffer that frees bytes only as the
+/// link transmits.
+struct SendBufferState {
+    capacity_bytes: u64,
+    queued_bytes: u64,
+    last_drain_ms: u64,
+}
+
+impl SendBufferState {
+    fn new(capacity_bytes: u64) -> Self {
+        Self {
+            capacity_bytes,
+            queued_bytes: 0,
+            last_drain_ms: 0,
+        }
+    }
+
+    fn try_enqueue(&mut self, now_ms: u64, bytes: u64, bytes_per_second: u64) -> bool {
+        if bytes_per_second == 0 {
+            // Without a finite link the socket buffer drains instantly and
+            // never reports backpressure.
+            return true;
+        }
+        self.drain_to(now_ms, bytes_per_second);
+        if self.queued_bytes.saturating_add(bytes) > self.capacity_bytes {
+            return false;
+        }
+        self.queued_bytes = self.queued_bytes.saturating_add(bytes);
+        true
+    }
+
+    fn drain_to(&mut self, now_ms: u64, bytes_per_second: u64) {
+        if now_ms <= self.last_drain_ms {
+            return;
+        }
+        let elapsed_ms = now_ms - self.last_drain_ms;
+        self.last_drain_ms = now_ms;
+        let drained = self
+            .queued_bytes
+            .min(bytes_per_second.saturating_mul(elapsed_ms) / 1_000);
+        self.queued_bytes = self.queued_bytes.saturating_sub(drained);
+    }
+
+    fn queued_bytes(&self) -> u64 {
+        self.queued_bytes
     }
 }
 
@@ -425,5 +506,88 @@ mod tests {
         network.profile.burst_length_packets = 1;
         assert_eq!(network.send(0, 3_u32, 1), SendOutcome::DroppedByLoss);
         assert_eq!(network.stats.burst_loss_packets, u64::MAX);
+    }
+
+    #[test]
+    fn default_profile_never_reports_send_buffer_backpressure() {
+        let profile = NetworkProfile::stable(1);
+        let mut network = VirtualNetwork::new(profile).unwrap();
+
+        for _ in 0..16 {
+            assert_ne!(network.send(0, 0_u32, 1_024), SendOutcome::SendBufferFull);
+        }
+        assert_eq!(network.stats().send_buffer_full_packets, 0);
+        assert_eq!(network.send_buffer_queued_bytes(), 0);
+    }
+
+    #[test]
+    fn full_send_buffer_reports_backpressure_without_scheduling() {
+        let mut profile = NetworkProfile::stable(1);
+        profile.send_buffer_bytes = Some(100);
+        profile.bandwidth_bytes_per_second = 1_000; // one byte per millisecond
+        let mut network = VirtualNetwork::new(profile).unwrap();
+
+        assert_eq!(
+            network.send(0, 1_u32, 100),
+            SendOutcome::Scheduled { copies: 1 }
+        );
+        assert_eq!(network.send(0, 2_u32, 1), SendOutcome::SendBufferFull);
+        assert_eq!(network.stats().send_buffer_full_packets, 1);
+        assert_eq!(network.send_buffer_queued_bytes(), 100);
+        assert!(network.drain_ready(0).is_empty());
+        assert_eq!(network.drain_ready(1_000).len(), 1);
+        assert_eq!(network.send_buffer_queued_bytes(), 0);
+    }
+
+    #[test]
+    fn send_buffer_drains_at_link_bandwidth_over_virtual_time() {
+        let mut profile = NetworkProfile::stable(1);
+        profile.send_buffer_bytes = Some(100);
+        profile.bandwidth_bytes_per_second = 1_000; // one byte per millisecond
+        let mut network = VirtualNetwork::new(profile).unwrap();
+
+        assert_eq!(
+            network.send(0, 1_u32, 100),
+            SendOutcome::Scheduled { copies: 1 }
+        );
+        assert_eq!(network.send(0, 2_u32, 1), SendOutcome::SendBufferFull);
+
+        // 50 ms later the link drained 50 reserved bytes, so 51 bytes still
+        // exceed the one-hundred-byte buffer.
+        assert_eq!(network.send(50, 3_u32, 51), SendOutcome::SendBufferFull);
+        // After 100 ms the reservation is fully drained and 100 bytes fit.
+        assert_eq!(
+            network.send(100, 4_u32, 100),
+            SendOutcome::Scheduled { copies: 1 }
+        );
+    }
+
+    #[test]
+    fn unshaped_link_never_backpressures_the_send_buffer() {
+        let mut profile = NetworkProfile::stable(1);
+        profile.send_buffer_bytes = Some(100);
+        profile.bandwidth_bytes_per_second = 0;
+        let mut network = VirtualNetwork::new(profile).unwrap();
+
+        for _ in 0..16 {
+            assert_ne!(network.send(0, 0_u32, 100), SendOutcome::SendBufferFull);
+        }
+        assert_eq!(network.stats().send_buffer_full_packets, 0);
+    }
+
+    #[test]
+    fn send_buffer_full_counter_saturates_instead_of_wrapping() {
+        let mut profile = NetworkProfile::stable(1);
+        profile.send_buffer_bytes = Some(1);
+        profile.bandwidth_bytes_per_second = 1;
+        let mut network = VirtualNetwork::new(profile).unwrap();
+        network.stats.send_buffer_full_packets = u64::MAX - 1;
+
+        assert_eq!(
+            network.send(0, 1_u32, 1),
+            SendOutcome::Scheduled { copies: 1 }
+        );
+        assert_eq!(network.send(0, 2_u32, 1), SendOutcome::SendBufferFull);
+        assert_eq!(network.stats().send_buffer_full_packets, u64::MAX);
     }
 }

@@ -6,6 +6,8 @@ pub const MAX_IN_FLIGHT_PACKETS: usize = 4_096;
 pub const MAX_NETWORK_DELAY_MS: u64 = 60_000;
 /// Hard bound on one virtual-link bandwidth configuration.
 pub const MAX_BANDWIDTH_BYTES_PER_SECOND: u64 = 1_000_000_000;
+/// Hard bound on one sender-side socket-buffer configuration.
+pub const MAX_SEND_BUFFER_BYTES: u64 = 64 * 1024 * 1024;
 
 /// Deterministic network impairment configuration.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -24,6 +26,9 @@ pub struct NetworkProfile {
     pub reorder_delay_ms: u64,
     /// Serial link bandwidth in bytes per second; zero disables shaping.
     pub bandwidth_bytes_per_second: u64,
+    /// Sender-side socket buffer bound in bytes; `None` disables the model
+    /// so the sender never reports backpressure.
+    pub send_buffer_bytes: Option<u64>,
     /// Start one non-overlapping burst every N submitted packets; zero disables bursts.
     pub burst_interval_packets: u32,
     /// Consecutive packets dropped in each configured non-overlapping burst.
@@ -46,6 +51,7 @@ impl NetworkProfile {
             jitter_ms: 5,
             reorder_delay_ms: 30,
             bandwidth_bytes_per_second: 0,
+            send_buffer_bytes: None,
             burst_interval_packets: 0,
             burst_length_packets: 0,
             max_in_flight_packets: 256,
@@ -86,6 +92,14 @@ impl NetworkProfile {
         if u32::from(self.burst_length_packets) > self.burst_interval_packets {
             return Err(ProfileError::BurstLengthExceedsInterval);
         }
+        if let Some(bytes) = self.send_buffer_bytes {
+            if bytes == 0 {
+                return Err(ProfileError::ZeroSendBuffer);
+            }
+            if bytes > MAX_SEND_BUFFER_BYTES {
+                return Err(ProfileError::SendBufferTooLarge);
+            }
+        }
         Ok(())
     }
 }
@@ -113,6 +127,10 @@ pub enum ProfileError {
     BurstLengthExceedsInterval,
     /// Link bandwidth exceeds [`MAX_BANDWIDTH_BYTES_PER_SECOND`].
     BandwidthTooLarge,
+    /// Sender-side socket buffer must hold at least one byte.
+    ZeroSendBuffer,
+    /// Sender-side socket buffer exceeds [`MAX_SEND_BUFFER_BYTES`].
+    SendBufferTooLarge,
 }
 
 impl fmt::Display for ProfileError {
@@ -135,6 +153,12 @@ impl fmt::Display for ProfileError {
             }
             Self::BandwidthTooLarge => {
                 formatter.write_str("virtual-network bandwidth exceeds the explicit hard bound")
+            }
+            Self::ZeroSendBuffer => {
+                formatter.write_str("virtual-network send buffer must hold at least one byte")
+            }
+            Self::SendBufferTooLarge => {
+                formatter.write_str("virtual-network send buffer exceeds the explicit hard bound")
             }
         }
     }
@@ -223,5 +247,41 @@ mod tests {
             "virtual-network bandwidth exceeds the explicit hard bound"
         );
         assert!(Error::source(&ProfileError::InvalidPercentage).is_none());
+    }
+
+    #[test]
+    fn rejects_a_zero_send_buffer() {
+        let mut profile = NetworkProfile::stable(1);
+        profile.send_buffer_bytes = Some(0);
+
+        assert_eq!(profile.validate(), Err(ProfileError::ZeroSendBuffer));
+    }
+
+    #[test]
+    fn rejects_an_unbounded_send_buffer_configuration() {
+        let mut profile = NetworkProfile::stable(1);
+        profile.send_buffer_bytes = Some(MAX_SEND_BUFFER_BYTES + 1);
+
+        assert_eq!(profile.validate(), Err(ProfileError::SendBufferTooLarge));
+    }
+
+    #[test]
+    fn accepts_a_bounded_send_buffer() {
+        let mut profile = NetworkProfile::stable(1);
+        profile.send_buffer_bytes = Some(1_024);
+
+        assert_eq!(profile.validate(), Ok(()));
+    }
+
+    #[test]
+    fn send_buffer_errors_have_descriptive_stable_messages() {
+        assert_eq!(
+            ProfileError::ZeroSendBuffer.to_string(),
+            "virtual-network send buffer must hold at least one byte"
+        );
+        assert_eq!(
+            ProfileError::SendBufferTooLarge.to_string(),
+            "virtual-network send buffer exceeds the explicit hard bound"
+        );
     }
 }

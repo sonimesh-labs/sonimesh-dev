@@ -68,7 +68,7 @@ pub use opus_experiment::{
     simulate_opus_experiment, simulate_opus_worker_experiment,
 };
 pub use profile::{
-    MAX_BANDWIDTH_BYTES_PER_SECOND, MAX_IN_FLIGHT_PACKETS, MAX_NETWORK_DELAY_MS, NetworkProfile,
-    ProfileError,
+    MAX_BANDWIDTH_BYTES_PER_SECOND, MAX_IN_FLIGHT_PACKETS, MAX_NETWORK_DELAY_MS,
+    MAX_SEND_BUFFER_BYTES, NetworkProfile, ProfileError,
 };
 pub use scenario::{ScenarioConfig, ScenarioError, SimulationReport, simulate};

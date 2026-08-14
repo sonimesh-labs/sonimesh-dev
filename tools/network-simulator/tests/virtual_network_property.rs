@@ -89,6 +89,9 @@ struct NetworkModel {
     bandwidth_serialized_bytes: u64,
     bandwidth_queue_delay_ms: u64,
     next_transmit_available_ms: u64,
+    send_buffer_full: u64,
+    send_buffer_queued: u64,
+    send_buffer_last_drain_ms: u64,
 }
 
 impl NetworkModel {
@@ -101,6 +104,32 @@ impl NetworkModel {
     ) {
         let ordinal = self.submitted;
         self.submitted = self.submitted.saturating_add(1);
+
+        let send_buffer_full = match profile.send_buffer_bytes {
+            Some(capacity) if profile.bandwidth_bytes_per_second > 0 => {
+                self.sb_drain(now_ms, profile);
+                let full = self.send_buffer_queued.saturating_add(payload_bytes) > capacity;
+                if full {
+                    self.send_buffer_full = self.send_buffer_full.saturating_add(1);
+                } else {
+                    self.send_buffer_queued = self.send_buffer_queued.saturating_add(payload_bytes);
+                }
+                full
+            }
+            _ => false,
+        };
+        match outcome {
+            SendOutcome::SendBufferFull => {
+                assert!(
+                    send_buffer_full,
+                    "model must predict SendBufferFull exactly"
+                );
+            }
+            _ => assert!(
+                !send_buffer_full,
+                "model must predict admission when bytes fit"
+            ),
+        }
 
         match outcome {
             SendOutcome::DroppedByLoss => {
@@ -130,6 +159,7 @@ impl NetworkModel {
                     }
                 }
             }
+            SendOutcome::SendBufferFull => {}
         }
     }
 
@@ -145,10 +175,28 @@ impl NetworkModel {
         self.next_transmit_available_ms = transmit_start.saturating_add(transfer);
     }
 
-    fn on_drain(&mut self, delivered: usize) {
+    fn on_drain(&mut self, now_ms: u64, delivered: usize, profile: &NetworkProfile) {
+        if profile.send_buffer_bytes.is_some() {
+            self.sb_drain(now_ms, profile);
+        }
         self.delivered_copies = self
             .delivered_copies
             .saturating_add(u64::try_from(delivered).expect("drain length stays tiny"));
+    }
+
+    fn sb_drain(&mut self, now_ms: u64, profile: &NetworkProfile) {
+        if now_ms <= self.send_buffer_last_drain_ms {
+            return;
+        }
+        let elapsed_ms = now_ms - self.send_buffer_last_drain_ms;
+        self.send_buffer_last_drain_ms = now_ms;
+        let drained = self.send_buffer_queued.min(
+            profile
+                .bandwidth_bytes_per_second
+                .saturating_mul(elapsed_ms)
+                / 1_000,
+        );
+        self.send_buffer_queued = self.send_buffer_queued.saturating_sub(drained);
     }
 }
 
@@ -230,6 +278,7 @@ impl WalkCoverage {
     const DUPLICATE_DROP: u8 = 1 << 3;
     const ORIGINAL_DROP: u8 = 1 << 4;
     const SHAPED: u8 = 1 << 5;
+    const SEND_BUFFER_FULL: u8 = 1 << 6;
 
     fn mark(&mut self, flag: u8) {
         self.0 |= flag;
@@ -296,6 +345,20 @@ fn curated_profiles() -> Vec<NetworkProfile> {
     pinned.max_in_flight_packets = 1;
     profiles.push(pinned);
 
+    // A bounded sender-side socket buffer on a finite link, so the walk
+    // reports backpressure when the buffer cannot admit the next packet.
+    let mut buffered = NetworkProfile::stable(0x4E47_0000_2026_0006);
+    buffered.loss_percent = 10;
+    buffered.duplicate_percent = 50;
+    buffered.reorder_percent = 25;
+    buffered.base_delay_ms = 5;
+    buffered.jitter_ms = 10;
+    buffered.reorder_delay_ms = 20;
+    buffered.bandwidth_bytes_per_second = 1_000;
+    buffered.send_buffer_bytes = Some(256);
+    buffered.max_in_flight_packets = 16;
+    profiles.push(buffered);
+
     profiles
 }
 
@@ -309,6 +372,9 @@ fn random_profile(rng: &mut XorShift64) -> NetworkProfile {
     profile.reorder_delay_ms = rng.next_u64(201);
     if rng.next_usize(4) != 0 {
         profile.bandwidth_bytes_per_second = 100 + rng.next_u64(10_000);
+    }
+    if rng.next_usize(3) == 0 {
+        profile.send_buffer_bytes = Some(1 + rng.next_u64(4_096));
     }
     if rng.next_usize(3) != 0 {
         let interval = 2 + rng.next_u32() % 49;
@@ -373,6 +439,7 @@ fn check_invariants(network: &VirtualNetwork<u64>, model: &NetworkModel, profile
         .burst_loss_packets
         .saturating_add(stats.random_loss_packets)
         .saturating_add(model.original_capacity_drops)
+        .saturating_add(stats.send_buffer_full_packets)
         .saturating_add(
             stats
                 .scheduled_copies
@@ -381,6 +448,16 @@ fn check_invariants(network: &VirtualNetwork<u64>, model: &NetworkModel, profile
     assert_eq!(
         stats.submitted_packets, accounted,
         "submission conservation across all outcomes"
+    );
+
+    assert_eq!(
+        stats.send_buffer_full_packets, model.send_buffer_full,
+        "send-buffer backpressure accounting"
+    );
+    assert_eq!(
+        network.send_buffer_queued_bytes(),
+        model.send_buffer_queued,
+        "send-buffer queued bytes track the model"
     );
 
     if profile.duplicate_percent == 100 {
@@ -420,7 +497,7 @@ fn drain_and_check(
     now_ms: u64,
 ) {
     let delivered = network.drain_ready(now_ms);
-    model.on_drain(delivered.len());
+    model.on_drain(now_ms, delivered.len(), profile);
     for delivery in &delivered {
         tracker.check_delivery(delivery, now_ms);
     }
@@ -468,6 +545,7 @@ fn run_walk(
                 }
             }
             SendOutcome::DroppedByCapacity => observed.mark(WalkCoverage::ORIGINAL_DROP),
+            SendOutcome::SendBufferFull => observed.mark(WalkCoverage::SEND_BUFFER_FULL),
             SendOutcome::Scheduled { copies } => {
                 tracker.register(id, now_ms, copies);
                 if copies == 2 {
@@ -538,6 +616,10 @@ fn randomized_send_drain_walks_match_an_independent_network_model() {
     assert!(
         observed.covered(WalkCoverage::SHAPED),
         "walk must exercise finite-link shaping"
+    );
+    assert!(
+        observed.covered(WalkCoverage::SEND_BUFFER_FULL),
+        "walk must exercise sender-side send-buffer backpressure"
     );
 }
 
