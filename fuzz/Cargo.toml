@@ -260,3 +260,9 @@ path = "fuzz_targets/udp_receiver_pipeline.rs"
 test = false
 doc = false
 bench = false
+[[bin]]
+name = "mixer_membership_controller"
+path = "fuzz_targets/mixer_membership_controller.rs"
+test = false
+doc = false
+bench = false
