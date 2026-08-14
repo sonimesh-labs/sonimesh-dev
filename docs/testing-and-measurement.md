@@ -221,7 +221,12 @@ and reconnection returns to ready with no dangling pending command, so the same
 start is admitted as a fresh action. A rotation accepted before an output fault
 is rejected after the fault and rolls the mixer back to the previous identity,
 so output recovery re-admits exactly the identity the coordinator still tracks
-and a fresh rotation can be accepted again.
+and a fresh rotation can be accepted again. A stop commits in the control
+domain before the mixer removes the stream, because a removal cannot be rolled
+back without the stream's decode pipeline: a stop accepted before an output
+fault or a connection loss is rejected with both domains unchanged, the stream
+keeps playing inside the reconnect grace window, and recovery re-admits the
+same identity the coordinator still tracks.
 
 A separate deterministic suite feeds the ADR 0016 adaptive jitter target
 from virtual-link arrival jitter and the encoded-frame water level for one
