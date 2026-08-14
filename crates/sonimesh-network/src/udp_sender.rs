@@ -110,12 +110,22 @@ impl UdpMediaSender {
         if payload.len() > MAX_MEDIA_DATAGRAM_LEN {
             return Err(UdpSendError::DatagramTooLarge);
         }
-        match self.socket.send_to(payload, peer) {
-            Ok(_) => Ok(true),
-            Err(error) if error.kind() == io::ErrorKind::WouldBlock => Ok(false),
-            Err(error) if is_datagram_too_large(&error) => Err(UdpSendError::DatagramTooLarge),
-            Err(error) => Err(UdpSendError::Io(error)),
-        }
+        classify_send_result(self.socket.send_to(payload, peer))
+    }
+}
+
+/// Maps one operating-system send result to the bounded public outcome.
+///
+/// A full non-blocking send buffer reports `Ok(false)` as backpressure without
+/// an error, so the caller applies its own drop or pacing policy. Datagrams the
+/// operating system rejects as too large map to the protocol bound instead of a
+/// raw I/O error.
+fn classify_send_result(result: io::Result<usize>) -> Result<bool, UdpSendError> {
+    match result {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == io::ErrorKind::WouldBlock => Ok(false),
+        Err(error) if is_datagram_too_large(&error) => Err(UdpSendError::DatagramTooLarge),
+        Err(error) => Err(UdpSendError::Io(error)),
     }
 }
 
@@ -127,7 +137,7 @@ fn is_datagram_too_large(error: &io::Error) -> bool {
 mod tests {
     use std::io;
 
-    use super::{UdpMediaSender, UdpSendError};
+    use super::{UdpMediaSender, UdpSendError, classify_send_result};
 
     #[test]
     fn io_failure_debug_omits_the_free_form_error_message() {
@@ -161,5 +171,41 @@ mod tests {
             sender.send_to("127.0.0.1:9".parse().unwrap(), &oversized),
             Err(UdpSendError::DatagramTooLarge)
         ));
+    }
+
+    #[test]
+    fn successful_send_reports_handed_to_the_operating_system() {
+        assert!(matches!(classify_send_result(Ok(1_200)), Ok(true)));
+    }
+
+    #[test]
+    fn full_send_buffer_reports_backpressure_without_an_error() {
+        let error = io::Error::new(io::ErrorKind::WouldBlock, "send buffer is full");
+
+        assert!(matches!(classify_send_result(Err(error)), Ok(false)));
+    }
+
+    #[test]
+    fn datagram_too_large_os_errors_map_to_the_bounded_variant() {
+        for raw_os_error in [40, 90, 10040] {
+            let error = io::Error::from_raw_os_error(raw_os_error);
+
+            assert!(matches!(
+                classify_send_result(Err(error)),
+                Err(UdpSendError::DatagramTooLarge)
+            ));
+        }
+    }
+
+    #[test]
+    fn unrelated_os_error_maps_to_the_io_variant_and_preserves_the_kind() {
+        let error = io::Error::new(io::ErrorKind::PermissionDenied, "firewall dropped the send");
+
+        match classify_send_result(Err(error)) {
+            Err(UdpSendError::Io(error)) => {
+                assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+            }
+            other => panic!("expected an I/O error, got {other:?}"),
+        }
     }
 }

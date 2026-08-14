@@ -256,15 +256,10 @@ impl MediaSessionSender {
             .seal(flags, sample_timestamp, plaintext)
             .map_err(map_seal_error)?;
         let sequence = packet.header.sequence;
-        match self.transport.send_to(self.peer, &packet.datagram) {
-            Ok(true) => Ok(MediaSessionSendOutcome::Sent { sequence }),
-            Ok(false) => Ok(MediaSessionSendOutcome::BufferFull { sequence }),
-            Err(UdpSendError::DatagramTooLarge) => {
-                // The sealer only produces bounded datagrams; fail closed.
-                Err(MediaSessionSendError::PayloadTooLarge)
-            }
-            Err(UdpSendError::Io(error)) => Err(MediaSessionSendError::Io(error)),
-        }
+        classify_send_outcome(
+            self.transport.send_to(self.peer, &packet.datagram),
+            sequence,
+        )
     }
 
     /// Rotates this session to a strictly newer authenticated media epoch.
@@ -329,6 +324,24 @@ fn map_seal_error(error: MediaCryptoError) -> MediaSessionSendError {
     }
 }
 
+/// Maps one bounded transport send result to the session-level send outcome.
+///
+/// The sealer already consumed `sequence` before the transport result existed,
+/// so a full send buffer still reports the consumed sequence and the receiver
+/// observes a gap rather than a retried frame. The sealer only produces bounded
+/// datagrams, so an impossible oversized transport result fails closed.
+fn classify_send_outcome(
+    result: Result<bool, UdpSendError>,
+    sequence: u32,
+) -> Result<MediaSessionSendOutcome, MediaSessionSendError> {
+    match result {
+        Ok(true) => Ok(MediaSessionSendOutcome::Sent { sequence }),
+        Ok(false) => Ok(MediaSessionSendOutcome::BufferFull { sequence }),
+        Err(UdpSendError::DatagramTooLarge) => Err(MediaSessionSendError::PayloadTooLarge),
+        Err(UdpSendError::Io(error)) => Err(MediaSessionSendError::Io(error)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::io;
@@ -338,7 +351,11 @@ mod tests {
         parse_media_packet,
     };
 
-    use super::{MediaSessionSendError, MediaSessionSender, MediaSessionSenderError};
+    use super::{
+        MediaSessionSendError, MediaSessionSendOutcome, MediaSessionSender,
+        MediaSessionSenderError, classify_send_outcome,
+    };
+    use crate::udp_sender::UdpSendError;
 
     fn context(key_epoch: u16) -> MediaKeyContext {
         MediaKeyContext::new(7, 9, key_epoch, MediaDirection::AndroidToDesktop).unwrap()
@@ -492,5 +509,46 @@ mod tests {
             std::thread::yield_now();
         }
         panic!("loopback datagram was not delivered");
+    }
+
+    #[test]
+    fn handed_to_the_os_reports_sent_with_the_consumed_sequence() {
+        assert!(matches!(
+            classify_send_outcome(Ok(true), 41),
+            Ok(MediaSessionSendOutcome::Sent { sequence: 41 })
+        ));
+    }
+
+    #[test]
+    fn full_send_buffer_reports_backpressure_with_the_consumed_sequence() {
+        // The sealer consumed the sequence even though nothing reached the wire,
+        // so the receiver observes a gap and the caller must not retry the frame.
+        assert!(matches!(
+            classify_send_outcome(Ok(false), 41),
+            Ok(MediaSessionSendOutcome::BufferFull { sequence: 41 })
+        ));
+    }
+
+    #[test]
+    fn impossible_oversized_transport_result_fails_closed() {
+        assert!(matches!(
+            classify_send_outcome(Err(UdpSendError::DatagramTooLarge), 41),
+            Err(MediaSessionSendError::PayloadTooLarge)
+        ));
+    }
+
+    #[test]
+    fn os_send_error_maps_to_the_io_variant_and_preserves_the_kind() {
+        let error = UdpSendError::Io(io::Error::new(
+            io::ErrorKind::ConnectionRefused,
+            "peer refused the datagram",
+        ));
+
+        match classify_send_outcome(Err(error), 41) {
+            Err(MediaSessionSendError::Io(error)) => {
+                assert_eq!(error.kind(), io::ErrorKind::ConnectionRefused);
+            }
+            other => panic!("expected an I/O error, got {other:?}"),
+        }
     }
 }
