@@ -966,6 +966,93 @@ fn delayed_stop_after_output_fault_fails_closed_and_keeps_both_domains_in_agreem
 }
 
 #[test]
+fn recover_output_rejected_after_the_lifecycle_moves_on_fails_closed() {
+    let counters = Arc::new(StreamCounters::default());
+    let mut bridge = bridge();
+    let token = authenticated(&mut bridge);
+    let mut pipeline = pipeline_for(1, 1, Arc::clone(&counters));
+
+    start_one(
+        &mut bridge,
+        token,
+        1,
+        1,
+        Some(Arc::clone(&counters)),
+        &mut pipeline,
+    );
+
+    // An output fault retires the membership boundary and the lifecycle.
+    bridge.mixer_mut().output_mut().health = OutputHealth::StreamError;
+    assert_eq!(bridge.monitor().unwrap(), Some(OutputHealth::StreamError));
+    assert_eq!(bridge.state().phase(), SessionPhase::OutputUnavailable);
+    assert!(!bridge.mixer().snapshot().stream_active());
+
+    // The control session expires while the output is still down. The later
+    // recovery cannot recreate the output across that boundary.
+    bridge.expire_control_session();
+    assert_eq!(bridge.state().phase(), SessionPhase::Idle);
+
+    assert!(matches!(
+        bridge.recover_output(),
+        Err(ControlToMixerError::Control(_))
+    ));
+    // Fail closed: the coordinator rejected the restoration, so the mixer
+    // must not have recreated its backend (recreation cannot be rolled back).
+    assert_eq!(bridge.state().phase(), SessionPhase::Idle);
+    assert!(
+        !bridge.mixer().snapshot().stream_active(),
+        "a rejected recovery must leave the mixer output retired"
+    );
+    assert!(!bridge.output_active());
+}
+
+#[test]
+fn recover_output_mixer_failure_rolls_back_the_coordinator() {
+    let counters = Arc::new(StreamCounters::default());
+    let mut bridge = bridge();
+    let token = authenticated(&mut bridge);
+    let mut pipeline = pipeline_for(1, 1, Arc::clone(&counters));
+
+    let request = start_one(
+        &mut bridge,
+        token,
+        1,
+        1,
+        Some(Arc::clone(&counters)),
+        &mut pipeline,
+    );
+
+    bridge.mixer_mut().output_mut().health = OutputHealth::StreamError;
+    assert_eq!(bridge.monitor().unwrap(), Some(OutputHealth::StreamError));
+    assert_eq!(bridge.state().phase(), SessionPhase::OutputUnavailable);
+    assert!(!bridge.mixer().snapshot().stream_active());
+
+    // The backend cannot be recreated. The coordinator already acknowledged
+    // the restoration, so it must roll back to OutputUnavailable and leave the
+    // mixer output retired; both domains agree the output is still down.
+    bridge.mixer_mut().output_mut().fail_start = true;
+    assert!(matches!(
+        bridge.recover_output(),
+        Err(ControlToMixerError::Mixer(_))
+    ));
+    assert_eq!(bridge.state().phase(), SessionPhase::OutputUnavailable);
+    assert!(!bridge.mixer().snapshot().stream_active());
+    assert!(!bridge.output_active());
+
+    // Once the backend can be recreated, the retried recovery succeeds and
+    // re-admits the persisted stream.
+    bridge.mixer_mut().output_mut().fail_start = false;
+    let identities = bridge.recover_output().unwrap();
+    assert_eq!(identities, vec![request.identity]);
+    assert_eq!(bridge.state().phase(), SessionPhase::Streaming);
+    assert!(bridge.output_active());
+    bridge
+        .recover_stream::<_, BLOCK>(request.identity, &mut pipeline)
+        .unwrap();
+    assert_eq!(bridge.mixer().stream_count(), 1);
+}
+
+#[test]
 fn export_snapshot_before_start_omits_format_and_streams() {
     let bridge = bridge();
     let mut metrics = Vec::new();

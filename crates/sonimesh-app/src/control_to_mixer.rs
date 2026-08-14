@@ -495,18 +495,39 @@ where
     /// The coordinator returns to `Streaming`; the caller must re-admit each
     /// returned identity through [`Self::recover_stream`].
     ///
+    /// The coordinator acknowledges the restoration before the mixer recreates
+    /// its backend, because recreation cannot be rolled back: a rejected
+    /// restoration must fail closed with both domains unchanged. When the
+    /// mixer cannot recreate the backend after the coordinator committed, the
+    /// coordinator is rolled back to `OutputUnavailable` so both domains keep
+    /// agreeing that the output is still down and recovery can be retried.
+    ///
     /// # Errors
     ///
-    /// Returns a control or mixer error when recreation fails or the lifecycle
-    /// cannot acknowledge the restored output.
+    /// Returns a control error without changing either domain when the
+    /// lifecycle cannot acknowledge the restored output, or a mixer error with
+    /// the coordinator rolled back to `OutputUnavailable` when recreation
+    /// fails.
     pub fn recover_output(&mut self) -> Result<Vec<MediaStreamIdentity>, ControlToMixerError> {
-        let identities = self
-            .mixer
-            .recover_output()
-            .map_err(ControlToMixerError::Mixer)?;
         self.coordinator
             .acknowledge_platform_event(SessionEvent::OutputRestored)
             .map_err(ControlToMixerError::Control)?;
+        let identities = match self
+            .mixer
+            .recover_output()
+            .map_err(ControlToMixerError::Mixer)
+        {
+            Ok(identities) => identities,
+            Err(error) => {
+                // The coordinator already returned to Streaming. Roll it back
+                // to OutputUnavailable (valid from Streaming) so both domains
+                // agree the output is not restored yet.
+                let _ = self
+                    .coordinator
+                    .acknowledge_platform_event(SessionEvent::OutputLost);
+                return Err(error);
+            }
+        };
         self.output_active = true;
         Ok(identities)
     }
