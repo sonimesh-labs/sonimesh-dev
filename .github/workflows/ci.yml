@@ -133,6 +133,7 @@ jobs:
           cargo +nightly-2026-07-18 fuzz run channel_mapper -- -runs=512 -max_len=1024 -timeout=5
           cargo +nightly-2026-07-18 fuzz run peak_limiter -- -runs=512 -max_len=1024 -timeout=5
           cargo +nightly-2026-07-18 fuzz run drift_controller -- -runs=512 -max_len=1024 -timeout=5
+          cargo +nightly-2026-07-18 fuzz run drift_scenario -- -runs=512 -max_len=1024 -timeout=5
           cargo +nightly-2026-07-18 fuzz run fixed_slot_mixer -- -runs=512 -max_len=1024 -timeout=5
           cargo +nightly-2026-07-18 fuzz run mixer_membership -- -runs=512 -max_len=1024 -timeout=5
           cargo +nightly-2026-07-18 fuzz run mixer_jitter_scheduler -- -runs=512 -max_len=1024 -timeout=5

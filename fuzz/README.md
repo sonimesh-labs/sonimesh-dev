@@ -36,6 +36,12 @@ production workspace so `libfuzzer-sys` never becomes a shipping dependency.
   occupancy snapshots into the bounded per-stream drift controller, proving
   adversarial occupancy cannot panic the controller, exceed the ratio or slew
   caps, or survive a hard resync with stale history.
+- `drift_scenario` drives arbitrary bounded scenario configurations through
+  the integerized occupancy model, proving an accepted configuration keeps
+  every occupancy observation within the bounded PCM queue, keeps the final
+  requested ratio within the configured cap, keeps each hard resync exactly
+  one low- or high-side reset, and stays deterministic while arbitrary raw
+  scenario fields return a clean error or satisfy the same invariants.
 - `fixed_slot_mixer` drives arbitrary insert/remove/render/push/gain scripts
   through the preallocated realtime slot table, proving membership churn cannot
   panic the mixer, bypass the fixed slot bound, or leave render output
@@ -120,6 +126,7 @@ cargo +nightly-2026-07-18 fuzz run nominal_resampler -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run channel_mapper -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run peak_limiter -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run drift_controller -- -max_len=1024
+cargo +nightly-2026-07-18 fuzz run drift_scenario -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run fixed_slot_mixer -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run mixer_membership -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run mixer_jitter_scheduler -- -max_len=1024

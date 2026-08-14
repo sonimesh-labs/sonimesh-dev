@@ -105,6 +105,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "drift_scenario"
+path = "fuzz_targets/drift_scenario.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "fixed_slot_mixer"
 path = "fuzz_targets/fixed_slot_mixer.rs"
 test = false

@@ -183,7 +183,13 @@ test exercises bounded packet parsing, reviewed AEAD authentication and replay
 rejection, jitter/PLC decisions, controlled jitter resynchronization, the
 non-realtime decode worker, and realtime PCM transfer. An independent integerized
 occupancy model exercises bounded drift controller decisions and stream-local
-hard-resynchronization requests. A separate deterministic case drops a valid
+hard-resynchronization requests; a seeded property walk
+(`drift_scenario_property.rs`) and a `drift_scenario` fuzz target drive random
+tick counts, source rates, initial occupancies, and controller parameters and
+assert every accepted report stays deterministic, keeps every occupancy
+observation within the bounded PCM queue, keeps the final requested ratio
+within the configured cap, and keeps each hard resync exactly one low- or
+high-side reset. A separate deterministic case drops a valid
 control envelope while an independent authenticated media path still reaches PCM.
 
 A deterministic virtual-endpoint test now applies the shared network-domain
