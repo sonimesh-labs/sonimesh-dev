@@ -348,6 +348,13 @@ Evidence produced so far:
   format exist exactly while the stream is active, that a fault is
   reported at most once and retires both, and that recovery reuses the
   last successful selection;
+- a libFuzzer target (`mixer_output_controller`) feeding arbitrary byte-driven
+  start, monitor, recover, stop, health, and fail-start scripts through the
+  real mixer output controller and asserting after every step the same
+  independent-model invariants as the seeded walk: the membership handle and
+  the output format exist exactly while the stream is active, a fault is
+  reported at most once and retires both, and recovery reuses the last
+  successful selection;
 
 Still open before Phase 2 can claim multi-source streaming: the roadmap's 24-hour
 soak and hardware callback timing on actual WASAPI devices.
