@@ -217,6 +217,181 @@ fn authenticated_pipeline_stays_bounded_under_impairment() {
 }
 
 #[test]
+fn jitter_only_reorder_is_accounted_without_network_reorder() {
+    // Symmetric jitter (delay = base +/- jitter) can admit a later frame
+    // before an earlier one even when no packet receives the configured
+    // reorder delay: the protected pipeline counts the out-of-order
+    // admission at its jitter buffer while the network reports zero reorder
+    // packets, and every frame still renders in sequence without PLC.
+    let mut profile = NetworkProfile::stable(0x1234_2026);
+    profile.loss_percent = 0;
+    profile.duplicate_percent = 0;
+    profile.reorder_percent = 0;
+    profile.reorder_delay_ms = 0;
+    profile.base_delay_ms = 5;
+    profile.jitter_ms = 25;
+    let mut network = VirtualNetwork::new(profile).unwrap();
+    let secret = SessionSecret::new([0xA5; 32]);
+    let context = context();
+    let mut sealer = MediaSealer::new(&secret, context).unwrap();
+    let mut ingress = ProtectedMediaIngress::new(&secret, context).unwrap();
+    let (pcm_producer, mut pcm_consumer) = realtime_pcm_queue::<1>(4).unwrap();
+    let mut worker = StreamDecodeWorker::<LabDecoder, 16, 8, 1>::new(LabDecoder, pcm_producer, 0);
+    let mut plaintext = [0_u8; 8];
+    let mut next_send = 0_u32;
+    let mut next_playout = 0_u32;
+    let mut reordered_admissions = 0_u32;
+    let mut rejected = 0_u32;
+    let mut plc_frames = 0_u32;
+    let mut rendered = 0_u32;
+    let end_ms = TARGET_MS + u64::from(FRAMES - 1) * FRAME_MS + 100;
+
+    for now_ms in 0..=end_ms {
+        if next_send < FRAMES && now_ms == u64::from(next_send) * FRAME_MS {
+            let datagram = media_datagram(&mut sealer, next_send);
+            let payload_bytes = u64::try_from(datagram.len()).unwrap_or(u64::MAX);
+            network.send(now_ms, datagram, payload_bytes);
+            next_send += 1;
+        }
+
+        for delivery in network.drain_ready(now_ms) {
+            match ingress.receive(&delivery.payload, &mut plaintext) {
+                Ok(frame) => {
+                    match worker
+                        .admit(
+                            frame.header.sequence,
+                            frame.header.sample_timestamp,
+                            frame.opus_payload,
+                        )
+                        .unwrap()
+                    {
+                        InsertOutcome::Inserted => {}
+                        InsertOutcome::Reordered => reordered_admissions += 1,
+                        InsertOutcome::Resynchronized { .. } => {
+                            panic!("jitter-only profile must not resynchronize")
+                        }
+                        InsertOutcome::Duplicate | InsertOutcome::Late => rejected += 1,
+                        InsertOutcome::SequenceExhausted => {
+                            panic!("test sequence range must not exhaust")
+                        }
+                        InsertOutcome::Disabled => panic!("test jitter buffer must be enabled"),
+                    }
+                }
+                Err(IngressError::Replay(_)) => panic!("no duplicates are configured"),
+                Err(error) => panic!("every admitted datagram must authenticate: {error:?}"),
+            }
+        }
+
+        if next_playout < FRAMES && now_ms == TARGET_MS + u64::from(next_playout) * FRAME_MS {
+            plc_frames += u32::from(decode_and_render(
+                &mut worker,
+                &mut pcm_consumer,
+                next_playout,
+            ));
+            rendered += 1;
+            next_playout += 1;
+        }
+    }
+
+    assert_eq!(
+        (next_send, rendered, rejected, plc_frames),
+        (FRAMES, FRAMES, 0, 0)
+    );
+    assert_eq!(network.stats().reordered_packets, 0);
+    assert_eq!(network.stats().duplicate_copies, 0);
+    assert!(
+        reordered_admissions > 0,
+        "symmetric jitter alone must reorder arrivals at the jitter buffer"
+    );
+}
+
+#[test]
+fn late_arrivals_are_rejected_without_double_decode() {
+    // A tight target buffer with symmetric jitter makes some frames arrive
+    // behind their playout slot: the slot renders PLC and the arrival is
+    // rejected as late, never decoded a second time. Nothing is lost or
+    // duplicated, so every missed slot's frame arrives exactly once
+    // afterward: the late-rejection count equals the PLC count.
+    let mut profile = NetworkProfile::stable(0xF00D_2026);
+    profile.loss_percent = 0;
+    profile.duplicate_percent = 0;
+    profile.reorder_percent = 0;
+    profile.reorder_delay_ms = 0;
+    profile.base_delay_ms = 30;
+    profile.jitter_ms = 25;
+    let target_ms = 40_u64;
+    let mut network = VirtualNetwork::new(profile).unwrap();
+    let secret = SessionSecret::new([0xA5; 32]);
+    let context = context();
+    let mut sealer = MediaSealer::new(&secret, context).unwrap();
+    let mut ingress = ProtectedMediaIngress::new(&secret, context).unwrap();
+    let (pcm_producer, mut pcm_consumer) = realtime_pcm_queue::<1>(4).unwrap();
+    let mut worker = StreamDecodeWorker::<LabDecoder, 16, 8, 1>::new(LabDecoder, pcm_producer, 0);
+    let mut plaintext = [0_u8; 8];
+    let mut next_send = 0_u32;
+    let mut next_playout = 0_u32;
+    let mut rejected = 0_u32;
+    let mut plc_frames = 0_u32;
+    let mut rendered = 0_u32;
+    let end_ms = target_ms + u64::from(FRAMES - 1) * FRAME_MS + 100;
+
+    for now_ms in 0..=end_ms {
+        if next_send < FRAMES && now_ms == u64::from(next_send) * FRAME_MS {
+            let datagram = media_datagram(&mut sealer, next_send);
+            let payload_bytes = u64::try_from(datagram.len()).unwrap_or(u64::MAX);
+            network.send(now_ms, datagram, payload_bytes);
+            next_send += 1;
+        }
+
+        for delivery in network.drain_ready(now_ms) {
+            match ingress.receive(&delivery.payload, &mut plaintext) {
+                Ok(frame) => {
+                    match worker
+                        .admit(
+                            frame.header.sequence,
+                            frame.header.sample_timestamp,
+                            frame.opus_payload,
+                        )
+                        .unwrap()
+                    {
+                        InsertOutcome::Inserted | InsertOutcome::Reordered => {}
+                        InsertOutcome::Resynchronized { .. } => {
+                            panic!("tight-buffer profile must not resynchronize")
+                        }
+                        InsertOutcome::Duplicate | InsertOutcome::Late => rejected += 1,
+                        InsertOutcome::SequenceExhausted => {
+                            panic!("test sequence range must not exhaust")
+                        }
+                        InsertOutcome::Disabled => panic!("test jitter buffer must be enabled"),
+                    }
+                }
+                Err(IngressError::Replay(_)) => panic!("no duplicates are configured"),
+                Err(error) => panic!("every admitted datagram must authenticate: {error:?}"),
+            }
+        }
+
+        if next_playout < FRAMES && now_ms == target_ms + u64::from(next_playout) * FRAME_MS {
+            plc_frames += u32::from(decode_and_render(
+                &mut worker,
+                &mut pcm_consumer,
+                next_playout,
+            ));
+            rendered += 1;
+            next_playout += 1;
+        }
+    }
+
+    assert_eq!((next_send, rendered), (FRAMES, FRAMES));
+    assert!(plc_frames > 0, "a tight target buffer must produce PLC");
+    assert_eq!(
+        rejected, plc_frames,
+        "no loss or duplication: every missed slot's frame arrives once and is rejected late"
+    );
+    assert_eq!(network.stats().random_loss_packets, 0);
+    assert_eq!(network.stats().duplicate_copies, 0);
+    assert_eq!(network.stats().reordered_packets, 0);
+}
+#[test]
 fn control_loss_does_not_block_an_independent_authenticated_media_path() {
     let mut control_profile = NetworkProfile::stable(0x0C01_1055);
     control_profile.loss_percent = 100;
