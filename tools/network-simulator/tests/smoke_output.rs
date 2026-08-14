@@ -17,6 +17,7 @@ const FRAMES: u64 = 500;
 /// Ordered smoke section headers; pinning the order documents the suite.
 const HEADERS: &[&str] = &[
     "SoniMesh deterministic virtual-network profiles",
+    "SoniMesh shaped finite-link and sender-side socket-buffer profile",
     "SoniMesh codec-neutral Opus experiment suite",
     "SoniMesh codec-neutral mock decode-worker suite",
     "SoniMesh multi-stream shared-link suite",
@@ -164,6 +165,47 @@ fn smoke_output_is_deterministic_and_reports_consistent_accounting() {
             "no late arrivals: every lost frame conceals once: {line}"
         );
     }
+
+    // Shaped profile: the finite link plus a bounded sender-side socket
+    // buffer exercises backpressure on the CI smoke gate, and every admitted
+    // frame is either serialized or concealed.
+    let shaped: Vec<&str> = lines
+        .iter()
+        .copied()
+        .filter(|line| line.starts_with("shaped "))
+        .collect();
+    assert_eq!(shaped.len(), 1, "one shaped profile line is printed");
+    let shaped_line = shaped[0];
+    let parsed = fields(shaped_line);
+    let sent = number(&parsed, "sent");
+    let full = number(&parsed, "full");
+    let scheduled = number(&parsed, "scheduled");
+    let queued = number(&parsed, "queued_bytes");
+    let serialized = number(&parsed, "serialized_bytes");
+    assert_eq!(sent, 200, "{shaped_line}");
+    assert_eq!(
+        number(&parsed, "decoded") + number(&parsed, "plc"),
+        sent,
+        "{shaped_line}"
+    );
+    assert!(
+        full > 0,
+        "the shaped profile must exercise backpressure: {shaped_line}"
+    );
+    assert_eq!(
+        full + scheduled,
+        sent,
+        "no loss or duplication: every submission is admitted or backpressured: {shaped_line}"
+    );
+    assert_eq!(
+        queued, 0,
+        "the final snapshot drains the bounded socket buffer: {shaped_line}"
+    );
+    assert_eq!(
+        serialized,
+        scheduled * 256,
+        "serialized bytes equal one 256-byte datagram per scheduled copy: {shaped_line}"
+    );
 
     // Opus experiment suite: every case still accounts all 500 frames, and a
     // case with no network loss conceals nothing.

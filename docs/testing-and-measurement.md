@@ -228,7 +228,8 @@ late/duplicate arrival relations. A smoke-output regression test
 (`smoke_output.rs`) pins what the CI smoke gate actually prints: the seeded
 runner is byte-for-byte deterministic, every data line parses into
 `key=value` fields, and the report sections satisfy their cross-field
-accounting invariants. A cross-crate
+accounting invariants, including a shaped finite-link profile with a bounded
+sender-side socket buffer that exercises backpressure end to end. A cross-crate
 test exercises bounded packet parsing, reviewed AEAD authentication and replay
 rejection, jitter/PLC decisions, controlled jitter resynchronization, the
 non-realtime decode worker, and realtime PCM transfer. An independent integerized

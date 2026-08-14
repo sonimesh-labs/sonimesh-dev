@@ -43,6 +43,8 @@ fn main() {
         );
     }
 
+    run_shaped_profile();
+
     println!("SoniMesh codec-neutral Opus experiment suite");
     for case_ in opus_experiment_cases() {
         let report =
@@ -121,6 +123,33 @@ fn main() {
     run_jitter_target_suite();
     run_multi_stream_jitter_target_suite();
     run_jitter_scheduler_suite();
+}
+
+fn run_shaped_profile() {
+    println!("SoniMesh shaped finite-link and sender-side socket-buffer profile");
+    let mut shaped = NetworkProfile::stable(0x51DB_2026);
+    shaped.loss_percent = 0;
+    shaped.duplicate_percent = 0;
+    shaped.reorder_percent = 0;
+    shaped.bandwidth_bytes_per_second = 6_400; // one 256-byte datagram per 40 ms
+    shaped.send_buffer_bytes = Some(256);
+    let report = simulate(ScenarioConfig {
+        frames: 200,
+        media_datagram_bytes: 256,
+        network: shaped,
+        ..ScenarioConfig::default()
+    })
+    .expect("built-in shaped profile is valid");
+    println!(
+        "shaped sent={} full={} queued_bytes={} scheduled={} serialized_bytes={} decoded={} plc={}",
+        report.network.submitted_packets,
+        report.network.send_buffer_full_packets,
+        report.network.send_buffer_queued_bytes,
+        report.network.scheduled_copies,
+        report.network.bandwidth_serialized_bytes,
+        report.playout_frames,
+        report.plc_frames,
+    );
 }
 
 fn run_multi_stream_suite() {
