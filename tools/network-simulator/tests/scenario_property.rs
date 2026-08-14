@@ -6,7 +6,9 @@
 //! PLC, the network-level submission conservation, jitter-buffer duplicates
 //! never exceeding network duplicate copies, and — when nothing is dropped or
 //! duplicated — every missed slot's frame arriving exactly once afterward and
-//! being counted late. A second walk adds a finite serial link and sender-side
+//! being counted late, and — because the first walk configures no serial
+//! link and no socket buffer — zero bandwidth shaping and zero sender-side
+//! backpressure. A second walk adds a finite serial link and sender-side
 //! socket buffer, cross-checking sender backpressure against an independent
 //! byte-credit model and pinning the serialization and submission accounting.
 
@@ -83,6 +85,24 @@ fn scenario_walk_preserves_cross_layer_invariants() {
         assert_eq!(
             first.resynchronizations, 0,
             "bounded occupancy never forces a jitter reset"
+        );
+        // The walk configures no serial link and no sender-side socket buffer,
+        // so the report must show zero shaping and zero backpressure.
+        assert_eq!(
+            first.network.bandwidth_shaped_copies, 0,
+            "unshaped walk must not serialize any copy"
+        );
+        assert_eq!(
+            first.network.bandwidth_serialized_bytes, 0,
+            "unshaped walk must not place bytes on a link"
+        );
+        assert_eq!(
+            first.network.send_buffer_full_packets, 0,
+            "no socket buffer means no backpressure"
+        );
+        assert_eq!(
+            first.network.send_buffer_queued_bytes, 0,
+            "no socket buffer means no queued bytes"
         );
         // With no send-buffer and no capacity drops, every submission is
         // either lost or scheduled: scheduled originals equal submitted minus
@@ -290,6 +310,10 @@ fn shaped_walk_preserves_sender_side_and_conservation_invariants() {
                 first.network.send_buffer_full_packets, 0,
                 "no finite link or no socket buffer means no backpressure"
             );
+            assert_eq!(
+                first.network.send_buffer_queued_bytes, 0,
+                "no finite link or no socket buffer means no queued bytes"
+            );
         } else {
             let capacity = config.network.send_buffer_bytes.expect("checked Some");
             let mut model = SendBufferCreditModel::new(capacity);
@@ -318,6 +342,10 @@ fn shaped_walk_preserves_sender_side_and_conservation_invariants() {
             assert_eq!(
                 model.queued_bytes, first.network.send_buffer_queued_bytes,
                 "independent byte-credit model reproduces the final sender-side queued bytes"
+            );
+            assert!(
+                first.network.send_buffer_queued_bytes <= capacity,
+                "sender-side queued bytes never exceed the configured socket-buffer capacity"
             );
         }
 
