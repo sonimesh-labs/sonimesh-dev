@@ -5,8 +5,8 @@ use sonimesh_network_simulator::{
     DEFAULT_MIXER_CONTROLLER_PCM_BLOCK, DEFAULT_MIXER_CONTROLLER_SLOTS,
     DEFAULT_MIXER_JITTER_PCM_BLOCK, DEFAULT_MIXER_JITTER_SLOTS, DEFAULT_MIXER_MEMBERSHIP_PCM_BLOCK,
     DEFAULT_MIXER_MEMBERSHIP_SLOTS, DriftScenarioConfig, JitterSchedulerScenarioConfig,
-    JitterTargetScenarioConfig, MixerControllerScenarioConfig, MixerJitterGainScript,
-    MixerJitterSchedulerScenarioConfig, MixerMembershipScenarioConfig,
+    JitterTargetScenarioConfig, MixerControllerGainScript, MixerControllerScenarioConfig,
+    MixerJitterGainScript, MixerJitterSchedulerScenarioConfig, MixerMembershipScenarioConfig,
     MultiStreamJitterTargetScenarioConfig, MultiStreamScenarioConfig, NetworkProfile,
     ScenarioConfig, opus_experiment_cases, simulate, simulate_control_reconnect, simulate_drift,
     simulate_jitter_scheduler, simulate_jitter_target, simulate_mixer_controller_membership,
@@ -177,11 +177,25 @@ fn run_mixer_controller_membership_suite() {
     >(MixerControllerScenarioConfig {
         frames: 200,
         network,
+        // Muting every stream mid-session proves the all-muted bus goes
+        // exactly silent once the bounded ramp converges, then stream 0
+        // unmutes to prove per-source control does not stall the others.
+        gain_scripts: [
+            MixerControllerGainScript {
+                mute_at_frame: Some(150),
+                unmute_at_frame: Some(180),
+                ..MixerControllerGainScript::default()
+            },
+            MixerControllerGainScript {
+                mute_at_frame: Some(150),
+                ..MixerControllerGainScript::default()
+            },
+        ],
         ..MixerControllerScenarioConfig::default()
     })
     .expect("built-in mixer controller membership profile is valid");
     println!(
-        "mixer_controller_membership streams=2 slots={} submitted={} burst_loss={} active={} projected={} inserts={} removes={} renders={} projection_matched={} underflows={} finite={}",
+        "mixer_controller_membership streams=2 slots={} submitted={} burst_loss={} active={} projected={} inserts={} removes={} renders={} projection_matched={} underflows={} stream0_plc_ratio={} stream1_plc_ratio={} muted0={} muted1={} silent_ticks={} finite={}",
         report.mixer.slots,
         report.network.submitted_packets,
         report.network.burst_loss_packets,
@@ -192,6 +206,11 @@ fn run_mixer_controller_membership_suite() {
         report.mixer.renders,
         report.mixer.projection_matched,
         report.mixer.slot_underflows.iter().sum::<u64>(),
+        report.streams[0].quality.plc_ratio_milli,
+        report.streams[1].quality.plc_ratio_milli,
+        report.streams[0].muted,
+        report.streams[1].muted,
+        report.mixer.all_muted_silent_ticks,
         report.mixer.output_finite,
     );
 }

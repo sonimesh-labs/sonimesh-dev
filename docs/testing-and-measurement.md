@@ -277,7 +277,22 @@ mid-session remove/re-admit exercises churn. After every render the report
 checks that the controller projection matches the mixer's actual slot table
 exactly (active count, per-slot membership, and pending commands), so the
 cross-domain invariant is shown to hold under shared-link loss and churn
-while a starved slot never blocks the other slots.
+while a starved slot never blocks the other slots. Bounded per-source gain
+and mute scripts are applied through each admitted slot's real
+`GainControlHandle`, which the scenario retains and clones into every
+admission: a muted stream keeps consuming frames and the report asserts the
+bus is exactly silent once every muted slot has rendered its bounded gain
+ramp — the ramp advances only as the slot renders queued content, so a
+starved slot may resume it without breaking the invariant — a gain event
+publishes its target without stalling membership, and a target published
+before the churn survives the remove/re-admit. The report also carries
+bounded per-source quality ratios (PLC, late, reorder, duplicate,
+PCM-underflow, and discontinuity in milli-units) derived exactly from the
+raw counters, and unit and property coverage assert every ratio stays
+within its bound while a clean link reports zero concealment. The scenario
+is exercised at both ends of the Phase 2 stream range (two and four
+independent sources) with the same churn profile, so the cross-domain
+invariant keeps every admitted slot active and the bus finite.
 
 A deterministic combined jitter-scheduler and mixer scenario
 (`mixer_jitter_scheduler_scenario.rs`) ties ADR 0016 to that same fixed-slot
