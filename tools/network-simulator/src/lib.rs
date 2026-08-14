@@ -5,6 +5,7 @@ mod control_scenario;
 mod drift_scenario;
 mod jitter_scheduler_scenario;
 mod jitter_target_scenario;
+mod mixer_membership_scenario;
 mod multi_stream_jitter_target_scenario;
 mod multi_stream_scenario;
 mod network;
@@ -27,6 +28,11 @@ pub use jitter_scheduler_scenario::{
 pub use jitter_target_scenario::{
     JitterTargetScenarioConfig, JitterTargetScenarioError, JitterTargetSimulationReport,
     simulate_jitter_target,
+};
+pub use mixer_membership_scenario::{
+    DEFAULT_MIXER_MEMBERSHIP_PCM_BLOCK, DEFAULT_MIXER_MEMBERSHIP_SLOTS, MixerMembershipMixerReport,
+    MixerMembershipScenarioConfig, MixerMembershipScenarioError, MixerMembershipSimulationReport,
+    simulate_mixer_membership,
 };
 pub use multi_stream_jitter_target_scenario::{
     MultiStreamJitterTargetScenarioConfig, MultiStreamJitterTargetScenarioError,

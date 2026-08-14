@@ -257,6 +257,17 @@ gating once no frames are in flight, and forces a playout when the gate
 deadline expires, so the Phase 2 scheduler loop has deterministic,
 bounded-latency evidence without a physical latency claim.
 
+A deterministic fixed-slot mixer-membership scenario
+(`mixer_membership_scenario.rs`) now drives the real `CommandDrivenMixer`
+boundary from a multi-stream shared-link run: every stream's playout is
+decoded to a finite PCM block and pushed into its mixer slot, the callback
+renders the bus every tick, and a mid-session remove/reinsert exercises
+membership churn over the shared link. The report carries shared-link
+counters, per-stream jitter/PLC counters, per-slot underflow, refill-limit,
+and discontinuity counters, and the published membership transitions, so a
+slot starved by shared-link loss is shown to go silent without blocking the
+other slots while the bus stays bounded and finite.
+
 This is evidence for deterministic core behavior and host loopback composition
 only. It does not yet model socket buffers, real TLS/socket reconnection, real
 ASRC/device clocks, operating-system scheduling, NAT rebinding, or physical

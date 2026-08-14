@@ -286,6 +286,15 @@ Evidence produced so far:
   the mixer actual slot table exactly (active count, per-slot membership,
   and pending command count), that fail-closed admission and removal leave
   both sides unchanged, and that render output stays finite;
+- a deterministic network-simulator scenario
+  (`mixer_membership_scenario.rs`) driving two source streams over one
+  shared virtual link into a fixed eight-slot `CommandDrivenMixer` with a
+  mid-session remove/reinsert churn, asserting that every stream's playout
+  reaches the mixer, that a slot starved by shared-link loss records PCM
+  underflows while the other slots keep rendering, that membership
+  transitions publish through the bounded queue (three inserts, one
+  remove), that the active slot count returns to the full stream count
+  after the reinsert, and that render output stays bounded and finite;
 - a libFuzzer target (`control_to_mixer`) feeding arbitrary byte-driven
   lifecycle scripts through the real pairing path and the tokenized
   completion contract and asserting the same cross-domain invariants and
