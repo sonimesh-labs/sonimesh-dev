@@ -691,6 +691,37 @@ fn expire_control_session_stops_the_mixer() {
 }
 
 #[test]
+fn session_expiry_keeps_the_consumed_pairing_record_for_audit() {
+    let mut session = SessionState::IDLE;
+    let mut pairing = PairingInvitationController::<1>::new();
+    pairing
+        .begin(&mut session, PairingId::new([47; 16]), 100, 50, 1)
+        .unwrap();
+    assert_eq!(
+        pairing.verify_proof(&mut session, 101, PairingSource::new([53; 16]), || {
+            PairingProofVerification::Verified
+        }),
+        Ok(PairingAttemptOutcome::Paired)
+    );
+    let mut bridge = bridge_with(session);
+    authenticated(&mut bridge);
+
+    bridge.expire_control_session();
+    assert_eq!(bridge.state().phase(), SessionPhase::Idle);
+
+    // The trusted session retired, but the consumed pairing record stays
+    // retained for audit and is projected through the snapshot entry point;
+    // an explicit revoke is what clears it.
+    let snapshot = bridge.desktop_snapshot_at(&mut pairing, 200).unwrap();
+    assert_eq!(snapshot.session(), SessionPhase::Idle);
+    assert_eq!(snapshot.pairing(), PairingSnapshotState::Consumed);
+    assert_eq!(
+        pairing.state(),
+        Some(sonimesh_app::PairingRecordState::Consumed)
+    );
+}
+
+#[test]
 fn export_snapshot_before_start_omits_format_and_streams() {
     let bridge = bridge();
     let mut metrics = Vec::new();
@@ -1296,6 +1327,7 @@ fn snapshot_polling_alone_retires_the_reconnect_window() {
 
     let expired = bridge.desktop_snapshot_at(&mut pairing, 2_200).unwrap();
     assert_eq!(expired.session(), SessionPhase::Idle);
+    assert_eq!(expired.pairing(), PairingSnapshotState::Consumed);
     assert_eq!(expired.reconnect_remaining_ms(), None);
     assert_eq!(bridge.state().phase(), SessionPhase::Idle);
     assert_eq!(
