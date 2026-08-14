@@ -178,10 +178,14 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   set), smoothed jitter, and step counts reach the diagnostic export. The
   product playout scheduler that consumes the target remains Phase 2 work.
 - an independent LibFuzzer workspace for bounded control decoding, media packet
-  parsing, and protected ingress. The ingress target covers arbitrary bytes,
-  valid authenticated arbitrary payloads, replay, output bounds, tampering,
-  and plaintext clearing. Configured finite CI executions are smoke evidence
-  rather than a sustained campaign.
+  parsing, protected ingress, and the bounded diagnostic export journal. The
+  ingress target covers arbitrary bytes, valid authenticated arbitrary
+  payloads, replay, output bounds, tampering, and plaintext clearing; the
+  journal target drives arbitrary record sizes and policy shapes against an
+  independent spec model, proving oversized bundles are rejected before any
+  record and eviction keeps the newest exports within both fixed bounds.
+  Configured finite CI executions are smoke evidence rather than a sustained
+  campaign.
 - a bounded incremental TCP control-frame reader/writer that validates the
   existing length-prefixed Protobuf envelope and retires partial read/write
   state after a framing, semantic, or non-transient socket error, plus

@@ -94,6 +94,14 @@ pending file, recovery resumes the sequence from the newest retained
 file, a shrunk policy evicts oldest files on open, stale pending files
 are removed, and foreign files in the directory are ignored.
 
+A seeded property walk and a byte-driven libFuzzer target
+(`export_retention_journal`) drive the retention journal under
+count-dominant, byte-dominant, and tight bounds against an independent spec
+model that computes the retained set as the longest newest-first suffix,
+asserting the result, retained count, retained bytes, and next sequence stay
+in sync, that oversized bundles are rejected before any record, and that
+eviction keeps the newest exports within both fixed bounds.
+
 ## Rollback plan
 
 Bundle schemas are versioned. A new export field requires an explicit allowlist

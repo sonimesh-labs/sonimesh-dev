@@ -128,6 +128,13 @@ redacted snapshot match an independent state model, that a fault is reported
 at most once and retires the stream, and that recovery reuses the last
 successful selection.
 
+The bounded diagnostic export journal (ADR 0011) has a dedicated target that
+drives arbitrary record sizes and input-selected count and byte bounds,
+comparing the result, retained count, retained bytes, and next sequence
+against an independent spec model and proving oversized bundles are rejected
+before any record and eviction keeps the newest exports within both fixed
+bounds.
+
 `tools/check_fuzz_targets.py` keeps the manifest registration, fuzz README
 inventory and runnable commands, and finite CI smoke list synchronized. Linux
 CI is configured to compile these targets with AddressSanitizer and perform 512
