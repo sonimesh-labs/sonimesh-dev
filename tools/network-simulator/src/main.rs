@@ -31,14 +31,15 @@ fn main() {
         .expect("built-in profiles are valid");
 
         println!(
-            "loss={loss_percent:>2}% sent={} network_lost={} decoded={} plc={} duplicates={} late={} resets={}",
+            "loss={loss_percent:>2}% sent={} network_lost={} decoded={} plc={} duplicates={} late={} resets={} reordered={}",
             report.network.submitted_packets,
             report.network.random_loss_packets + report.network.burst_loss_packets,
             report.playout_frames,
             report.plc_frames,
             report.duplicate_frames,
             report.late_frames,
-            report.resynchronizations
+            report.resynchronizations,
+            report.reordered_arrivals,
         );
     }
 
@@ -50,15 +51,18 @@ fn main() {
             .independent_loss_percent
             .map_or_else(|| "n/a".to_owned(), |percent| format!("{percent}%"));
         println!(
-            "opus={} frame={}ms bitrate={}bps independent_loss={} decoded={} plc={} network_lost={} reordered={}",
+            "opus={} frame={}ms bitrate={}bps independent_loss={} decoded={} plc={} duplicates={} late={} resets={} reordered={} network_lost={}",
             case_.id.label(),
             case_.frame.frame_duration_ms(),
             case_.proposed_bitrate_bps,
             loss_variant,
             report.playout_frames,
             report.plc_frames,
-            report.network.random_loss_packets + report.network.burst_loss_packets,
+            report.duplicate_frames,
+            report.late_frames,
+            report.resynchronizations,
             report.reordered_arrivals,
+            report.network.random_loss_packets + report.network.burst_loss_packets,
         );
     }
 
