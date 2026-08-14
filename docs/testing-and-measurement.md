@@ -205,6 +205,14 @@ session retire to idle at the deadline, without a separate grace observation.
 Reconnecting through the same entry point clears the projected countdown and
 returns the session to ready.
 
+A deterministic recovery scenario now drives a full renegotiation through the
+same bridge entry point: connection loss keeps streams playing inside the armed
+grace window, reconnecting before the deadline retires those streams and stops
+the output, a fresh authenticated control session renegotiates, and a new
+stream restarts and renders. A companion audit scenario retires the trusted
+session on expiry while the consumed pairing record stays retained and is
+projected as such, so the revocation path remains reachable.
+
 A separate deterministic suite feeds the ADR 0016 adaptive jitter target
 from virtual-link arrival jitter and the encoded-frame water level for one
 stream and for two to four streams over one shared link, and a target-gated
