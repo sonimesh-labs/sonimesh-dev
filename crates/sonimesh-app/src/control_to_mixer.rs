@@ -26,8 +26,8 @@ use crate::{
     ControlStreamError, DesktopControlSnapshot, MediaStreamIdentity, MixerAdmissionError,
     MixerStreamSession, MixerStreamSessionError, OutputSelection, OutputSnapshot,
     OutputSnapshotSource, PairingInvitationController, PairingInvitationError,
-    ReceiverPcmProducerInstaller, ReconnectGraceObservation, SessionEvent, SessionPhase,
-    SessionState, StartedMixerStream, StreamStartRequest,
+    ReceiverPcmProducerInstaller, ReconnectGraceError, ReconnectGraceObservation, SessionEvent,
+    SessionPhase, SessionState, StartedMixerStream, StreamStartRequest,
 };
 
 /// Control or mixer failure surfaced by the bridge.
@@ -326,12 +326,23 @@ where
         &mut self,
         now_ms: u64,
     ) -> Result<ReconnectGraceObservation, ControlStreamError> {
-        let observation = self.coordinator.observe_reconnect_grace(now_ms)?;
-        if matches!(observation, ReconnectGraceObservation::Expired) {
+        let observation = self.coordinator.observe_reconnect_grace(now_ms);
+        // The coordinator force-expires the session on a clock regression as
+        // well as on deadline expiry, so the mixer must stop in both cases:
+        // an idle lifecycle with a live stream or output would let the
+        // snapshot contradict the coordinator.
+        let expired = matches!(
+            observation,
+            Ok(ReconnectGraceObservation::Expired)
+                | Err(ControlStreamError::ReconnectGrace(
+                    ReconnectGraceError::TimeRegressed,
+                )),
+        );
+        if expired {
             self.mixer.stop();
             self.output_active = false;
         }
-        Ok(observation)
+        observation
     }
 
     /// Prepares the output, admits one stream, and commits the start.

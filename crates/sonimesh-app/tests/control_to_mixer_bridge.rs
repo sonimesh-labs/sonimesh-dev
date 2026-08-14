@@ -604,6 +604,42 @@ fn connection_loss_keeps_streams_and_reconnect_stops_the_mixer() {
 }
 
 #[test]
+fn grace_clock_regression_force_expires_the_mixer_with_the_session() {
+    let counters = Arc::new(StreamCounters::default());
+    let mut bridge = bridge();
+    let token = authenticated(&mut bridge);
+    let mut pipeline = pipeline_for(1, 1, Arc::clone(&counters));
+
+    start_one(&mut bridge, token, 1, 1, None, &mut pipeline);
+    assert_eq!(bridge.state().phase(), SessionPhase::Streaming);
+    assert_eq!(bridge.mixer().stream_count(), 1);
+    assert!(bridge.output_active());
+
+    // Lose the control connection and arm a grace window.
+    bridge
+        .acknowledge_platform_event(SessionEvent::ConnectionLost)
+        .unwrap();
+    bridge.begin_reconnect_grace(1_000, 5_000).unwrap();
+    assert_eq!(bridge.state().phase(), SessionPhase::Reconnecting);
+    assert_eq!(bridge.mixer().stream_count(), 1);
+    assert!(bridge.output_active());
+
+    // A clock regression force-expires the session in the coordinator, so the
+    // mixer must retire with it: an idle lifecycle with a live stream or
+    // output would let the snapshot contradict the coordinator.
+    assert!(matches!(
+        bridge.observe_reconnect_grace(500),
+        Err(sonimesh_app::ControlStreamError::ReconnectGrace(
+            sonimesh_app::ReconnectGraceError::TimeRegressed
+        ))
+    ));
+    assert_eq!(bridge.state().phase(), SessionPhase::Idle);
+    assert_eq!(bridge.mixer().stream_count(), 0);
+    assert!(!bridge.output_active());
+    assert!(!bridge.mixer().snapshot().stream_active());
+}
+
+#[test]
 fn reconnect_then_renegotiates_and_restarts_the_stream() {
     let counters = Arc::new(StreamCounters::default());
     let mut bridge = bridge();
