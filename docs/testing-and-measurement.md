@@ -213,6 +213,16 @@ stream restarts and renders. A companion audit scenario retires the trusted
 session on expiry while the consumed pairing record stays retained and is
 projected as such, so the revocation path remains reachable.
 
+A deterministic delayed-completion suite now proves the bridge fails closed
+when a platform or lifecycle boundary moves between command acceptance and
+execution. A first-stream start accepted before a connection loss is rejected
+after the loss: the briefly started output and admitted stream are rolled back,
+and reconnection returns to ready with no dangling pending command, so the same
+start is admitted as a fresh action. A rotation accepted before an output fault
+is rejected after the fault and rolls the mixer back to the previous identity,
+so output recovery re-admits exactly the identity the coordinator still tracks
+and a fresh rotation can be accepted again.
+
 A separate deterministic suite feeds the ADR 0016 adaptive jitter target
 from virtual-link arrival jitter and the encoded-frame water level for one
 stream and for two to four streams over one shared link, and a target-gated
