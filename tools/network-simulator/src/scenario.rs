@@ -341,6 +341,55 @@ mod tests {
     }
 
     #[test]
+    fn send_buffer_backpressure_is_accounted_and_concealed() {
+        // A finite link with a sender-side socket buffer that admits every
+        // other 256-byte datagram: rejected frames are counted exactly once
+        // and concealed by PLC while admitted frames still decode in sequence.
+        let mut network = NetworkProfile::stable(0x51DB_2026);
+        network.loss_percent = 0;
+        network.duplicate_percent = 0;
+        network.reorder_percent = 0;
+        network.base_delay_ms = 1;
+        network.jitter_ms = 0;
+        network.reorder_delay_ms = 0;
+        network.bandwidth_bytes_per_second = 6_400; // one datagram per 40 ms
+        network.send_buffer_bytes = Some(256);
+        let config = ScenarioConfig {
+            frames: 200,
+            media_datagram_bytes: 256,
+            network,
+            ..ScenarioConfig::default()
+        };
+
+        let first = simulate(config).unwrap();
+        let second = simulate(config).unwrap();
+
+        assert_eq!(first, second, "scenario stays deterministic");
+        assert!(
+            first.network.send_buffer_full_packets > 0,
+            "bounded sender buffer must report backpressure"
+        );
+        assert_eq!(
+            first.playout_frames + first.plc_frames,
+            config.frames,
+            "every playout slot renders decoded audio or PLC"
+        );
+        assert!(
+            first.plc_frames > 0,
+            "rejected frames are concealed with PLC"
+        );
+        assert_eq!(first.network.random_loss_packets, 0);
+        assert_eq!(first.network.burst_loss_packets, 0);
+        // No loss, duplication, or capacity drops: every submission is either
+        // admitted or rejected by the sender-side socket buffer.
+        assert_eq!(
+            first.network.send_buffer_full_packets + first.network.scheduled_copies,
+            first.network.submitted_packets,
+            "send-buffer backpressure conserves every submission"
+        );
+    }
+
+    #[test]
     fn rejects_unnegotiated_frame_duration() {
         let config = ScenarioConfig {
             frame_duration_ms: 15,
