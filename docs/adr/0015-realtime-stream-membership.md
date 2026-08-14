@@ -309,6 +309,17 @@ Evidence produced so far:
   transitions publish through the bounded queue (three inserts, one
   remove), that the active slot count returns to the full stream count
   after the reinsert, and that render output stays bounded and finite;
+- a deterministic network-simulator property walk
+  (`mixer_membership_property.rs`) driving two seeded runs by 128
+  shared-link configurations and asserting that every accepted report
+  consumes every frame through playout or PLC, submits exactly one packet
+  per stream per frame, keeps both streams active after the mid-session
+  reinsert, publishes two starts plus one reinsert and one remove, and
+  renders a finite bus while identical configs produce identical reports,
+  plus a libFuzzer target (`mixer_membership_scenario`) asserting the same
+  transport, membership, and bounded-bus invariants on byte-driven
+  configurations while rejected configurations return clean scenario
+  errors;
 - a deterministic combined jitter-scheduler and mixer scenario
   (`mixer_jitter_scheduler_scenario.rs`) driving two source streams over one
   shared virtual link through ADR 0016's target-gated playout into the same
