@@ -154,6 +154,14 @@ production workspace so `libfuzzer-sys` never becomes a shipping dependency.
   durations, comparing every decision against an independent deadline model so
   the controller cannot panic, cannot revive a force-expired window, and always
   returns to idle after expiry, regression, reconnect, or cancel.
+- `mixer_membership_controller` drives arbitrary fast-path and adapted
+  admissions, removals, finite producer pushes, bounded gain and mute
+  changes, renders, and drains through the control-domain admission
+  boundary (ADR 0015) and asserts after every drain that the controller
+  projection matches the callback fixed-slot table exactly, that pending
+  commands drain to zero, that fail-closed admission (format mismatch,
+  table full, command queue full) leaves both sides unchanged, and that
+  render output stays finite while producers carry finite samples.
 - `mixer_output_controller` drives arbitrary start, monitor, recover, stop,
   health, and fail-start scripts through the mixer output lifecycle owner
   and compares every result against an independent state model, proving the
@@ -241,6 +249,7 @@ cargo +nightly-2026-07-18 fuzz run replay_window -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run pairing_invitation -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run reconnect_grace -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run mixer_output_controller -- -max_len=1024
+cargo +nightly-2026-07-18 fuzz run mixer_membership_controller -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run receiver_output_controller -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run pcm_render_source -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run receiver_pipeline -- -max_len=1024

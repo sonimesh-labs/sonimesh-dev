@@ -156,6 +156,7 @@ jobs:
           cargo +nightly-2026-07-18 fuzz run pairing_invitation -- -runs=512 -max_len=1024 -timeout=5
           cargo +nightly-2026-07-18 fuzz run reconnect_grace -- -runs=512 -max_len=1024 -timeout=5
           cargo +nightly-2026-07-18 fuzz run mixer_output_controller -- -runs=512 -max_len=1024 -timeout=5
+          cargo +nightly-2026-07-18 fuzz run mixer_membership_controller -- -runs=512 -max_len=1024 -timeout=5
           cargo +nightly-2026-07-18 fuzz run receiver_output_controller -- -runs=512 -max_len=1024 -timeout=5
           cargo +nightly-2026-07-18 fuzz run pcm_render_source -- -runs=512 -max_len=1024 -timeout=5
           cargo +nightly-2026-07-18 fuzz run receiver_pipeline -- -runs=512 -max_len=1024 -timeout=5

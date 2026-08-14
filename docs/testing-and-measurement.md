@@ -128,6 +128,15 @@ redacted snapshot match an independent state model, that a fault is reported
 at most once and retires the stream, and that recovery reuses the last
 successful selection.
 
+A separate target drives the control-domain mixer membership boundary
+(`mixer_membership_controller`): arbitrary fast-path and adapted
+admissions, removals, finite producer pushes, bounded gain and mute
+changes, renders, and drains against the callback fixed-slot mixer,
+asserting after every drain that the controller projection matches the
+real slot table exactly, that pending commands drain to zero, and that
+fail-closed admission (format mismatch, table full, command queue full)
+leaves both sides unchanged.
+
 The bounded diagnostic export journal (ADR 0011) has a dedicated target that
 drives arbitrary record sizes and input-selected count and byte bounds,
 comparing the result, retained count, retained bytes, and next sequence
