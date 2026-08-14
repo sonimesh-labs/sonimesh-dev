@@ -44,6 +44,13 @@ production workspace so `libfuzzer-sys` never becomes a shipping dependency.
   single-byte flags-byte and tag tampering plus ciphertext tampering for
   nonempty payloads. Every rejected path must clear the caller-owned plaintext
   buffer.
+- `pairing_invitation` drives arbitrary begin/observe/verify_proof/expire/revoke
+  scripts through the bounded pairing-invitation owner with adversarial clocks,
+  lifetimes, pairing ids, sources, and per-source attempt limits, proving the
+  lifecycle cannot panic, cannot desynchronize the shared session from the
+  retained record, and invokes the transcript-bound proof verifier exactly when
+  the record admits an attempt (never after expiry, consumption, revocation, or
+  source rate limiting).
 - `pairing_binding` derives public fuzz-only pairing material, exercises both
   local roles on every input, and feeds arbitrary peer-proof lengths into the
   pure TLS-binding helper. It asserts exact opposite-role verification while
@@ -86,6 +93,7 @@ cargo +nightly-2026-07-18 fuzz run untrusted_control_stream -- -max_len=65540
 cargo +nightly-2026-07-18 fuzz run negotiation -- -max_len=66052
 cargo +nightly-2026-07-18 fuzz run control_stream_coordinator -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run replay_window -- -max_len=1024
+cargo +nightly-2026-07-18 fuzz run pairing_invitation -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run stream_decode_worker -- -max_len=64
 ```
 

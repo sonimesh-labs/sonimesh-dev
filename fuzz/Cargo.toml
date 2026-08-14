@@ -121,3 +121,10 @@ path = "fuzz_targets/replay_window.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "pairing_invitation"
+path = "fuzz_targets/pairing_invitation.rs"
+test = false
+doc = false
+bench = false
