@@ -224,7 +224,13 @@ jitter alone and then with a finite serial link and a bounded sender-side
 socket buffer, and asserts determinism, playout-or-PLC accounting,
 submission conservation, serialization and backpressure accounting
 cross-checked against an independent byte-credit model, and the bounded
-late/duplicate arrival relations. A smoke-output regression test
+late/duplicate arrival relations. The scheduler, adaptive-jitter-target,
+mixer-membership, multi-stream, mixer-controller-membership, and
+mixer-jitter-scheduler walks extend the same treatment: each varies the media
+datagram across the protocol range and occasionally configures the finite
+serial link and a bounded sender-side socket buffer, pinning the serialization
+accounting (one datagram per scheduled copy) and the no-link/no-buffer
+backpressure semantics on every report. A smoke-output regression test
 (`smoke_output.rs`) pins what the CI smoke gate actually prints: the seeded
 runner is byte-for-byte deterministic, every data line parses into
 `key=value` fields, and the report sections satisfy their cross-field
