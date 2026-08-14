@@ -80,6 +80,21 @@ keeps each hard resync exactly one low- or high-side reset. Hardware tests
 are still required before selecting gain defaults or making drift or latency
 claims.
 
+A deterministic multi-stream mixer-drift scenario now extends that
+evidence to the Phase 2 source set: `simulate_mixer_drift` in
+`tools/network-simulator` closes one independent integerized occupancy loop
+per stream (two to four streams) with a private controller instance per
+stream, and asserts the per-stream isolation property end to end. A seeded
+property walk (`mixer_drift_scenario_property.rs`) and a
+`mixer_drift_scenario` libFuzzer target drive random per-stream source rates
+and initial occupancies and assert that every stream's occupancy stays within
+the bounded PCM queue, every final ratio stays within the configured cap,
+every hard resync is exactly one low- or high-side reset, every stream's
+report equals the single-stream `simulate_drift` result for that stream's own
+configuration, and a clean no-drift stream never requests a resynchronization
+even while uncorrectable siblings do. Hardware tests are still required before
+selecting gain defaults or making drift or latency claims.
+
 ## Rollback plan
 
 The controller exports a small decision type rather than an ASRC implementation.

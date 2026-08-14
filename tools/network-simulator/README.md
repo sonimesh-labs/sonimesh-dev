@@ -39,6 +39,12 @@ a physical latency claim.
   playouts, and added completion latency as Phase 2 scheduler evidence.
 - `DriftScenarioConfig` closes an integerized PCM-occupancy loop around the
   bounded ppm controller; it is not an ASRC or device-clock emulator.
+- the multi-stream mixer-drift scenario closes one independent
+  integerized PCM-occupancy loop per Phase 2 source stream with its own
+  bounded ppm controller, proving per-stream drift isolation
+  deterministically: each stream's report equals the single-stream loop for
+  that stream's own configuration, and a clean stream never requests a
+  resynchronization while uncorrectable siblings do.
 - the media-pipeline integration test crosses protocol parsing, ChaCha20-
   Poly1305 authentication, replay rejection, jitter/PLC decisions, the bounded
   decode-worker boundary, and the realtime PCM queue. A deterministic stalled

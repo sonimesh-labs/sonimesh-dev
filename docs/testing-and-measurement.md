@@ -189,7 +189,17 @@ tick counts, source rates, initial occupancies, and controller parameters and
 assert every accepted report stays deterministic, keeps every occupancy
 observation within the bounded PCM queue, keeps the final requested ratio
 within the configured cap, and keeps each hard resync exactly one low- or
-high-side reset. A separate deterministic case drops a valid
+high-side reset. A deterministic multi-stream mixer-drift scenario
+(`simulate_mixer_drift`) now extends that loop to two to four independent
+Phase 2 source streams, each with its own bounded controller, and a seeded
+property walk (`mixer_drift_scenario_property.rs`) plus a
+`mixer_drift_scenario` fuzz target assert the per-stream isolation property
+on every report: every stream's occupancy stays within the bounded PCM
+queue, every final ratio stays within the configured cap, every hard resync
+is exactly one low- or high-side reset, every stream's report equals the
+single-stream `simulate_drift` result for that stream's own configuration,
+and a clean no-drift stream never requests a resynchronization while
+uncorrectable siblings do. A separate deterministic case drops a valid
 control envelope while an independent authenticated media path still reaches PCM.
 
 A deterministic virtual-endpoint test now applies the shared network-domain
