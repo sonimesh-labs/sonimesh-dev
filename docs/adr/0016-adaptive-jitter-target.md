@@ -114,8 +114,12 @@ consumption loop in the network simulator: the scheduler waits while fewer
 than the target frames are buffered, drains without gating once no frames
 are in flight, and forces a playout when the gate deadline expires, so the
 controller can gate playout without an unbounded mid-stream stall and every
-configured run completes; the product playout scheduler remains Phase 2
-work.
+configured run completes. A combined multi-stream scenario
+(`mixer_jitter_scheduler_scenario.rs`) now ties that target-gated scheduler
+to the fixed-slot mixer over one shared link and additionally publishes
+bounded per-source gain, mute, and quality evidence
+([ADR 0015](./0015-realtime-stream-membership.md)); the product playout
+scheduler remains Phase 2 work.
 A bounded relative arrival-jitter estimator in `sonimesh-audio`
 (`ArrivalJitter`) measures per-packet inter-arrival deviation from a
 monotonic arrival clock and the sender sample timestamps, so a real packet
