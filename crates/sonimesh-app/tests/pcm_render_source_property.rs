@@ -286,7 +286,7 @@ impl RenderModel {
                             continue;
                         }
                     }
-                    PopModel::Underflow { .. } => {
+                    PopModel::Underflow => {
                         self.underflows += 1;
                         break;
                     }

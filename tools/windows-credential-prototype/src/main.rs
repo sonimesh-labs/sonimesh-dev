@@ -98,7 +98,7 @@ fn write_credential(target: &[u16], blob: &mut [u8]) -> Result<(), Box<dyn std::
         ..Default::default()
     };
     // The target and blob remain valid for the synchronous WinCred call.
-    unsafe { CredWriteW(&credential, 0) }?;
+    unsafe { CredWriteW(std::ptr::addr_of!(credential), 0) }?;
     Ok(())
 }
 
@@ -135,7 +135,14 @@ struct CredentialAllocation {
 impl CredentialAllocation {
     fn read(target: &[u16]) -> Result<Self, std::io::Error> {
         let mut raw = std::ptr::null_mut();
-        match unsafe { CredReadW(PCWSTR(target.as_ptr()), CRED_TYPE_GENERIC, None, &mut raw) } {
+        match unsafe {
+            CredReadW(
+                PCWSTR(target.as_ptr()),
+                CRED_TYPE_GENERIC,
+                None,
+                std::ptr::addr_of_mut!(raw),
+            )
+        } {
             Ok(()) => Ok(Self { raw }),
             Err(_) => Err(last_error()),
         }

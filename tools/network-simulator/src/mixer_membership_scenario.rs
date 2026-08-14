@@ -538,12 +538,7 @@ mod tests {
             "a slot starved by the link must record PCM underflows"
         );
         assert!(
-            report
-                .mixer
-                .slot_underflows
-                .iter()
-                .any(|&underflows| underflows == 0)
-                || report.mixer.active_streams == 2,
+            report.mixer.slot_underflows.contains(&0) || report.mixer.active_streams == 2,
             "one starved slot must not silence the whole bus"
         );
         assert!(report.mixer.output_finite);

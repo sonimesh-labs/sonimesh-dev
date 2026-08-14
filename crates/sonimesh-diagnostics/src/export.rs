@@ -7,6 +7,7 @@
 //! never call this module: building a bundle allocates and serializes.
 
 use core::fmt;
+use core::fmt::Write as _;
 use std::net::SocketAddr;
 
 use crate::{StreamMetricsSnapshot, redact_endpoint};
@@ -489,7 +490,9 @@ fn write_json_string(out: &mut String, value: &str) {
             '\n' => out.push_str("\\n"),
             '\r' => out.push_str("\\r"),
             '\t' => out.push_str("\\t"),
-            c if u32::from(c) < 0x20 => out.push_str(&format!("\\u{:04x}", u32::from(c))),
+            c if u32::from(c) < 0x20 => {
+                let _ = write!(out, "\\u{:04x}", u32::from(c));
+            }
             c => out.push(c),
         }
     }

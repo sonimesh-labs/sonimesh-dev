@@ -117,7 +117,7 @@ fn median_matches_the_linear_interpolation_convention() {
         let expected = if sorted.len() % 2 == 1 {
             sorted[sorted.len() / 2]
         } else {
-            (sorted[sorted.len() / 2 - 1] + sorted[sorted.len() / 2]) / 2.0
+            f64::midpoint(sorted[sorted.len() / 2 - 1], sorted[sorted.len() / 2])
         };
         assert_close(percentile(&sorted, 50.0), expected);
     }
