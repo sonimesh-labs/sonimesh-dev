@@ -222,3 +222,10 @@ path = "fuzz_targets/reconnect_grace.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "mixer_output_controller"
+path = "fuzz_targets/mixer_output_controller.rs"
+test = false
+doc = false
+bench = false
