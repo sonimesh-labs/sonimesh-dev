@@ -470,20 +470,27 @@ where
 
     /// Detects a platform fault and retires the membership boundary.
     ///
-    /// On a fault the coordinator moves to `OutputUnavailable` so
-    /// [`Self::recover_output`] can recreate the source.
+    /// On a fault the mixer stops the output and the coordinator moves to
+    /// `OutputUnavailable` so [`Self::recover_output`] can recreate the
+    /// source.
     ///
     /// # Errors
     ///
     /// Returns a control error when the lifecycle cannot acknowledge the lost
-    /// output from its current state.
+    /// output from its current state (for example during reconnect grace,
+    /// where `OutputLost` is invalid). The bridge output is still marked down
+    /// in that case, because the mixer already stopped the output.
     pub fn monitor(&mut self) -> Result<Option<OutputHealth>, ControlToMixerError> {
         let fault = self.mixer.monitor();
         if let Some(health) = fault {
+            // The mixer stopped the output and retired its membership. Mark
+            // the bridge output down before acknowledging, so the snapshot
+            // never claims an active output even when the lifecycle cannot
+            // represent the fault.
+            self.output_active = false;
             self.coordinator
                 .acknowledge_platform_event(SessionEvent::OutputLost)
                 .map_err(ControlToMixerError::Control)?;
-            self.output_active = false;
             Ok(Some(health))
         } else {
             Ok(None)

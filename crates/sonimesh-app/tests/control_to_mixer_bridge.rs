@@ -1053,6 +1053,55 @@ fn recover_output_mixer_failure_rolls_back_the_coordinator() {
 }
 
 #[test]
+fn fault_during_reconnect_grace_keeps_the_output_honestly_down() {
+    let counters = Arc::new(StreamCounters::default());
+    let mut bridge = bridge();
+    let token = authenticated(&mut bridge);
+    let mut pipeline = pipeline_for(1, 1, Arc::clone(&counters));
+    start_one(
+        &mut bridge,
+        token,
+        1,
+        1,
+        Some(Arc::clone(&counters)),
+        &mut pipeline,
+    );
+    assert!(bridge.output_active());
+
+    // Connection loss arms reconnect grace while the stream keeps playing.
+    bridge
+        .acknowledge_platform_event(SessionEvent::ConnectionLost)
+        .unwrap();
+    assert_eq!(bridge.state().phase(), SessionPhase::Reconnecting);
+
+    // The output faults while the session is still reconnecting. The state
+    // machine cannot represent OutputUnavailable from Reconnecting, so
+    // monitor() surfaces a control error, but the bridge must not keep
+    // claiming an active output after the mixer stopped it.
+    bridge.mixer_mut().output_mut().health = OutputHealth::StreamError;
+    assert!(matches!(
+        bridge.monitor(),
+        Err(ControlToMixerError::Control(_))
+    ));
+    assert!(
+        !bridge.output_active(),
+        "a stopped output must not stay active"
+    );
+    assert!(!bridge.mixer().snapshot().stream_active());
+    assert_eq!(bridge.state().phase(), SessionPhase::Reconnecting);
+
+    // The reconnect resolves to ready, retiring the stream and keeping the
+    // output down; a later monitor sees no new fault.
+    bridge
+        .acknowledge_platform_event(SessionEvent::Reconnected)
+        .unwrap();
+    assert_eq!(bridge.state().phase(), SessionPhase::Ready);
+    assert!(!bridge.output_active());
+    assert_eq!(bridge.mixer().stream_count(), 0);
+    assert_eq!(bridge.monitor().unwrap(), None);
+}
+
+#[test]
 fn export_snapshot_before_start_omits_format_and_streams() {
     let bridge = bridge();
     let mut metrics = Vec::new();
