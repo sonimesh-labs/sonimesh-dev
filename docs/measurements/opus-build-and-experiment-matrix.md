@@ -1,13 +1,13 @@
 # Opus build and experiment matrix
 
-> Status: pre-binding gate and proposed experiment plan; no Opus binding is enabled and no codec-quality result is recorded.
+> Status: pre-binding gate and proposed experiment plan; no Opus binding is enabled and the gate is not closed.
 > Updated: 2026-08-16
 >
 > On 2026-08-16 the reference host built the candidate binding and ran the
 > `tools/opus-codec-prototype` decode/PLC probe (see the dated build record).
-> The binding is still not enabled; Android ABI, quality, sustained
-> CPU/power, sustained coverage-guided fuzzing, and CI reproducibility
-> evidence remain pending.
+> The binding is still not enabled; Android ABI, measured CPU-time
+> utilization, allocation-profile and power, sustained coverage-guided
+> fuzzing, and CI reproducibility evidence remain pending.
 
 This document turns the acceptance conditions in ADR 0009 into reproducible evidence. A passing Rust-only decoder mock, a dependency resolution, or a successful Windows build alone is insufficient to select a codec binding or media policy.
 
@@ -109,12 +109,15 @@ keep the window mean SNR within 35.7-41.3 dB across both shapes, a
 deterministic jitter-wait sweep that records the concealment/drop boundary
 of waiting before declaring a loss, bounded reorder absorption and
 late-drop, steady-state and loss-window quality across two deterministic
-content profiles (single tone and multi-harmonic sum), and per-frame
-encode+decode and decode-only host throughput for both shapes (see the
-dated build record). That is prototype-level
+content profiles (single tone and multi-harmonic sum), per-frame
+encode+decode and decode-only host throughput for both shapes, and a
+sustained 120 s encode+decode pass per shape that reports realtime
+headroom and a wall-clock-derived single-core utilization estimate
+(see the dated build record). That is prototype-level
 evidence only, not a coverage-guided fuzz result, an adaptive
-jitter-target result, or a power or sustained CPU-utilization
-measurement. The Linux CI fuzz job now also runs a finite
+jitter-target result, a measured CPU-time utilization trace, a power
+measurement, or an allocation-profile result. The Linux CI fuzz job
+now also runs a finite
 `native_opus_decode` smoke target that drives arbitrary post-authentication
 bytes through the bundled libopus decoder behind the fixed-capacity decode
 worker; that smoke is a build and regression check, not sustained

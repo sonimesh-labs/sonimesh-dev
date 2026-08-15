@@ -5,11 +5,11 @@
 > burst-length sweep, independent/burst loss-pattern windows, bounded
 > reorder absorption and late-drop, a deterministic jitter-wait sweep,
 > steady-state and loss-window quality across two deterministic content
-> profiles, and per-frame host throughput for both shapes, all with
-> recovery.
-> ADR 0009 remains Provisional: Android ABI packaging, sustained
-> CPU/power, and sustained coverage-guided malformed-payload fuzzing
-> against the native decoder are still pending.
+> profiles, per-frame host throughput, and a sustained encode+decode
+> throughput pass for both shapes, all with recovery.
+> ADR 0009 remains Provisional: Android ABI packaging, allocation-profile
+> and power evidence, and sustained coverage-guided malformed-payload
+> fuzzing against the native decoder are still pending.
 > Updated: 2026-08-16
 
 ## Summary
@@ -33,11 +33,12 @@ late-drop (one slot concealed by PLC while the bounded buffer drops the
 late frame), sweeps deterministic jitter-wait steps that absorb a bounded
 late frame without concealment or drop it when the wait is too short,
 measures deterministic per-frame encode+decode and decode-only host
-throughput for both shapes, and sweeps deterministic malformed payloads
-that must surface as bounded stream-local errors. The PCM block is sized
-to the negotiated
-frame on each
-shape, so PLC synthesizes exactly one frame of concealment per missing frame.
+throughput for both shapes, runs a sustained 120 s encode+decode pass
+per shape that records realtime headroom and a wall-clock-derived
+single-core utilization estimate, and sweeps deterministic malformed
+payloads that must surface as bounded stream-local errors. The PCM block
+is sized to the negotiated frame on each shape, so PLC synthesizes
+exactly one frame of concealment per missing frame.
 
 ## Command
 
@@ -49,9 +50,9 @@ $env:CMAKE_POLICY_VERSION_MINIMUM = '3.5'
 cargo run --release -p opus-codec-prototype
 ~~~
 
-A release build is used so the per-frame throughput lines are meaningful;
-the codec-quality lines are deterministic and identical between debug and
-release builds.
+A release build is used so the per-frame and sustained throughput lines
+are meaningful; the codec-quality lines are deterministic and identical
+between debug and release builds.
 
 ## Observation
 
@@ -136,6 +137,7 @@ opus_10ms_jitter_wait: wait 2 ok (8 frames; 1 concealed snr 40.0 dB; late drop 1
 opus_10ms_jitter_wait: wait 4 ok (8 frames; 0 concealed; late drop 0; decoded mean 39.0 dB)
 opus_10ms_jitter_wait: wait 6 ok (8 frames; 0 concealed; late drop 0; decoded mean 39.0 dB)
 opus_10ms_cpu: encode+decode mean 783.3 us/frame (1277 frames/s); decode-only mean 141.2 us/frame (7084 frames/s)
+opus_10ms_sustained: 120 s of tone audio in 9.87 s wall (12.2x realtime; 822.5 us/frame; ~8.2% of one core estimate)
 opus_20ms_reorder: absorbed ok (6 frames; 0 concealed; mean 41.2 worst 38.9 dB)
 opus_20ms_reorder: late_one ok (1 concealed snr 48.4 dB; late drop 1; decoded mean 40.8 dB)
 opus_20ms_jitter_wait: wait 0 ok (8 frames; 1 concealed snr 48.4 dB; late drop 1; decoded mean 38.9 dB)
@@ -144,6 +146,7 @@ opus_20ms_jitter_wait: wait 2 ok (8 frames; 1 concealed snr 48.4 dB; late drop 1
 opus_20ms_jitter_wait: wait 4 ok (8 frames; 0 concealed; late drop 0; decoded mean 41.4 dB)
 opus_20ms_jitter_wait: wait 6 ok (8 frames; 0 concealed; late drop 0; decoded mean 41.4 dB)
 opus_20ms_cpu: encode+decode mean 1650.1 us/frame (606 frames/s); decode-only mean 282.7 us/frame (3537 frames/s)
+opus_20ms_sustained: 120 s of tone audio in 9.01 s wall (13.3x realtime; 1502.5 us/frame; ~7.5% of one core estimate)
 opus_malformed_payload: rejected
 opus_malformed_sweep: ok (1000 payloads; 642 rejected; 358 accepted-bounded)
 opus_native_build: ok
@@ -238,10 +241,29 @@ encode+decode at 783 us/frame (about 13x realtime) and decode-only at
 dominates the path, and the 20 ms shape costs roughly twice the 10 ms
 shape per frame, consistent with per-sample codec work. These are
 single-host wall-clock numbers from a release build of the probe and
-the bundled libopus; they are not CPU-utilization percentages, do not
+the bundled libopus; they are not measured CPU-time traces, do not
 cover power, and vary by roughly ten percent between runs, but they
 show the bounded worker path keeps up with realtime on this host with
 large headroom even before optimization of the bundled native build.
+
+The sustained pass processes 120 s of tone audio per shape in a single
+long window and reports end-to-end wall time, realtime headroom, and a
+wall-clock-derived single-core utilization estimate (per-frame wall time
+divided by the frame period). On the reference host the 10 ms shape
+processed 120 s of audio in 9.87 s wall (12.2x realtime; 822.5 us/frame;
+about 8.2% of one core) and the 20 ms shape in 9.01 s wall (13.3x
+realtime; 1502.5 us/frame; about 7.5% of one core), each the minimum of
+two sustained passes per invocation and the minimum across three
+invocations. Across those invocations the 10 ms headroom ranged
+10.5x-12.2x and the 20 ms headroom 12.6x-13.3x, the same roughly ten
+percent host spread as the per-frame numbers. The long-window per-frame
+wall time is slightly higher than the short min-of-three passes,
+consistent with boost and thermal variance over a longer window. The
+utilization estimate is an upper bound on one core's busy fraction
+rather than a measured CPU-time trace; both shapes keep more than 10x
+realtime headroom in the sustained window, so the bounded worker path
+keeps up with realtime on this host with large margin. Allocation
+profile, power, and Android ABI evidence remain separate gates.
 
 A sizing detail changed in this revision: the PCM block is now the negotiated
 frame size (960 samples for 10 ms, 1,920 for 20 ms) instead of the reserved
@@ -254,8 +276,10 @@ the 10 ms shape is gone; a production 10 ms stream should size its block to
 
 - reproducible native build on the Android ABIs (`arm64-v8a`, `x86_64`) with
   a pinned NDK;
-- sustained CPU utilization, allocation profile, and power evidence for
-  both frame durations on this host;
+- measured CPU-time utilization, allocation profile, and power evidence
+  for both frame durations on this host (a sustained wall-clock
+  throughput pass with a derived single-core estimate is recorded, but it
+  is not a CPU-time trace);
 - sustained coverage-guided malformed-payload fuzzing against the
   native decoder;
 - physical latency and Android capture claims remain separate tests.
