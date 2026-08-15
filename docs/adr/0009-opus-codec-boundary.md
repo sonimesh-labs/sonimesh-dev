@@ -90,6 +90,13 @@ checks; that record is native-build and basic decode/PLC evidence only and
 does not close the Android, quality, or coverage-guided fuzz gates.
 Physical latency and Android capture claims remain separate tests.
 
+A [deterministic in-band FEC content-class record](../measurements/2026-08-16-windows-opus-inband-fec.md)
+documents that 20 ms in-band FEC recovers a dropped speech-like frame at
+22.3 dB versus 16.3 dB for PLC (+6.0 dB) and adds nothing for a tone
+reference (FEC equals PLC at 33.1 dB). It is codec-level evidence through
+the opus binding directly; the `FrameDecoder` boundary has no FEC flag, the
+10 ms shape cannot carry LBRR redundancy, and FEC remains disabled.
+
 ## Rollback plan
 
 The optional feature remains behind `FrameDecoder`. It can be disabled or

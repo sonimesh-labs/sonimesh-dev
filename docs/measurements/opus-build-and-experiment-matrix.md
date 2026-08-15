@@ -123,6 +123,14 @@ bytes through the bundled libopus decoder behind the fixed-capacity decode
 worker; that smoke is a build and regression check, not sustained
 coverage-guided fuzzing.
 
+On the same date the probe added a deterministic in-band FEC recovery
+comparison by content class: for one dropped 20 ms frame, speech-like content
+recovers at 22.3 dB through in-band FEC versus 16.3 dB through PLC (+6.0 dB),
+while a single-tone reference shows no benefit (FEC equals PLC at 33.1 dB).
+The comparison is codec-level evidence only; FEC stays disabled in every cell
+and the 10 ms shape cannot carry LBRR redundancy (see the
+[in-band FEC content-class record](../measurements/2026-08-16-windows-opus-inband-fec.md)).
+
 ## Codec-neutral media-path regression
 
 The deterministic cross-crate test in
