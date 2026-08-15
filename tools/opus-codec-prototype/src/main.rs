@@ -39,8 +39,9 @@ const HISTORY_FRAMES: usize = 10;
 const PLC_BURST_FRAMES: usize = 5;
 /// Frames admitted and decoded after the burst to confirm stream recovery.
 const RECOVERY_FRAMES: usize = 2;
-/// Burst lengths swept to record PLC degradation and recovery on this host.
-const BURST_LENGTHS: [usize; 6] = [1, 2, 3, 5, 8, 12];
+/// Burst lengths swept to record PLC degradation and recovery on this host,
+/// including sustained lengths beyond 12 frames.
+const BURST_LENGTHS: [usize; 9] = [1, 2, 3, 5, 8, 12, 16, 24, 32];
 /// Frames in one deterministic loss-pattern window per negotiated shape.
 const LOSS_PATTERN_FRAMES: usize = 240;
 /// Deterministic seed shared by both shapes so the same frames drop in each.
