@@ -13,8 +13,9 @@
 //! measures deterministic per-frame encode+decode and decode-only host
 //! throughput for both shapes, compares steady-state and loss-window
 //! quality across two deterministic content profiles (a single tone and a
-//! multi-harmonic sum), and sweeps bounded deterministic malformed
-//! payloads that must surface as
+//! multi-harmonic sum), compares in-band FEC recovery against PLC for a
+//! dropped 20 ms frame across speech-like and tone content, and sweeps
+//! bounded deterministic malformed payloads that must surface as
 //! stream-local errors or bounded decodes. It is not a quality, power,
 //! latency, Android ABI, or coverage-guided fuzz result.
 
@@ -91,6 +92,34 @@ const PLC_BURST_SNR_MIN: f32 = 1.0;
 const PLC_BURST_MEAN_SNR_MIN: f32 = 10.0;
 /// A recovered frame must re-lock to the source at least this SNR.
 const RECOVERY_SNR_MIN: f32 = 0.0;
+
+/// Frame duration probed for in-band FEC recovery; libopus codes LBRR only
+/// when a packet carries more than one frame, so 10 ms packets cannot carry it.
+const FEC_FRAME_MS: u16 = 20;
+/// Source frames encoded in the deterministic in-band FEC recovery probe.
+const FEC_SOURCE_FRAMES: usize = 240;
+/// Frame index dropped to compare in-band FEC recovery against PLC for it.
+const FEC_DROP_FRAME: usize = 120;
+/// Encoder packet-loss percentage that enables LBRR coding in the probe.
+const FEC_PACKET_LOSS_PERCENT: i32 = 10;
+/// Speech-like FEC recovery must beat PLC by at least this many decibels.
+const FEC_SPEECH_GAIN_MIN_DB: f32 = 4.0;
+/// Non-speech FEC recovery must not fall more than this many decibels below PLC.
+const FEC_NON_SPEECH_TOLERANCE_DB: f32 = 2.0;
+/// Glottal pulse rate of the speech-like content profile in hertz.
+const SPEECH_F0_HZ: u32 = 120;
+/// Glottal pulse period in samples at `SPEECH_F0_HZ` and `SAMPLE_RATE_HZ`.
+const SPEECH_PERIOD_SAMPLES: usize = (SAMPLE_RATE_HZ / SPEECH_F0_HZ) as usize;
+/// Maximum glottal pulse length in samples before the next pulse begins.
+const SPEECH_PULSE_MAX_SAMPLES: usize = 120;
+/// Glottal pulse decay time constant in samples.
+const SPEECH_PULSE_DECAY_SAMPLES: f32 = 40.0;
+/// Glottal pulse attack time constant in samples.
+const SPEECH_PULSE_ATTACK_SAMPLES: f32 = 8.0;
+/// Formant resonators (frequency, radius) shaping the speech-like pulse train.
+const SPEECH_FORMANTS: [(f32, f32); 2] = [(500.0, 0.92), (2_200.0, 0.86)];
+/// Syllabic amplitude-modulation rate of the speech-like profile in hertz.
+const SPEECH_AM_RATE_HZ: f32 = 4.0;
 
 /// One deterministic loss pattern probed through the native decoder.
 #[derive(Clone, Copy)]
@@ -1708,6 +1737,216 @@ fn sustained_summary(
     )
 }
 
+/// Content profiles compared by the in-band FEC recovery probe.
+///
+/// The speech-like profile models voiced speech, which libopus's SILK LBRR
+/// layer targets; the tone profile is the non-speech reference expected to
+/// show no FEC benefit.
+#[derive(Clone, Copy)]
+enum FecContent {
+    /// Voiced speech-like profile.
+    Speech,
+    /// Single-tone non-speech reference profile.
+    Tone,
+}
+
+impl FecContent {
+    /// Short stable label used in probe output lines.
+    #[must_use]
+    fn label(self) -> &'static str {
+        match self {
+            Self::Speech => "speech",
+            Self::Tone => "tone",
+        }
+    }
+
+    /// Builds one deterministic stereo block with `samples` interleaved samples.
+    #[must_use]
+    fn content(self, samples: usize) -> Vec<f32> {
+        match self {
+            Self::Speech => speech_like(samples),
+            Self::Tone => tone(samples),
+        }
+    }
+}
+
+/// Runs the deterministic in-band FEC recovery probe.
+///
+/// libopus codes LBRR (low-bitrate redundancy) only when a packet carries
+/// more than one frame, so the probe runs at the 20 ms shape only; 10 ms
+/// packets cannot carry FEC and must rely on PLC. For each content profile it
+/// encodes `FEC_SOURCE_FRAMES` frames with in-band FEC enabled, drops one
+/// deterministic frame, and compares the aligned SNR of that frame recovered
+/// through in-band FEC against the same frame concealed by decoder-side PLC.
+/// This is codec-level evidence, not a `FrameDecoder`-boundary result.
+fn run_fec_probe() -> ProbeResult<Vec<String>> {
+    let frame =
+        OpusFrameConfig::new(SAMPLE_RATE_HZ, 2, FEC_FRAME_MS).map_err(|error| error.to_string())?;
+    let expected_samples = frame.interleaved_samples();
+    let source_samples = FEC_SOURCE_FRAMES * expected_samples;
+    let mut lines = Vec::new();
+    for content in [FecContent::Speech, FecContent::Tone] {
+        let source = content.content(source_samples);
+        let mut encoder = opus::Encoder::new(
+            SAMPLE_RATE_HZ,
+            opus::Channels::Stereo,
+            opus::Application::Audio,
+        )
+        .map_err(|error| error.to_string())?;
+        encoder
+            .set_inband_fec(true)
+            .map_err(|error| error.to_string())?;
+        encoder
+            .set_packet_loss_perc(FEC_PACKET_LOSS_PERCENT)
+            .map_err(|error| error.to_string())?;
+        let (packets, encoded_lens) = encode_fec_frames(&mut encoder, frame, &source)?;
+        let (fec_snr, plc_snr, avg_bytes) =
+            measure_fec_recovery(&packets, &encoded_lens, frame, &source)?;
+        let gain = fec_snr - plc_snr;
+        match content {
+            FecContent::Speech if gain < FEC_SPEECH_GAIN_MIN_DB => {
+                return Err(format!(
+                    "speech FEC gain {gain:.1} dB is below the {FEC_SPEECH_GAIN_MIN_DB:.1} dB gate"
+                ));
+            }
+            FecContent::Tone if gain < -FEC_NON_SPEECH_TOLERANCE_DB => {
+                return Err(format!(
+                    "non-speech FEC {fec_snr:.1} dB is worse than PLC {plc_snr:.1} dB by {gain:.1} dB"
+                ));
+            }
+            FecContent::Speech | FecContent::Tone => {}
+        }
+        lines.push(format!(
+            "opus_20ms_fec: {label} fec {fec_snr:.1} dB plc {plc_snr:.1} dB gain {gain:+.1} dB \
+             (loss {FEC_PACKET_LOSS_PERCENT}% drop {FEC_DROP_FRAME} avg {avg_bytes:.0} B)",
+            label = content.label(),
+        ));
+    }
+    Ok(lines)
+}
+
+/// Encodes `FEC_SOURCE_FRAMES` frames of `source` with in-band FEC enabled.
+///
+/// The encoder must be configured with `set_inband_fec` and
+/// `set_packet_loss_perc` before the first encode so libopus codes LBRR data
+/// into each following packet.
+fn encode_fec_frames(
+    encoder: &mut opus::Encoder,
+    frame: OpusFrameConfig,
+    source: &[f32],
+) -> ProbeResult<(Vec<[u8; MAX_ENCODED_BYTES]>, Vec<usize>)> {
+    let expected_samples = frame.interleaved_samples();
+    let mut packets = vec![[0_u8; MAX_ENCODED_BYTES]; FEC_SOURCE_FRAMES];
+    let mut encoded_lens = vec![0_usize; FEC_SOURCE_FRAMES];
+    for index in 0..FEC_SOURCE_FRAMES {
+        let start = index * expected_samples;
+        encoded_lens[index] = encode_frame(
+            encoder,
+            &source[start..start + expected_samples],
+            &mut packets[index],
+        )?;
+    }
+    Ok((packets, encoded_lens))
+}
+
+/// Decodes one dropped frame through in-band FEC recovery and through
+/// decoder-side PLC, returning both aligned SNRs and the average packet size.
+///
+/// The FEC path uses the canonical one-packet-delay flow from `opus_demo.c`:
+/// the output of iteration `k` is frame `k - 1`; when packet `k - 1` was lost,
+/// frame `k - 1` is decoded from packet `k` with `fec = true`, otherwise
+/// packet `k - 1` is decoded normally with `fec = false`. The final source
+/// frame is held back by that one-packet delay and is not decoded.
+#[allow(clippy::cast_precision_loss)]
+fn measure_fec_recovery(
+    packets: &[[u8; MAX_ENCODED_BYTES]],
+    encoded_lens: &[usize],
+    frame: OpusFrameConfig,
+    source: &[f32],
+) -> ProbeResult<(f32, f32, f64)> {
+    if FEC_DROP_FRAME == 0 {
+        return Err("FEC drop frame must be at least 1".to_owned());
+    }
+    let expected_samples = frame.interleaved_samples();
+    let per_channel_samples = frame.samples_per_channel();
+    let mut block = [0.0_f32; MAX_PCM_SAMPLES_PER_BLOCK];
+    let mut decoder = opus::Decoder::new(SAMPLE_RATE_HZ, opus::Channels::Stereo)
+        .map_err(|error| error.to_string())?;
+    let mut fec_snr = f32::NAN;
+    let mut prev_lost = false;
+    for k in 0..FEC_SOURCE_FRAMES {
+        let lost_here = k == FEC_DROP_FRAME;
+        if k >= 1 {
+            let (payload, fec) = if prev_lost {
+                (&packets[k][..encoded_lens[k]], true)
+            } else {
+                (&packets[k - 1][..encoded_lens[k - 1]], false)
+            };
+            let samples = decoder
+                .decode_float(payload, &mut block, fec)
+                .map_err(|error| error.to_string())?;
+            if samples != per_channel_samples {
+                return Err(format!(
+                    "FEC-path decode produced {samples} samples, expected {per_channel_samples}"
+                ));
+            }
+            if prev_lost {
+                let start = (k - 1) * expected_samples;
+                let (snr, _) = best_aligned_snr(
+                    &source[start..start + expected_samples],
+                    &block[..expected_samples],
+                );
+                if !snr.is_finite() {
+                    return Err("FEC-recovered frame SNR is non-finite".to_owned());
+                }
+                fec_snr = snr;
+            }
+        }
+        prev_lost = lost_here;
+    }
+    if !fec_snr.is_finite() {
+        return Err("FEC probe never decoded the dropped frame".to_owned());
+    }
+
+    let mut plc_decoder = opus::Decoder::new(SAMPLE_RATE_HZ, opus::Channels::Stereo)
+        .map_err(|error| error.to_string())?;
+    let mut plc_snr = f32::NAN;
+    for k in 0..FEC_SOURCE_FRAMES {
+        let samples = if k == FEC_DROP_FRAME {
+            plc_decoder
+                .decode_float(&[], &mut block, false)
+                .map_err(|error| error.to_string())?
+        } else {
+            plc_decoder
+                .decode_float(&packets[k][..encoded_lens[k]], &mut block, false)
+                .map_err(|error| error.to_string())?
+        };
+        if samples != per_channel_samples {
+            return Err(format!(
+                "PLC-path decode produced {samples} samples, expected {per_channel_samples}"
+            ));
+        }
+        if k == FEC_DROP_FRAME {
+            let start = k * expected_samples;
+            let (snr, _) = best_aligned_snr(
+                &source[start..start + expected_samples],
+                &block[..expected_samples],
+            );
+            if !snr.is_finite() {
+                return Err("PLC-concealed frame SNR is non-finite".to_owned());
+            }
+            plc_snr = snr;
+        }
+    }
+    if !plc_snr.is_finite() {
+        return Err("PLC probe never concealed the dropped frame".to_owned());
+    }
+
+    let total_bytes = encoded_lens.iter().copied().sum::<usize>();
+    let avg_bytes = total_bytes as f64 / encoded_lens.len() as f64;
+    Ok((fec_snr, plc_snr, avg_bytes))
+}
+
 /// Returns the signal-to-noise ratio in decibels between `reference` and
 /// `decoded` over the overlapping region, or infinity when either side is
 /// digital silence.
@@ -1834,6 +2073,10 @@ fn run_probe() -> ProbeResult<Vec<String>> {
         lines.push(run_sustained_probe(duration_ms)?);
     }
 
+    // In-band FEC recovery is probed once at the 20 ms shape; libopus codes
+    // LBRR only when a packet carries more than one frame, so 10 ms cannot.
+    lines.extend(run_fec_probe()?);
+
     // A malformed authenticated payload surfaces as a bounded stream-local
     // decoder error and never reaches the PCM queue.
     let mut block = [0.0_f32; MAX_PCM_SAMPLES_PER_BLOCK];
@@ -1935,6 +2178,62 @@ fn tone(samples: usize) -> Vec<f32> {
         .collect()
 }
 
+/// Builds one deterministic stereo speech-like block with `samples` interleaved
+/// samples, scaled to the tone profile's peak amplitude.
+///
+/// A glottal pulse train at `SPEECH_F0_HZ` with exponential decay is shaped
+/// through two bandpass formant resonators and multiplied by a syllabic
+/// amplitude modulation. The generator uses no randomness, so every quality
+/// line derived from it is reproducible across runs.
+#[must_use]
+#[allow(clippy::cast_precision_loss)]
+fn speech_like(samples: usize) -> Vec<f32> {
+    let mut out = vec![0.0_f32; samples];
+    let mut pulse_start = 0_usize;
+    while pulse_start < samples {
+        let mut index = 0_usize;
+        while pulse_start + index < samples && index < SPEECH_PULSE_MAX_SAMPLES {
+            let time = index as f32;
+            out[pulse_start + index] += (-time / SPEECH_PULSE_DECAY_SAMPLES).exp()
+                * (1.0 - (-time / SPEECH_PULSE_ATTACK_SAMPLES).exp());
+            index += 1;
+        }
+        pulse_start += SPEECH_PERIOD_SAMPLES;
+    }
+    for (frequency, radius) in SPEECH_FORMANTS {
+        let omega = 2.0 * std::f32::consts::PI * frequency / SAMPLE_RATE_HZ as f32;
+        let alpha = omega.sin() * (1.0 - radius) / 2.0;
+        let a0 = 1.0 + alpha;
+        let a1 = -2.0 * omega.cos();
+        let a2 = 1.0 - alpha;
+        let feedforward1 = -a1;
+        let feedforward2 = -a2;
+        let mut x1 = 0.0_f32;
+        let mut x2 = 0.0_f32;
+        let mut y1 = 0.0_f32;
+        let mut y2 = 0.0_f32;
+        for sample in &mut out {
+            let input = *sample;
+            let output = (feedforward1 * x1 + feedforward2 * x2 - a1 * y1 - a2 * y2) / a0;
+            x2 = x1;
+            x1 = input;
+            y2 = y1;
+            y1 = output;
+            *sample = output;
+        }
+    }
+    for (index, sample) in out.iter_mut().enumerate() {
+        let time = index as f32 / SAMPLE_RATE_HZ as f32;
+        let am = 0.55 + 0.45 * (2.0 * std::f32::consts::PI * SPEECH_AM_RATE_HZ * time).sin();
+        *sample *= am;
+    }
+    let peak = out
+        .iter()
+        .fold(0.0_f32, |acc, sample| acc.max(sample.abs()));
+    let scale = TONE_AMPLITUDE / peak;
+    out.into_iter().map(|sample| sample * scale).collect()
+}
+
 /// Pops one complete PCM block from the consumer or fails the probe.
 fn assert_popped_pcm<const N: usize>(
     consumer: &mut RealtimePcmConsumer<N>,
@@ -1963,7 +2262,9 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{best_aligned_snr, snr_db, sustained_summary};
+    use super::{
+        TONE_AMPLITUDE, best_aligned_snr, block_rms, snr_db, speech_like, sustained_summary,
+    };
 
     #[test]
     fn snr_db_identical_signals_are_infinite() {
@@ -2048,5 +2349,25 @@ mod tests {
         assert!(line.contains("12.0x realtime"));
         assert!(line.contains("1666.7 us/frame"));
         assert!(line.contains("~8.3% of one core estimate"));
+    }
+
+    #[test]
+    fn speech_like_is_deterministic_and_bounded() {
+        let first = speech_like(4 * 960);
+        let second = speech_like(4 * 960);
+        assert_eq!(first.len(), 4 * 960);
+        assert_eq!(first, second);
+        assert!(first.iter().all(|sample| sample.is_finite()));
+    }
+
+    #[test]
+    fn speech_like_scales_to_tone_peak_with_nonzero_rms() {
+        let block = speech_like(960);
+        let peak = block
+            .iter()
+            .fold(0.0_f32, |acc, sample| acc.max(sample.abs()));
+        assert!((peak - TONE_AMPLITUDE).abs() < 1.0e-3);
+        let rms = block_rms(&block);
+        assert!(rms > 0.0 && rms < TONE_AMPLITUDE);
     }
 }
