@@ -571,6 +571,16 @@ mod tests {
     }
 
     #[test]
+    fn accepts_media_datagrams_at_the_protocol_bound() {
+        let config = MultiStreamJitterTargetScenarioConfig {
+            media_datagram_bytes: u16::try_from(MAX_MEDIA_DATAGRAM_LEN).unwrap(),
+            ..MultiStreamJitterTargetScenarioConfig::default()
+        };
+
+        assert!(simulate_multi_stream_jitter_target::<2>(config).is_ok());
+    }
+
+    #[test]
     fn rejects_invalid_target_configuration() {
         let mismatched_duration = MultiStreamJitterTargetScenarioConfig {
             targets: [balanced_target(10), balanced_target(20)],

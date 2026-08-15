@@ -956,6 +956,16 @@ mod tests {
     }
 
     #[test]
+    fn accepts_media_datagrams_at_the_protocol_bound() {
+        let config = MixerControllerScenarioConfig {
+            media_datagram_bytes: u16::try_from(MAX_MEDIA_DATAGRAM_LEN).unwrap(),
+            ..MixerControllerScenarioConfig::default()
+        };
+
+        assert!(simulate_mixer_controller_membership::<2, SLOTS, PCM_BLOCK>(config).is_ok());
+    }
+
+    #[test]
     fn per_source_mute_makes_the_bus_exactly_silent() {
         let config = MixerControllerScenarioConfig {
             frames: 40,

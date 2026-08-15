@@ -1296,6 +1296,16 @@ mod tests {
     }
 
     #[test]
+    fn accepts_media_datagrams_at_the_protocol_bound() {
+        let config = MixerJitterSchedulerScenarioConfig {
+            media_datagram_bytes: u16::try_from(MAX_MEDIA_DATAGRAM_LEN).unwrap(),
+            ..MixerJitterSchedulerScenarioConfig::default()
+        };
+
+        assert!(simulate_mixer_jitter_scheduler::<2, SLOTS, PCM_BLOCK>(config).is_ok());
+    }
+
+    #[test]
     fn preserved_error_variants_expose_their_causes() {
         let target =
             MixerJitterSchedulerScenarioError::Target(JitterTargetConfigError::ZeroCapacity);

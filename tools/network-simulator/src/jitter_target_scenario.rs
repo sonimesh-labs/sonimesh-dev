@@ -519,6 +519,16 @@ mod tests {
     }
 
     #[test]
+    fn accepts_media_datagrams_at_the_protocol_bound() {
+        let config = JitterTargetScenarioConfig {
+            media_datagram_bytes: u16::try_from(MAX_MEDIA_DATAGRAM_LEN).unwrap(),
+            ..JitterTargetScenarioConfig::default()
+        };
+
+        assert!(simulate_jitter_target(config).is_ok());
+    }
+
+    #[test]
     fn preserved_error_variants_expose_their_causes() {
         let target = JitterTargetScenarioError::Target(JitterTargetConfigError::ZeroCapacity);
         assert!(
