@@ -11,7 +11,9 @@
 //! behavior, sweeps deterministic jitter-wait steps that absorb a bounded
 //! late frame without concealment or drop it when the wait is too short,
 //! measures deterministic per-frame encode+decode and decode-only host
-//! throughput for both shapes, and sweeps bounded deterministic malformed
+//! throughput for both shapes, compares steady-state and loss-window
+//! quality across two deterministic content profiles (a single tone and a
+//! multi-harmonic sum), and sweeps bounded deterministic malformed
 //! payloads that must surface as
 //! stream-local errors or bounded decodes. It is not a quality, power,
 //! latency, Android ABI, or coverage-guided fuzz result.
@@ -34,6 +36,8 @@ const PCM_QUEUE_CAPACITY: usize = 8;
 const SAMPLE_RATE_HZ: u32 = 48_000;
 /// Deterministic probe tone frequency in hertz.
 const TONE_HZ: f32 = 440.0;
+/// Peak amplitude shared by the tone and multi-harmonic content profiles.
+const TONE_AMPLITUDE: f32 = 0.25;
 /// Negotiated frame durations probed through the native decoder.
 const FRAME_DURATIONS_MS: [u16; 2] = [10, 20];
 /// Tone frames decoded before the loss burst begins.
@@ -170,7 +174,7 @@ fn encode_frame(
 /// one burst, returning packets and their encoded lengths.
 ///
 /// The `recovery_start` is the source frame index of the first frame admitted
-/// after the burst; the tone must cover it and the recovery frames that follow.
+/// after the burst; the content must cover it and the recovery frames that follow.
 fn encode_history_and_recovery(
     encoder: &mut opus::Encoder,
     tone_block: &[f32],
@@ -206,31 +210,48 @@ fn encode_history_and_recovery(
 /// The PCM block is sized to the negotiated frame (10 ms -> 960 samples,
 /// 20 ms -> 1,920 samples) so PLC synthesizes exactly one frame of
 /// concealment per missing frame on both shapes.
-fn run_frame_path(frame_duration_ms: u16) -> ProbeResult<String> {
+fn run_frame_path(frame_duration_ms: u16) -> ProbeResult<Vec<String>> {
     match frame_duration_ms {
-        10 => run_frame_path_impl::<960>(frame_duration_ms),
-        20 => run_frame_path_impl::<MAX_PCM_SAMPLES_PER_BLOCK>(frame_duration_ms),
+        10 => run_frame_path_profiles::<960>(frame_duration_ms),
+        20 => run_frame_path_profiles::<MAX_PCM_SAMPLES_PER_BLOCK>(frame_duration_ms),
         other => Err(format!("unsupported frame duration {other} ms")),
     }
 }
 
+/// Runs the steady-state path once per content profile for one shape.
+fn run_frame_path_profiles<const PCM_SAMPLES_PER_BLOCK: usize>(
+    frame_duration_ms: u16,
+) -> ProbeResult<Vec<String>> {
+    let mut lines = Vec::new();
+    for profile in ContentProfile::ALL {
+        lines.push(run_frame_path_impl::<PCM_SAMPLES_PER_BLOCK>(
+            frame_duration_ms,
+            profile,
+        )?);
+    }
+    Ok(lines)
+}
+
 /// Runs one negotiated-duration probe with a compile-time PCM block capacity.
 ///
-/// A deterministic tone is encoded into a history of frames, decoded through
-/// the bounded [`StreamDecodeWorker`] boundary, then a burst of consecutive
-/// frames is dropped and concealed by decoder-side PLC while every concealed
-/// block is compared against the actual dropped frame. The stream then admits
-/// and decodes fresh frames to confirm it re-locks to the source.
+/// A deterministic content profile is encoded into a history of frames,
+/// decoded through the bounded [`StreamDecodeWorker`] boundary, then a burst
+/// of consecutive frames is dropped and concealed by decoder-side PLC while
+/// every concealed block is compared against the actual dropped frame. The
+/// stream then admits and decodes fresh frames to confirm it re-locks to the
+/// source.
 fn run_frame_path_impl<const PCM_SAMPLES_PER_BLOCK: usize>(
     frame_duration_ms: u16,
+    profile: ContentProfile,
 ) -> ProbeResult<String> {
     let frame = OpusFrameConfig::new(SAMPLE_RATE_HZ, 2, frame_duration_ms)
         .map_err(|error| error.to_string())?;
     let expected_samples = frame.interleaved_samples();
 
-    // A continuous tone long enough for the history, the loss burst, and the
-    // recovery frames that follow it.
-    let tone_block = tone((HISTORY_FRAMES + PLC_BURST_FRAMES + RECOVERY_FRAMES) * expected_samples);
+    // A continuous content block long enough for the history, the loss burst,
+    // and the recovery frames that follow it.
+    let content_block =
+        profile.content((HISTORY_FRAMES + PLC_BURST_FRAMES + RECOVERY_FRAMES) * expected_samples);
 
     let mut encoder = opus::Encoder::new(
         SAMPLE_RATE_HZ,
@@ -246,7 +267,7 @@ fn run_frame_path_impl<const PCM_SAMPLES_PER_BLOCK: usize>(
 
     let (packets, encoded_lens) = encode_history_and_recovery(
         &mut encoder,
-        &tone_block,
+        &content_block,
         expected_samples,
         HISTORY_FRAMES + PLC_BURST_FRAMES,
     )?;
@@ -283,7 +304,7 @@ fn run_frame_path_impl<const PCM_SAMPLES_PER_BLOCK: usize>(
 
     // Steady-state decode quality from the last decoded frame, compensated
     // for the codec lookahead delay.
-    let decode_snr = steady_state_decode_snr(&block, &tone_block, expected_samples, delay)?;
+    let decode_snr = steady_state_decode_snr(&block, &content_block, expected_samples, delay)?;
 
     // Sustained loss: the next PLC_BURST_FRAMES sequences are never admitted,
     // so playout schedules one Concealed block per missing frame. libopus
@@ -293,7 +314,7 @@ fn run_frame_path_impl<const PCM_SAMPLES_PER_BLOCK: usize>(
         &mut worker,
         &mut consumer,
         &mut block,
-        &tone_block,
+        &content_block,
         expected_samples,
     )?;
     let plc_snr_min = burst_snr.iter().copied().fold(f32::INFINITY, f32::min);
@@ -316,7 +337,7 @@ fn run_frame_path_impl<const PCM_SAMPLES_PER_BLOCK: usize>(
         &mut worker,
         &mut consumer,
         &mut block,
-        &tone_block,
+        &content_block,
         &packets,
         &encoded_lens,
         expected_samples,
@@ -328,8 +349,9 @@ fn run_frame_path_impl<const PCM_SAMPLES_PER_BLOCK: usize>(
     }
 
     let encode_per_frame = encoded_lens[..HISTORY_FRAMES].iter().sum::<usize>() / HISTORY_FRAMES;
+    let profile_label = profile.label();
     Ok(format!(
-        "opus_{frame_duration_ms}ms: ok (encode {encode_per_frame} B/frame; decode {expected_samples}/PLC {PCM_SAMPLES_PER_BLOCK} samples; snr {decode_snr:.1} dB; plc burst {PLC_BURST_FRAMES} min {plc_snr_min:.1} mean {plc_snr_mean:.1} dB; align {first_align}; recovery {recovery_snr:.1} dB; delay {delay} samples)"
+        "opus_{frame_duration_ms}ms_{profile_label}: ok (encode {encode_per_frame} B/frame; decode {expected_samples}/PLC {PCM_SAMPLES_PER_BLOCK} samples; snr {decode_snr:.1} dB; plc burst {PLC_BURST_FRAMES} min {plc_snr_min:.1} mean {plc_snr_mean:.1} dB; align {first_align}; recovery {recovery_snr:.1} dB; delay {delay} samples)"
     ))
 }
 
@@ -345,7 +367,7 @@ fn steady_state_decode_snr(
     let decoded_rms = block_rms(decoded_slice);
     if !(DECODED_RMS_MIN..=DECODED_RMS_MAX).contains(&decoded_rms) {
         return Err(format!(
-            "decoded tone RMS {decoded_rms:.3} outside the expected band"
+            "decoded content RMS {decoded_rms:.3} outside the expected band"
         ));
     }
     let decoded_frame_start = (HISTORY_FRAMES - 1) * expected_samples - delay;
@@ -355,7 +377,7 @@ fn steady_state_decode_snr(
     );
     if !decode_snr.is_finite() || decode_snr < DECODE_SNR_MIN {
         return Err(format!(
-            "decoded tone SNR {decode_snr:.1} dB below the expected floor"
+            "decoded content SNR {decode_snr:.1} dB below the expected floor"
         ));
     }
     Ok(decode_snr)
@@ -593,8 +615,9 @@ fn run_loss_pattern<const N: usize>(
     frame: OpusFrameConfig,
     expected_samples: usize,
     pattern: LossPattern,
+    profile: ContentProfile,
 ) -> ProbeResult<(usize, f32, f32)> {
-    let tone_block = tone(LOSS_PATTERN_FRAMES * expected_samples);
+    let content_block = profile.content(LOSS_PATTERN_FRAMES * expected_samples);
     let mut encoder = opus::Encoder::new(
         SAMPLE_RATE_HZ,
         opus::Channels::Stereo,
@@ -634,7 +657,7 @@ fn run_loss_pattern<const N: usize>(
             let start = index * expected_samples;
             let len = encode_frame(
                 &mut encoder,
-                &tone_block[start..start + expected_samples],
+                &content_block[start..start + expected_samples],
                 &mut packet,
             )?;
             worker
@@ -657,14 +680,14 @@ fn run_loss_pattern<const N: usize>(
                 "loss-pattern frame {index} RMS {rms:.3} is silent or non-finite"
             ));
         }
-        // The first block predates the source tone by the codec lookahead
+        // The first block predates the source content by the codec lookahead
         // and is skipped, so the mean covers LOSS_PATTERN_FRAMES - 1 frames.
         if index == 0 {
             continue;
         }
         let reference_start = index * expected_samples - delay;
         let snr = snr_db(
-            &tone_block[reference_start..reference_start + expected_samples],
+            &content_block[reference_start..reference_start + expected_samples],
             current,
         );
         if !snr.is_finite() {
@@ -697,28 +720,35 @@ fn run_loss_patterns_impl<const PCM_SAMPLES_PER_BLOCK: usize>(
         .map_err(|error| error.to_string())?;
     let expected_samples = frame.interleaved_samples();
     let mut lines = Vec::new();
-    for pattern in [
-        LossPattern::None,
-        LossPattern::Independent { percent: 1 },
-        LossPattern::Independent { percent: 3 },
-        LossPattern::Independent { percent: 5 },
-        LossPattern::PeriodicBurst {
-            burst: 5,
-            period: 50,
-        },
-    ] {
-        let (dropped, worst, mean) =
-            run_loss_pattern::<PCM_SAMPLES_PER_BLOCK>(frame, expected_samples, pattern)?;
-        if mean < LOSS_PATTERN_MEAN_SNR_MIN {
-            return Err(format!(
-                "loss pattern {} mean SNR {mean:.1} dB below the expected floor",
+    for profile in ContentProfile::ALL {
+        let profile_label = profile.label();
+        for pattern in [
+            LossPattern::None,
+            LossPattern::Independent { percent: 1 },
+            LossPattern::Independent { percent: 3 },
+            LossPattern::Independent { percent: 5 },
+            LossPattern::PeriodicBurst {
+                burst: 5,
+                period: 50,
+            },
+        ] {
+            let (dropped, worst, mean) = run_loss_pattern::<PCM_SAMPLES_PER_BLOCK>(
+                frame,
+                expected_samples,
+                pattern,
+                profile,
+            )?;
+            if mean < LOSS_PATTERN_MEAN_SNR_MIN {
+                return Err(format!(
+                    "loss pattern {} mean SNR {mean:.1} dB below the expected floor",
+                    pattern.label()
+                ));
+            }
+            lines.push(format!(
+                "opus_{frame_duration_ms}ms_{profile_label}_loss: pattern {} ok ({LOSS_PATTERN_FRAMES} frames; {dropped} dropped; mean {mean:.1} worst {worst:.1} dB)",
                 pattern.label()
             ));
         }
-        lines.push(format!(
-            "opus_{frame_duration_ms}ms_loss: pattern {} ok ({LOSS_PATTERN_FRAMES} frames; {dropped} dropped; mean {mean:.1} worst {worst:.1} dB)",
-            pattern.label()
-        ));
     }
     Ok(lines)
 }
@@ -1720,7 +1750,7 @@ fn sweep_malformed_payloads() -> ProbeResult<(usize, usize)> {
 fn run_probe() -> ProbeResult<Vec<String>> {
     let mut lines = Vec::new();
     for duration_ms in FRAME_DURATIONS_MS {
-        lines.push(run_frame_path(duration_ms)?);
+        lines.extend(run_frame_path(duration_ms)?);
         lines.extend(run_burst_sweep(duration_ms)?);
         lines.extend(run_loss_patterns(duration_ms)?);
         lines.extend(run_reorder_probe(duration_ms)?);
@@ -1750,6 +1780,73 @@ fn run_probe() -> ProbeResult<Vec<String>> {
     Ok(lines)
 }
 
+/// Deterministic content profile used by the quality probes.
+///
+/// The tone is the original single-sine content; the multi-harmonic profile
+/// adds spectral complexity at the same RMS so PLC quality is not tuned to a
+/// pure sine alone.
+#[derive(Clone, Copy)]
+enum ContentProfile {
+    /// Single `TONE_HZ` sine at `TONE_AMPLITUDE`.
+    Tone,
+    /// Fixed five-harmonic sum scaled to the tone profile's RMS.
+    MultiHarmonic,
+}
+
+impl ContentProfile {
+    /// Every profile probed for each negotiated shape.
+    const ALL: [ContentProfile; 2] = [ContentProfile::Tone, ContentProfile::MultiHarmonic];
+
+    /// Short stable label used in probe output lines.
+    #[must_use]
+    fn label(self) -> &'static str {
+        match self {
+            Self::Tone => "tone",
+            Self::MultiHarmonic => "multi",
+        }
+    }
+
+    /// Builds one deterministic stereo block with `samples` interleaved samples.
+    #[must_use]
+    fn content(self, samples: usize) -> Vec<f32> {
+        match self {
+            Self::Tone => tone(samples),
+            Self::MultiHarmonic => multi_harmonic(samples),
+        }
+    }
+}
+
+/// Builds one deterministic stereo multi-harmonic block with `samples`
+/// interleaved samples, scaled to the tone profile's RMS so quality gates
+/// compare content-relative behavior rather than level.
+#[must_use]
+#[allow(clippy::cast_precision_loss)]
+fn multi_harmonic(samples: usize) -> Vec<f32> {
+    const HARMONICS: [(f32, f32); 5] = [
+        (220.0, 0.15),
+        (330.0, 0.12),
+        (440.0, 0.10),
+        (550.0, 0.08),
+        (880.0, 0.05),
+    ];
+    let raw: Vec<f32> = (0..samples)
+        .map(|index| {
+            HARMONICS
+                .iter()
+                .enumerate()
+                .fold(0.0_f32, |sum, (harmonic, (frequency, amplitude))| {
+                    let phase = 2.0 * std::f32::consts::PI * frequency * index as f32
+                        / SAMPLE_RATE_HZ as f32
+                        + harmonic as f32 * 0.7;
+                    sum + amplitude * phase.sin()
+                })
+        })
+        .collect();
+    let rms = block_rms(&raw);
+    let scale = TONE_AMPLITUDE / (std::f32::consts::SQRT_2 * rms);
+    raw.into_iter().map(|sample| sample * scale).collect()
+}
+
 /// Builds one deterministic stereo tone block with `samples` interleaved samples.
 #[must_use]
 #[allow(clippy::cast_precision_loss)]
@@ -1757,7 +1854,7 @@ fn tone(samples: usize) -> Vec<f32> {
     (0..samples)
         .map(|index| {
             let phase = 2.0 * std::f32::consts::PI * TONE_HZ * index as f32 / SAMPLE_RATE_HZ as f32;
-            0.25 * phase.sin()
+            TONE_AMPLITUDE * phase.sin()
         })
         .collect()
 }
