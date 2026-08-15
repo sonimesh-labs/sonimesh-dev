@@ -5,8 +5,9 @@
 >
 > On 2026-08-16 the reference host built the candidate binding and ran the
 > `tools/opus-codec-prototype` decode/PLC probe (see the dated build record).
-> The binding is still not enabled; Android ABI, quality, CPU/power,
-> coverage-guided fuzzing, and CI reproducibility evidence remain pending.
+> The binding is still not enabled; Android ABI, quality, sustained
+> CPU/power, coverage-guided fuzzing, and CI reproducibility evidence
+> remain pending.
 
 This document turns the acceptance conditions in ADR 0009 into reproducible evidence. A passing Rust-only decoder mock, a dependency resolution, or a successful Windows build alone is insufficient to select a codec binding or media policy.
 
@@ -106,10 +107,12 @@ source after every length, deterministic
 loss-pattern windows (independent 1/3/5% and a periodic 5-in-50 burst) that
 keep the window mean SNR within 35.7-41.3 dB across both shapes, a
 deterministic jitter-wait sweep that records the concealment/drop boundary
-of waiting before declaring a loss, and bounded reorder absorption and
-late-drop (see the dated build record). That is prototype-level evidence
-only, not a coverage-guided fuzz result, an adaptive jitter-target result,
-or CPU/power measurement.
+of waiting before declaring a loss, bounded reorder absorption and
+late-drop, and per-frame encode+decode and decode-only host throughput
+for both shapes (see the dated build record). That is prototype-level
+evidence only, not a coverage-guided fuzz result, an adaptive
+jitter-target result, or a power or sustained CPU-utilization
+measurement.
 
 ## Codec-neutral media-path regression
 

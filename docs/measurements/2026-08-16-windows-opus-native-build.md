@@ -3,10 +3,11 @@
 > Status: native libopus build and decode/PLC probe on the reference Windows
 > host, including a deterministic five-frame loss burst, a 1-32 frame
 > burst-length sweep, independent/burst loss-pattern windows, bounded
-> reorder absorption and late-drop, and a deterministic jitter-wait sweep,
-> all with recovery. ADR 0009 remains
-> Provisional: Android ABI packaging, CPU/power, and coverage-guided
-> malformed-payload fuzzing against the native decoder are still pending.
+> reorder absorption and late-drop, a deterministic jitter-wait sweep,
+> and per-frame host throughput for both shapes, all with recovery.
+> ADR 0009 remains Provisional: Android ABI packaging, sustained
+> CPU/power, and coverage-guided malformed-payload fuzzing against the
+> native decoder are still pending.
 > Updated: 2026-08-16
 
 ## Summary
@@ -27,9 +28,11 @@ bounded reorder absorption (a six-frame out-of-order arrival batch played
 out in sequence with no concealment at the constant codec delay) and
 late-drop (one slot concealed by PLC while the bounded buffer drops the
 late frame), sweeps deterministic jitter-wait steps that absorb a bounded
-late frame without concealment or drop it when the wait is too short, and
-sweeps deterministic malformed payloads that must surface as bounded
-stream-local errors. The PCM block is sized to the negotiated
+late frame without concealment or drop it when the wait is too short,
+measures deterministic per-frame encode+decode and decode-only host
+throughput for both shapes, and sweeps deterministic malformed payloads
+that must surface as bounded stream-local errors. The PCM block is sized
+to the negotiated
 frame on each
 shape, so PLC synthesizes exactly one frame of concealment per missing frame.
 
@@ -40,8 +43,11 @@ shape, so PLC synthesizes exactly one frame of concealment per missing frame.
 $vsCm = 'C:\Program Files\Microsoft Visual Studio\18\Community\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin'
 $env:PATH = $vsCm + ';' + $env:PATH
 $env:CMAKE_POLICY_VERSION_MINIMUM = '3.5'
-cargo run -p opus-codec-prototype
+cargo run --release -p opus-codec-prototype
 ~~~
+
+A release build is used so the per-frame throughput lines are meaningful;
+the codec-quality lines are deterministic and identical across profiles.
 
 ## Observation
 
@@ -113,6 +119,7 @@ opus_10ms_jitter_wait: wait 1 ok (8 frames; 1 concealed snr 40.0 dB; late drop 1
 opus_10ms_jitter_wait: wait 2 ok (8 frames; 1 concealed snr 40.0 dB; late drop 1; decoded mean 29.8 dB)
 opus_10ms_jitter_wait: wait 4 ok (8 frames; 0 concealed; late drop 0; decoded mean 39.0 dB)
 opus_10ms_jitter_wait: wait 6 ok (8 frames; 0 concealed; late drop 0; decoded mean 39.0 dB)
+opus_10ms_cpu: encode+decode mean 783.3 us/frame (1277 frames/s); decode-only mean 141.2 us/frame (7084 frames/s)
 opus_20ms_reorder: absorbed ok (6 frames; 0 concealed; mean 41.2 worst 38.9 dB)
 opus_20ms_reorder: late_one ok (1 concealed snr 48.4 dB; late drop 1; decoded mean 40.8 dB)
 opus_20ms_jitter_wait: wait 0 ok (8 frames; 1 concealed snr 48.4 dB; late drop 1; decoded mean 38.9 dB)
@@ -120,6 +127,7 @@ opus_20ms_jitter_wait: wait 1 ok (8 frames; 1 concealed snr 48.4 dB; late drop 1
 opus_20ms_jitter_wait: wait 2 ok (8 frames; 1 concealed snr 48.4 dB; late drop 1; decoded mean 38.9 dB)
 opus_20ms_jitter_wait: wait 4 ok (8 frames; 0 concealed; late drop 0; decoded mean 41.4 dB)
 opus_20ms_jitter_wait: wait 6 ok (8 frames; 0 concealed; late drop 0; decoded mean 41.4 dB)
+opus_20ms_cpu: encode+decode mean 1650.1 us/frame (606 frames/s); decode-only mean 282.7 us/frame (3537 frames/s)
 opus_malformed_payload: rejected
 opus_malformed_sweep: ok (1000 payloads; 642 rejected; 358 accepted-bounded)
 opus_native_build: ok
@@ -150,7 +158,7 @@ recovery SNR at or above 26 dB. That is the first on-host quality signal for
 the 10 ms versus 20 ms comparison at comparable bitrate (141 B/frame at 10 ms
 and 273 B/frame at 20 ms are both about 110 kb/s) and a first sustained-loss
 signal up to 640 ms, but it is one deterministic tone on one host, not a
-CPU/power or coverage-guided fuzz result. The loss-pattern windows (240 frames each, patterns applied after a
+sustained CPU/power or coverage-guided fuzz result. The loss-pattern windows (240 frames each, patterns applied after a
 10-frame warm-up history, immediate concealment with no jitter wait) keep the
 window mean SNR between 39.0 dB and 35.7 dB for the 10 ms shape and between
 41.3 dB and 38.4 dB for the 20 ms shape as loss rises from 0% to 10%
@@ -192,6 +200,21 @@ of a wait is measured by the network simulator, not by this probe. The
 boundary sits at wait equal to the delay, and the 4/6-frame waits stay
 inside the 8-slot jitter capacity.
 
+The throughput pass measures deterministic per-frame wall time for the
+full encode-to-pop worker path and the decode-only path on the same
+tone, reporting the minimum of three passes per shape to reduce
+scheduling noise. On the reference host the 10 ms shape runs
+encode+decode at 783 us/frame (about 13x realtime) and decode-only at
+141 us/frame, and the 20 ms shape runs encode+decode at 1650 us/frame
+(about 12x realtime) and decode-only at 283 us/frame. Encoding
+dominates the path, and the 20 ms shape costs roughly twice the 10 ms
+shape per frame, consistent with per-sample codec work. These are
+single-host wall-clock numbers from a release build of the probe and
+the bundled libopus; they are not CPU-utilization percentages, do not
+cover power, and vary by roughly ten percent between runs, but they
+show the bounded worker path keeps up with realtime on this host with
+large headroom even before optimization of the bundled native build.
+
 A sizing detail changed in this revision: the PCM block is now the negotiated
 frame size (960 samples for 10 ms, 1,920 for 20 ms) instead of the reserved
 20 ms block, so an empty packet makes libopus synthesize exactly one frame of
@@ -203,6 +226,7 @@ the 10 ms shape is gone; a production 10 ms stream should size its block to
 
 - reproducible native build on the Android ABIs (`arm64-v8a`, `x86_64`) with
   a pinned NDK;
-- CPU and power evidence for both frame durations on this host;
+- sustained CPU utilization, allocation profile, and power evidence for
+  both frame durations on this host;
 - authenticated malformed-payload fuzzing against the native decoder;
 - physical latency and Android capture claims remain separate tests.
