@@ -396,6 +396,13 @@ fn smoke_output_is_deterministic_and_reports_consistent_accounting() {
                 "projection matches the real slot table: {line}"
             );
         }
+        if line.contains("inserts") && line.contains("removes") {
+            assert_eq!(
+                number(&parsed, "inserts").saturating_sub(number(&parsed, "removes")),
+                number(&parsed, "active"),
+                "active slots equal admits minus removes: {line}"
+            );
+        }
         if line.contains("stream0_plc_ratio") {
             assert!(
                 number(&parsed, "stream0_plc_ratio") <= 1_000,
