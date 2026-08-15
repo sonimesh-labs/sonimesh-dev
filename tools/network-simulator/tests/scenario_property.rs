@@ -15,6 +15,9 @@
 use sonimesh_network_simulator::{NetworkProfile, ScenarioConfig, simulate};
 use sonimesh_protocol::MAX_MEDIA_DATAGRAM_LEN;
 
+mod common;
+use common::{SubmissionTimeline, cross_check_send_buffer_credit};
+
 /// Small deterministic xorshift64 generator; no external dependency.
 struct XorShift64(u64);
 
@@ -148,56 +151,6 @@ fn scenario_walk_preserves_cross_layer_invariants() {
     }
 }
 
-/// Independent byte-credit model of the sender-side socket buffer.
-///
-/// Mirrors the production drain semantics (bytes drain at
-/// `bandwidth * elapsed_ms / 1000` whenever the clock advances) so the shaped
-/// walk can cross-check backpressure counts without reaching into the
-/// library's private state. It is deliberately a separate, simpler
-/// implementation: if the two diverge, the production path is wrong.
-struct SendBufferCreditModel {
-    capacity_bytes: u64,
-    queued_bytes: u64,
-    last_drain_ms: u64,
-    full_packets: u64,
-}
-
-impl SendBufferCreditModel {
-    fn new(capacity_bytes: u64) -> Self {
-        Self {
-            capacity_bytes,
-            queued_bytes: 0,
-            last_drain_ms: 0,
-            full_packets: 0,
-        }
-    }
-
-    fn drain_to(&mut self, now_ms: u64, bytes_per_second: u64) {
-        if now_ms <= self.last_drain_ms {
-            return;
-        }
-        let elapsed_ms = now_ms - self.last_drain_ms;
-        self.last_drain_ms = now_ms;
-        let drained = self
-            .queued_bytes
-            .min(bytes_per_second.saturating_mul(elapsed_ms) / 1_000);
-        self.queued_bytes -= drained;
-    }
-
-    fn try_enqueue(&mut self, now_ms: u64, bytes: u64, bytes_per_second: u64) -> bool {
-        if bytes_per_second == 0 {
-            return true;
-        }
-        self.drain_to(now_ms, bytes_per_second);
-        if self.queued_bytes.saturating_add(bytes) > self.capacity_bytes {
-            self.full_packets += 1;
-            return false;
-        }
-        self.queued_bytes += bytes;
-        true
-    }
-}
-
 fn random_shaped_config(random: &mut XorShift64) -> ScenarioConfig {
     let mut network = NetworkProfile::stable(0x5B1F_2026);
     network.loss_percent = random.percent().min(20);
@@ -315,37 +268,25 @@ fn shaped_walk_preserves_sender_side_and_conservation_invariants() {
                 "no finite link or no socket buffer means no queued bytes"
             );
         } else {
-            let capacity = config.network.send_buffer_bytes.expect("checked Some");
-            let mut model = SendBufferCreditModel::new(capacity);
-            let last_playout_ms = config.target_buffer_ms.saturating_add(
-                u64::from(config.frames.saturating_sub(1)).saturating_mul(config.frame_duration_ms),
-            );
-            let end_ms = last_playout_ms
-                .saturating_add(config.network.base_delay_ms)
-                .saturating_add(config.network.jitter_ms)
-                .saturating_add(config.network.reorder_delay_ms)
-                .saturating_add(2);
-            let mut next_send_sequence = 0_u32;
-            let mut next_send_ms = 0_u64;
-            for now_ms in 0..=end_ms {
-                if next_send_sequence < config.frames && now_ms == next_send_ms {
-                    model.try_enqueue(now_ms, u64::from(config.media_datagram_bytes), bandwidth);
-                    next_send_sequence += 1;
-                    next_send_ms = next_send_ms.saturating_add(config.frame_duration_ms);
-                }
-                model.drain_to(now_ms, bandwidth);
-            }
-            assert_eq!(
-                model.full_packets, first.network.send_buffer_full_packets,
-                "independent byte-credit model reproduces sender backpressure"
-            );
-            assert_eq!(
-                model.queued_bytes, first.network.send_buffer_queued_bytes,
-                "independent byte-credit model reproduces the final sender-side queued bytes"
-            );
-            assert!(
-                first.network.send_buffer_queued_bytes <= capacity,
-                "sender-side queued bytes never exceed the configured socket-buffer capacity"
+            cross_check_send_buffer_credit(
+                &first.network,
+                &config.network,
+                &SubmissionTimeline {
+                    media_datagram_bytes: config.media_datagram_bytes,
+                    frames: config.frames,
+                    frame_duration_ms: config.frame_duration_ms,
+                    end_ms: config
+                        .target_buffer_ms
+                        .saturating_add(
+                            u64::from(config.frames.saturating_sub(1))
+                                .saturating_mul(config.frame_duration_ms),
+                        )
+                        .saturating_add(config.network.base_delay_ms)
+                        .saturating_add(config.network.jitter_ms)
+                        .saturating_add(config.network.reorder_delay_ms)
+                        .saturating_add(2),
+                    streams: 1,
+                },
             );
         }
 
