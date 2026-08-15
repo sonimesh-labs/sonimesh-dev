@@ -4,7 +4,8 @@
 //! opus binding builds on this host, encodes a deterministic tone, decodes
 //! a steady-state history of frames for each negotiated shape (10 ms and
 //! 20 ms stereo) through the sonimesh-audio StreamDecodeWorker boundary,
-//! compares decoded and PLC-concealed blocks against the source, and sweeps
+//! conceals a deterministic burst of lost frames with decoder-side PLC,
+//! confirms the stream re-locks to the source after the burst, and sweeps
 //! bounded deterministic malformed payloads that must surface as
 //! stream-local errors or bounded decodes. It is not a quality, power,
 //! latency, Android ABI, or coverage-guided fuzz result.
@@ -18,8 +19,8 @@ use sonimesh_audio::{
 const JITTER_CAPACITY: usize = 8;
 /// Maximum encoded payload bytes per frame, bounded by the media datagram limit.
 const MAX_ENCODED_BYTES: usize = 1_200;
-/// Interleaved Float32 samples per decoded 20 ms stereo block at 48 kHz.
-const PCM_SAMPLES_PER_BLOCK: usize = 1_920;
+/// Maximum interleaved Float32 samples per decoded stereo block (the 20 ms shape).
+const MAX_PCM_SAMPLES_PER_BLOCK: usize = 1_920;
 /// Cross-thread PCM queue capacity in blocks.
 const PCM_QUEUE_CAPACITY: usize = 8;
 /// Sample rate shared by the encoder, decoder, and negotiated frame shape.
@@ -28,8 +29,12 @@ const SAMPLE_RATE_HZ: u32 = 48_000;
 const TONE_HZ: f32 = 440.0;
 /// Negotiated frame durations probed through the native decoder.
 const FRAME_DURATIONS_MS: [u16; 2] = [10, 20];
-/// Tone frames decoded before one frame is dropped to probe PLC.
+/// Tone frames decoded before the loss burst begins.
 const HISTORY_FRAMES: usize = 10;
+/// Consecutive frames dropped after the history to probe sustained-loss PLC.
+const PLC_BURST_FRAMES: usize = 5;
+/// Frames admitted and decoded after the burst to confirm stream recovery.
+const RECOVERY_FRAMES: usize = 2;
 /// Deterministic malformed-payload sweep size.
 const MALFORMED_SWEEP_PAYLOADS: usize = 1_000;
 /// Lowest plausible RMS for a decoded 0.25-amplitude tone block.
@@ -40,6 +45,12 @@ const DECODED_RMS_MAX: f32 = 0.35;
 const PLC_RMS_MIN: f32 = 1.0e-3;
 /// A steady-state decoded tone must retain at least this SNR against the source.
 const DECODE_SNR_MIN: f32 = 10.0;
+/// Every concealed block in the sustained-loss burst must keep at least this SNR.
+const PLC_BURST_SNR_MIN: f32 = 1.0;
+/// The sustained-loss burst mean SNR must stay at least this high.
+const PLC_BURST_MEAN_SNR_MIN: f32 = 10.0;
+/// A recovered frame must re-lock to the source at least this SNR.
+const RECOVERY_SNR_MIN: f32 = 0.0;
 
 /// Wraps the candidate libopus decoder behind the stable FrameDecoder
 /// boundary so decode and PLC stay outside the realtime output callback.
@@ -65,14 +76,51 @@ impl FrameDecoder for NativeOpusDecoder {
 
 type ProbeResult<T> = Result<T, String>;
 
+/// Encodes one deterministic tone frame into `packet` and validates the length.
+fn encode_frame(
+    encoder: &mut opus::Encoder,
+    source: &[f32],
+    packet: &mut [u8; MAX_ENCODED_BYTES],
+) -> ProbeResult<usize> {
+    let len = encoder
+        .encode_float(source, packet)
+        .map_err(|error| error.to_string())?;
+    if len == 0 || len > MAX_ENCODED_BYTES {
+        return Err(format!("encoder produced an invalid length {len}"));
+    }
+    Ok(len)
+}
+
 /// Runs the steady-state encode/decode/PLC path for one negotiated duration.
+///
+/// The PCM block is sized to the negotiated frame (10 ms -> 960 samples,
+/// 20 ms -> 1,920 samples) so PLC synthesizes exactly one frame of
+/// concealment per missing frame on both shapes.
 fn run_frame_path(frame_duration_ms: u16) -> ProbeResult<String> {
+    match frame_duration_ms {
+        10 => run_frame_path_impl::<960>(frame_duration_ms),
+        20 => run_frame_path_impl::<MAX_PCM_SAMPLES_PER_BLOCK>(frame_duration_ms),
+        other => Err(format!("unsupported frame duration {other} ms")),
+    }
+}
+
+/// Runs one negotiated-duration probe with a compile-time PCM block capacity.
+///
+/// A deterministic tone is encoded into a history of frames, decoded through
+/// the bounded [`StreamDecodeWorker`] boundary, then a burst of consecutive
+/// frames is dropped and concealed by decoder-side PLC while every concealed
+/// block is compared against the actual dropped frame. The stream then admits
+/// and decodes fresh frames to confirm it re-locks to the source.
+fn run_frame_path_impl<const PCM_SAMPLES_PER_BLOCK: usize>(
+    frame_duration_ms: u16,
+) -> ProbeResult<String> {
     let frame = OpusFrameConfig::new(SAMPLE_RATE_HZ, 2, frame_duration_ms)
         .map_err(|error| error.to_string())?;
     let expected_samples = frame.interleaved_samples();
 
-    // A continuous tone long enough for the history plus one dropped frame.
-    let tone_block = tone((HISTORY_FRAMES + 1) * expected_samples);
+    // A continuous tone long enough for the history, the loss burst, and the
+    // recovery frames that follow it.
+    let tone_block = tone((HISTORY_FRAMES + PLC_BURST_FRAMES + RECOVERY_FRAMES) * expected_samples);
 
     let mut encoder = opus::Encoder::new(
         SAMPLE_RATE_HZ,
@@ -86,22 +134,26 @@ fn run_frame_path(frame_duration_ms: u16) -> ProbeResult<String> {
         .expect("lookahead is non-negative");
     let delay = lookahead * OPUS_CHANNELS as usize;
 
-    let mut packets = [[0_u8; MAX_ENCODED_BYTES]; HISTORY_FRAMES];
-    let mut encoded_lens = [0_usize; HISTORY_FRAMES];
+    let mut packets = [[0_u8; MAX_ENCODED_BYTES]; HISTORY_FRAMES + RECOVERY_FRAMES];
+    let mut encoded_lens = [0_usize; HISTORY_FRAMES + RECOVERY_FRAMES];
     for index in 0..HISTORY_FRAMES {
         let start = index * expected_samples;
-        encoded_lens[index] = encoder
-            .encode_float(
-                &tone_block[start..start + expected_samples],
-                &mut packets[index],
-            )
-            .map_err(|error| error.to_string())?;
-        if encoded_lens[index] == 0 || encoded_lens[index] > MAX_ENCODED_BYTES {
-            return Err(format!(
-                "encoder produced an invalid length {}",
-                encoded_lens[index]
-            ));
-        }
+        encoded_lens[index] = encode_frame(
+            &mut encoder,
+            &tone_block[start..start + expected_samples],
+            &mut packets[index],
+        )?;
+    }
+    // The recovery frames sit after the burst in the source tone; encoding
+    // them out of order keeps the probe deterministic and skips the lost ones.
+    for index in 0..RECOVERY_FRAMES {
+        let source_index = HISTORY_FRAMES + PLC_BURST_FRAMES + index;
+        let start = source_index * expected_samples;
+        encoded_lens[HISTORY_FRAMES + index] = encode_frame(
+            &mut encoder,
+            &tone_block[start..start + expected_samples],
+            &mut packets[HISTORY_FRAMES + index],
+        )?;
     }
 
     let (producer, mut consumer) = realtime_pcm_queue::<PCM_SAMPLES_PER_BLOCK>(PCM_QUEUE_CAPACITY)
@@ -136,6 +188,64 @@ fn run_frame_path(frame_duration_ms: u16) -> ProbeResult<String> {
 
     // Steady-state decode quality from the last decoded frame, compensated
     // for the codec lookahead delay.
+    let decode_snr = steady_state_decode_snr(&block, &tone_block, expected_samples, delay)?;
+
+    // Sustained loss: the next PLC_BURST_FRAMES sequences are never admitted,
+    // so playout schedules one Concealed block per missing frame. libopus
+    // synthesizes frame_size = block capacity / channels for an empty packet,
+    // so PLC fills exactly one negotiated frame on both shapes.
+    let (burst_snr, first_align) = measure_loss_burst(
+        &mut worker,
+        &mut consumer,
+        &mut block,
+        &tone_block,
+        expected_samples,
+    )?;
+    let plc_snr_min = burst_snr.iter().copied().fold(f32::INFINITY, f32::min);
+    let plc_snr_mean = mean_snr(&burst_snr);
+    if plc_snr_min < PLC_BURST_SNR_MIN {
+        return Err(format!(
+            "concealed block SNR min {plc_snr_min:.1} dB collapsed below the floor"
+        ));
+    }
+    if plc_snr_mean < PLC_BURST_MEAN_SNR_MIN {
+        return Err(format!(
+            "sustained-loss PLC mean SNR {plc_snr_mean:.1} dB below the expected floor"
+        ));
+    }
+
+    // The stream re-locks after the burst: admit and decode fresh frames, then
+    // check the final recovered block against the source with the same
+    // model-free alignment used for steady-state decode.
+    let recovery_snr = verify_recovery(
+        &mut worker,
+        &mut consumer,
+        &mut block,
+        &tone_block,
+        &packets,
+        &encoded_lens,
+        expected_samples,
+    )?;
+    if !recovery_snr.is_finite() || recovery_snr < RECOVERY_SNR_MIN {
+        return Err(format!(
+            "recovered frame SNR {recovery_snr:.1} dB below the expected floor"
+        ));
+    }
+
+    let encode_per_frame = encoded_lens[..HISTORY_FRAMES].iter().sum::<usize>() / HISTORY_FRAMES;
+    Ok(format!(
+        "opus_{frame_duration_ms}ms: ok (encode {encode_per_frame} B/frame; decode {expected_samples}/PLC {PCM_SAMPLES_PER_BLOCK} samples; snr {decode_snr:.1} dB; plc burst {PLC_BURST_FRAMES} min {plc_snr_min:.1} mean {plc_snr_mean:.1} dB; align {first_align}; recovery {recovery_snr:.1} dB; delay {delay} samples)"
+    ))
+}
+
+/// Checks the last steady-state decoded block against the source and returns
+/// its SNR, compensating for the codec lookahead delay.
+fn steady_state_decode_snr(
+    block: &[f32],
+    tone_block: &[f32],
+    expected_samples: usize,
+    delay: usize,
+) -> ProbeResult<f32> {
     let decoded_slice = &block[..expected_samples];
     let decoded_rms = block_rms(decoded_slice);
     if !(DECODED_RMS_MIN..=DECODED_RMS_MAX).contains(&decoded_rms) {
@@ -153,40 +263,85 @@ fn run_frame_path(frame_duration_ms: u16) -> ProbeResult<String> {
             "decoded tone SNR {decode_snr:.1} dB below the expected floor"
         ));
     }
+    Ok(decode_snr)
+}
 
-    // The next sequence is never admitted, so the next playout decision is
-    // deterministic decoder-side PLC for the confirmed missing frame.
-    // libopus synthesizes frame_size = block capacity / channels for an empty
-    // packet, so PLC fills the reserved 20 ms block even for the 10 ms shape;
-    // the worker accepts that bounded length and the consumer pops it whole.
-    match worker.decode_next().map_err(|error| error.to_string())? {
-        DecodeStep::Concealed { samples, .. } if samples == PCM_SAMPLES_PER_BLOCK => {}
-        other => return Err(format!("expected a concealed frame, got {other:?}")),
+/// Conceals `PLC_BURST_FRAMES` consecutive missing frames and returns each
+/// concealed block's aligned SNR against the actual dropped frame, plus the
+/// first block's alignment offset.
+fn measure_loss_burst<const N: usize>(
+    worker: &mut StreamDecodeWorker<NativeOpusDecoder, JITTER_CAPACITY, MAX_ENCODED_BYTES, N>,
+    consumer: &mut RealtimePcmConsumer<N>,
+    block: &mut [f32; N],
+    tone_block: &[f32],
+    expected_samples: usize,
+) -> ProbeResult<([f32; PLC_BURST_FRAMES], i32)> {
+    let mut burst_snr = [0.0_f32; PLC_BURST_FRAMES];
+    let mut first_align = 0_i32;
+    for (drop_index, slot) in burst_snr.iter_mut().enumerate() {
+        match worker.decode_next().map_err(|error| error.to_string())? {
+            DecodeStep::Concealed { samples, .. } if samples == expected_samples => {}
+            other => return Err(format!("expected a concealed frame, got {other:?}")),
+        }
+        assert_popped_pcm(consumer, block, expected_samples)?;
+        let concealed = &block[..expected_samples];
+        let concealed_rms = block_rms(concealed);
+        if !concealed_rms.is_finite() || concealed_rms < PLC_RMS_MIN {
+            return Err(format!(
+                "concealed block {drop_index} RMS {concealed_rms:.3} is silent or non-finite"
+            ));
+        }
+        let dropped_start = (HISTORY_FRAMES + drop_index) * expected_samples;
+        let (snr, align) = best_aligned_snr(
+            &tone_block[dropped_start..dropped_start + expected_samples],
+            concealed,
+        );
+        if !snr.is_finite() {
+            return Err(format!(
+                "concealed block {drop_index} SNR {snr:.1} dB is non-finite"
+            ));
+        }
+        if drop_index == 0 {
+            first_align = align;
+        }
+        *slot = snr;
     }
-    assert_popped_pcm(&mut consumer, &mut block, PCM_SAMPLES_PER_BLOCK)?;
-    let plc_rms = block_rms(&block[..PCM_SAMPLES_PER_BLOCK]);
-    if !plc_rms.is_finite() || plc_rms < PLC_RMS_MIN {
-        return Err(format!(
-            "PLC block RMS {plc_rms:.3} is silent or non-finite"
-        ));
-    }
+    Ok((burst_snr, first_align))
+}
 
-    // Compare the concealment against the actual dropped frame. The alignment
-    // search compensates for the codec's algorithmic delay; the found delay is
-    // reported so the metric stays reproducible.
-    let dropped_start = HISTORY_FRAMES * expected_samples;
-    let (plc_snr, plc_delay) = best_aligned_snr(
-        &tone_block[dropped_start..dropped_start + expected_samples],
-        &block[..PCM_SAMPLES_PER_BLOCK],
+/// Admits and decodes `RECOVERY_FRAMES` fresh frames after the loss burst and
+/// returns the final recovered block's aligned SNR against its source frame.
+fn verify_recovery<const N: usize>(
+    worker: &mut StreamDecodeWorker<NativeOpusDecoder, JITTER_CAPACITY, MAX_ENCODED_BYTES, N>,
+    consumer: &mut RealtimePcmConsumer<N>,
+    block: &mut [f32; N],
+    tone_block: &[f32],
+    packets: &[[u8; MAX_ENCODED_BYTES]],
+    encoded_lens: &[usize],
+    expected_samples: usize,
+) -> ProbeResult<f32> {
+    for index in 0..RECOVERY_FRAMES {
+        let sequence = HISTORY_FRAMES + PLC_BURST_FRAMES + index;
+        worker
+            .admit(
+                u32::try_from(sequence).expect("recovery frame index fits u32"),
+                0,
+                &packets[HISTORY_FRAMES + index][..encoded_lens[HISTORY_FRAMES + index]],
+            )
+            .map_err(|error| error.to_string())?;
+        match worker.decode_next().map_err(|error| error.to_string())? {
+            DecodeStep::Decoded { samples, .. } if samples == expected_samples => {}
+            other => return Err(format!("expected a recovered frame, got {other:?}")),
+        }
+        assert_popped_pcm(consumer, block, expected_samples)?;
+    }
+    let recovered_frame = HISTORY_FRAMES + PLC_BURST_FRAMES + RECOVERY_FRAMES - 1;
+    let recovered_start = recovered_frame * expected_samples;
+    let (recovery_snr, _) = best_aligned_snr(
+        &tone_block[recovered_start..recovered_start + expected_samples],
+        &block[..expected_samples],
     );
-    if !plc_snr.is_finite() {
-        return Err(format!("PLC-loss SNR {plc_snr:.1} dB is non-finite"));
-    }
-
-    let encode_per_frame = encoded_lens.iter().sum::<usize>() / HISTORY_FRAMES;
-    Ok(format!(
-        "opus_{frame_duration_ms}ms: ok (encode {encode_per_frame} B/frame; decode {expected_samples}/PLC {PCM_SAMPLES_PER_BLOCK} samples; snr {decode_snr:.1}/{plc_snr:.1} dB; delay {delay} samples; plc align {plc_delay})"
-    ))
+    Ok(recovery_snr)
 }
 
 /// Returns the signal-to-noise ratio in decibels between `reference` and
@@ -242,6 +397,13 @@ fn best_aligned_snr(reference: &[f32], decoded: &[f32]) -> (f32, i32) {
     (best, best_delay)
 }
 
+/// Returns the arithmetic mean of a non-empty finite SNR slice.
+#[must_use]
+#[allow(clippy::cast_precision_loss)]
+fn mean_snr(samples: &[f32]) -> f32 {
+    samples.iter().copied().sum::<f32>() / samples.len() as f32
+}
+
 /// Returns the root-mean-square of a finite PCM block.
 #[must_use]
 #[allow(clippy::cast_precision_loss)]
@@ -271,7 +433,7 @@ fn sweep_malformed_payloads() -> ProbeResult<(usize, usize)> {
     let mut rng = 0x5eed_0007_u32;
     let mut rejected = 0_usize;
     let mut accepted = 0_usize;
-    let mut block = [0.0_f32; PCM_SAMPLES_PER_BLOCK];
+    let mut block = [0.0_f32; MAX_PCM_SAMPLES_PER_BLOCK];
     let mut decoder = NativeOpusDecoder {
         decoder: opus::Decoder::new(SAMPLE_RATE_HZ, opus::Channels::Stereo)
             .map_err(|error| error.to_string())?,
@@ -283,7 +445,7 @@ fn sweep_malformed_payloads() -> ProbeResult<(usize, usize)> {
             *byte = u8::try_from(next_random(&mut rng) & 0xFF).expect("masked byte fits u8");
         }
         match decoder.decode(&payload[..length], &mut block) {
-            Ok(samples) if (1..=PCM_SAMPLES_PER_BLOCK).contains(&samples) => accepted += 1,
+            Ok(samples) if (1..=MAX_PCM_SAMPLES_PER_BLOCK).contains(&samples) => accepted += 1,
             Ok(samples) => {
                 return Err(format!(
                     "malformed payload accepted with out-of-bounds {samples} samples"
@@ -304,7 +466,7 @@ fn run_probe() -> ProbeResult<Vec<String>> {
 
     // A malformed authenticated payload surfaces as a bounded stream-local
     // decoder error and never reaches the PCM queue.
-    let mut block = [0.0_f32; PCM_SAMPLES_PER_BLOCK];
+    let mut block = [0.0_f32; MAX_PCM_SAMPLES_PER_BLOCK];
     let malformed = [0xFF_u8; 16];
     let mut bad_decoder = NativeOpusDecoder {
         decoder: opus::Decoder::new(SAMPLE_RATE_HZ, opus::Channels::Stereo)
