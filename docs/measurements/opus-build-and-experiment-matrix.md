@@ -91,7 +91,7 @@ For every implemented cell, retain these results with the existing deterministic
 - malformed but authenticated payload rejection without process crash;
 - reset after discontinuity and stream-local decoder error isolation;
 - output-length overflow rejection by the decode worker;
-- loss, reorder, bandwidth, and drift profiles with reproducible seed values;
+- loss, reorder, jitter-wait, bandwidth, and drift profiles with reproducible seed values;
 - 10 ms and 20 ms scheduler/sample timestamps derived from the same OpusFrameConfig used by the future decode worker;
 - decode CPU, allocation profile, and Android power/thermal observations; and
 - real-device subjective quality notes separated from physical latency results.
@@ -103,10 +103,12 @@ against the source tone for both negotiated shapes, a deterministic five-frame
 loss burst, a 1-12 frame burst-length sweep that records PLC degradation and
 confirms the stream re-locks to the source after every length, deterministic
 loss-pattern windows (independent 1/3/5% and a periodic 5-in-50 burst) that
-keep the window mean SNR within 35.7-41.3 dB across both shapes, and bounded
-reorder absorption and late-drop (see the dated build record). That is
-prototype-level evidence only, not a coverage-guided fuzz result, an adaptive
-jitter-wait profile, or CPU/power measurement.
+keep the window mean SNR within 35.7-41.3 dB across both shapes, a
+deterministic jitter-wait sweep that records the concealment/drop boundary
+of waiting before declaring a loss, and bounded reorder absorption and
+late-drop (see the dated build record). That is prototype-level evidence
+only, not a coverage-guided fuzz result, an adaptive jitter-target result,
+or CPU/power measurement.
 
 ## Codec-neutral media-path regression
 
