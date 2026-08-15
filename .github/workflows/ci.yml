@@ -10,6 +10,10 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
+  # The bundled libopus CMakeLists uses a pre-3.5 policy floor; CMake 4.x
+  # needs this variable to configure, so it must cover the workspace test and
+  # clippy steps that compile the native opus-codec-prototype member.
+  CMAKE_POLICY_VERSION_MINIMUM: '3.5'
 
 jobs:
   rust:
@@ -80,8 +84,6 @@ jobs:
         run: cargo run -p windows-tls-provider-prototype
       - name: Run Windows Opus codec prototype
         if: runner.os == 'Windows'
-        env:
-          CMAKE_POLICY_VERSION_MINIMUM: '3.5'
         run: cargo run -p opus-codec-prototype
 
   desktop-ui:
