@@ -5,7 +5,8 @@
 //! a steady-state history of frames for each negotiated shape (10 ms and
 //! 20 ms stereo) through the sonimesh-audio StreamDecodeWorker boundary,
 //! conceals a deterministic burst of lost frames with decoder-side PLC,
-//! confirms the stream re-locks to the source after the burst, and sweeps
+//! confirms the stream re-locks to the source after the burst, sweeps
+//! multiple burst lengths to record PLC degradation and recovery, and sweeps
 //! bounded deterministic malformed payloads that must surface as
 //! stream-local errors or bounded decodes. It is not a quality, power,
 //! latency, Android ABI, or coverage-guided fuzz result.
@@ -35,6 +36,8 @@ const HISTORY_FRAMES: usize = 10;
 const PLC_BURST_FRAMES: usize = 5;
 /// Frames admitted and decoded after the burst to confirm stream recovery.
 const RECOVERY_FRAMES: usize = 2;
+/// Burst lengths swept to record PLC degradation and recovery on this host.
+const BURST_LENGTHS: [usize; 6] = [1, 2, 3, 5, 8, 12];
 /// Deterministic malformed-payload sweep size.
 const MALFORMED_SWEEP_PAYLOADS: usize = 1_000;
 /// Lowest plausible RMS for a decoded 0.25-amplitude tone block.
@@ -91,6 +94,41 @@ fn encode_frame(
     Ok(len)
 }
 
+/// Encodes the deterministic tone history plus the recovery frames that follow
+/// one burst, returning packets and their encoded lengths.
+///
+/// The `recovery_start` is the source frame index of the first frame admitted
+/// after the burst; the tone must cover it and the recovery frames that follow.
+fn encode_history_and_recovery(
+    encoder: &mut opus::Encoder,
+    tone_block: &[f32],
+    expected_samples: usize,
+    recovery_start: usize,
+) -> ProbeResult<(Vec<[u8; MAX_ENCODED_BYTES]>, Vec<usize>)> {
+    let mut packets = vec![[0_u8; MAX_ENCODED_BYTES]; HISTORY_FRAMES + RECOVERY_FRAMES];
+    let mut encoded_lens = vec![0_usize; HISTORY_FRAMES + RECOVERY_FRAMES];
+    for index in 0..HISTORY_FRAMES {
+        let start = index * expected_samples;
+        encoded_lens[index] = encode_frame(
+            encoder,
+            &tone_block[start..start + expected_samples],
+            &mut packets[index],
+        )?;
+    }
+    // The recovery frames sit after the burst in the source tone; encoding
+    // them out of order keeps the probe deterministic and skips the lost ones.
+    for index in 0..RECOVERY_FRAMES {
+        let source_index = recovery_start + index;
+        let start = source_index * expected_samples;
+        encoded_lens[HISTORY_FRAMES + index] = encode_frame(
+            encoder,
+            &tone_block[start..start + expected_samples],
+            &mut packets[HISTORY_FRAMES + index],
+        )?;
+    }
+    Ok((packets, encoded_lens))
+}
+
 /// Runs the steady-state encode/decode/PLC path for one negotiated duration.
 ///
 /// The PCM block is sized to the negotiated frame (10 ms -> 960 samples,
@@ -134,27 +172,12 @@ fn run_frame_path_impl<const PCM_SAMPLES_PER_BLOCK: usize>(
         .expect("lookahead is non-negative");
     let delay = lookahead * OPUS_CHANNELS as usize;
 
-    let mut packets = [[0_u8; MAX_ENCODED_BYTES]; HISTORY_FRAMES + RECOVERY_FRAMES];
-    let mut encoded_lens = [0_usize; HISTORY_FRAMES + RECOVERY_FRAMES];
-    for index in 0..HISTORY_FRAMES {
-        let start = index * expected_samples;
-        encoded_lens[index] = encode_frame(
-            &mut encoder,
-            &tone_block[start..start + expected_samples],
-            &mut packets[index],
-        )?;
-    }
-    // The recovery frames sit after the burst in the source tone; encoding
-    // them out of order keeps the probe deterministic and skips the lost ones.
-    for index in 0..RECOVERY_FRAMES {
-        let source_index = HISTORY_FRAMES + PLC_BURST_FRAMES + index;
-        let start = source_index * expected_samples;
-        encoded_lens[HISTORY_FRAMES + index] = encode_frame(
-            &mut encoder,
-            &tone_block[start..start + expected_samples],
-            &mut packets[HISTORY_FRAMES + index],
-        )?;
-    }
+    let (packets, encoded_lens) = encode_history_and_recovery(
+        &mut encoder,
+        &tone_block,
+        expected_samples,
+        HISTORY_FRAMES + PLC_BURST_FRAMES,
+    )?;
 
     let (producer, mut consumer) = realtime_pcm_queue::<PCM_SAMPLES_PER_BLOCK>(PCM_QUEUE_CAPACITY)
         .map_err(|error| error.to_string())?;
@@ -344,6 +367,146 @@ fn verify_recovery<const N: usize>(
     Ok(recovery_snr)
 }
 
+/// Conceals one `burst_len`-frame loss burst through a fresh decode worker and
+/// returns the worst and mean concealed-block SNR plus the recovery SNR.
+///
+/// Every concealed block must stay non-silent and finite, and the stream must
+/// re-lock to the source after the burst. Quality degradation across longer
+/// bursts is reported rather than gated, so the probe records the loss curve
+/// instead of assuming one floor holds for every length.
+fn run_burst_len<const N: usize>(
+    frame: OpusFrameConfig,
+    burst_len: usize,
+    expected_samples: usize,
+) -> ProbeResult<(f32, f32, f32)> {
+    let tone_block = tone((HISTORY_FRAMES + burst_len + RECOVERY_FRAMES) * expected_samples);
+
+    let mut encoder = opus::Encoder::new(
+        SAMPLE_RATE_HZ,
+        opus::Channels::Stereo,
+        opus::Application::Audio,
+    )
+    .map_err(|error| error.to_string())?;
+    let (packets, encoded_lens) = encode_history_and_recovery(
+        &mut encoder,
+        &tone_block,
+        expected_samples,
+        HISTORY_FRAMES + burst_len,
+    )?;
+
+    let (producer, mut consumer) =
+        realtime_pcm_queue::<N>(PCM_QUEUE_CAPACITY).map_err(|error| error.to_string())?;
+    let decoder = NativeOpusDecoder {
+        decoder: opus::Decoder::new(SAMPLE_RATE_HZ, opus::Channels::Stereo)
+            .map_err(|error| error.to_string())?,
+    };
+    let mut worker: StreamDecodeWorker<NativeOpusDecoder, JITTER_CAPACITY, MAX_ENCODED_BYTES, N> =
+        StreamDecodeWorker::new_for_opus(decoder, producer, 0, frame)
+            .map_err(|error| error.to_string())?;
+
+    let mut block = [0.0_f32; N];
+    for index in 0..HISTORY_FRAMES {
+        worker
+            .admit(
+                u32::try_from(index).expect("history frame index fits u32"),
+                0,
+                &packets[index][..encoded_lens[index]],
+            )
+            .map_err(|error| error.to_string())?;
+        match worker.decode_next().map_err(|error| error.to_string())? {
+            DecodeStep::Decoded { samples, .. } if samples == expected_samples => {}
+            other => return Err(format!("expected a decoded frame, got {other:?}")),
+        }
+        assert_popped_pcm(&mut consumer, &mut block, expected_samples)?;
+    }
+
+    let mut concealed_snr = Vec::with_capacity(burst_len);
+    for drop_index in 0..burst_len {
+        match worker.decode_next().map_err(|error| error.to_string())? {
+            DecodeStep::Concealed { samples, .. } if samples == expected_samples => {}
+            other => return Err(format!("expected a concealed frame, got {other:?}")),
+        }
+        assert_popped_pcm(&mut consumer, &mut block, expected_samples)?;
+        let concealed = &block[..expected_samples];
+        let concealed_rms = block_rms(concealed);
+        if !concealed_rms.is_finite() || concealed_rms < PLC_RMS_MIN {
+            return Err(format!(
+                "sweep concealed block {drop_index} RMS {concealed_rms:.3} is silent or non-finite"
+            ));
+        }
+        let dropped_start = (HISTORY_FRAMES + drop_index) * expected_samples;
+        let (snr, _) = best_aligned_snr(
+            &tone_block[dropped_start..dropped_start + expected_samples],
+            concealed,
+        );
+        if !snr.is_finite() {
+            return Err(format!(
+                "sweep concealed block {drop_index} SNR {snr:.1} dB is non-finite"
+            ));
+        }
+        concealed_snr.push(snr);
+    }
+    let worst = concealed_snr.iter().copied().fold(f32::INFINITY, f32::min);
+    let mean = mean_snr(&concealed_snr);
+
+    for index in 0..RECOVERY_FRAMES {
+        let sequence = HISTORY_FRAMES + burst_len + index;
+        worker
+            .admit(
+                u32::try_from(sequence).expect("recovery frame index fits u32"),
+                0,
+                &packets[HISTORY_FRAMES + index][..encoded_lens[HISTORY_FRAMES + index]],
+            )
+            .map_err(|error| error.to_string())?;
+        match worker.decode_next().map_err(|error| error.to_string())? {
+            DecodeStep::Decoded { samples, .. } if samples == expected_samples => {}
+            other => return Err(format!("expected a recovered frame, got {other:?}")),
+        }
+        assert_popped_pcm(&mut consumer, &mut block, expected_samples)?;
+    }
+    let recovered_frame = HISTORY_FRAMES + burst_len + RECOVERY_FRAMES - 1;
+    let recovered_start = recovered_frame * expected_samples;
+    let (recovery_snr, _) = best_aligned_snr(
+        &tone_block[recovered_start..recovered_start + expected_samples],
+        &block[..expected_samples],
+    );
+    Ok((worst, mean, recovery_snr))
+}
+
+/// Runs the burst-length sweep for one negotiated duration and returns one
+/// success line per swept length.
+fn run_burst_sweep(frame_duration_ms: u16) -> ProbeResult<Vec<String>> {
+    match frame_duration_ms {
+        10 => run_burst_sweep_impl::<960>(frame_duration_ms),
+        20 => run_burst_sweep_impl::<MAX_PCM_SAMPLES_PER_BLOCK>(frame_duration_ms),
+        other => Err(format!("unsupported frame duration {other} ms")),
+    }
+}
+
+/// Sweeps [`BURST_LENGTHS`] through fresh decode workers with a compile-time
+/// PCM block capacity and validates each length's sanity and recovery floors.
+fn run_burst_sweep_impl<const PCM_SAMPLES_PER_BLOCK: usize>(
+    frame_duration_ms: u16,
+) -> ProbeResult<Vec<String>> {
+    let frame = OpusFrameConfig::new(SAMPLE_RATE_HZ, 2, frame_duration_ms)
+        .map_err(|error| error.to_string())?;
+    let expected_samples = frame.interleaved_samples();
+    let mut lines = Vec::new();
+    for &burst_len in &BURST_LENGTHS {
+        let (worst, mean, recovery_snr) =
+            run_burst_len::<PCM_SAMPLES_PER_BLOCK>(frame, burst_len, expected_samples)?;
+        if !recovery_snr.is_finite() || recovery_snr < RECOVERY_SNR_MIN {
+            return Err(format!(
+                "burst length {burst_len} recovery SNR {recovery_snr:.1} dB below the expected floor"
+            ));
+        }
+        lines.push(format!(
+            "opus_{frame_duration_ms}ms_burst: len {burst_len} ok (min {worst:.1} mean {mean:.1} recovery {recovery_snr:.1} dB)"
+        ));
+    }
+    Ok(lines)
+}
+
 /// Returns the signal-to-noise ratio in decibels between `reference` and
 /// `decoded` over the overlapping region, or infinity when either side is
 /// digital silence.
@@ -462,6 +625,7 @@ fn run_probe() -> ProbeResult<Vec<String>> {
     let mut lines = Vec::new();
     for duration_ms in FRAME_DURATIONS_MS {
         lines.push(run_frame_path(duration_ms)?);
+        lines.extend(run_burst_sweep(duration_ms)?);
     }
 
     // A malformed authenticated payload surfaces as a bounded stream-local
