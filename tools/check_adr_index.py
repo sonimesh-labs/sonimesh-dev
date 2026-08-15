@@ -16,6 +16,8 @@ RECORD_PATTERN = re.compile(
 MARKDOWN_HEADING_PATTERN = re.compile(r"^## [^\r\n]+[ \t]*$")
 MARKDOWN_FENCE_PATTERN = re.compile(r"^[ \t]*(`{3,}|~{3,})")
 RECORDS_HEADING = "## Records"
+STATUS_LINE_PATTERN = re.compile(r"^-\s*Status:\s*(?P<status>[^\r\n]+)$")
+ADR_STATUS_TOKENS = ("Accepted", "Provisional")
 
 
 def adr_files(adr_directory: Path) -> list[tuple[int, str]]:
@@ -128,6 +130,31 @@ def record_heading(source: str) -> tuple[str | None, str | None, int | None]:
     return "ADR record has no level-one heading", None, None
 
 
+def record_status(source: str) -> str | None:
+    """Returns an error when the metadata block lacks a canonical Status line.
+
+    The status line must appear between the level-one heading and the first
+    level-two heading and start with one of the documented lifecycle tokens.
+    """
+    for raw in source.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith("## "):
+            break
+        match = STATUS_LINE_PATTERN.match(line)
+        if match is None:
+            continue
+        status = match.group("status").strip()
+        if status.split(" ", 1)[0] in ADR_STATUS_TOKENS:
+            return None
+        return (
+            "ADR record status must start with one of "
+            f"{', '.join(ADR_STATUS_TOKENS)}: {status}"
+        )
+    return "ADR record has no canonical Status metadata line"
+
+
 def validate_sources(readme: str, adr_directory: Path) -> list[str]:
     """Returns deterministic consistency errors across the ADR index."""
     try:
@@ -171,6 +198,9 @@ def validate_sources(readme: str, adr_directory: Path) -> list[str]:
         if heading_error is not None:
             errors.append(f"ADR {number:04d} ({filename}) {heading_error}")
             continue
+        status_error = record_status(content)
+        if status_error is not None:
+            errors.append(f"ADR {number:04d} ({filename}) {status_error}")
         if heading_number is not None and heading_number != number:
             errors.append(
                 f"ADR {number:04d} ({filename}) heading number is ADR {heading_number:04d}"
@@ -219,7 +249,10 @@ class AdrIndexTests(unittest.TestCase):
     ) -> None:
         for filename in filenames:
             heading = headings[filename] if headings is not None else "# record"
-            (directory / filename).write_text(heading + "\n", encoding="utf-8")
+            (directory / filename).write_text(
+                heading + "\n\n- Status: Accepted for tests\n- Date: 2026-01-01\n",
+                encoding="utf-8",
+            )
 
     def test_matching_index_and_files_are_valid(self) -> None:
         readme = """## Priority ADRs
@@ -386,6 +419,57 @@ class AdrIndexTests(unittest.TestCase):
                 Path(directory),
                 ["0001-first-decision.md"],
                 {"0001-first-decision.md": "# First decision"},
+            )
+            self.assertEqual(validate_sources(readme, Path(directory)), [])
+
+    def test_reports_missing_status_line(self) -> None:
+        readme = """## Records
+
+- [ADR 0001: First decision](./0001-first-decision.md) - accepted.
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            (Path(directory) / "0001-first-decision.md").write_text(
+                "# ADR 0001: First decision\n\n- Date: 2026-01-01\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                validate_sources(readme, Path(directory)),
+                [
+                    "ADR 0001 (0001-first-decision.md) ADR record has no canonical Status metadata line"
+                ],
+            )
+
+    def test_reports_noncanonical_status_token(self) -> None:
+        readme = """## Records
+
+- [ADR 0001: First decision](./0001-first-decision.md) - accepted.
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            (Path(directory) / "0001-first-decision.md").write_text(
+                "# ADR 0001: First decision\n\n- Status: TBD\n- Date: 2026-01-01\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                validate_sources(readme, Path(directory)),
+                [
+                    "ADR 0001 (0001-first-decision.md) ADR record status must start with one of Accepted, Provisional: TBD"
+                ],
+            )
+
+    def test_accepts_qualified_canonical_statuses(self) -> None:
+        readme = """## Records
+
+- [ADR 0001: First decision](./0001-first-decision.md) - accepted.
+- [ADR 0002: Second decision](./0002-second-decision.md) - provisional.
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            (Path(directory) / "0001-first-decision.md").write_text(
+                "# ADR 0001: First decision\n\n- Status: Accepted for feasibility work\n- Date: 2026-01-01\n",
+                encoding="utf-8",
+            )
+            (Path(directory) / "0002-second-decision.md").write_text(
+                "# ADR 0002: Second decision\n\n- Status: Provisional pending device evidence\n- Date: 2026-01-01\n",
+                encoding="utf-8",
             )
             self.assertEqual(validate_sources(readme, Path(directory)), [])
 
