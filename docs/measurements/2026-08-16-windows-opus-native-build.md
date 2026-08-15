@@ -1,9 +1,10 @@
 # Windows Opus native build - 2026-08-16
 
-> Status: native libopus build and steady-state decode/PLC probe on the
-> reference Windows host. ADR 0009 remains Provisional: Android ABI packaging,
-> CPU/power, sustained-loss behavior, and coverage-guided malformed-payload
-> fuzzing against the native decoder are still pending.
+> Status: native libopus build and decode/PLC probe on the reference Windows
+> host, including a deterministic five-frame loss burst with recovery. ADR 0009
+> remains Provisional: Android ABI packaging, CPU/power, loss-over-time and
+> longer-burst behavior, and coverage-guided malformed-payload fuzzing against
+> the native decoder are still pending.
 > Updated: 2026-08-16
 
 ## Summary
@@ -13,9 +14,12 @@ The candidate `opus` 0.3.1 binding (bundled libopus through `audiopus_sys`
 `tools/opus-codec-prototype` probe. For each negotiated shape (10 ms and 20 ms
 stereo), the probe encodes a deterministic tone history, decodes it through
 the `sonimesh-audio` `StreamDecodeWorker::new_for_opus` boundary, compares the
-steady-state decoded block and one PLC-concealed block against the source with
-model-free aligned SNR, and sweeps deterministic malformed payloads that must
-surface as bounded stream-local errors.
+steady-state decoded block against the source with model-free aligned SNR,
+conceals a deterministic burst of five consecutive lost frames with
+decoder-side PLC, confirms the stream re-locks to the source after the burst,
+and sweeps deterministic malformed payloads that must surface as bounded
+stream-local errors. The PCM block is sized to the negotiated frame on each
+shape, so PLC synthesizes exactly one frame of concealment per missing frame.
 
 ## Command
 
@@ -60,8 +64,8 @@ lets CMake apply the pre-3.5 policy floor, and the native build completed.
 The probe then passed every step:
 
 ```text
-opus_10ms: ok (encode 141 B/frame; decode 960/PLC 1920 samples; snr 36.9/40.0 dB; delay 624 samples; plc align 733)
-opus_20ms: ok (encode 273 B/frame; decode 1920/PLC 1920 samples; snr 44.9/48.4 dB; delay 624 samples; plc align 733)
+opus_10ms: ok (encode 141 B/frame; decode 960/PLC 960 samples; snr 36.9 dB; plc burst 5 min 2.8 mean 16.6 dB; align 733; recovery 42.4 dB; delay 624 samples)
+opus_20ms: ok (encode 273 B/frame; decode 1920/PLC 1920 samples; snr 44.9 dB; plc burst 5 min 4.1 mean 18.5 dB; align 733; recovery 48.1 dB; delay 624 samples)
 opus_malformed_payload: rejected
 opus_malformed_sweep: ok (1000 payloads; 642 rejected; 358 accepted-bounded)
 opus_native_build: ok
@@ -74,28 +78,32 @@ Windows host and that its decode and PLC paths work through the bounded
 `StreamDecodeWorker` boundary with decode writing into caller-owned storage.
 The steady-state decoded tone keeps a 36.9 dB SNR for the 10 ms shape and
 44.9 dB for the 20 ms shape against the source, compensated for the codec's
-624-sample interleaved lookahead delay; the PLC-concealed block keeps 40.0 dB
-and 48.4 dB against the actual dropped frame, with the reported 733-sample
-alignment equal to the lookahead plus one 440 Hz tone period. That is the
-first on-host quality signal for the 10 ms versus 20 ms comparison at
-comparable bitrate (141 B/frame at 10 ms and 273 B/frame at 20 ms are both
-about 110 kb/s), but it is one deterministic tone on one host, not a
-CPU/power or sustained-loss result. The malformed-payload sweep remains a
+624-sample interleaved lookahead delay. Over a deterministic five-frame loss
+burst, decoder-side PLC keeps every concealed block non-silent with a per-block
+SNR floor of 2.8 dB (10 ms) and 4.1 dB (20 ms) and a burst mean of 16.6 dB and
+18.5 dB against the actual dropped frames; after the burst the stream re-locks
+to the source with a recovered-frame SNR of 42.4 dB and 48.1 dB. The reported
+733-sample alignment on the first concealed block equals the lookahead plus one
+440 Hz tone period. That is the first on-host quality signal for the 10 ms
+versus 20 ms comparison at comparable bitrate (141 B/frame at 10 ms and
+273 B/frame at 20 ms are both about 110 kb/s) and the first sustained-loss
+signal, but it is one deterministic tone on one host, not a CPU/power,
+loss-over-time, or longer-burst result. The malformed-payload sweep remains a
 deterministic bounded probe (fixed-seed xorshift32, 1,000 payloads up to the
 datagram limit) rather than a coverage-guided fuzz result.
 
-One observable detail: for an empty packet libopus synthesizes
-`frame_size = output capacity / channels`, so with the reserved 20 ms block
-(1,920 samples) PLC fills the whole block for both the 10 ms and 20 ms shapes.
-The worker accepts that bounded length and the consumer pops it whole; a
-production 10 ms stream should either size its block to 960 samples or expect
-full-block PLC.
+A sizing detail changed in this revision: the PCM block is now the negotiated
+frame size (960 samples for 10 ms, 1,920 for 20 ms) instead of the reserved
+20 ms block, so an empty packet makes libopus synthesize exactly one frame of
+concealment per missing frame on both shapes. The earlier full-block PLC for
+the 10 ms shape is gone; a production 10 ms stream should size its block to
+960 samples.
 
 ## Remaining ADR 0009 gates
 
 - reproducible native build on the Android ABIs (`arm64-v8a`, `x86_64`) with
   a pinned NDK;
-- CPU and power evidence for both frame durations, plus sustained or
-  loss-over-time behavior beyond the single deterministic drop;
+- CPU and power evidence for both frame durations, plus loss-over-time and
+  longer-burst behavior beyond the deterministic five-frame probe on this host;
 - authenticated malformed-payload fuzzing against the native decoder;
 - physical latency and Android capture claims remain separate tests.
