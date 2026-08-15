@@ -1,7 +1,12 @@
 # Opus build and experiment matrix
 
 > Status: pre-binding gate and proposed experiment plan; no Opus binding is enabled and no codec-quality result is recorded.
-> Updated: 2026-07-20
+> Updated: 2026-08-16
+>
+> On 2026-08-16 the reference host built the candidate binding and ran the
+> `tools/opus-codec-prototype` decode/PLC probe (see the dated build record).
+> The binding is still not enabled; Android ABI, quality, CPU/power,
+> coverage-guided fuzzing, and CI reproducibility evidence remain pending.
 
 This document turns the acceptance conditions in ADR 0009 into reproducible evidence. A passing Rust-only decoder mock, a dependency resolution, or a successful Windows build alone is insufficient to select a codec binding or media policy.
 
@@ -9,7 +14,7 @@ This document turns the acceptance conditions in ADR 0009 into reproducible evid
 
 | Check | Observation | Interpretation |
 | --- | --- | --- |
-| Windows build tools | `cmake`, `ninja`, and `cl.exe` were absent from PATH; CMake's conventional locations and VS 2019/2022 BuildTools/Community MSVC directories were also absent | The reference host cannot build bundled libopus or a C/C++ binding until reviewed build tools are installed and their versions are recorded. |
+| Windows build tools | On 2026-07-20 `cmake`, `ninja`, and `cl.exe` were absent from PATH; on 2026-08-16 Visual Studio 18 Community provided CMake `4.2.3-msvc3` and MSVC `14.50` (CMake not on PATH by default; Ninja availability not recorded) | The reference host can now build bundled libopus with the documented `CMAKE_POLICY_VERSION_MINIMUM=3.5` workaround; see the 2026-08-16 build record. |
 | Rust Windows host | Rust 1.85.0 `x86_64-pc-windows-msvc` is installed; it is the only installed Rust target | A Windows-native build still also needs the C/C++ toolchain required by libopus. Android cross-targets are not installed. |
 | Reviewed installed libopus | No workspace dependency, Cargo cache entry, Gradle cache entry, or reviewed installed library was found | Do not use an ambient library path or add an unreviewed prebuilt binary. |
 | Candidate binding metadata | `cargo info opus@0.3.1` reports `opus` 0.3.1, MIT/Apache-2.0, repository `SpaceManiac/opus-rs` | Candidate metadata only; it does not establish a libopus source revision, native build path, or libopus license evidence. |
@@ -22,10 +27,10 @@ All rows must be recorded before enabling any optional codec feature.
 
 | Target | Required evidence | Result |
 | --- | --- | --- |
-| Windows x86_64 MSVC | Pinned Rust crate/version, libopus source/version, CMake invocation, MSVC toolset, linkage decision, artifact hash, and license texts | Blocked: CMake, Ninja, and MSVC compiler/toolset unavailable on the reference host |
+| Windows x86_64 MSVC | Pinned Rust crate/version, libopus source/version, CMake invocation, MSVC toolset, linkage decision, artifact hash, and license texts | Partially passed on the reference host (2026-08-16): `opus` 0.3.1 / `audiopus_sys` 0.2.2 built with CMake 4.2.3-msvc3 + MSVC 14.50; artifact hash and license texts not yet recorded; CI reproducibility pending |
 | Android arm64-v8a | NDK version, ABI build command, packaged native library inspection, and a device load test | Blocked: NDK not present |
 | Android x86_64 | Same evidence as arm64-v8a for emulator/CI coverage | Blocked: NDK not present |
-| Rust CI | Fresh Windows build plus workspace Clippy/tests with the codec feature enabled | Not run |
+| Rust CI | Fresh Windows build plus workspace Clippy/tests with the codec feature enabled | Wired into CI (Windows probe step plus workspace clippy/test compile the member); CI execution not yet observed |
 | Cross-platform vectors | Identical 10 ms and 20 ms decode/PLC vectors accepted by Rust and Android implementations | Not run |
 
 A build artifact must not be accepted through an unreviewed system library search path. Record the exact dependency and license evidence before any app or Android packaging integration.
@@ -90,6 +95,11 @@ For every implemented cell, retain these results with the existing deterministic
 - 10 ms and 20 ms scheduler/sample timestamps derived from the same OpusFrameConfig used by the future decode worker;
 - decode CPU, allocation profile, and Android power/thermal observations; and
 - real-device subjective quality notes separated from physical latency results.
+
+On 2026-08-16 the reference-host probe (`tools/opus-codec-prototype`) added a
+deterministic malformed-payload sweep (fixed-seed, 1,000 payloads up to the
+datagram limit) and decode/PLC RMS sanity checks. That is prototype-level
+evidence only, not a coverage-guided fuzz result or a quality measurement.
 
 ## Codec-neutral media-path regression
 
