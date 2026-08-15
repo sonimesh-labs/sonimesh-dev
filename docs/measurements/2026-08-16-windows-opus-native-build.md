@@ -1,10 +1,11 @@
 # Windows Opus native build - 2026-08-16
 
 > Status: native libopus build and decode/PLC probe on the reference Windows
-> host, including a deterministic five-frame loss burst with recovery. ADR 0009
-> remains Provisional: Android ABI packaging, CPU/power, loss-over-time and
-> longer-burst behavior, and coverage-guided malformed-payload fuzzing against
-> the native decoder are still pending.
+> host, including a deterministic five-frame loss burst and a 1-12 frame
+> burst-length sweep, both with recovery. ADR 0009 remains Provisional: Android
+> ABI packaging, CPU/power, loss-over-time profiles, bursts beyond 12 frames,
+> and coverage-guided malformed-payload fuzzing against the native decoder are
+> still pending.
 > Updated: 2026-08-16
 
 ## Summary
@@ -16,9 +17,10 @@ stereo), the probe encodes a deterministic tone history, decodes it through
 the `sonimesh-audio` `StreamDecodeWorker::new_for_opus` boundary, compares the
 steady-state decoded block against the source with model-free aligned SNR,
 conceals a deterministic burst of five consecutive lost frames with
-decoder-side PLC, confirms the stream re-locks to the source after the burst,
-and sweeps deterministic malformed payloads that must surface as bounded
-stream-local errors. The PCM block is sized to the negotiated frame on each
+decoder-side PLC, sweeps burst lengths from 1 to 12 frames to record how PLC
+quality degrades and confirm the stream re-locks to the source after every
+length, and sweeps deterministic malformed payloads that must surface as
+bounded stream-local errors. The PCM block is sized to the negotiated frame on each
 shape, so PLC synthesizes exactly one frame of concealment per missing frame.
 
 ## Command
@@ -65,7 +67,19 @@ The probe then passed every step:
 
 ```text
 opus_10ms: ok (encode 141 B/frame; decode 960/PLC 960 samples; snr 36.9 dB; plc burst 5 min 2.8 mean 16.6 dB; align 733; recovery 42.4 dB; delay 624 samples)
+opus_10ms_burst: len 1 ok (min 40.0 mean 40.0 recovery 33.4 dB)
+opus_10ms_burst: len 2 ok (min 22.7 mean 31.4 recovery 26.7 dB)
+opus_10ms_burst: len 3 ok (min 11.4 mean 24.7 recovery 37.9 dB)
+opus_10ms_burst: len 5 ok (min 2.8 mean 16.6 recovery 42.4 dB)
+opus_10ms_burst: len 8 ok (min 1.3 mean 11.0 recovery 37.7 dB)
+opus_10ms_burst: len 12 ok (min 0.4 mean 7.5 recovery 26.1 dB)
 opus_20ms: ok (encode 273 B/frame; decode 1920/PLC 1920 samples; snr 44.9 dB; plc burst 5 min 4.1 mean 18.5 dB; align 733; recovery 48.1 dB; delay 624 samples)
+opus_20ms_burst: len 1 ok (min 48.4 mean 48.4 recovery 43.2 dB)
+opus_20ms_burst: len 2 ok (min 22.4 mean 35.4 recovery 42.8 dB)
+opus_20ms_burst: len 3 ok (min 11.2 mean 27.3 recovery 40.9 dB)
+opus_20ms_burst: len 5 ok (min 4.1 mean 18.5 recovery 48.1 dB)
+opus_20ms_burst: len 8 ok (min 1.0 mean 12.1 recovery 41.5 dB)
+opus_20ms_burst: len 12 ok (min 0.4 mean 8.3 recovery 38.9 dB)
 opus_malformed_payload: rejected
 opus_malformed_sweep: ok (1000 payloads; 642 rejected; 358 accepted-bounded)
 opus_native_build: ok
@@ -84,13 +98,19 @@ SNR floor of 2.8 dB (10 ms) and 4.1 dB (20 ms) and a burst mean of 16.6 dB and
 18.5 dB against the actual dropped frames; after the burst the stream re-locks
 to the source with a recovered-frame SNR of 42.4 dB and 48.1 dB. The reported
 733-sample alignment on the first concealed block equals the lookahead plus one
-440 Hz tone period. That is the first on-host quality signal for the 10 ms
-versus 20 ms comparison at comparable bitrate (141 B/frame at 10 ms and
-273 B/frame at 20 ms are both about 110 kb/s) and the first sustained-loss
-signal, but it is one deterministic tone on one host, not a CPU/power,
-loss-over-time, or longer-burst result. The malformed-payload sweep remains a
-deterministic bounded probe (fixed-seed xorshift32, 1,000 payloads up to the
-datagram limit) rather than a coverage-guided fuzz result.
+440 Hz tone period. The burst-length sweep (1, 2, 3, 5, 8, 12 frames) records
+the PLC degradation curve: the worst concealed block drops monotonically from
+40.0 dB (10 ms) / 48.4 dB (20 ms) at one lost frame to 0.4 dB at twelve lost
+frames (120 ms of loss at the 10 ms shape), while the burst mean falls to
+7.5 dB and 8.3 dB respectively; no concealed block goes silent and the stream
+re-locks after every swept length with recovery SNR at or above 26 dB. That is
+the first on-host quality signal for the 10 ms versus 20 ms comparison at
+comparable bitrate (141 B/frame at 10 ms and 273 B/frame at 20 ms are both
+about 110 kb/s) and a first longer-burst signal, but it is one deterministic
+tone on one host, not a CPU/power, loss-over-time profile, or beyond-12-frame
+result. The malformed-payload sweep remains a deterministic bounded probe
+(fixed-seed xorshift32, 1,000 payloads up to the datagram limit) rather than
+a coverage-guided fuzz result.
 
 A sizing detail changed in this revision: the PCM block is now the negotiated
 frame size (960 samples for 10 ms, 1,920 for 20 ms) instead of the reserved
@@ -103,7 +123,7 @@ the 10 ms shape is gone; a production 10 ms stream should size its block to
 
 - reproducible native build on the Android ABIs (`arm64-v8a`, `x86_64`) with
   a pinned NDK;
-- CPU and power evidence for both frame durations, plus loss-over-time and
-  longer-burst behavior beyond the deterministic five-frame probe on this host;
+- CPU and power evidence for both frame durations, plus loss-over-time profiles
+  and burst behavior beyond the 1-12 frame sweep on this host;
 - authenticated malformed-payload fuzzing against the native decoder;
 - physical latency and Android capture claims remain separate tests.

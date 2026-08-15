@@ -99,9 +99,9 @@ For every implemented cell, retain these results with the existing deterministic
 On 2026-08-16 the reference-host probe (`tools/opus-codec-prototype`) added a
 deterministic malformed-payload sweep (fixed-seed, 1,000 payloads up to the
 datagram limit), decode/PLC RMS sanity checks, steady-state aligned-SNR checks
-against the source tone for both negotiated shapes, and a deterministic
-five-frame loss burst that confirms decoder-side PLC keeps every concealed
-block non-silent and the stream re-locks to the source afterwards (see the
+against the source tone for both negotiated shapes, a deterministic five-frame
+loss burst, and a 1-12 frame burst-length sweep that records PLC degradation
+and confirms the stream re-locks to the source after every length (see the
 dated build record). That is prototype-level evidence only, not a
 coverage-guided fuzz result or a CPU/power/loss-over-time measurement.
 
