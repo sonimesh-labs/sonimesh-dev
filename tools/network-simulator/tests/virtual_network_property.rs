@@ -12,7 +12,10 @@
 
 use std::collections::HashMap;
 
-use sonimesh_network_simulator::{Delivery, NetworkProfile, SendOutcome, VirtualNetwork};
+use sonimesh_network_simulator::{
+    Delivery, MAX_BANDWIDTH_BYTES_PER_SECOND, MAX_IN_FLIGHT_PACKETS, MAX_NETWORK_DELAY_MS,
+    MAX_SEND_BUFFER_BYTES, NetworkProfile, SendOutcome, VirtualNetwork,
+};
 
 /// Small deterministic xorshift64 generator; no external dependency.
 struct XorShift64(u64);
@@ -731,4 +734,72 @@ fn drain_respects_the_delivery_boundary_and_full_drain_is_exhaustive() {
         network.drain_ready(u64::MAX).is_empty(),
         "second full drain is empty"
     );
+}
+/// A profile at every explicit hard bound must run inside those bounds: the
+/// event queue never exceeds the in-flight capacity, the maximum sender-side
+/// socket buffer never backpressures at the maximum in-flight bound, and a
+/// full drain returns every admitted copy.
+#[test]
+fn boundary_profiles_run_within_their_hard_bounds() {
+    let mut profile = NetworkProfile::stable(0x4E47_0000_2026_0020);
+    profile.base_delay_ms = MAX_NETWORK_DELAY_MS;
+    profile.jitter_ms = 0;
+    profile.reorder_delay_ms = 0;
+    profile.bandwidth_bytes_per_second = MAX_BANDWIDTH_BYTES_PER_SECOND;
+    profile.send_buffer_bytes = Some(MAX_SEND_BUFFER_BYTES);
+    profile.max_in_flight_packets = MAX_IN_FLIGHT_PACKETS;
+
+    let mut network = VirtualNetwork::new(profile).expect("boundary profile validates");
+    let payload_bytes = 1_200;
+    let sends = 5_000_u64;
+
+    for index in 0..sends {
+        let now_ms = index.saturating_mul(100);
+        let outcome = network.send(now_ms, index, payload_bytes);
+        assert!(
+            matches!(
+                outcome,
+                SendOutcome::Scheduled { .. } | SendOutcome::DroppedByCapacity
+            ),
+            "boundary profile must admit or drop by the queue bound, got {outcome:?}"
+        );
+        assert!(
+            network.queued_copies() <= MAX_IN_FLIGHT_PACKETS,
+            "in-flight bound exceeded at packet {index}"
+        );
+    }
+
+    let drained = network.drain_ready(u64::MAX);
+    let stats = network.stats();
+    assert_eq!(stats.submitted_packets, sends);
+    assert_eq!(
+        stats.scheduled_copies, stats.delivered_copies,
+        "a full drain delivers every admitted copy"
+    );
+    assert_eq!(
+        usize::try_from(stats.delivered_copies).expect("delivered copies stay bounded"),
+        drained.len(),
+        "the drain returns exactly the delivered copies"
+    );
+    assert_eq!(
+        network.queued_copies(),
+        0,
+        "a full drain exhausts the queue"
+    );
+    assert_eq!(
+        stats.submitted_packets,
+        stats.delivered_copies + stats.capacity_dropped_copies,
+        "every submitted packet is admitted or dropped by the queue bound"
+    );
+    assert_eq!(
+        stats.send_buffer_full_packets, 0,
+        "the maximum socket buffer never backpressures at the maximum in-flight bound"
+    );
+    assert_eq!(
+        stats.send_buffer_queued_bytes, 0,
+        "the send buffer drains at u64::MAX"
+    );
+    assert_eq!(stats.random_loss_packets, 0);
+    assert_eq!(stats.burst_loss_packets, 0);
+    assert_eq!(stats.duplicate_copies, 0);
 }
