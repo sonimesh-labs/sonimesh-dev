@@ -409,27 +409,50 @@ fn smoke_output_is_deterministic_and_reports_consistent_accounting() {
             );
         }
         if line.contains("stream0_forced") {
+            let forced = number(&parsed, "stream0_forced");
             assert!(
-                number(&parsed, "stream0_forced") <= number(&parsed, "submitted"),
-                "forced playouts stay within the frame count: {line}"
+                (1..=number(&parsed, "submitted")).contains(&forced),
+                "burst starvation forces playouts within the frame count: {line}"
             );
         }
         if line.contains("stream1_forced") {
+            let forced = number(&parsed, "stream1_forced");
             assert!(
-                number(&parsed, "stream1_forced") <= number(&parsed, "submitted"),
-                "forced playouts stay within the frame count: {line}"
+                (1..=number(&parsed, "submitted")).contains(&forced),
+                "burst starvation forces playouts within the frame count: {line}"
             );
         }
         if line.starts_with("mixer_jitter_scheduler streams=4") {
+            let forced = number(&parsed, "forced");
             assert!(
-                number(&parsed, "forced") <= number(&parsed, "submitted"),
-                "forced playouts stay within the frame count: {line}"
+                (1..=number(&parsed, "submitted")).contains(&forced),
+                "burst starvation forces playouts within the frame count: {line}"
             );
         }
         if line.starts_with("mixer_jitter_scheduler") {
             assert!(
+                number(&parsed, "burst_loss") > 0,
+                "the burst profile must drop packets: {line}"
+            );
+            assert!(
                 number(&parsed, "excess_latency") <= PLAYOUT_HARD_DEADLINE_MS,
                 "completion must never exceed the hard deadline: {line}"
+            );
+        }
+        if line.contains("muted0") && line.contains("muted1") && line.contains("silent_ticks") {
+            assert_eq!(
+                parsed.get("muted0").map(String::as_str),
+                Some("false"),
+                "stream 0 unmutes before the session ends: {line}"
+            );
+            assert_eq!(
+                parsed.get("muted1").map(String::as_str),
+                Some("true"),
+                "stream 1 stays muted after its mute event: {line}"
+            );
+            assert!(
+                number(&parsed, "silent_ticks") > 0,
+                "the all-muted bus must go exactly silent: {line}"
             );
         }
     }
