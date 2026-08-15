@@ -14,6 +14,7 @@ date declaration.
 
 from __future__ import annotations
 
+import datetime
 import os
 import re
 import subprocess
@@ -42,6 +43,17 @@ SKIP_DIRECTORIES = frozenset(
 
 DECLARATION_PREFIX = re.compile(r"^\s*>?\s*Updated\s*[:：]\s*")
 VALID_DATE = re.compile(r"^20\d{2}-\d{2}-\d{2}$")
+
+
+def _valid_calendar_date(value: str) -> bool:
+    """Returns whether `value` is a real calendar date."""
+    try:
+        datetime.date.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
+
+
 DIFF_HEADER_PATTERN = re.compile(r"^(---|\+\+\+|@@|diff --git|index |new file|deleted file|rename )")
 
 
@@ -66,7 +78,14 @@ def declared_dates(source: str) -> list[tuple[int, str | None]]:
         if match is None:
             continue
         date = line[match.end() :].strip()
-        results.append((index, date if VALID_DATE.fullmatch(date) else None))
+        results.append(
+            (
+                index,
+                date
+                if VALID_DATE.fullmatch(date) and _valid_calendar_date(date)
+                else None,
+            )
+        )
     return results
 
 
@@ -257,6 +276,18 @@ class DocDateTests(unittest.TestCase):
         errors = validate_workspace(self.repo)
         self.assertEqual(len(errors), 1)
         self.assertIn("declares Updated 2026-01-01", errors[0])
+
+
+    def test_impossible_calendar_date_is_reported(self) -> None:
+        self.commit("docs/a.md", "# A\n\n> Updated: 2026-02-30\n\nprose\n", "2026-01-01")
+        self.assertEqual(
+            validate_workspace(self.repo),
+            ["docs/a.md:3 has a malformed Updated date"],
+        )
+
+    def test_leap_day_is_accepted(self) -> None:
+        self.commit("docs/a.md", "# A\n\n> Updated: 2024-02-29\n\nprose\n", "2024-02-29")
+        self.assertEqual(validate_workspace(self.repo), [])
 
 
 if __name__ == "__main__":
