@@ -300,3 +300,336 @@ where
         self.pcm.fill(0.0);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::RealtimePcmPopOutcome;
+    use crate::realtime_pcm_queue;
+
+    const JITTER_CAPACITY: usize = 4;
+    const MAX_ENCODED_BYTES: usize = 64;
+    const PCM_SAMPLES_PER_BLOCK: usize = 16;
+    const QUEUE_CAPACITY: usize = 4;
+
+    /// Deterministic decoder that writes markers and can report a bogus length.
+    #[derive(Default)]
+    struct MockDecoder {
+        reported_samples: usize,
+        fail_decode: bool,
+    }
+
+    impl MockDecoder {
+        fn reported(reported_samples: usize) -> Self {
+            Self {
+                reported_samples,
+                ..Self::default()
+            }
+        }
+    }
+
+    impl FrameDecoder for MockDecoder {
+        type Error = &'static str;
+
+        fn decode(&mut self, _encoded: &[u8], output: &mut [f32]) -> Result<usize, Self::Error> {
+            if self.fail_decode {
+                return Err("mock decode failure");
+            }
+            let writable = self.reported_samples.min(output.len());
+            output[..writable].fill(1.0);
+            Ok(self.reported_samples)
+        }
+
+        fn decode_plc(&mut self, output: &mut [f32]) -> Result<usize, Self::Error> {
+            let writable = self.reported_samples.min(output.len());
+            output[..writable].fill(-1.0);
+            Ok(self.reported_samples)
+        }
+    }
+
+    type Worker =
+        StreamDecodeWorker<MockDecoder, JITTER_CAPACITY, MAX_ENCODED_BYTES, PCM_SAMPLES_PER_BLOCK>;
+
+    fn make_worker(
+        decoder: MockDecoder,
+        sequence: u32,
+    ) -> (Worker, crate::RealtimePcmConsumer<PCM_SAMPLES_PER_BLOCK>) {
+        let (producer, consumer) =
+            realtime_pcm_queue::<PCM_SAMPLES_PER_BLOCK>(QUEUE_CAPACITY).unwrap();
+        (
+            StreamDecodeWorker::new(decoder, producer, sequence),
+            consumer,
+        )
+    }
+
+    #[test]
+    fn disabled_capacity_never_schedules_playout() {
+        let (producer, _consumer) =
+            realtime_pcm_queue::<PCM_SAMPLES_PER_BLOCK>(QUEUE_CAPACITY).unwrap();
+        let mut worker = StreamDecodeWorker::<
+            MockDecoder,
+            0,
+            MAX_ENCODED_BYTES,
+            PCM_SAMPLES_PER_BLOCK,
+        >::new(MockDecoder::default(), producer, 0);
+        assert_eq!(
+            worker.admit(0, 0, &[1, 2, 3]).unwrap(),
+            InsertOutcome::Disabled
+        );
+        assert_eq!(worker.decode_next().unwrap(), DecodeStep::NotReady);
+        assert_eq!(worker.decode_next().unwrap(), DecodeStep::NotReady);
+    }
+
+    #[test]
+    fn decodes_the_negotiated_first_frame() {
+        let (mut worker, mut consumer) = make_worker(MockDecoder::reported(4), 0);
+        assert_eq!(
+            worker.admit(0, 0, &[0xAB]).unwrap(),
+            InsertOutcome::Inserted
+        );
+        assert_eq!(
+            worker.decode_next().unwrap(),
+            DecodeStep::Decoded {
+                sequence: 0,
+                samples: 4,
+                queue: RealtimePcmPushOutcome::Inserted,
+            }
+        );
+        assert_eq!(worker.jitter_len(), 0);
+        assert_eq!(worker.queued_blocks(), 1);
+        let mut block = [0.0_f32; PCM_SAMPLES_PER_BLOCK];
+        assert!(matches!(
+            consumer.pop_into(&mut block),
+            RealtimePcmPopOutcome::Filled { samples: 4, .. }
+        ));
+        assert!(
+            block[..4]
+                .iter()
+                .all(|sample| (sample - 1.0).abs() < 1.0e-6)
+        );
+    }
+
+    #[test]
+    fn conceals_a_confirmed_missing_frame_with_plc() {
+        let (mut worker, mut consumer) = make_worker(MockDecoder::reported(4), 0);
+        // Only sequence 1 arrives; the negotiated first sequence 0 is missing.
+        assert_eq!(
+            worker.admit(1, 960, &[0x01]).unwrap(),
+            InsertOutcome::Inserted
+        );
+        assert_eq!(
+            worker.decode_next().unwrap(),
+            DecodeStep::Concealed {
+                sequence: 0,
+                samples: 4,
+                queue: RealtimePcmPushOutcome::Inserted,
+            }
+        );
+        assert_eq!(
+            worker.decode_next().unwrap(),
+            DecodeStep::Decoded {
+                sequence: 1,
+                samples: 4,
+                queue: RealtimePcmPushOutcome::Inserted,
+            }
+        );
+        let mut block = [0.0_f32; PCM_SAMPLES_PER_BLOCK];
+        assert!(matches!(
+            consumer.pop_into(&mut block),
+            RealtimePcmPopOutcome::Filled { samples: 4, .. }
+        ));
+        assert!(
+            block[..4]
+                .iter()
+                .all(|sample| (sample + 1.0).abs() < 1.0e-6)
+        );
+    }
+
+    #[test]
+    fn decodes_reordered_frames_in_sequence_order() {
+        let (mut worker, _consumer) = make_worker(MockDecoder::reported(4), 0);
+        assert_eq!(
+            worker.admit(0, 0, &[0x00]).unwrap(),
+            InsertOutcome::Inserted
+        );
+        assert_eq!(
+            worker.admit(2, 1_920, &[0x02]).unwrap(),
+            InsertOutcome::Inserted
+        );
+        assert_eq!(
+            worker.admit(1, 960, &[0x01]).unwrap(),
+            InsertOutcome::Reordered
+        );
+
+        for expected in [0_u32, 1, 2] {
+            assert!(matches!(
+                worker.decode_next().unwrap(),
+                DecodeStep::Decoded {
+                    sequence,
+                    samples: 4,
+                    queue: RealtimePcmPushOutcome::Inserted,
+                } if sequence == expected
+            ));
+        }
+    }
+
+    #[test]
+    fn rejects_empty_and_oversized_payloads_at_admission() {
+        let (mut worker, _consumer) = make_worker(MockDecoder::default(), 0);
+        assert!(matches!(
+            worker.admit(0, 0, &[]),
+            Err(DecodeWorkerError::Frame(FrameError::EmptyPayload))
+        ));
+        assert!(matches!(
+            worker.admit(0, 0, &[0_u8; MAX_ENCODED_BYTES + 1]),
+            Err(DecodeWorkerError::Frame(FrameError::PayloadTooLarge))
+        ));
+        assert_eq!(worker.jitter_len(), 0);
+    }
+
+    #[test]
+    fn rejects_invalid_output_length_without_queuing() {
+        let (mut worker, mut consumer) = make_worker(MockDecoder::reported(0), 0);
+        worker.admit(0, 0, &[0x01]).unwrap();
+        assert_eq!(
+            worker.decode_next().unwrap_err(),
+            DecodeWorkerError::InvalidOutputLength
+        );
+        assert_eq!(worker.queued_blocks(), 0);
+        let mut block = [0.0_f32; PCM_SAMPLES_PER_BLOCK];
+        assert!(matches!(
+            consumer.pop_into(&mut block),
+            RealtimePcmPopOutcome::Underflow { .. }
+        ));
+
+        let (mut worker, mut consumer) =
+            make_worker(MockDecoder::reported(PCM_SAMPLES_PER_BLOCK + 1), 0);
+        worker.admit(0, 0, &[0x01]).unwrap();
+        assert_eq!(
+            worker.decode_next().unwrap_err(),
+            DecodeWorkerError::InvalidOutputLength
+        );
+        assert_eq!(worker.queued_blocks(), 0);
+        assert!(matches!(
+            consumer.pop_into(&mut block),
+            RealtimePcmPopOutcome::Underflow { .. }
+        ));
+    }
+
+    #[test]
+    fn isolates_decoder_errors_without_queuing() {
+        let mut decoder = MockDecoder::reported(4);
+        decoder.fail_decode = true;
+        let (mut worker, mut consumer) = make_worker(decoder, 0);
+        worker.admit(0, 0, &[0x01]).unwrap();
+        assert!(matches!(
+            worker.decode_next(),
+            Err(DecodeWorkerError::Decoder("mock decode failure"))
+        ));
+        assert_eq!(worker.queued_blocks(), 0);
+        let mut block = [0.0_f32; PCM_SAMPLES_PER_BLOCK];
+        assert!(matches!(
+            consumer.pop_into(&mut block),
+            RealtimePcmPopOutcome::Underflow { .. }
+        ));
+    }
+
+    #[test]
+    fn capacity_collision_resynchronizes_only_this_stream() {
+        let (producer, _consumer) =
+            realtime_pcm_queue::<PCM_SAMPLES_PER_BLOCK>(QUEUE_CAPACITY).unwrap();
+        let mut worker = StreamDecodeWorker::<
+            MockDecoder,
+            2,
+            MAX_ENCODED_BYTES,
+            PCM_SAMPLES_PER_BLOCK,
+        >::new(MockDecoder::reported(4), producer, 0);
+        assert_eq!(
+            worker.admit(0, 0, &[0x00]).unwrap(),
+            InsertOutcome::Inserted
+        );
+        assert_eq!(
+            worker.admit(2, 1_920, &[0x02]).unwrap(),
+            InsertOutcome::Resynchronized { dropped_frames: 1 }
+        );
+        assert_eq!(worker.jitter_len(), 1);
+        assert!(matches!(
+            worker.decode_next().unwrap(),
+            DecodeStep::Decoded { sequence: 2, .. }
+        ));
+    }
+
+    #[test]
+    fn begin_epoch_retires_queued_pcm() {
+        let (mut worker, mut consumer) = make_worker(MockDecoder::reported(4), 0);
+        worker.admit(0, 0, &[0x00]).unwrap();
+        worker.decode_next().unwrap();
+        assert_eq!(worker.queued_blocks(), 1);
+
+        worker.begin_epoch(100);
+        assert_eq!(worker.queued_blocks(), 0);
+        let mut block = [0.0_f32; PCM_SAMPLES_PER_BLOCK];
+        assert!(matches!(
+            consumer.pop_into(&mut block),
+            RealtimePcmPopOutcome::Underflow {
+                discarded_stale_blocks: 1
+            }
+        ));
+    }
+
+    #[test]
+    fn hard_resynchronize_clears_jitter_and_pcm() {
+        let (mut worker, mut consumer) = make_worker(MockDecoder::reported(4), 0);
+        worker.admit(0, 0, &[0x00]).unwrap();
+        worker.decode_next().unwrap();
+        worker.admit(1, 960, &[0x01]).unwrap();
+        assert_eq!(worker.jitter_len(), 1);
+
+        worker.hard_resynchronize();
+        assert_eq!(worker.jitter_len(), 0);
+        assert_eq!(worker.decode_next().unwrap(), DecodeStep::NotReady);
+        let mut block = [0.0_f32; PCM_SAMPLES_PER_BLOCK];
+        assert!(matches!(
+            consumer.pop_into(&mut block),
+            RealtimePcmPopOutcome::Underflow { .. }
+        ));
+    }
+
+    #[test]
+    fn reset_after_jitter_resync_keeps_the_new_frame() {
+        let (producer, _consumer) =
+            realtime_pcm_queue::<PCM_SAMPLES_PER_BLOCK>(QUEUE_CAPACITY).unwrap();
+        let mut worker = StreamDecodeWorker::<
+            MockDecoder,
+            2,
+            MAX_ENCODED_BYTES,
+            PCM_SAMPLES_PER_BLOCK,
+        >::new(MockDecoder::reported(4), producer, 0);
+        worker.admit(0, 0, &[0x00]).unwrap();
+        assert_eq!(
+            worker.admit(2, 1_920, &[0x02]).unwrap(),
+            InsertOutcome::Resynchronized { dropped_frames: 1 }
+        );
+        worker.reset_after_jitter_resynchronization();
+        assert_eq!(worker.jitter_len(), 1);
+        assert!(matches!(
+            worker.decode_next().unwrap(),
+            DecodeStep::Decoded { sequence: 2, .. }
+        ));
+    }
+
+    #[test]
+    fn replace_pcm_producer_starts_empty_and_clears_decode_state() {
+        let (mut worker, _old_consumer) = make_worker(MockDecoder::reported(4), 0);
+        worker.admit(0, 0, &[0x00]).unwrap();
+        worker.decode_next().unwrap();
+        assert_eq!(worker.queued_blocks(), 1);
+
+        let (producer, _new_consumer) =
+            realtime_pcm_queue::<PCM_SAMPLES_PER_BLOCK>(QUEUE_CAPACITY).unwrap();
+        worker.replace_pcm_producer(producer);
+        assert_eq!(worker.queued_blocks(), 0);
+        assert_eq!(worker.jitter_len(), 0);
+        assert_eq!(worker.decode_next().unwrap(), DecodeStep::NotReady);
+    }
+}
