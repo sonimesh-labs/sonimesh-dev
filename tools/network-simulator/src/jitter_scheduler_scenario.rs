@@ -429,3 +429,18 @@ fn validate(
 fn sample_timestamp(sequence: u32, frame: OpusFrameConfig) -> u64 {
     u64::from(sequence).saturating_mul(frame.samples_per_channel() as u64)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accepts_media_datagrams_at_the_protocol_bound() {
+        let config = JitterSchedulerScenarioConfig {
+            media_datagram_bytes: u16::try_from(MAX_MEDIA_DATAGRAM_LEN).unwrap(),
+            ..JitterSchedulerScenarioConfig::default()
+        };
+
+        assert!(simulate_jitter_scheduler(config).is_ok());
+    }
+}
