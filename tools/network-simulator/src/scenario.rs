@@ -307,6 +307,16 @@ mod tests {
     }
 
     #[test]
+    fn accepts_media_datagrams_at_the_protocol_bound() {
+        let config = ScenarioConfig {
+            media_datagram_bytes: u16::try_from(MAX_MEDIA_DATAGRAM_LEN).unwrap(),
+            ..ScenarioConfig::default()
+        };
+
+        assert!(simulate(config).is_ok());
+    }
+
+    #[test]
     fn negotiated_frame_duration_controls_48khz_sample_timestamps() {
         let ten_ms = OpusFrameConfig::new(48_000, 2, 10).unwrap();
         let twenty_ms = OpusFrameConfig::new(48_000, 2, 20).unwrap();

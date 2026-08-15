@@ -274,6 +274,95 @@ mod tests {
     }
 
     #[test]
+    fn accepts_percentages_at_the_inclusive_upper_bound() {
+        let mut profile = NetworkProfile::stable(1);
+        profile.loss_percent = 100;
+        profile.duplicate_percent = 100;
+        profile.reorder_percent = 100;
+
+        assert_eq!(profile.validate(), Ok(()));
+    }
+
+    #[test]
+    fn rejects_a_percentage_above_the_inclusive_upper_bound() {
+        let mut profile = NetworkProfile::stable(1);
+        profile.loss_percent = 101;
+
+        assert_eq!(profile.validate(), Err(ProfileError::InvalidPercentage));
+    }
+
+    #[test]
+    fn accepts_the_minimum_in_flight_capacity() {
+        let mut profile = NetworkProfile::stable(1);
+        profile.max_in_flight_packets = 1;
+
+        assert_eq!(profile.validate(), Ok(()));
+    }
+
+    #[test]
+    fn accepts_the_maximum_in_flight_capacity() {
+        let mut profile = NetworkProfile::stable(1);
+        profile.max_in_flight_packets = MAX_IN_FLIGHT_PACKETS;
+
+        assert_eq!(profile.validate(), Ok(()));
+    }
+
+    #[test]
+    fn rejects_in_flight_capacity_above_the_inclusive_upper_bound() {
+        let mut profile = NetworkProfile::stable(1);
+        profile.max_in_flight_packets = MAX_IN_FLIGHT_PACKETS + 1;
+
+        assert_eq!(
+            profile.validate(),
+            Err(ProfileError::InFlightCapacityTooLarge)
+        );
+    }
+
+    #[test]
+    fn accepts_the_maximum_combined_delay() {
+        let mut profile = NetworkProfile::stable(1);
+        profile.base_delay_ms = MAX_NETWORK_DELAY_MS;
+        profile.jitter_ms = 0;
+        profile.reorder_delay_ms = 0;
+
+        assert_eq!(profile.validate(), Ok(()));
+    }
+
+    #[test]
+    fn rejects_combined_delay_above_the_inclusive_upper_bound() {
+        let mut profile = NetworkProfile::stable(1);
+        profile.base_delay_ms = MAX_NETWORK_DELAY_MS;
+        profile.jitter_ms = 1;
+
+        assert_eq!(profile.validate(), Err(ProfileError::DelayTooLarge));
+    }
+
+    #[test]
+    fn rejects_a_combined_delay_that_overflows_virtual_time() {
+        let mut profile = NetworkProfile::stable(1);
+        profile.base_delay_ms = u64::MAX;
+        profile.jitter_ms = 1;
+
+        assert_eq!(profile.validate(), Err(ProfileError::DelayTooLarge));
+    }
+
+    #[test]
+    fn accepts_the_maximum_bandwidth_configuration() {
+        let mut profile = NetworkProfile::stable(1);
+        profile.bandwidth_bytes_per_second = MAX_BANDWIDTH_BYTES_PER_SECOND;
+
+        assert_eq!(profile.validate(), Ok(()));
+    }
+
+    #[test]
+    fn accepts_the_maximum_send_buffer_configuration() {
+        let mut profile = NetworkProfile::stable(1);
+        profile.send_buffer_bytes = Some(MAX_SEND_BUFFER_BYTES);
+
+        assert_eq!(profile.validate(), Ok(()));
+    }
+
+    #[test]
     fn send_buffer_errors_have_descriptive_stable_messages() {
         assert_eq!(
             ProfileError::ZeroSendBuffer.to_string(),
