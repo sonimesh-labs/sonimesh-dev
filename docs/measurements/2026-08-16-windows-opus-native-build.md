@@ -2,11 +2,11 @@
 
 > Status: native libopus build and decode/PLC probe on the reference Windows
 > host, including a deterministic five-frame loss burst, a 1-12 frame
-> burst-length sweep, and independent/burst loss-pattern windows, all with
-> recovery. ADR 0009 remains Provisional: Android ABI packaging, CPU/power,
-> jitter-wait and reorder loss profiles, bursts beyond 12 frames, and
-> coverage-guided malformed-payload fuzzing against the native decoder are
-> still pending.
+> burst-length sweep, independent/burst loss-pattern windows, and bounded
+> reorder absorption and late-drop, all with recovery. ADR 0009 remains
+> Provisional: Android ABI packaging, CPU/power, jitter-wait loss profiles,
+> bursts beyond 12 frames, and coverage-guided malformed-payload fuzzing
+> against the native decoder are still pending.
 > Updated: 2026-08-16
 
 ## Summary
@@ -21,9 +21,13 @@ conceals a deterministic burst of five consecutive lost frames with
 decoder-side PLC, sweeps burst lengths from 1 to 12 frames to record how PLC
 quality degrades and confirm the stream re-locks to the source after every
 length, runs deterministic loss-pattern windows (independent 1/3/5% and a
-periodic 5-in-50 burst) to record quality under loss-over-time, and sweeps
-deterministic malformed payloads that must surface as bounded stream-local
-errors. The PCM block is sized to the negotiated frame on each
+periodic 5-in-50 burst) to record quality under loss-over-time, probes
+bounded reorder absorption (a six-frame out-of-order arrival batch played
+out in sequence with no concealment at the constant codec delay) and
+late-drop (one slot concealed by PLC while the bounded buffer drops the
+late frame), and sweeps deterministic malformed payloads that must surface
+as bounded stream-local errors. The PCM block is sized to the negotiated
+frame on each
 shape, so PLC synthesizes exactly one frame of concealment per missing frame.
 
 ## Command
@@ -93,6 +97,10 @@ opus_20ms_loss: pattern independent_1pct ok (240 frames; 2 dropped; mean 40.7 wo
 opus_20ms_loss: pattern independent_3pct ok (240 frames; 7 dropped; mean 39.8 worst -1.2 dB)
 opus_20ms_loss: pattern independent_5pct ok (240 frames; 10 dropped; mean 38.8 worst -1.2 dB)
 opus_20ms_loss: pattern burst_5in50 ok (240 frames; 20 dropped; mean 38.4 worst 2.3 dB)
+opus_10ms_reorder: absorbed ok (6 frames; 0 concealed; mean 39.1 worst 37.8 dB)
+opus_10ms_reorder: late_one ok (1 concealed snr 40.0 dB; late drop 1; decoded mean 30.7 dB)
+opus_20ms_reorder: absorbed ok (6 frames; 0 concealed; mean 41.2 worst 38.9 dB)
+opus_20ms_reorder: late_one ok (1 concealed snr 48.4 dB; late drop 1; decoded mean 40.8 dB)
 opus_malformed_payload: rejected
 opus_malformed_sweep: ok (1000 payloads; 642 rejected; 358 accepted-bounded)
 opus_native_build: ok
@@ -131,10 +139,22 @@ per seed (2, 7, 10, and 20 of 240 frames). Individual concealed blocks can
 deviate sharply from the true frame at the codec delay (worst about -1.5 dB)
 because PLC applies amplitude decay over concealed frames, while the window
 mean stays well above the 10 dB floor. These are immediate-concealment
-results; a jitter buffer that waits before declaring a loss, and reorder
-profiles, remain untested. The malformed-payload sweep remains a
-deterministic bounded probe (fixed-seed xorshift32, 1,000 payloads up to the
-datagram limit) rather than a coverage-guided fuzz result.
+results; a jitter buffer that waits before declaring a loss remains
+untested. The malformed-payload sweep remains a deterministic bounded probe
+(fixed-seed xorshift32, 1,000 payloads up to the datagram limit) rather
+than a coverage-guided fuzz result.
+
+The bounded reorder probe adds the first jitter-buffer reorder signal.
+With a six-frame out-of-order arrival batch (sequences 13, 10, 15, 12, 11,
+14) inside the 8-slot jitter capacity, playout emits every frame in
+sequence with no concealment, and each block keeps the codec constant-delay
+SNR (window mean 39.1 dB at 10 ms and 41.2 dB at 20 ms), so absorption does
+not shift the stream. When one frame arrives one slot late, exactly one
+block is concealed by PLC (model-free SNR 40.0 dB and 48.4 dB), the two
+following frames decode in order (mean 30.7 dB and 40.8 dB), and the bounded
+buffer reports the late frame as dropped. This is immediate-concealment
+evidence with no jitter-wait tuning; an adaptive target and deeper reorder
+profiles remain untested.
 
 A sizing detail changed in this revision: the PCM block is now the negotiated
 frame size (960 samples for 10 ms, 1,920 for 20 ms) instead of the reserved
@@ -147,7 +167,7 @@ the 10 ms shape is gone; a production 10 ms stream should size its block to
 
 - reproducible native build on the Android ABIs (`arm64-v8a`, `x86_64`) with
   a pinned NDK;
-- CPU and power evidence for both frame durations, plus jitter-wait/reorder
-  loss profiles and burst behavior beyond the 1-12 frame sweep on this host;
+- CPU and power evidence for both frame durations, plus jitter-wait loss
+  profiles and burst behavior beyond the 1-12 frame sweep on this host;
 - authenticated malformed-payload fuzzing against the native decoder;
 - physical latency and Android capture claims remain separate tests.

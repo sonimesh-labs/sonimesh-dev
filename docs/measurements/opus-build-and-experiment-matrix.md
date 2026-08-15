@@ -101,12 +101,12 @@ deterministic malformed-payload sweep (fixed-seed, 1,000 payloads up to the
 datagram limit), decode/PLC RMS sanity checks, steady-state aligned-SNR checks
 against the source tone for both negotiated shapes, a deterministic five-frame
 loss burst, a 1-12 frame burst-length sweep that records PLC degradation and
-confirms the stream re-locks to the source after every length, and
-deterministic loss-pattern windows (independent 1/3/5% and a periodic 5-in-50
-burst) that keep the window mean SNR within 35.7-41.3 dB across both shapes
-(see the dated build record). That is prototype-level evidence only, not a
-coverage-guided fuzz result, jitter-wait/reorder profile, or CPU/power
-measurement.
+confirms the stream re-locks to the source after every length, deterministic
+loss-pattern windows (independent 1/3/5% and a periodic 5-in-50 burst) that
+keep the window mean SNR within 35.7-41.3 dB across both shapes, and bounded
+reorder absorption and late-drop (see the dated build record). That is
+prototype-level evidence only, not a coverage-guided fuzz result, an adaptive
+jitter-wait profile, or CPU/power measurement.
 
 ## Codec-neutral media-path regression
 
