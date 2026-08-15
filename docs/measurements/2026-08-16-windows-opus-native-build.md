@@ -6,8 +6,8 @@
 > reorder absorption and late-drop, a deterministic jitter-wait sweep,
 > and per-frame host throughput for both shapes, all with recovery.
 > ADR 0009 remains Provisional: Android ABI packaging, sustained
-> CPU/power, and coverage-guided malformed-payload fuzzing against the
-> native decoder are still pending.
+> CPU/power, and sustained coverage-guided malformed-payload fuzzing
+> against the native decoder are still pending.
 > Updated: 2026-08-16
 
 ## Summary
@@ -228,5 +228,6 @@ the 10 ms shape is gone; a production 10 ms stream should size its block to
   a pinned NDK;
 - sustained CPU utilization, allocation profile, and power evidence for
   both frame durations on this host;
-- authenticated malformed-payload fuzzing against the native decoder;
+- sustained coverage-guided malformed-payload fuzzing against the
+  native decoder;
 - physical latency and Android capture claims remain separate tests.

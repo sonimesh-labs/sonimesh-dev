@@ -6,8 +6,8 @@
 > On 2026-08-16 the reference host built the candidate binding and ran the
 > `tools/opus-codec-prototype` decode/PLC probe (see the dated build record).
 > The binding is still not enabled; Android ABI, quality, sustained
-> CPU/power, coverage-guided fuzzing, and CI reproducibility evidence
-> remain pending.
+> CPU/power, sustained coverage-guided fuzzing, and CI reproducibility
+> evidence remain pending.
 
 This document turns the acceptance conditions in ADR 0009 into reproducible evidence. A passing Rust-only decoder mock, a dependency resolution, or a successful Windows build alone is insufficient to select a codec binding or media policy.
 
@@ -112,7 +112,11 @@ late-drop, and per-frame encode+decode and decode-only host throughput
 for both shapes (see the dated build record). That is prototype-level
 evidence only, not a coverage-guided fuzz result, an adaptive
 jitter-target result, or a power or sustained CPU-utilization
-measurement.
+measurement. The Linux CI fuzz job now also runs a finite
+`native_opus_decode` smoke target that drives arbitrary post-authentication
+bytes through the bundled libopus decoder behind the fixed-capacity decode
+worker; that smoke is a build and regression check, not sustained
+coverage-guided fuzzing.
 
 ## Codec-neutral media-path regression
 
