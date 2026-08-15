@@ -352,7 +352,11 @@ scheduler scenario makes that target the playout decision: the scheduler
 waits while fewer than the target frames are buffered, drains without
 gating once no frames are in flight, and forces a playout when the gate
 deadline expires, so the Phase 2 scheduler loop has deterministic,
-bounded-latency evidence without a physical latency claim.
+bounded-latency evidence without a physical latency claim; property
+walks, fuzz targets, and the CI smoke gate all assert the scenario's
+completion stays within the explicit hard deadline
+(`frames * (max_gate_ticks + 2) * frame_duration_ms` plus the
+worst-case one-way network delay).
 
 A deterministic fixed-slot mixer-membership scenario
 (`mixer_membership_scenario.rs`) now drives the real `CommandDrivenMixer`
@@ -417,7 +421,11 @@ concealment and forced playouts. The scenario
 is exercised at both ends of the Phase 2 stream range (two and four
 independent sources) with a shared burst that starves every stream past the
 gate deadline, so the four-stream upper bound keeps every slot active and
-the bus finite.
+the bus finite. Completion is pinned to the same explicit hard deadline
+by the property walks, fuzz targets, and CI smoke gate: reported
+`excess_latency_ms` stays within `frames * (max_gate_ticks + 2) *
+frame_duration_ms` plus the worst-case one-way network delay, so the
+bounded-latency claim is enforced at the CI gate.
 
 This is evidence for deterministic core behavior and host loopback composition
 only. It models a bounded sender-side socket buffer as backpressure, but not
