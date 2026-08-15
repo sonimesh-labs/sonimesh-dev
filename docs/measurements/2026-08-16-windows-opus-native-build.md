@@ -10,9 +10,10 @@
 The candidate `opus` 0.3.1 binding (bundled libopus through `audiopus_sys`
 0.2.2) built on the reference host and ran the new
 `tools/opus-codec-prototype` probe. The probe encodes one deterministic
-20 ms stereo frame, decodes it through the `sonimesh-audio`
-`StreamDecodeWorker::new_for_opus` boundary, synthesizes one PLC block, and
-rejects a malformed payload as a bounded stream-local error.
+frame for each negotiated shape (10 ms and 20 ms stereo), decodes it through
+the `sonimesh-audio` `StreamDecodeWorker::new_for_opus` boundary, synthesizes
+one PLC block per shape, and rejects a malformed payload as a bounded
+stream-local error.
 
 ## Command
 
@@ -57,9 +58,8 @@ lets CMake apply the pre-3.5 policy floor, and the native build completed.
 The probe then passed every step:
 
 ```text
-opus_encode: ok (384 bytes)
-opus_decode: ok (1920 interleaved samples)
-opus_plc: ok (1920 interleaved samples)
+opus_10ms: ok (encode 200 bytes; decode 960 / PLC 1920 interleaved samples)
+opus_20ms: ok (encode 384 bytes; decode 1920 / PLC 1920 interleaved samples)
 opus_malformed_payload: rejected
 opus_native_build: ok
 ```
@@ -72,6 +72,13 @@ Windows host and that its decode and PLC paths work through the bounded
 It does not qualify codec quality, CPU, power, 10 ms versus 20 ms trade-offs,
 FEC, or Android ABIs, and the malformed-payload check is a single bounded
 probe rather than a fuzz result.
+
+One observable detail: for an empty packet libopus synthesizes
+`frame_size = output capacity / channels`, so with the reserved 20 ms block
+(1,920 samples) PLC fills the whole block for both the 10 ms and 20 ms shapes.
+The worker accepts that bounded length and the consumer pops it whole; a
+production 10 ms stream should either size its block to 960 samples or expect
+full-block PLC.
 
 ## Remaining ADR 0009 gates
 

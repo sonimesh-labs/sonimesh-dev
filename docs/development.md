@@ -173,8 +173,9 @@ measurement aid, not a physical latency proof.
 The `tools/opus-codec-prototype` workspace member compiles the candidate
 `opus` binding and exercises it through the `sonimesh-audio`
 `StreamDecodeWorker::new_for_opus` boundary: it encodes one deterministic
-20 ms stereo frame, decodes it, synthesizes one PLC block, and rejects a
-malformed payload as a bounded stream-local error. Run it with:
+stereo frame for each negotiated 10 ms and 20 ms shape, decodes each, and
+synthesizes one PLC block per shape, then rejects a malformed payload as a
+bounded stream-local error. Run it with:
 
 ~~~powershell
 cargo run -p opus-codec-prototype

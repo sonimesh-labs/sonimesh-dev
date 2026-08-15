@@ -1,11 +1,13 @@
 //! Windows native libopus build and decode/PLC feasibility probe for SoniMesh.
 //!
 //! This prototype produces ADR 0009 evidence only: it proves the candidate
-//! opus binding builds on this host, encodes one deterministic 20 ms stereo
-//! frame, decodes it through the sonimesh-audio StreamDecodeWorker
-//! boundary, synthesizes one deterministic PLC block, and rejects a malformed
-//! payload as a bounded stream-local error. It is not a quality, power,
-//! latency, Android ABI, or malformed-payload fuzz result.
+//! opus binding builds on this host, encodes one deterministic frame for
+//! each negotiated shape (10 ms and 20 ms stereo), decodes it through the
+//! sonimesh-audio StreamDecodeWorker boundary, synthesizes one
+//! deterministic PLC block per shape (PLC fills the reserved block, as
+//! libopus synthesizes the full requested frame size), and rejects a malformed payload as a
+//! bounded stream-local error. It is not a quality, power, latency,
+//! Android ABI, or malformed-payload fuzz result.
 
 use sonimesh_audio::{
     DecodeStep, FrameDecoder, OPUS_CHANNELS, OpusFrameConfig, RealtimePcmConsumer,
@@ -24,6 +26,8 @@ const PCM_QUEUE_CAPACITY: usize = 8;
 const SAMPLE_RATE_HZ: u32 = 48_000;
 /// Deterministic probe tone frequency in hertz.
 const TONE_HZ: f32 = 440.0;
+/// Negotiated frame durations probed through the native decoder.
+const FRAME_DURATIONS_MS: [u16; 2] = [10, 20];
 
 /// Wraps the candidate libopus decoder behind the stable FrameDecoder
 /// boundary so decode and PLC stay outside the realtime output callback.
@@ -49,11 +53,11 @@ impl FrameDecoder for NativeOpusDecoder {
 
 type ProbeResult<T> = Result<T, String>;
 
-/// Runs every probe step and returns the ordered success lines.
-fn run_probe() -> ProbeResult<Vec<String>> {
-    let mut lines = Vec::new();
-
-    let frame = OpusFrameConfig::new(SAMPLE_RATE_HZ, 2, 20).map_err(|error| error.to_string())?;
+/// Runs the encode/decode/PLC path once for one negotiated frame duration.
+fn run_frame_path(frame_duration_ms: u16) -> ProbeResult<String> {
+    let frame = OpusFrameConfig::new(SAMPLE_RATE_HZ, 2, frame_duration_ms)
+        .map_err(|error| error.to_string())?;
+    let expected_samples = frame.interleaved_samples();
 
     let mut encoder = opus::Encoder::new(
         SAMPLE_RATE_HZ,
@@ -63,12 +67,11 @@ fn run_probe() -> ProbeResult<Vec<String>> {
     .map_err(|error| error.to_string())?;
     let mut packet = [0_u8; MAX_ENCODED_BYTES];
     let encoded_len = encoder
-        .encode_float(&tone(PCM_SAMPLES_PER_BLOCK), &mut packet)
+        .encode_float(&tone(expected_samples), &mut packet)
         .map_err(|error| error.to_string())?;
     if encoded_len == 0 || encoded_len > MAX_ENCODED_BYTES {
         return Err(format!("encoder produced an invalid length {encoded_len}"));
     }
-    lines.push(format!("opus_encode: ok ({encoded_len} bytes)"));
 
     let (producer, mut consumer) = realtime_pcm_queue::<PCM_SAMPLES_PER_BLOCK>(PCM_QUEUE_CAPACITY)
         .map_err(|error| error.to_string())?;
@@ -91,23 +94,37 @@ fn run_probe() -> ProbeResult<Vec<String>> {
         .map_err(|error| error.to_string())?;
     let mut block = [0.0_f32; PCM_SAMPLES_PER_BLOCK];
     match worker.decode_next().map_err(|error| error.to_string())? {
-        DecodeStep::Decoded { samples, .. } if samples == PCM_SAMPLES_PER_BLOCK => {}
+        DecodeStep::Decoded { samples, .. } if samples == expected_samples => {}
         other => return Err(format!("expected a decoded frame, got {other:?}")),
     }
-    assert_popped_pcm(&mut consumer, &mut block)?;
-    lines.push("opus_decode: ok (1920 interleaved samples)".to_owned());
+    assert_popped_pcm(&mut consumer, &mut block, expected_samples)?;
 
     // With no further frame buffered, the next playout decision is
     // deterministic decoder-side PLC for the confirmed missing sequence.
+    // libopus synthesizes frame_size = block capacity / channels for an empty
+    // packet, so PLC fills the reserved 20 ms block even for the 10 ms shape;
+    // the worker accepts that bounded length and the consumer pops it whole.
     match worker.decode_next().map_err(|error| error.to_string())? {
         DecodeStep::Concealed { samples, .. } if samples == PCM_SAMPLES_PER_BLOCK => {}
         other => return Err(format!("expected a concealed frame, got {other:?}")),
     }
-    assert_popped_pcm(&mut consumer, &mut block)?;
-    lines.push("opus_plc: ok (1920 interleaved samples)".to_owned());
+    assert_popped_pcm(&mut consumer, &mut block, PCM_SAMPLES_PER_BLOCK)?;
+
+    Ok(format!(
+        "opus_{frame_duration_ms}ms: ok (encode {encoded_len} bytes; decode {expected_samples} / PLC {PCM_SAMPLES_PER_BLOCK} interleaved samples)"
+    ))
+}
+
+/// Runs every probe step and returns the ordered success lines.
+fn run_probe() -> ProbeResult<Vec<String>> {
+    let mut lines = Vec::new();
+    for duration_ms in FRAME_DURATIONS_MS {
+        lines.push(run_frame_path(duration_ms)?);
+    }
 
     // A malformed authenticated payload surfaces as a bounded stream-local
     // decoder error and never reaches the PCM queue.
+    let mut block = [0.0_f32; PCM_SAMPLES_PER_BLOCK];
     let malformed = [0xFF_u8; 16];
     let mut bad_decoder = NativeOpusDecoder {
         decoder: opus::Decoder::new(SAMPLE_RATE_HZ, opus::Channels::Stereo)
@@ -122,7 +139,7 @@ fn run_probe() -> ProbeResult<Vec<String>> {
     Ok(lines)
 }
 
-/// Builds one deterministic 20 ms stereo tone block.
+/// Builds one deterministic stereo tone block with `samples` interleaved samples.
 #[must_use]
 #[allow(clippy::cast_precision_loss)]
 fn tone(samples: usize) -> Vec<f32> {
@@ -138,9 +155,10 @@ fn tone(samples: usize) -> Vec<f32> {
 fn assert_popped_pcm<const N: usize>(
     consumer: &mut RealtimePcmConsumer<N>,
     block: &mut [f32; N],
+    expected_samples: usize,
 ) -> ProbeResult<()> {
     match consumer.pop_into(block) {
-        RealtimePcmPopOutcome::Filled { samples, .. } if samples == N => Ok(()),
+        RealtimePcmPopOutcome::Filled { samples, .. } if samples == expected_samples => Ok(()),
         other => Err(format!("expected a filled PCM block, got {other:?}")),
     }
 }

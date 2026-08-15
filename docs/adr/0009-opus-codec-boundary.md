@@ -84,8 +84,9 @@ read-only availability probe; it is an observation, not a build or quality claim
 A [Windows native build record](../measurements/2026-08-16-windows-opus-native-build.md)
 documents the successful `opus` 0.3.1 build on the reference host and the
 `tools/opus-codec-prototype` decode/PLC probe through
-`StreamDecodeWorker::new_for_opus`; that record is native-build and basic
-decode/PLC evidence only and does not close the Android, quality, or fuzz gates.
+`StreamDecodeWorker::new_for_opus` for both negotiated 10 ms and 20 ms shapes;
+that record is native-build and basic decode/PLC evidence only and does not
+close the Android, quality, or fuzz gates.
 Physical latency and Android capture claims remain separate tests.
 
 ## Rollback plan
