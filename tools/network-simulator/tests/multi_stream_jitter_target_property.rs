@@ -19,7 +19,7 @@
 use sonimesh_audio::{JitterMode, JitterTargetConfig};
 use sonimesh_network_simulator::{
     MultiStreamJitterTargetScenarioConfig, MultiStreamJitterTargetSimulationReport, NetworkProfile,
-    simulate_multi_stream_jitter_target,
+    NetworkStats, simulate_multi_stream_jitter_target,
 };
 use sonimesh_protocol::MAX_MEDIA_DATAGRAM_LEN;
 
@@ -60,6 +60,111 @@ const JITTER_BUFFER_CAPACITY: usize = 64;
 const STEPS: usize = 64;
 /// Streams in each scenario run.
 const STREAMS: usize = 3;
+
+/// Mirrors the production drain semantics (bytes drain at
+/// `bandwidth * elapsed_ms / 1000` whenever the clock advances) so the shaped
+/// walk can cross-check backpressure counts without reaching into the
+/// library's private state. It is deliberately a separate, simpler
+/// implementation: if the two diverge, the production path is wrong.
+struct SendBufferCreditModel {
+    capacity_bytes: u64,
+    queued_bytes: u64,
+    last_drain_ms: u64,
+    full_packets: u64,
+}
+
+impl SendBufferCreditModel {
+    fn new(capacity_bytes: u64) -> Self {
+        Self {
+            capacity_bytes,
+            queued_bytes: 0,
+            last_drain_ms: 0,
+            full_packets: 0,
+        }
+    }
+
+    fn drain_to(&mut self, now_ms: u64, bytes_per_second: u64) {
+        if now_ms <= self.last_drain_ms {
+            return;
+        }
+        let elapsed_ms = now_ms - self.last_drain_ms;
+        self.last_drain_ms = now_ms;
+        let drained = self
+            .queued_bytes
+            .min(bytes_per_second.saturating_mul(elapsed_ms) / 1_000);
+        self.queued_bytes -= drained;
+    }
+
+    fn try_enqueue(&mut self, now_ms: u64, bytes: u64, bytes_per_second: u64) -> bool {
+        if bytes_per_second == 0 {
+            return true;
+        }
+        self.drain_to(now_ms, bytes_per_second);
+        if self.queued_bytes.saturating_add(bytes) > self.capacity_bytes {
+            self.full_packets += 1;
+            return false;
+        }
+        self.queued_bytes += bytes;
+        true
+    }
+}
+
+/// Replays the scenario's exact submission timeline for the credit model:
+/// every stream submits one datagram every `frame_duration_ms` from time zero
+/// on the shared link.
+struct SubmissionTimeline {
+    media_datagram_bytes: u16,
+    frames: u32,
+    frame_duration_ms: u64,
+    target_buffer_ms: u64,
+    streams: usize,
+}
+
+/// Cross-checks the report's sender-side backpressure counters against an
+/// independent byte-credit model that replays the scenario's submission
+/// timeline exactly, draining at the link bandwidth whenever the virtual clock
+/// advances.
+fn cross_check_send_buffer_credit(
+    stats: &NetworkStats,
+    profile: &NetworkProfile,
+    timeline: &SubmissionTimeline,
+) {
+    let capacity = profile.send_buffer_bytes.expect("checked Some");
+    let bandwidth = profile.bandwidth_bytes_per_second;
+    let mut model = SendBufferCreditModel::new(capacity);
+    let last_playout_ms = timeline.target_buffer_ms.saturating_add(
+        u64::from(timeline.frames.saturating_sub(1)).saturating_mul(timeline.frame_duration_ms),
+    );
+    let end_ms = last_playout_ms
+        .saturating_add(profile.base_delay_ms)
+        .saturating_add(profile.jitter_ms)
+        .saturating_add(profile.reorder_delay_ms)
+        .saturating_add(2);
+    let mut next_send_sequence = 0_u32;
+    let mut next_send_ms = 0_u64;
+    for now_ms in 0..=end_ms {
+        if next_send_sequence < timeline.frames && now_ms == next_send_ms {
+            for _ in 0..timeline.streams {
+                model.try_enqueue(now_ms, u64::from(timeline.media_datagram_bytes), bandwidth);
+            }
+            next_send_sequence += 1;
+            next_send_ms = next_send_ms.saturating_add(timeline.frame_duration_ms);
+        }
+        model.drain_to(now_ms, bandwidth);
+    }
+    assert_eq!(
+        model.full_packets, stats.send_buffer_full_packets,
+        "independent byte-credit model reproduces sender backpressure"
+    );
+    assert_eq!(
+        model.queued_bytes, stats.send_buffer_queued_bytes,
+        "independent byte-credit model reproduces the final sender-side queued bytes"
+    );
+    assert!(
+        stats.send_buffer_queued_bytes <= capacity,
+        "sender-side queued bytes never exceed the configured socket-buffer capacity"
+    );
+}
 
 /// Builds a validated network profile within the scenario impairment range.
 ///
@@ -198,10 +303,16 @@ fn assert_invariants(
             "no finite link or no socket buffer means no queued bytes"
         );
     } else {
-        let capacity = config.network.send_buffer_bytes.expect("checked Some");
-        assert!(
-            report.network.send_buffer_queued_bytes <= capacity,
-            "sender-side queued bytes never exceed the configured socket-buffer capacity"
+        cross_check_send_buffer_credit(
+            &report.network,
+            &config.network,
+            &SubmissionTimeline {
+                media_datagram_bytes: config.media_datagram_bytes,
+                frames: config.frames,
+                frame_duration_ms: config.frame_duration_ms,
+                target_buffer_ms: config.target_buffer_ms,
+                streams: STREAMS,
+            },
         );
     }
 }
