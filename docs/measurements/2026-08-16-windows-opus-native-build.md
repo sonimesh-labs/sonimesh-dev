@@ -1,19 +1,21 @@
 # Windows Opus native build - 2026-08-16
 
-> Status: native libopus build and basic decode/PLC probe on the reference
-> Windows host. ADR 0009 remains Provisional: Android ABI packaging, quality,
-> CPU/power, 10 ms versus 20 ms comparison, and malformed-payload fuzzing
-> against the native decoder are still pending.
+> Status: native libopus build and steady-state decode/PLC probe on the
+> reference Windows host. ADR 0009 remains Provisional: Android ABI packaging,
+> CPU/power, sustained-loss behavior, and coverage-guided malformed-payload
+> fuzzing against the native decoder are still pending.
+> Updated: 2026-08-16
 
 ## Summary
 
 The candidate `opus` 0.3.1 binding (bundled libopus through `audiopus_sys`
-0.2.2) built on the reference host and ran the new
-`tools/opus-codec-prototype` probe. The probe encodes one deterministic
-frame for each negotiated shape (10 ms and 20 ms stereo), decodes it through
-the `sonimesh-audio` `StreamDecodeWorker::new_for_opus` boundary, synthesizes
-one PLC block per shape, and rejects a malformed payload as a bounded
-stream-local error.
+0.2.2) built on the reference host and ran the revised
+`tools/opus-codec-prototype` probe. For each negotiated shape (10 ms and 20 ms
+stereo), the probe encodes a deterministic tone history, decodes it through
+the `sonimesh-audio` `StreamDecodeWorker::new_for_opus` boundary, compares the
+steady-state decoded block and one PLC-concealed block against the source with
+model-free aligned SNR, and sweeps deterministic malformed payloads that must
+surface as bounded stream-local errors.
 
 ## Command
 
@@ -58,8 +60,8 @@ lets CMake apply the pre-3.5 policy floor, and the native build completed.
 The probe then passed every step:
 
 ```text
-opus_10ms: ok (encode 200 bytes; decode 960 / PLC 1920 interleaved samples; rms 0.104/0.050)
-opus_20ms: ok (encode 384 bytes; decode 1920 / PLC 1920 interleaved samples; rms 0.146/0.178)
+opus_10ms: ok (encode 141 B/frame; decode 960/PLC 1920 samples; snr 36.9/40.0 dB; delay 624 samples; plc align 733)
+opus_20ms: ok (encode 273 B/frame; decode 1920/PLC 1920 samples; snr 44.9/48.4 dB; delay 624 samples; plc align 733)
 opus_malformed_payload: rejected
 opus_malformed_sweep: ok (1000 payloads; 642 rejected; 358 accepted-bounded)
 opus_native_build: ok
@@ -70,13 +72,17 @@ opus_native_build: ok
 This is evidence that the candidate binding builds natively on the reference
 Windows host and that its decode and PLC paths work through the bounded
 `StreamDecodeWorker` boundary with decode writing into caller-owned storage.
-The decoded tone and first concealed block keep plausible finite RMS values
-(0.104/0.146 decoded and 0.050/0.178 concealed), so the decode path returns
-energy rather than silence or garbage. It does not qualify codec quality, CPU,
-power, 10 ms versus 20 ms trade-offs, FEC, or Android ABIs, and the
-malformed-payload sweep is a deterministic bounded probe (fixed-seed
-xorshift32, 1,000 payloads up to the datagram limit) rather than a
-coverage-guided fuzz result.
+The steady-state decoded tone keeps a 36.9 dB SNR for the 10 ms shape and
+44.9 dB for the 20 ms shape against the source, compensated for the codec's
+624-sample interleaved lookahead delay; the PLC-concealed block keeps 40.0 dB
+and 48.4 dB against the actual dropped frame, with the reported 733-sample
+alignment equal to the lookahead plus one 440 Hz tone period. That is the
+first on-host quality signal for the 10 ms versus 20 ms comparison at
+comparable bitrate (141 B/frame at 10 ms and 273 B/frame at 20 ms are both
+about 110 kb/s), but it is one deterministic tone on one host, not a
+CPU/power or sustained-loss result. The malformed-payload sweep remains a
+deterministic bounded probe (fixed-seed xorshift32, 1,000 payloads up to the
+datagram limit) rather than a coverage-guided fuzz result.
 
 One observable detail: for an empty packet libopus synthesizes
 `frame_size = output capacity / channels`, so with the reserved 20 ms block
@@ -89,7 +95,7 @@ full-block PLC.
 
 - reproducible native build on the Android ABIs (`arm64-v8a`, `x86_64`) with
   a pinned NDK;
-- 10 ms and 20 ms frame-duration comparison with documented quality, CPU,
-  power, and loss/PLC evidence;
+- CPU and power evidence for both frame durations, plus sustained or
+  loss-over-time behavior beyond the single deterministic drop;
 - authenticated malformed-payload fuzzing against the native decoder;
 - physical latency and Android capture claims remain separate tests.

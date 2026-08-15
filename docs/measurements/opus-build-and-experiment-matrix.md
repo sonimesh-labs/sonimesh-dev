@@ -98,8 +98,10 @@ For every implemented cell, retain these results with the existing deterministic
 
 On 2026-08-16 the reference-host probe (`tools/opus-codec-prototype`) added a
 deterministic malformed-payload sweep (fixed-seed, 1,000 payloads up to the
-datagram limit) and decode/PLC RMS sanity checks. That is prototype-level
-evidence only, not a coverage-guided fuzz result or a quality measurement.
+datagram limit), decode/PLC RMS sanity checks, and steady-state aligned-SNR
+checks against the source tone for both negotiated shapes (see the dated
+build record). That is prototype-level evidence only, not a coverage-guided
+fuzz result or a CPU/power/sustained-quality measurement.
 
 ## Codec-neutral media-path regression
 
