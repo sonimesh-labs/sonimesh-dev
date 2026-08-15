@@ -325,7 +325,7 @@ fn run_mixer_jitter_scheduler_suite() {
     })
     .expect("built-in mixer jitter scheduler profile is valid");
     println!(
-        "mixer_jitter_scheduler streams=2 slots={} submitted={} burst_loss={} active={} renders={} stream0_plc={} stream1_plc={} stream0_plc_ratio={} stream1_plc_ratio={} stream0_forced={} stream1_forced={} underflows={} muted0={} muted1={} silent_ticks={} finite={}",
+        "mixer_jitter_scheduler streams=2 slots={} submitted={} burst_loss={} active={} renders={} stream0_plc={} stream1_plc={} stream0_plc_ratio={} stream1_plc_ratio={} stream0_forced={} stream1_forced={} underflows={} muted0={} muted1={} silent_ticks={} finite={} excess_latency={}ms",
         report.mixer.slots,
         report.network.submitted_packets,
         report.network.burst_loss_packets,
@@ -342,6 +342,7 @@ fn run_mixer_jitter_scheduler_suite() {
         report.streams[1].muted,
         report.mixer.all_muted_silent_ticks,
         report.mixer.output_finite,
+        report.excess_latency_ms,
     );
 
     let mut four_stream_network = NetworkProfile::stable(7);
@@ -367,7 +368,7 @@ fn run_mixer_jitter_scheduler_suite() {
         .map(|stream| stream.forced_playouts)
         .sum();
     println!(
-        "mixer_jitter_scheduler streams=4 slots={} submitted={} burst_loss={} active={} renders={} forced={} underflows={} finite={}",
+        "mixer_jitter_scheduler streams=4 slots={} submitted={} burst_loss={} active={} renders={} forced={} underflows={} finite={} excess_latency={}ms",
         four_stream_report.mixer.slots,
         four_stream_report.network.submitted_packets,
         four_stream_report.network.burst_loss_packets,
@@ -376,6 +377,7 @@ fn run_mixer_jitter_scheduler_suite() {
         four_stream_forced,
         four_stream_report.mixer.slot_underflows.iter().sum::<u64>(),
         four_stream_report.mixer.output_finite,
+        four_stream_report.excess_latency_ms,
     );
 }
 

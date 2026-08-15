@@ -14,6 +14,16 @@ use std::process::Command;
 /// Default scenario frame count used by every smoke section.
 const FRAMES: u64 = 500;
 
+/// Hard-deadline slack for the `mixer_jitter_scheduler` smoke profiles,
+/// mirroring the walk/fuzz formula
+/// `frames * (max_gate_ticks + 2) * frame_duration_ms + base_delay_ms +
+/// jitter_ms + reorder_delay_ms + 2`. Both smoke profiles pin `frames=200`
+/// and keep the remaining scenario defaults (`max_gate_ticks=8`,
+/// `frame_duration_ms=20`, and the stable network profile's
+/// `base_delay_ms=20`, `jitter_ms=5`, `reorder_delay_ms=30`), so the bound
+/// is `200 * 10 * 20 + 20 + 5 + 30 + 2`.
+const MIXER_HARD_DEADLINE_MS: u64 = 200 * (8 + 2) * 20 + 20 + 5 + 30 + 2;
+
 /// Ordered smoke section headers; pinning the order documents the suite.
 const HEADERS: &[&str] = &[
     "SoniMesh deterministic virtual-network profiles",
@@ -345,6 +355,12 @@ fn smoke_output_is_deterministic_and_reports_consistent_accounting() {
             assert!(
                 number(&parsed, "forced") <= number(&parsed, "submitted"),
                 "forced playouts stay within the frame count: {line}"
+            );
+        }
+        if line.starts_with("mixer_jitter_scheduler") {
+            assert!(
+                number(&parsed, "excess_latency") <= MIXER_HARD_DEADLINE_MS,
+                "completion must never exceed the hard deadline: {line}"
             );
         }
     }
