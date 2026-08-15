@@ -443,4 +443,36 @@ mod tests {
 
         assert!(simulate_jitter_scheduler(config).is_ok());
     }
+
+    #[test]
+    fn max_delay_profile_completes_within_the_hard_deadline() {
+        let mut network = NetworkProfile::stable(0x5A17_2026);
+        network.base_delay_ms = crate::MAX_NETWORK_DELAY_MS;
+        network.jitter_ms = 0;
+        network.reorder_delay_ms = 0;
+        let config = JitterSchedulerScenarioConfig {
+            media_datagram_bytes: u16::try_from(MAX_MEDIA_DATAGRAM_LEN).unwrap(),
+            network,
+            ..JitterSchedulerScenarioConfig::default()
+        };
+
+        let report = simulate_jitter_scheduler(config).expect("max-delay scenario must finish");
+        assert!(
+            report.forced_playouts > 0,
+            "the bounded gate budget must force playout instead of stalling"
+        );
+        assert_eq!(
+            report.playout.playout_frames, 0,
+            "every arrival is late once the bounded gate has advanced past it"
+        );
+        assert_eq!(
+            report.playout.plc_frames, config.frames,
+            "every frame is concealed rather than left unaccounted"
+        );
+        assert!(
+            report.excess_latency_ms <= crate::MAX_NETWORK_DELAY_MS,
+            "added completion latency stays within the maximum one-way delay: {}",
+            report.excess_latency_ms
+        );
+    }
 }
