@@ -217,6 +217,69 @@ fn smoke_output_is_deterministic_and_reports_consistent_accounting() {
         "serialized bytes equal one 256-byte datagram per scheduled copy: {shaped_line}"
     );
 
+    // Clock-drift model: the controller request never exceeds the configured
+    // ±500 ppm cap, so a 100 ppm source converges without a hard resync.
+    let drift_lines: Vec<&str> = lines
+        .iter()
+        .copied()
+        .filter(|line| line.starts_with("drift "))
+        .collect();
+    assert_eq!(drift_lines.len(), 1, "one drift line is printed");
+    for line in &drift_lines {
+        let parsed = fields(line);
+        assert!(
+            signed(&parsed, "final_adjustment").unsigned_abs() <= 500,
+            "drift adjustment stays within the ppm cap: {line}"
+        );
+    }
+
+    // Control reconnect: retiring the old transport rejects its delayed work
+    // and requires a fresh hello before the replacement transport is trusted.
+    let reconnect_lines: Vec<&str> = lines
+        .iter()
+        .copied()
+        .filter(|line| line.starts_with("control_reconnect"))
+        .collect();
+    assert_eq!(
+        reconnect_lines.len(),
+        1,
+        "one control reconnect line is printed"
+    );
+    for line in &reconnect_lines {
+        let parsed = fields(line);
+        for key in [
+            "stale_completion_rejected",
+            "fresh_hello_required",
+            "stale_session_command_rejected",
+            "fresh_session_command_accepted",
+        ] {
+            assert_eq!(parsed.get(key).map(String::as_str), Some("true"), "{line}");
+        }
+    }
+
+    // Multi-stream shared link: two sources share one link, so every
+    // burst-dropped packet conceals exactly once across the streams, and the
+    // two 200-frame sources submit exactly 400 packets.
+    let multi_stream_lines: Vec<&str> = lines
+        .iter()
+        .copied()
+        .filter(|line| line.starts_with("multi_stream "))
+        .collect();
+    assert_eq!(
+        multi_stream_lines.len(),
+        1,
+        "one multi-stream line is printed"
+    );
+    for line in &multi_stream_lines {
+        let parsed = fields(line);
+        assert_eq!(number(&parsed, "submitted"), 400, "{line}");
+        assert_eq!(
+            number(&parsed, "stream0_plc") + number(&parsed, "stream1_plc"),
+            number(&parsed, "burst_loss"),
+            "every burst-dropped packet conceals exactly once: {line}"
+        );
+    }
+
     // Opus experiment suite: every case still accounts all 500 frames, and a
     // case with no network loss conceals nothing.
     let opus: Vec<&str> = lines
