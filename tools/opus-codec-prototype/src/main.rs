@@ -71,6 +71,10 @@ const CPU_PROBE_FRAMES: usize = 2_000;
 const CPU_WARMUP_FRAMES: usize = 200;
 /// Timed passes per throughput measurement; the minimum wall time is reported.
 const CPU_PROBE_REPEATS: usize = 3;
+/// Seconds of audio processed in one sustained throughput pass per shape.
+const SUSTAINED_AUDIO_SECONDS: u32 = 120;
+/// Sustained passes per shape; the minimum wall time is reported.
+const SUSTAINED_PROBE_REPEATS: usize = 2;
 /// Deterministic malformed-payload sweep size.
 const MALFORMED_SWEEP_PAYLOADS: usize = 1_000;
 /// Lowest plausible RMS for a decoded 0.25-amplitude tone block.
@@ -1633,6 +1637,77 @@ fn run_cpu_probe_impl<const PCM_SAMPLES_PER_BLOCK: usize>(
     ))
 }
 
+/// Measures one sustained encode+decode pass over `SUSTAINED_AUDIO_SECONDS`
+/// of tone audio and returns one success line.
+///
+/// Unlike the min-of-three `run_cpu_probe` numbers, this is a single long
+/// window (120 s of audio) that reports end-to-end wall time, realtime
+/// headroom, and a wall-clock-derived single-core utilization estimate. It
+/// is not a measured CPU-time, allocation, or power result.
+fn run_sustained_probe(frame_duration_ms: u16) -> ProbeResult<String> {
+    match frame_duration_ms {
+        10 => run_sustained_probe_impl::<960>(frame_duration_ms),
+        20 => run_sustained_probe_impl::<MAX_PCM_SAMPLES_PER_BLOCK>(frame_duration_ms),
+        other => Err(format!("unsupported frame duration {other} ms")),
+    }
+}
+
+/// Runs the sustained passes with a compile-time PCM block capacity.
+#[allow(clippy::cast_precision_loss)]
+fn run_sustained_probe_impl<const PCM_SAMPLES_PER_BLOCK: usize>(
+    frame_duration_ms: u16,
+) -> ProbeResult<String> {
+    let frame = OpusFrameConfig::new(SAMPLE_RATE_HZ, 2, frame_duration_ms)
+        .map_err(|error| error.to_string())?;
+    let expected_samples = frame.interleaved_samples();
+    let frames = usize::try_from(SUSTAINED_AUDIO_SECONDS * 1_000 / u32::from(frame_duration_ms))
+        .expect("sustained frame count fits usize");
+    let tone_block = tone(frames * expected_samples);
+
+    let mut elapsed_us = f64::INFINITY;
+    for _ in 0..SUSTAINED_PROBE_REPEATS {
+        elapsed_us = elapsed_us.min(timed_encode_decode_pass::<PCM_SAMPLES_PER_BLOCK>(
+            frame,
+            expected_samples,
+            &tone_block,
+            frames,
+        )?);
+    }
+    Ok(sustained_summary(
+        frame_duration_ms,
+        SUSTAINED_AUDIO_SECONDS,
+        frames,
+        elapsed_us,
+    ))
+}
+
+/// Formats one sustained throughput line for a negotiated shape.
+///
+/// `elapsed_us` is the minimum wall time over `frames` encode+decode frames
+/// covering `audio_seconds` of audio. The reported single-core estimate is
+/// the per-frame wall time divided by the frame period and is therefore an
+/// upper bound on one core's busy fraction rather than a measured CPU-time
+/// trace.
+#[must_use]
+#[allow(clippy::cast_precision_loss)]
+fn sustained_summary(
+    frame_duration_ms: u16,
+    audio_seconds: u32,
+    frames: usize,
+    elapsed_us: f64,
+) -> String {
+    let wall_seconds = elapsed_us / 1.0e6;
+    let headroom = f64::from(audio_seconds) / wall_seconds;
+    let per_frame_us = elapsed_us / frames as f64;
+    let frame_period_us = f64::from(frame_duration_ms) * 1.0e3;
+    let single_core_estimate = per_frame_us / frame_period_us * 100.0;
+    format!(
+        "opus_{frame_duration_ms}ms_sustained: {audio_seconds} s of tone audio in \
+         {wall_seconds:.2} s wall ({headroom:.1}x realtime; {per_frame_us:.1} us/frame; \
+         ~{single_core_estimate:.1}% of one core estimate)"
+    )
+}
+
 /// Returns the signal-to-noise ratio in decibels between `reference` and
 /// `decoded` over the overlapping region, or infinity when either side is
 /// digital silence.
@@ -1756,6 +1831,7 @@ fn run_probe() -> ProbeResult<Vec<String>> {
         lines.extend(run_reorder_probe(duration_ms)?);
         lines.extend(run_jitter_wait_probe(duration_ms)?);
         lines.push(run_cpu_probe(duration_ms)?);
+        lines.push(run_sustained_probe(duration_ms)?);
     }
 
     // A malformed authenticated payload surfaces as a bounded stream-local
@@ -1887,7 +1963,7 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::{best_aligned_snr, snr_db};
+    use super::{best_aligned_snr, snr_db, sustained_summary};
 
     #[test]
     fn snr_db_identical_signals_are_infinite() {
@@ -1951,5 +2027,26 @@ mod tests {
         let (snr, delay) = best_aligned_snr(&reference, &decoded);
         assert_eq!(delay, -i32::try_from(lead).expect("lead fits i32"));
         assert!(snr.is_infinite());
+    }
+
+    #[test]
+    #[allow(clippy::cast_precision_loss)]
+    fn sustained_summary_reports_headroom_and_utilization() {
+        let line = sustained_summary(10, 120, 12_000, 9.0e6);
+        assert!(line.starts_with("opus_10ms_sustained: "));
+        assert!(line.contains("120 s of tone audio in 9.00 s wall"));
+        assert!(line.contains("13.3x realtime"));
+        assert!(line.contains("750.0 us/frame"));
+        assert!(line.contains("~7.5% of one core estimate"));
+    }
+
+    #[test]
+    #[allow(clippy::cast_precision_loss)]
+    fn sustained_summary_scales_with_frame_duration() {
+        let line = sustained_summary(20, 120, 6_000, 10.0e6);
+        assert!(line.starts_with("opus_20ms_sustained: "));
+        assert!(line.contains("12.0x realtime"));
+        assert!(line.contains("1666.7 us/frame"));
+        assert!(line.contains("~8.3% of one core estimate"));
     }
 }
