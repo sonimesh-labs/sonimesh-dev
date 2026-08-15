@@ -1,15 +1,13 @@
 //! Windows native libopus build and decode/PLC feasibility probe for SoniMesh.
 //!
 //! This prototype produces ADR 0009 evidence only: it proves the candidate
-//! opus binding builds on this host, encodes one deterministic frame for
-//! each negotiated shape (10 ms and 20 ms stereo), decodes it through the
-//! sonimesh-audio StreamDecodeWorker boundary, synthesizes one
-//! deterministic PLC block per shape (PLC fills the reserved block, as
-//! libopus synthesizes the full requested frame size), checks the decoded
-//! and concealed blocks for plausible finite energy, and sweeps bounded
-//! deterministic malformed payloads that must surface as stream-local
-//! errors or bounded decodes. It is not a quality, power, latency,
-//! Android ABI, or coverage-guided fuzz result.
+//! opus binding builds on this host, encodes a deterministic tone, decodes
+//! a steady-state history of frames for each negotiated shape (10 ms and
+//! 20 ms stereo) through the sonimesh-audio StreamDecodeWorker boundary,
+//! compares decoded and PLC-concealed blocks against the source, and sweeps
+//! bounded deterministic malformed payloads that must surface as
+//! stream-local errors or bounded decodes. It is not a quality, power,
+//! latency, Android ABI, or coverage-guided fuzz result.
 
 use sonimesh_audio::{
     DecodeStep, FrameDecoder, OPUS_CHANNELS, OpusFrameConfig, RealtimePcmConsumer,
@@ -30,6 +28,8 @@ const SAMPLE_RATE_HZ: u32 = 48_000;
 const TONE_HZ: f32 = 440.0;
 /// Negotiated frame durations probed through the native decoder.
 const FRAME_DURATIONS_MS: [u16; 2] = [10, 20];
+/// Tone frames decoded before one frame is dropped to probe PLC.
+const HISTORY_FRAMES: usize = 10;
 /// Deterministic malformed-payload sweep size.
 const MALFORMED_SWEEP_PAYLOADS: usize = 1_000;
 /// Lowest plausible RMS for a decoded 0.25-amplitude tone block.
@@ -38,6 +38,8 @@ const DECODED_RMS_MIN: f32 = 0.05;
 const DECODED_RMS_MAX: f32 = 0.35;
 /// PLC concealment must remain non-silent for the first concealed block.
 const PLC_RMS_MIN: f32 = 1.0e-3;
+/// A steady-state decoded tone must retain at least this SNR against the source.
+const DECODE_SNR_MIN: f32 = 10.0;
 
 /// Wraps the candidate libopus decoder behind the stable FrameDecoder
 /// boundary so decode and PLC stay outside the realtime output callback.
@@ -63,11 +65,14 @@ impl FrameDecoder for NativeOpusDecoder {
 
 type ProbeResult<T> = Result<T, String>;
 
-/// Runs the encode/decode/PLC path once for one negotiated frame duration.
+/// Runs the steady-state encode/decode/PLC path for one negotiated duration.
 fn run_frame_path(frame_duration_ms: u16) -> ProbeResult<String> {
     let frame = OpusFrameConfig::new(SAMPLE_RATE_HZ, 2, frame_duration_ms)
         .map_err(|error| error.to_string())?;
     let expected_samples = frame.interleaved_samples();
+
+    // A continuous tone long enough for the history plus one dropped frame.
+    let tone_block = tone((HISTORY_FRAMES + 1) * expected_samples);
 
     let mut encoder = opus::Encoder::new(
         SAMPLE_RATE_HZ,
@@ -75,12 +80,28 @@ fn run_frame_path(frame_duration_ms: u16) -> ProbeResult<String> {
         opus::Application::Audio,
     )
     .map_err(|error| error.to_string())?;
-    let mut packet = [0_u8; MAX_ENCODED_BYTES];
-    let encoded_len = encoder
-        .encode_float(&tone(expected_samples), &mut packet)
-        .map_err(|error| error.to_string())?;
-    if encoded_len == 0 || encoded_len > MAX_ENCODED_BYTES {
-        return Err(format!("encoder produced an invalid length {encoded_len}"));
+    // libopus adds an encoder-lookahead delay (312 samples/channel at 48 kHz);
+    // decoded blocks are aligned to the source only after skipping it.
+    let lookahead = usize::try_from(encoder.get_lookahead().map_err(|error| error.to_string())?)
+        .expect("lookahead is non-negative");
+    let delay = lookahead * OPUS_CHANNELS as usize;
+
+    let mut packets = [[0_u8; MAX_ENCODED_BYTES]; HISTORY_FRAMES];
+    let mut encoded_lens = [0_usize; HISTORY_FRAMES];
+    for index in 0..HISTORY_FRAMES {
+        let start = index * expected_samples;
+        encoded_lens[index] = encoder
+            .encode_float(
+                &tone_block[start..start + expected_samples],
+                &mut packets[index],
+            )
+            .map_err(|error| error.to_string())?;
+        if encoded_lens[index] == 0 || encoded_lens[index] > MAX_ENCODED_BYTES {
+            return Err(format!(
+                "encoder produced an invalid length {}",
+                encoded_lens[index]
+            ));
+        }
     }
 
     let (producer, mut consumer) = realtime_pcm_queue::<PCM_SAMPLES_PER_BLOCK>(PCM_QUEUE_CAPACITY)
@@ -97,26 +118,44 @@ fn run_frame_path(frame_duration_ms: u16) -> ProbeResult<String> {
     > = StreamDecodeWorker::new_for_opus(decoder, producer, 0, frame)
         .map_err(|error| error.to_string())?;
 
-    // The negotiated start sequence admits the encoded frame first, so the
-    // first playout decision is a deterministic ordinary decode.
-    worker
-        .admit(0, 0, &packet[..encoded_len])
-        .map_err(|error| error.to_string())?;
     let mut block = [0.0_f32; PCM_SAMPLES_PER_BLOCK];
-    match worker.decode_next().map_err(|error| error.to_string())? {
-        DecodeStep::Decoded { samples, .. } if samples == expected_samples => {}
-        other => return Err(format!("expected a decoded frame, got {other:?}")),
+    for index in 0..HISTORY_FRAMES {
+        worker
+            .admit(
+                u32::try_from(index).expect("history frame index fits u32"),
+                0,
+                &packets[index][..encoded_lens[index]],
+            )
+            .map_err(|error| error.to_string())?;
+        match worker.decode_next().map_err(|error| error.to_string())? {
+            DecodeStep::Decoded { samples, .. } if samples == expected_samples => {}
+            other => return Err(format!("expected a decoded frame, got {other:?}")),
+        }
+        assert_popped_pcm(&mut consumer, &mut block, expected_samples)?;
     }
-    assert_popped_pcm(&mut consumer, &mut block, expected_samples)?;
-    let decoded_rms = block_rms(&block[..expected_samples]);
+
+    // Steady-state decode quality from the last decoded frame, compensated
+    // for the codec lookahead delay.
+    let decoded_slice = &block[..expected_samples];
+    let decoded_rms = block_rms(decoded_slice);
     if !(DECODED_RMS_MIN..=DECODED_RMS_MAX).contains(&decoded_rms) {
         return Err(format!(
             "decoded tone RMS {decoded_rms:.3} outside the expected band"
         ));
     }
+    let decoded_frame_start = (HISTORY_FRAMES - 1) * expected_samples - delay;
+    let decode_snr = snr_db(
+        &tone_block[decoded_frame_start..decoded_frame_start + expected_samples],
+        decoded_slice,
+    );
+    if !decode_snr.is_finite() || decode_snr < DECODE_SNR_MIN {
+        return Err(format!(
+            "decoded tone SNR {decode_snr:.1} dB below the expected floor"
+        ));
+    }
 
-    // With no further frame buffered, the next playout decision is
-    // deterministic decoder-side PLC for the confirmed missing sequence.
+    // The next sequence is never admitted, so the next playout decision is
+    // deterministic decoder-side PLC for the confirmed missing frame.
     // libopus synthesizes frame_size = block capacity / channels for an empty
     // packet, so PLC fills the reserved 20 ms block even for the 10 ms shape;
     // the worker accepts that bounded length and the consumer pops it whole.
@@ -132,9 +171,75 @@ fn run_frame_path(frame_duration_ms: u16) -> ProbeResult<String> {
         ));
     }
 
+    // Compare the concealment against the actual dropped frame. The alignment
+    // search compensates for the codec's algorithmic delay; the found delay is
+    // reported so the metric stays reproducible.
+    let dropped_start = HISTORY_FRAMES * expected_samples;
+    let (plc_snr, plc_delay) = best_aligned_snr(
+        &tone_block[dropped_start..dropped_start + expected_samples],
+        &block[..PCM_SAMPLES_PER_BLOCK],
+    );
+    if !plc_snr.is_finite() {
+        return Err(format!("PLC-loss SNR {plc_snr:.1} dB is non-finite"));
+    }
+
+    let encode_per_frame = encoded_lens.iter().sum::<usize>() / HISTORY_FRAMES;
     Ok(format!(
-        "opus_{frame_duration_ms}ms: ok (encode {encoded_len} bytes; decode {expected_samples} / PLC {PCM_SAMPLES_PER_BLOCK} interleaved samples; rms {decoded_rms:.3}/{plc_rms:.3})"
+        "opus_{frame_duration_ms}ms: ok (encode {encode_per_frame} B/frame; decode {expected_samples}/PLC {PCM_SAMPLES_PER_BLOCK} samples; snr {decode_snr:.1}/{plc_snr:.1} dB; delay {delay} samples; plc align {plc_delay})"
     ))
+}
+
+/// Returns the signal-to-noise ratio in decibels between `reference` and
+/// `decoded` over the overlapping region, or infinity when either side is
+/// digital silence.
+#[must_use]
+fn snr_db(reference: &[f32], decoded: &[f32]) -> f32 {
+    let len = reference.len().min(decoded.len());
+    if len == 0 {
+        return f32::INFINITY;
+    }
+    let mut signal = 0.0_f32;
+    let mut error = 0.0_f32;
+    for index in 0..len {
+        let expected = reference[index];
+        let actual = decoded[index];
+        signal += expected * expected;
+        error += (actual - expected) * (actual - expected);
+    }
+    if signal <= f32::EPSILON || error <= f32::EPSILON {
+        return f32::INFINITY;
+    }
+    10.0 * (signal / error).log10()
+}
+
+/// Returns the best SNR over bounded one-sided alignments, with the delay used.
+///
+/// Opus's constant algorithmic delay means the same audio appears at a fixed
+/// offset; searching that offset keeps the comparison model-free while the
+/// reported delay makes the result reproducible.
+fn best_aligned_snr(reference: &[f32], decoded: &[f32]) -> (f32, i32) {
+    const MIN_OVERLAP: usize = 64;
+    let mut best = f32::NEG_INFINITY;
+    let mut best_delay = 0_i32;
+    let limit = reference
+        .len()
+        .min(decoded.len())
+        .saturating_sub(MIN_OVERLAP);
+    for offset in 0..=limit {
+        let forward = snr_db(&reference[..reference.len() - offset], &decoded[offset..]);
+        if forward > best {
+            best = forward;
+            best_delay = i32::try_from(offset).expect("alignment offset fits i32");
+        }
+        let backward = snr_db(&reference[offset..], &decoded[..decoded.len() - offset]);
+        if backward > best {
+            best = backward;
+            best_delay = i32::try_from(offset)
+                .expect("alignment offset fits i32")
+                .wrapping_neg();
+        }
+    }
+    (best, best_delay)
 }
 
 /// Returns the root-mean-square of a finite PCM block.
@@ -254,5 +359,74 @@ fn main() {
             eprintln!("opus-codec-prototype: failed: {error}");
             std::process::exit(1);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{best_aligned_snr, snr_db};
+
+    #[test]
+    fn snr_db_identical_signals_are_infinite() {
+        let signal = [0.25_f32, -0.25, 0.5, -0.5];
+        assert!(snr_db(&signal, &signal).is_infinite());
+    }
+
+    #[test]
+    fn snr_db_matches_analytic_ratio() {
+        let reference = [1.0_f32; 4];
+        let decoded = [0.5_f32; 4];
+        let expected = 10.0 * (4.0_f32).log10();
+        assert!((snr_db(&reference, &decoded) - expected).abs() < 1.0e-5);
+    }
+
+    #[test]
+    fn snr_db_silence_or_empty_is_infinite() {
+        let silence = [0.0_f32; 8];
+        assert!(snr_db(&silence, &[0.1_f32; 8]).is_infinite());
+        assert!(snr_db(&[], &[1.0_f32]).is_infinite());
+    }
+
+    #[test]
+    #[allow(clippy::cast_precision_loss)]
+    fn best_aligned_snr_identical_is_zero_delay() {
+        let signal: Vec<f32> = (0..256)
+            .map(|index| (index as f32 * 0.1).sin() * 0.25)
+            .collect();
+        let (snr, delay) = best_aligned_snr(&signal, &signal);
+        assert_eq!(delay, 0);
+        assert!(snr.is_infinite());
+    }
+
+    #[test]
+    #[allow(clippy::cast_precision_loss)]
+    fn best_aligned_snr_recovers_lagging_decoded_signal() {
+        // decoded[j] = reference[j - lag] for j >= lag: the decoded stream
+        // repeats the source `lag` samples later, reported as a positive delay.
+        let reference: Vec<f32> = (0..512)
+            .map(|index| (index as f32 * 0.1).sin() * 0.25)
+            .collect();
+        let lag = 37_usize;
+        let mut decoded = vec![0.0_f32; reference.len()];
+        decoded[lag..].copy_from_slice(&reference[..reference.len() - lag]);
+        let (snr, delay) = best_aligned_snr(&reference, &decoded);
+        assert_eq!(delay, i32::try_from(lag).expect("lag fits i32"));
+        assert!(snr.is_infinite());
+    }
+
+    #[test]
+    #[allow(clippy::cast_precision_loss)]
+    fn best_aligned_snr_recovers_leading_decoded_signal() {
+        // decoded[j] = reference[j + lead] for j < len - lead: the decoded
+        // stream repeats the source `lead` samples earlier, reported negative.
+        let reference: Vec<f32> = (0..512)
+            .map(|index| (index as f32 * 0.1).sin() * 0.25)
+            .collect();
+        let lead = 41_usize;
+        let mut decoded = vec![0.0_f32; reference.len()];
+        decoded[..reference.len() - lead].copy_from_slice(&reference[lead..]);
+        let (snr, delay) = best_aligned_snr(&reference, &decoded);
+        assert_eq!(delay, -i32::try_from(lead).expect("lead fits i32"));
+        assert!(snr.is_infinite());
     }
 }
