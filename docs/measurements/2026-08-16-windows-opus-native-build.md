@@ -4,7 +4,9 @@
 > host, including a deterministic five-frame loss burst, a 1-32 frame
 > burst-length sweep, independent/burst loss-pattern windows, bounded
 > reorder absorption and late-drop, a deterministic jitter-wait sweep,
-> and per-frame host throughput for both shapes, all with recovery.
+> steady-state and loss-window quality across two deterministic content
+> profiles, and per-frame host throughput for both shapes, all with
+> recovery.
 > ADR 0009 remains Provisional: Android ABI packaging, sustained
 > CPU/power, and sustained coverage-guided malformed-payload fuzzing
 > against the native decoder are still pending.
@@ -15,7 +17,8 @@
 The candidate `opus` 0.3.1 binding (bundled libopus through `audiopus_sys`
 0.2.2) built on the reference host and ran the revised
 `tools/opus-codec-prototype` probe. For each negotiated shape (10 ms and 20 ms
-stereo), the probe encodes a deterministic tone history, decodes it through
+stereo), the probe encodes a deterministic content history (a single tone and
+a multi-harmonic sum), decodes it through
 the `sonimesh-audio` `StreamDecodeWorker::new_for_opus` boundary, compares the
 steady-state decoded block against the source with model-free aligned SNR,
 conceals a deterministic burst of five consecutive lost frames with
@@ -23,7 +26,7 @@ decoder-side PLC, sweeps burst lengths from 1 to 32 frames (1, 2, 3, 5, 8,
 12, 16, 24, 32) to record how PLC quality degrades and confirm the stream
 re-locks to the source after every length, runs deterministic loss-pattern
 windows (independent 1/3/5% and a periodic 5-in-50 burst) to record quality
-under loss-over-time, probes
+under loss-over-time for both content profiles, probes
 bounded reorder absorption (a six-frame out-of-order arrival batch played
 out in sequence with no concealment at the constant codec delay) and
 late-drop (one slot concealed by PLC while the bounded buffer drops the
@@ -47,7 +50,8 @@ cargo run --release -p opus-codec-prototype
 ~~~
 
 A release build is used so the per-frame throughput lines are meaningful;
-the codec-quality lines are deterministic and identical across profiles.
+the codec-quality lines are deterministic and identical between debug and
+release builds.
 
 ## Observation
 
@@ -82,7 +86,8 @@ lets CMake apply the pre-3.5 policy floor, and the native build completed.
 The probe then passed every step:
 
 ```text
-opus_10ms: ok (encode 141 B/frame; decode 960/PLC 960 samples; snr 36.9 dB; plc burst 5 min 2.8 mean 16.6 dB; align 733; recovery 42.4 dB; delay 624 samples)
+opus_10ms_tone: ok (encode 141 B/frame; decode 960/PLC 960 samples; snr 36.9 dB; plc burst 5 min 2.8 mean 16.6 dB; align 733; recovery 42.4 dB; delay 624 samples)
+opus_10ms_multi: ok (encode 141 B/frame; decode 960/PLC 960 samples; snr 33.6 dB; plc burst 5 min 1.1 mean 12.2 dB; align -686; recovery 15.9 dB; delay 624 samples)
 opus_10ms_burst: len 1 ok (min 40.0 mean 40.0 recovery 33.4 dB)
 opus_10ms_burst: len 2 ok (min 22.7 mean 31.4 recovery 26.7 dB)
 opus_10ms_burst: len 3 ok (min 11.4 mean 24.7 recovery 37.9 dB)
@@ -92,7 +97,8 @@ opus_10ms_burst: len 12 ok (min 0.4 mean 7.5 recovery 26.1 dB)
 opus_10ms_burst: len 16 ok (min 0.1 mean 5.7 recovery 34.2 dB)
 opus_10ms_burst: len 24 ok (min 0.1 mean 3.9 recovery 29.7 dB)
 opus_10ms_burst: len 32 ok (min 0.1 mean 3.0 recovery 26.2 dB)
-opus_20ms: ok (encode 273 B/frame; decode 1920/PLC 1920 samples; snr 44.9 dB; plc burst 5 min 4.1 mean 18.5 dB; align 733; recovery 48.1 dB; delay 624 samples)
+opus_20ms_tone: ok (encode 273 B/frame; decode 1920/PLC 1920 samples; snr 44.9 dB; plc burst 5 min 4.1 mean 18.5 dB; align 733; recovery 48.1 dB; delay 624 samples)
+opus_20ms_multi: ok (encode 273 B/frame; decode 1920/PLC 1920 samples; snr 36.4 dB; plc burst 5 min 4.6 mean 13.4 dB; align -1559; recovery 31.8 dB; delay 624 samples)
 opus_20ms_burst: len 1 ok (min 48.4 mean 48.4 recovery 43.2 dB)
 opus_20ms_burst: len 2 ok (min 22.4 mean 35.4 recovery 42.8 dB)
 opus_20ms_burst: len 3 ok (min 11.2 mean 27.3 recovery 40.9 dB)
@@ -102,16 +108,26 @@ opus_20ms_burst: len 12 ok (min 0.4 mean 8.3 recovery 38.9 dB)
 opus_20ms_burst: len 16 ok (min 0.1 mean 6.3 recovery 43.8 dB)
 opus_20ms_burst: len 24 ok (min 0.1 mean 4.3 recovery 36.5 dB)
 opus_20ms_burst: len 32 ok (min 0.1 mean 3.3 recovery 38.8 dB)
-opus_10ms_loss: pattern none ok (240 frames; 0 dropped; mean 39.0 worst 33.2 dB)
-opus_10ms_loss: pattern independent_1pct ok (240 frames; 2 dropped; mean 38.5 worst 3.4 dB)
-opus_10ms_loss: pattern independent_3pct ok (240 frames; 7 dropped; mean 36.7 worst -1.5 dB)
-opus_10ms_loss: pattern independent_5pct ok (240 frames; 10 dropped; mean 35.7 worst -1.4 dB)
-opus_10ms_loss: pattern burst_5in50 ok (240 frames; 20 dropped; mean 36.2 worst 1.5 dB)
-opus_20ms_loss: pattern none ok (240 frames; 0 dropped; mean 41.3 worst 34.2 dB)
-opus_20ms_loss: pattern independent_1pct ok (240 frames; 2 dropped; mean 40.7 worst -1.1 dB)
-opus_20ms_loss: pattern independent_3pct ok (240 frames; 7 dropped; mean 39.8 worst -1.2 dB)
-opus_20ms_loss: pattern independent_5pct ok (240 frames; 10 dropped; mean 38.8 worst -1.2 dB)
-opus_20ms_loss: pattern burst_5in50 ok (240 frames; 20 dropped; mean 38.4 worst 2.3 dB)
+opus_10ms_tone_loss: pattern none ok (240 frames; 0 dropped; mean 39.0 worst 33.2 dB)
+opus_10ms_tone_loss: pattern independent_1pct ok (240 frames; 2 dropped; mean 38.5 worst 3.4 dB)
+opus_10ms_tone_loss: pattern independent_3pct ok (240 frames; 7 dropped; mean 36.7 worst -1.5 dB)
+opus_10ms_tone_loss: pattern independent_5pct ok (240 frames; 10 dropped; mean 35.7 worst -1.4 dB)
+opus_10ms_tone_loss: pattern burst_5in50 ok (240 frames; 20 dropped; mean 36.2 worst 1.5 dB)
+opus_10ms_multi_loss: pattern none ok (240 frames; 0 dropped; mean 33.4 worst 27.1 dB)
+opus_10ms_multi_loss: pattern independent_1pct ok (240 frames; 2 dropped; mean 32.8 worst -1.0 dB)
+opus_10ms_multi_loss: pattern independent_3pct ok (240 frames; 7 dropped; mean 31.0 worst -0.9 dB)
+opus_10ms_multi_loss: pattern independent_5pct ok (240 frames; 10 dropped; mean 30.0 worst -0.7 dB)
+opus_10ms_multi_loss: pattern burst_5in50 ok (240 frames; 20 dropped; mean 30.3 worst 1.1 dB)
+opus_20ms_tone_loss: pattern none ok (240 frames; 0 dropped; mean 41.3 worst 34.2 dB)
+opus_20ms_tone_loss: pattern independent_1pct ok (240 frames; 2 dropped; mean 40.7 worst -1.1 dB)
+opus_20ms_tone_loss: pattern independent_3pct ok (240 frames; 7 dropped; mean 39.8 worst -1.2 dB)
+opus_20ms_tone_loss: pattern independent_5pct ok (240 frames; 10 dropped; mean 38.8 worst -1.2 dB)
+opus_20ms_tone_loss: pattern burst_5in50 ok (240 frames; 20 dropped; mean 38.4 worst 2.3 dB)
+opus_20ms_multi_loss: pattern none ok (240 frames; 0 dropped; mean 36.2 worst 32.4 dB)
+opus_20ms_multi_loss: pattern independent_1pct ok (240 frames; 2 dropped; mean 35.5 worst 2.3 dB)
+opus_20ms_multi_loss: pattern independent_3pct ok (240 frames; 7 dropped; mean 34.2 worst 1.2 dB)
+opus_20ms_multi_loss: pattern independent_5pct ok (240 frames; 10 dropped; mean 33.3 worst 1.2 dB)
+opus_20ms_multi_loss: pattern burst_5in50 ok (240 frames; 20 dropped; mean 33.4 worst 3.8 dB)
 opus_10ms_reorder: absorbed ok (6 frames; 0 concealed; mean 39.1 worst 37.8 dB)
 opus_10ms_reorder: late_one ok (1 concealed snr 40.0 dB; late drop 1; decoded mean 30.7 dB)
 opus_10ms_jitter_wait: wait 0 ok (8 frames; 1 concealed snr 40.0 dB; late drop 1; decoded mean 29.8 dB)
@@ -157,8 +173,8 @@ block goes silent and the stream re-locks after every swept length with
 recovery SNR at or above 26 dB. That is the first on-host quality signal for
 the 10 ms versus 20 ms comparison at comparable bitrate (141 B/frame at 10 ms
 and 273 B/frame at 20 ms are both about 110 kb/s) and a first sustained-loss
-signal up to 640 ms, but it is one deterministic tone on one host, not a
-sustained CPU/power or coverage-guided fuzz result. The loss-pattern windows (240 frames each, patterns applied after a
+signal up to 640 ms, but it is one deterministic content pair on one host,
+not a sustained CPU/power or coverage-guided fuzz result. The loss-pattern windows (240 frames each, patterns applied after a
 10-frame warm-up history, immediate concealment with no jitter wait) keep the
 window mean SNR between 39.0 dB and 35.7 dB for the 10 ms shape and between
 41.3 dB and 38.4 dB for the 20 ms shape as loss rises from 0% to 10%
@@ -169,7 +185,19 @@ deviate sharply from the true frame at the codec delay (worst about -1.5 dB)
 because PLC applies amplitude decay over concealed frames, while the window
 mean stays well above the 10 dB floor. These are immediate-concealment
 results; the jitter-wait sweep below records what a wait buys before a
-loss is declared. The malformed-payload sweep remains a deterministic bounded probe
+loss is declared.
+
+A second deterministic content profile, a five-harmonic sum scaled to the
+tone profile's RMS, runs the same steady-state and loss-window passes so PLC
+quality is not tuned to a pure sine alone. The multi-harmonic profile keeps
+steady-state decode SNR at 33.6 dB (10 ms) and 36.4 dB (20 ms), a five-frame
+PLC burst floor of 1.1 dB and 4.6 dB with mean 12.2 dB and 13.4 dB, recovery
+SNR of 15.9 dB and 31.8 dB, and loss-window means from 30.0 dB to 33.4 dB
+(10 ms) and 33.3 dB to 36.2 dB (20 ms) as loss rises to 10%; every gate
+holds and no block goes silent. The spectrally richer content conceals less
+cleanly than the single tone (the 10 ms PLC burst floor and recovery SNR are
+lower), which is the expected direction for non-tonal material. The
+malformed-payload sweep remains a deterministic bounded probe
 (fixed-seed xorshift32, 1,000 payloads up to the datagram limit) rather
 than a coverage-guided fuzz result.
 

@@ -108,8 +108,10 @@ loss-pattern windows (independent 1/3/5% and a periodic 5-in-50 burst) that
 keep the window mean SNR within 35.7-41.3 dB across both shapes, a
 deterministic jitter-wait sweep that records the concealment/drop boundary
 of waiting before declaring a loss, bounded reorder absorption and
-late-drop, and per-frame encode+decode and decode-only host throughput
-for both shapes (see the dated build record). That is prototype-level
+late-drop, steady-state and loss-window quality across two deterministic
+content profiles (single tone and multi-harmonic sum), and per-frame
+encode+decode and decode-only host throughput for both shapes (see the
+dated build record). That is prototype-level
 evidence only, not a coverage-guided fuzz result, an adaptive
 jitter-target result, or a power or sustained CPU-utilization
 measurement. The Linux CI fuzz job now also runs a finite
