@@ -127,6 +127,15 @@ target-gated scheduler and multi-stream adaptive-target scenarios from
 seeded and arbitrary byte inputs and assert the same bounded-target,
 step-count, and completion invariants on every report.
 
+The completion bound is explicit: the `jitter_scheduler_property` and
+`mixer_jitter_scheduler_property` walks and the `jitter_scheduler`,
+`mixer_jitter_scheduler`, and `mixer_jitter_scheduler_4s` fuzz targets
+assert every accepted report's `excess_latency_ms` stays within the
+scenario hard deadline (`frames * (max_gate_ticks + 2) *
+frame_duration_ms` plus the worst-case one-way network delay), and the
+CI smoke gate pins the same bound on the seeded `scheduler` and
+`mixer_jitter_scheduler` smoke lines.
+
 A bounded relative arrival-jitter estimator in `sonimesh-audio`
 (`ArrivalJitter`) measures per-packet inter-arrival deviation from a
 monotonic arrival clock and the sender sample timestamps, so a real packet
