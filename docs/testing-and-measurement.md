@@ -230,10 +230,17 @@ mixer-jitter-scheduler walks extend the same treatment: each varies the media
 datagram across the protocol range and occasionally configures the finite
 serial link and a bounded sender-side socket buffer, pinning the serialization
 accounting (one datagram per scheduled copy) and the no-link/no-buffer
-backpressure semantics on every report. The eight network-scenario fuzz
-targets assert the same serialization and backpressure accounting on every
-accepted report, so adversarial inputs exercise the identical invariants the
-seeded walks pin. A smoke-output regression test
+backpressure semantics on every report. Those walks (and the base
+`scenario_property` walk) also reproduce `send_buffer_full_packets` and
+`send_buffer_queued_bytes` exactly with an independent byte-credit model that
+replays each scenario's submission timeline at the link bandwidth; the two
+scheduler walks stop the tick loop as soon as every frame is consumed, so the
+mixer-jitter-scheduler report now exposes `excess_latency_ms` (the wall-clock
+delay beyond the nominal playout completion) to recover the exact completion
+tick. The eight network-scenario fuzz targets assert the same serialization
+and backpressure accounting on every accepted report, so adversarial inputs
+exercise the identical invariants the seeded walks pin. A smoke-output
+regression test
 (`smoke_output.rs`) pins what the CI smoke gate actually prints: the seeded
 runner is byte-for-byte deterministic, every data line parses into
 `key=value` fields, and the report sections satisfy their cross-field

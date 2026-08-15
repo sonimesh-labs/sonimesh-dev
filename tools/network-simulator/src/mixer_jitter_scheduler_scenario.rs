@@ -242,6 +242,8 @@ pub struct MixerJitterSchedulerSimulationReport<const STREAMS: usize, const SLOT
     pub streams: [StreamJitterSchedulerReport; STREAMS],
     /// Mixer-bus counters.
     pub mixer: MixerJitterMixerReport<SLOTS>,
+    /// Wall-clock delay beyond the nominal playout completion time.
+    pub excess_latency_ms: u64,
 }
 
 /// Invalid simulation configuration or virtual time operation.
@@ -492,6 +494,7 @@ pub fn simulate_mixer_jitter_scheduler<
 
     let mut renders = 0_u32;
     let mut output_finite = true;
+    let mut completion_ms: Option<u64> = None;
     let all_consumed = |states: &[SchedulerState; STREAMS]| {
         states
             .iter()
@@ -564,6 +567,10 @@ pub fn simulate_mixer_jitter_scheduler<
                 next_playout_ms[stream] =
                     next_playout_ms[stream].saturating_add(config.frame_duration_ms);
             }
+        }
+
+        if all_consumed(&states) && completion_ms.is_none() {
+            completion_ms = Some(now_ms);
         }
 
         let mut queued_before = [0_u32; STREAMS];
@@ -644,6 +651,9 @@ pub fn simulate_mixer_jitter_scheduler<
             output_finite,
             all_muted_silent_ticks,
         },
+        excess_latency_ms: completion_ms
+            .unwrap_or(nominal_completion_ms)
+            .saturating_sub(nominal_completion_ms),
     })
 }
 

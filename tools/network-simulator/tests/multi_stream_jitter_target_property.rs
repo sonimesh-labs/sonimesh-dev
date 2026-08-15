@@ -111,12 +111,13 @@ impl SendBufferCreditModel {
 
 /// Replays the scenario's exact submission timeline for the credit model:
 /// every stream submits one datagram every `frame_duration_ms` from time zero
-/// on the shared link.
+/// on the shared link until the inclusive last virtual tick the production
+/// loop processes.
 struct SubmissionTimeline {
     media_datagram_bytes: u16,
     frames: u32,
     frame_duration_ms: u64,
-    target_buffer_ms: u64,
+    end_ms: u64,
     streams: usize,
 }
 
@@ -132,17 +133,9 @@ fn cross_check_send_buffer_credit(
     let capacity = profile.send_buffer_bytes.expect("checked Some");
     let bandwidth = profile.bandwidth_bytes_per_second;
     let mut model = SendBufferCreditModel::new(capacity);
-    let last_playout_ms = timeline.target_buffer_ms.saturating_add(
-        u64::from(timeline.frames.saturating_sub(1)).saturating_mul(timeline.frame_duration_ms),
-    );
-    let end_ms = last_playout_ms
-        .saturating_add(profile.base_delay_ms)
-        .saturating_add(profile.jitter_ms)
-        .saturating_add(profile.reorder_delay_ms)
-        .saturating_add(2);
     let mut next_send_sequence = 0_u32;
     let mut next_send_ms = 0_u64;
-    for now_ms in 0..=end_ms {
+    for now_ms in 0..=timeline.end_ms {
         if next_send_sequence < timeline.frames && now_ms == next_send_ms {
             for _ in 0..timeline.streams {
                 model.try_enqueue(now_ms, u64::from(timeline.media_datagram_bytes), bandwidth);
@@ -310,7 +303,16 @@ fn assert_invariants(
                 media_datagram_bytes: config.media_datagram_bytes,
                 frames: config.frames,
                 frame_duration_ms: config.frame_duration_ms,
-                target_buffer_ms: config.target_buffer_ms,
+                end_ms: config
+                    .target_buffer_ms
+                    .saturating_add(
+                        u64::from(config.frames.saturating_sub(1))
+                            .saturating_mul(config.frame_duration_ms),
+                    )
+                    .saturating_add(config.network.base_delay_ms)
+                    .saturating_add(config.network.jitter_ms)
+                    .saturating_add(config.network.reorder_delay_ms)
+                    .saturating_add(2),
                 streams: STREAMS,
             },
         );
