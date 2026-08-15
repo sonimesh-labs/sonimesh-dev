@@ -9,8 +9,10 @@
 //! multiple burst lengths and deterministic loss patterns to record PLC
 //! degradation and recovery, probes bounded reorder absorption and late-drop
 //! behavior, sweeps deterministic jitter-wait steps that absorb a bounded
-//! late frame without concealment or drop it when the wait is too short, and
-//! sweeps bounded deterministic malformed payloads that must surface as
+//! late frame without concealment or drop it when the wait is too short,
+//! measures deterministic per-frame encode+decode and decode-only host
+//! throughput for both shapes, and sweeps bounded deterministic malformed
+//! payloads that must surface as
 //! stream-local errors or bounded decodes. It is not a quality, power,
 //! latency, Android ABI, or coverage-guided fuzz result.
 
@@ -18,6 +20,7 @@ use sonimesh_audio::{
     DecodeStep, FrameDecoder, InsertOutcome, OPUS_CHANNELS, OpusFrameConfig, RealtimePcmConsumer,
     RealtimePcmPopOutcome, StreamDecodeWorker, realtime_pcm_queue,
 };
+use std::time::Instant;
 
 /// Fixed per-stream encoded-frame capacity in frames.
 const JITTER_CAPACITY: usize = 8;
@@ -58,6 +61,12 @@ const JITTER_WAIT_DELAY_FRAMES: usize = 4;
 const JITTER_WAIT_STEPS: [usize; 5] = [0, 1, 2, 4, 6];
 /// Frames in one deterministic jitter-wait window after the decoded history.
 const JITTER_WAIT_WINDOW_FRAMES: usize = 8;
+/// Frames timed in the deterministic host-throughput pass per shape.
+const CPU_PROBE_FRAMES: usize = 2_000;
+/// Frames run untimed before a throughput pass to warm codec state and caches.
+const CPU_WARMUP_FRAMES: usize = 200;
+/// Timed passes per throughput measurement; the minimum wall time is reported.
+const CPU_PROBE_REPEATS: usize = 3;
 /// Deterministic malformed-payload sweep size.
 const MALFORMED_SWEEP_PAYLOADS: usize = 1_000;
 /// Lowest plausible RMS for a decoded 0.25-amplitude tone block.
@@ -1400,6 +1409,200 @@ fn run_jitter_wait_probe_impl<const PCM_SAMPLES_PER_BLOCK: usize>(
     Ok(lines)
 }
 
+/// Times one deterministic encode+decode pass over `frames` source frames and
+/// returns the total wall time in microseconds.
+///
+/// Each timed frame runs the full per-stream path: encode into a reused
+/// packet, admit through the bounded jitter buffer, decode outside the realtime
+/// callback, and pop the PCM block. The worker and decoder are recreated per
+/// pass so every pass starts from a clean negotiated sequence.
+fn timed_encode_decode_pass<const N: usize>(
+    frame: OpusFrameConfig,
+    expected_samples: usize,
+    tone_block: &[f32],
+    frames: usize,
+) -> ProbeResult<f64> {
+    let mut encoder = opus::Encoder::new(
+        SAMPLE_RATE_HZ,
+        opus::Channels::Stereo,
+        opus::Application::Audio,
+    )
+    .map_err(|error| error.to_string())?;
+    let (producer, mut consumer) =
+        realtime_pcm_queue::<N>(PCM_QUEUE_CAPACITY).map_err(|error| error.to_string())?;
+    let decoder = NativeOpusDecoder {
+        decoder: opus::Decoder::new(SAMPLE_RATE_HZ, opus::Channels::Stereo)
+            .map_err(|error| error.to_string())?,
+    };
+    let mut worker: StreamDecodeWorker<NativeOpusDecoder, JITTER_CAPACITY, MAX_ENCODED_BYTES, N> =
+        StreamDecodeWorker::new_for_opus(decoder, producer, 0, frame)
+            .map_err(|error| error.to_string())?;
+
+    let mut packet = [0_u8; MAX_ENCODED_BYTES];
+    let mut block = [0.0_f32; N];
+    let start = Instant::now();
+    for index in 0..frames {
+        let source_start = index * expected_samples;
+        let len = encode_frame(
+            &mut encoder,
+            &tone_block[source_start..source_start + expected_samples],
+            &mut packet,
+        )?;
+        worker
+            .admit(
+                u32::try_from(index).expect("cpu frame index fits u32"),
+                0,
+                &packet[..len],
+            )
+            .map_err(|error| error.to_string())?;
+        match worker.decode_next().map_err(|error| error.to_string())? {
+            DecodeStep::Decoded { samples, .. } if samples == expected_samples => {}
+            other => return Err(format!("expected a decoded frame, got {other:?}")),
+        }
+        match consumer.pop_into(&mut block) {
+            RealtimePcmPopOutcome::Filled { samples, .. } if samples == expected_samples => Ok(()),
+            other => Err(format!("expected a filled PCM block, got {other:?}")),
+        }?;
+    }
+    let elapsed_us = start.elapsed().as_secs_f64() * 1.0e6;
+    // Sanity-check the final block so the compiler cannot treat the loop as
+    // producing dead output.
+    assert_non_silent(&block, expected_samples, "cpu encode+decode block")?;
+    Ok(elapsed_us)
+}
+
+/// Times one deterministic decode-only pass over pre-encoded packets and
+/// returns the total wall time in microseconds.
+///
+/// The encode cost is excluded; each timed frame still runs the full per-stream
+/// worker path (admit, decode, pop) against packets encoded in source order.
+fn timed_decode_only_pass<const N: usize>(
+    frame: OpusFrameConfig,
+    expected_samples: usize,
+    packets: &[[u8; MAX_ENCODED_BYTES]],
+    encoded_lens: &[usize],
+    frames: usize,
+) -> ProbeResult<f64> {
+    let (producer, mut consumer) =
+        realtime_pcm_queue::<N>(PCM_QUEUE_CAPACITY).map_err(|error| error.to_string())?;
+    let decoder = NativeOpusDecoder {
+        decoder: opus::Decoder::new(SAMPLE_RATE_HZ, opus::Channels::Stereo)
+            .map_err(|error| error.to_string())?,
+    };
+    let mut worker: StreamDecodeWorker<NativeOpusDecoder, JITTER_CAPACITY, MAX_ENCODED_BYTES, N> =
+        StreamDecodeWorker::new_for_opus(decoder, producer, 0, frame)
+            .map_err(|error| error.to_string())?;
+
+    let mut block = [0.0_f32; N];
+    let start = Instant::now();
+    for index in 0..frames {
+        worker
+            .admit(
+                u32::try_from(index).expect("cpu frame index fits u32"),
+                0,
+                &packets[index][..encoded_lens[index]],
+            )
+            .map_err(|error| error.to_string())?;
+        match worker.decode_next().map_err(|error| error.to_string())? {
+            DecodeStep::Decoded { samples, .. } if samples == expected_samples => {}
+            other => return Err(format!("expected a decoded frame, got {other:?}")),
+        }
+        match consumer.pop_into(&mut block) {
+            RealtimePcmPopOutcome::Filled { samples, .. } if samples == expected_samples => Ok(()),
+            other => Err(format!("expected a filled PCM block, got {other:?}")),
+        }?;
+    }
+    let elapsed_us = start.elapsed().as_secs_f64() * 1.0e6;
+    assert_non_silent(&block, expected_samples, "cpu decode-only block")?;
+    Ok(elapsed_us)
+}
+
+/// Measures deterministic per-frame host throughput for one negotiated shape
+/// and returns one success line.
+///
+/// The reported wall time covers the CPU-bound per-frame path and therefore
+/// tracks CPU time closely, but it is host- and build-profile-dependent and is
+/// not a CPU-utilization, allocation, or power result. Each pass is repeated
+/// `CPU_PROBE_REPEATS` times and the minimum wall time is reported to reduce
+/// scheduling noise.
+fn run_cpu_probe(frame_duration_ms: u16) -> ProbeResult<String> {
+    match frame_duration_ms {
+        10 => run_cpu_probe_impl::<960>(frame_duration_ms),
+        20 => run_cpu_probe_impl::<MAX_PCM_SAMPLES_PER_BLOCK>(frame_duration_ms),
+        other => Err(format!("unsupported frame duration {other} ms")),
+    }
+}
+
+/// Runs the throughput passes with a compile-time PCM block capacity.
+#[allow(clippy::cast_precision_loss)]
+fn run_cpu_probe_impl<const PCM_SAMPLES_PER_BLOCK: usize>(
+    frame_duration_ms: u16,
+) -> ProbeResult<String> {
+    let frame = OpusFrameConfig::new(SAMPLE_RATE_HZ, 2, frame_duration_ms)
+        .map_err(|error| error.to_string())?;
+    let expected_samples = frame.interleaved_samples();
+    let tone_block = tone(CPU_PROBE_FRAMES * expected_samples);
+
+    // Pre-encode every timed packet in source order for the decode-only pass.
+    let mut encoder = opus::Encoder::new(
+        SAMPLE_RATE_HZ,
+        opus::Channels::Stereo,
+        opus::Application::Audio,
+    )
+    .map_err(|error| error.to_string())?;
+    let mut packets = vec![[0_u8; MAX_ENCODED_BYTES]; CPU_PROBE_FRAMES];
+    let mut encoded_lens = vec![0_usize; CPU_PROBE_FRAMES];
+    for index in 0..CPU_PROBE_FRAMES {
+        let start = index * expected_samples;
+        encoded_lens[index] = encode_frame(
+            &mut encoder,
+            &tone_block[start..start + expected_samples],
+            &mut packets[index],
+        )?;
+    }
+
+    // Warm the codec and caches with untimed passes.
+    timed_encode_decode_pass::<PCM_SAMPLES_PER_BLOCK>(
+        frame,
+        expected_samples,
+        &tone_block,
+        CPU_WARMUP_FRAMES,
+    )?;
+    timed_decode_only_pass::<PCM_SAMPLES_PER_BLOCK>(
+        frame,
+        expected_samples,
+        &packets,
+        &encoded_lens,
+        CPU_WARMUP_FRAMES,
+    )?;
+
+    let mut encode_decode_us = f64::INFINITY;
+    let mut decode_only_us = f64::INFINITY;
+    for _ in 0..CPU_PROBE_REPEATS {
+        encode_decode_us = encode_decode_us.min(timed_encode_decode_pass::<PCM_SAMPLES_PER_BLOCK>(
+            frame,
+            expected_samples,
+            &tone_block,
+            CPU_PROBE_FRAMES,
+        )?);
+        decode_only_us = decode_only_us.min(timed_decode_only_pass::<PCM_SAMPLES_PER_BLOCK>(
+            frame,
+            expected_samples,
+            &packets,
+            &encoded_lens,
+            CPU_PROBE_FRAMES,
+        )?);
+    }
+
+    let encode_decode_per_frame = encode_decode_us / CPU_PROBE_FRAMES as f64;
+    let decode_only_per_frame = decode_only_us / CPU_PROBE_FRAMES as f64;
+    Ok(format!(
+        "opus_{frame_duration_ms}ms_cpu: encode+decode mean {encode_decode_per_frame:.1} us/frame ({encode_decode_rate:.0} frames/s); decode-only mean {decode_only_per_frame:.1} us/frame ({decode_only_rate:.0} frames/s)",
+        encode_decode_rate = 1.0e6 / encode_decode_per_frame,
+        decode_only_rate = 1.0e6 / decode_only_per_frame,
+    ))
+}
+
 /// Returns the signal-to-noise ratio in decibels between `reference` and
 /// `decoded` over the overlapping region, or infinity when either side is
 /// digital silence.
@@ -1522,6 +1725,7 @@ fn run_probe() -> ProbeResult<Vec<String>> {
         lines.extend(run_loss_patterns(duration_ms)?);
         lines.extend(run_reorder_probe(duration_ms)?);
         lines.extend(run_jitter_wait_probe(duration_ms)?);
+        lines.push(run_cpu_probe(duration_ms)?);
     }
 
     // A malformed authenticated payload surfaces as a bounded stream-local
