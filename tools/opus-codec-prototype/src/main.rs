@@ -8,8 +8,9 @@
 //! confirms the stream re-locks to the source after the burst, sweeps
 //! multiple burst lengths and deterministic loss patterns to record PLC
 //! degradation and recovery, probes bounded reorder absorption and late-drop
-//! behavior, and sweeps
-//! bounded deterministic malformed payloads that must surface as
+//! behavior, sweeps deterministic jitter-wait steps that absorb a bounded
+//! late frame without concealment or drop it when the wait is too short, and
+//! sweeps bounded deterministic malformed payloads that must surface as
 //! stream-local errors or bounded decodes. It is not a quality, power,
 //! latency, Android ABI, or coverage-guided fuzz result.
 
@@ -50,6 +51,12 @@ const LOSS_PATTERN_MEAN_SNR_MIN: f32 = 10.0;
 const REORDER_WINDOW_FRAMES: usize = 6;
 /// In-order reorder-window blocks must keep at least this mean SNR.
 const REORDER_MEAN_SNR_MIN: f32 = 25.0;
+/// Deterministic delay of the delayed frame in one jitter-wait window.
+const JITTER_WAIT_DELAY_FRAMES: usize = 4;
+/// Jitter-wait steps swept per negotiated shape.
+const JITTER_WAIT_STEPS: [usize; 5] = [0, 1, 2, 4, 6];
+/// Frames in one deterministic jitter-wait window after the decoded history.
+const JITTER_WAIT_WINDOW_FRAMES: usize = 8;
 /// Deterministic malformed-payload sweep size.
 const MALFORMED_SWEEP_PAYLOADS: usize = 1_000;
 /// Lowest plausible RMS for a decoded 0.25-amplitude tone block.
@@ -1099,6 +1106,299 @@ fn run_reorder_probe_impl<const PCM_SAMPLES_PER_BLOCK: usize>(
     Ok(lines)
 }
 
+/// Immutable source material shared by the two deterministic jitter-wait runs.
+struct JitterWaitSource<'a> {
+    /// Pre-encoded packets in source order.
+    packets: &'a [[u8; MAX_ENCODED_BYTES]],
+    /// Encoded length of each packet.
+    encoded_lens: &'a [usize],
+    /// Deterministic source tone.
+    tone_block: &'a [f32],
+    /// Interleaved PCM samples per negotiated frame.
+    expected_samples: usize,
+    /// Codec lookahead delay in interleaved samples.
+    delay: usize,
+}
+
+/// Runs one deterministic jitter-wait step through a fresh native decode worker
+/// and returns one success line.
+///
+/// A ten-frame history is always decoded first. In the eight-frame window the
+/// first frame is the delayed frame: it arrives `JITTER_WAIT_DELAY_FRAMES`
+/// slots after its own slot. A wait of at least that many frames admits it
+/// before its playout slot, so it decodes in order with no concealment and no
+/// drop; a shorter wait lets its slot conceal by PLC and the bounded buffer
+/// drops the late arrival. This records the codec/PLC outcome of a
+/// jitter-wait decision only; the scheduling latency of the wait is measured
+/// by the network simulator, not by this probe.
+fn run_jitter_wait_case<const N: usize>(
+    frame: OpusFrameConfig,
+    frame_duration_ms: u16,
+    expected_samples: usize,
+    wait: usize,
+) -> ProbeResult<String> {
+    let total_frames = HISTORY_FRAMES + JITTER_WAIT_WINDOW_FRAMES;
+    let tone_block = tone(total_frames * expected_samples);
+
+    let mut encoder = opus::Encoder::new(
+        SAMPLE_RATE_HZ,
+        opus::Channels::Stereo,
+        opus::Application::Audio,
+    )
+    .map_err(|error| error.to_string())?;
+    let lookahead = usize::try_from(encoder.get_lookahead().map_err(|error| error.to_string())?)
+        .expect("lookahead is non-negative");
+    let delay = lookahead * OPUS_CHANNELS as usize;
+
+    // Pre-encode the history and jitter-wait window in source order so every
+    // packet represents the deterministic tone timeline; admission order below
+    // is independent of the encoder's sequential state.
+    let mut packets = vec![[0_u8; MAX_ENCODED_BYTES]; total_frames];
+    let mut encoded_lens = vec![0_usize; total_frames];
+    for index in 0..total_frames {
+        let start = index * expected_samples;
+        encoded_lens[index] = encode_frame(
+            &mut encoder,
+            &tone_block[start..start + expected_samples],
+            &mut packets[index],
+        )?;
+    }
+
+    let (producer, mut consumer) =
+        realtime_pcm_queue::<N>(PCM_QUEUE_CAPACITY).map_err(|error| error.to_string())?;
+    let decoder = NativeOpusDecoder {
+        decoder: opus::Decoder::new(SAMPLE_RATE_HZ, opus::Channels::Stereo)
+            .map_err(|error| error.to_string())?,
+    };
+    let mut worker: StreamDecodeWorker<NativeOpusDecoder, JITTER_CAPACITY, MAX_ENCODED_BYTES, N> =
+        StreamDecodeWorker::new_for_opus(decoder, producer, 0, frame)
+            .map_err(|error| error.to_string())?;
+
+    let mut block = [0.0_f32; N];
+    for index in 0..HISTORY_FRAMES {
+        let sequence = u32::try_from(index).expect("history frame index fits u32");
+        admit_preencoded_frame(
+            &mut worker,
+            &mut consumer,
+            &mut block,
+            &packets[index][..encoded_lens[index]],
+            sequence,
+            expected_samples,
+        )?;
+    }
+
+    let source = JitterWaitSource {
+        packets: &packets,
+        encoded_lens: &encoded_lens,
+        tone_block: &tone_block,
+        expected_samples,
+        delay,
+    };
+    if wait >= JITTER_WAIT_DELAY_FRAMES {
+        run_absorbed_jitter_wait(
+            &mut worker,
+            &mut consumer,
+            &mut block,
+            &source,
+            frame_duration_ms,
+            wait,
+        )
+    } else {
+        run_unabsorbed_jitter_wait(
+            &mut worker,
+            &mut consumer,
+            &mut block,
+            &source,
+            frame_duration_ms,
+            wait,
+        )
+    }
+}
+
+/// Admits and decodes one in-order jitter-wait window frame and returns its
+/// SNR against the source at the codec's constant delay.
+fn decode_in_order_window_frame<const N: usize>(
+    worker: &mut StreamDecodeWorker<NativeOpusDecoder, JITTER_CAPACITY, MAX_ENCODED_BYTES, N>,
+    consumer: &mut RealtimePcmConsumer<N>,
+    block: &mut [f32; N],
+    source: &JitterWaitSource<'_>,
+    source_index: usize,
+) -> ProbeResult<f32> {
+    let sequence = u32::try_from(source_index).expect("jitter-wait source index fits u32");
+    admit_preencoded_frame(
+        worker,
+        consumer,
+        block,
+        &source.packets[source_index][..source.encoded_lens[source_index]],
+        sequence,
+        source.expected_samples,
+    )?;
+    assert_non_silent(block, source.expected_samples, "jitter-wait decoded block")?;
+    snr_vs_source(
+        source.tone_block,
+        source.expected_samples,
+        source_index,
+        source.delay,
+        block,
+    )
+}
+
+/// Plays out the jitter-wait window with the delayed frame admitted before its
+/// slot: no concealment, no drop, and every block stays at the constant delay.
+fn run_absorbed_jitter_wait<const N: usize>(
+    worker: &mut StreamDecodeWorker<NativeOpusDecoder, JITTER_CAPACITY, MAX_ENCODED_BYTES, N>,
+    consumer: &mut RealtimePcmConsumer<N>,
+    block: &mut [f32; N],
+    source: &JitterWaitSource<'_>,
+    frame_duration_ms: u16,
+    wait: usize,
+) -> ProbeResult<String> {
+    let history = u32::try_from(HISTORY_FRAMES).expect("history frames fit u32");
+    // The wait covered the delay, so the delayed first window frame is
+    // admitted before its playout slot and decodes in order.
+    let outcome = worker
+        .admit(
+            history,
+            0,
+            &source.packets[HISTORY_FRAMES][..source.encoded_lens[HISTORY_FRAMES]],
+        )
+        .map_err(|error| error.to_string())?;
+    if !matches!(outcome, InsertOutcome::Inserted | InsertOutcome::Reordered) {
+        return Err(format!(
+            "jitter-wait absorbed admit {history} returned {outcome:?}"
+        ));
+    }
+    match worker.decode_next().map_err(|error| error.to_string())? {
+        DecodeStep::Decoded {
+            sequence: actual,
+            samples,
+            ..
+        } if actual == history && samples == source.expected_samples => {}
+        other => return Err(format!("expected an in-order decode, got {other:?}")),
+    }
+    assert_popped_pcm(consumer, block, source.expected_samples)?;
+    assert_non_silent(block, source.expected_samples, "jitter-wait absorbed block")?;
+    let mut snrs = vec![snr_vs_source(
+        source.tone_block,
+        source.expected_samples,
+        HISTORY_FRAMES,
+        source.delay,
+        block,
+    )?];
+    for source_index in (HISTORY_FRAMES + 1)..(HISTORY_FRAMES + JITTER_WAIT_WINDOW_FRAMES) {
+        snrs.push(decode_in_order_window_frame(
+            worker,
+            consumer,
+            block,
+            source,
+            source_index,
+        )?);
+    }
+    let mean = mean_snr(&snrs);
+    if mean < REORDER_MEAN_SNR_MIN {
+        return Err(format!(
+            "jitter-wait absorbed decoded mean SNR {mean:.1} dB below the expected floor"
+        ));
+    }
+    Ok(format!(
+        "opus_{frame_duration_ms}ms_jitter_wait: wait {wait} ok ({JITTER_WAIT_WINDOW_FRAMES} frames; 0 concealed; late drop 0; decoded mean {mean:.1} dB)"
+    ))
+}
+
+/// Conceals the delayed frame's slot by PLC, decodes the remaining window
+/// frames in order, and confirms the bounded buffer drops the late arrival.
+fn run_unabsorbed_jitter_wait<const N: usize>(
+    worker: &mut StreamDecodeWorker<NativeOpusDecoder, JITTER_CAPACITY, MAX_ENCODED_BYTES, N>,
+    consumer: &mut RealtimePcmConsumer<N>,
+    block: &mut [f32; N],
+    source: &JitterWaitSource<'_>,
+    frame_duration_ms: u16,
+    wait: usize,
+) -> ProbeResult<String> {
+    let history = u32::try_from(HISTORY_FRAMES).expect("history frames fit u32");
+    match worker.decode_next().map_err(|error| error.to_string())? {
+        DecodeStep::Concealed {
+            sequence: actual,
+            samples,
+            ..
+        } if actual == history && samples == source.expected_samples => {}
+        other => return Err(format!("expected a concealed frame, got {other:?}")),
+    }
+    assert_popped_pcm(consumer, block, source.expected_samples)?;
+    assert_non_silent(
+        block,
+        source.expected_samples,
+        "jitter-wait concealed block",
+    )?;
+    let concealed_snr = aligned_snr_vs_source(
+        source.tone_block,
+        source.expected_samples,
+        HISTORY_FRAMES,
+        block,
+    )?;
+    let mut snrs = Vec::with_capacity(JITTER_WAIT_WINDOW_FRAMES - 1);
+    for source_index in (HISTORY_FRAMES + 1)..(HISTORY_FRAMES + JITTER_WAIT_WINDOW_FRAMES) {
+        snrs.push(decode_in_order_window_frame(
+            worker,
+            consumer,
+            block,
+            source,
+            source_index,
+        )?);
+    }
+    // The delayed frame arrives after its slot passed; the bounded buffer
+    // reports the late arrival as dropped.
+    let outcome = worker
+        .admit(
+            history,
+            0,
+            &source.packets[HISTORY_FRAMES][..source.encoded_lens[HISTORY_FRAMES]],
+        )
+        .map_err(|error| error.to_string())?;
+    if outcome != InsertOutcome::Late {
+        return Err(format!(
+            "expected the late frame to be dropped, got {outcome:?}"
+        ));
+    }
+    let decoded_mean = mean_snr(&snrs);
+    if decoded_mean < LOSS_PATTERN_MEAN_SNR_MIN {
+        return Err(format!(
+            "jitter-wait decoded mean SNR {decoded_mean:.1} dB below the expected floor"
+        ));
+    }
+    Ok(format!(
+        "opus_{frame_duration_ms}ms_jitter_wait: wait {wait} ok ({JITTER_WAIT_WINDOW_FRAMES} frames; 1 concealed snr {concealed_snr:.1} dB; late drop 1; decoded mean {decoded_mean:.1} dB)"
+    ))
+}
+
+/// Runs every deterministic jitter-wait step for one negotiated shape.
+fn run_jitter_wait_probe(frame_duration_ms: u16) -> ProbeResult<Vec<String>> {
+    match frame_duration_ms {
+        10 => run_jitter_wait_probe_impl::<960>(frame_duration_ms),
+        20 => run_jitter_wait_probe_impl::<MAX_PCM_SAMPLES_PER_BLOCK>(frame_duration_ms),
+        other => Err(format!("unsupported frame duration {other} ms")),
+    }
+}
+
+/// Sweeps the deterministic jitter-wait steps with a compile-time PCM block capacity.
+fn run_jitter_wait_probe_impl<const PCM_SAMPLES_PER_BLOCK: usize>(
+    frame_duration_ms: u16,
+) -> ProbeResult<Vec<String>> {
+    let frame = OpusFrameConfig::new(SAMPLE_RATE_HZ, 2, frame_duration_ms)
+        .map_err(|error| error.to_string())?;
+    let expected_samples = frame.interleaved_samples();
+    let mut lines = Vec::new();
+    for wait in JITTER_WAIT_STEPS {
+        lines.push(run_jitter_wait_case::<PCM_SAMPLES_PER_BLOCK>(
+            frame,
+            frame_duration_ms,
+            expected_samples,
+            wait,
+        )?);
+    }
+    Ok(lines)
+}
+
 /// Returns the signal-to-noise ratio in decibels between `reference` and
 /// `decoded` over the overlapping region, or infinity when either side is
 /// digital silence.
@@ -1220,6 +1520,7 @@ fn run_probe() -> ProbeResult<Vec<String>> {
         lines.extend(run_burst_sweep(duration_ms)?);
         lines.extend(run_loss_patterns(duration_ms)?);
         lines.extend(run_reorder_probe(duration_ms)?);
+        lines.extend(run_jitter_wait_probe(duration_ms)?);
     }
 
     // A malformed authenticated payload surfaces as a bounded stream-local
