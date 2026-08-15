@@ -6,7 +6,8 @@
 //! 20 ms stereo) through the sonimesh-audio StreamDecodeWorker boundary,
 //! conceals a deterministic burst of lost frames with decoder-side PLC,
 //! confirms the stream re-locks to the source after the burst, sweeps
-//! multiple burst lengths to record PLC degradation and recovery, and sweeps
+//! multiple burst lengths and deterministic loss patterns to record PLC
+//! degradation and recovery, and sweeps
 //! bounded deterministic malformed payloads that must surface as
 //! stream-local errors or bounded decodes. It is not a quality, power,
 //! latency, Android ABI, or coverage-guided fuzz result.
@@ -38,6 +39,12 @@ const PLC_BURST_FRAMES: usize = 5;
 const RECOVERY_FRAMES: usize = 2;
 /// Burst lengths swept to record PLC degradation and recovery on this host.
 const BURST_LENGTHS: [usize; 6] = [1, 2, 3, 5, 8, 12];
+/// Frames in one deterministic loss-pattern window per negotiated shape.
+const LOSS_PATTERN_FRAMES: usize = 240;
+/// Deterministic seed shared by both shapes so the same frames drop in each.
+const LOSS_PATTERN_SEED: u32 = 0x5eed_2026;
+/// Every loss pattern must keep at least this mean SNR across the window.
+const LOSS_PATTERN_MEAN_SNR_MIN: f32 = 10.0;
 /// Deterministic malformed-payload sweep size.
 const MALFORMED_SWEEP_PAYLOADS: usize = 1_000;
 /// Lowest plausible RMS for a decoded 0.25-amplitude tone block.
@@ -54,6 +61,38 @@ const PLC_BURST_SNR_MIN: f32 = 1.0;
 const PLC_BURST_MEAN_SNR_MIN: f32 = 10.0;
 /// A recovered frame must re-lock to the source at least this SNR.
 const RECOVERY_SNR_MIN: f32 = 0.0;
+
+/// One deterministic loss pattern probed through the native decoder.
+#[derive(Clone, Copy)]
+enum LossPattern {
+    /// No drops; baseline decode quality over the window.
+    None,
+    /// Each frame is dropped with `percent` probability from a shared seed.
+    Independent { percent: u32 },
+    /// `burst` consecutive frames are dropped every `period` frames.
+    PeriodicBurst { burst: usize, period: usize },
+}
+
+impl LossPattern {
+    /// Returns the stable report label for this pattern.
+    fn label(self) -> String {
+        match self {
+            Self::None => "none".to_owned(),
+            Self::Independent { percent } => format!("independent_{percent}pct"),
+            Self::PeriodicBurst { burst, period } => format!("burst_{burst}in{period}"),
+        }
+    }
+
+    /// Returns whether frame `index` is dropped, drawing from `rng` only for
+    /// the random patterns so every run stays reproducible.
+    fn drops(self, index: usize, rng: &mut u32) -> bool {
+        match self {
+            Self::None => false,
+            Self::Independent { percent } => next_random(rng) % 100 < percent,
+            Self::PeriodicBurst { burst, period } => index % period < burst,
+        }
+    }
+}
 
 /// Wraps the candidate libopus decoder behind the stable FrameDecoder
 /// boundary so decode and PLC stay outside the realtime output callback.
@@ -507,6 +546,150 @@ fn run_burst_sweep_impl<const PCM_SAMPLES_PER_BLOCK: usize>(
     Ok(lines)
 }
 
+/// Runs one deterministic loss pattern through a fresh native decode worker
+/// and returns the dropped count, worst-block SNR, and mean SNR over the window.
+///
+/// The first [`HISTORY_FRAMES`] frames are always admitted as warm-up so PLC
+/// never conceals without decoder history; the pattern then applies to every
+/// later frame. Each dropped frame is concealed immediately by decoder-side
+/// PLC (no jitter wait), matching the probe's burst methodology. Every block is
+/// compared to its source frame at the codec's constant delay (the same
+/// alignment as the steady-state check) so the metric is a fixed, reproducible
+/// comparison rather than a per-block best fit.
+fn run_loss_pattern<const N: usize>(
+    frame: OpusFrameConfig,
+    expected_samples: usize,
+    pattern: LossPattern,
+) -> ProbeResult<(usize, f32, f32)> {
+    let tone_block = tone(LOSS_PATTERN_FRAMES * expected_samples);
+    let mut encoder = opus::Encoder::new(
+        SAMPLE_RATE_HZ,
+        opus::Channels::Stereo,
+        opus::Application::Audio,
+    )
+    .map_err(|error| error.to_string())?;
+    // The codec's constant lookahead delay in interleaved samples: the
+    // decoded/concealed block for frame `index` aligns to the source at
+    // `index * samples - delay`.
+    let lookahead = usize::try_from(encoder.get_lookahead().map_err(|error| error.to_string())?)
+        .expect("lookahead is non-negative");
+    let delay = lookahead * OPUS_CHANNELS as usize;
+
+    let (producer, mut consumer) =
+        realtime_pcm_queue::<N>(PCM_QUEUE_CAPACITY).map_err(|error| error.to_string())?;
+    let decoder = NativeOpusDecoder {
+        decoder: opus::Decoder::new(SAMPLE_RATE_HZ, opus::Channels::Stereo)
+            .map_err(|error| error.to_string())?,
+    };
+    let mut worker: StreamDecodeWorker<NativeOpusDecoder, JITTER_CAPACITY, MAX_ENCODED_BYTES, N> =
+        StreamDecodeWorker::new_for_opus(decoder, producer, 0, frame)
+            .map_err(|error| error.to_string())?;
+
+    let mut rng = LOSS_PATTERN_SEED;
+    let mut packet = [0_u8; MAX_ENCODED_BYTES];
+    let mut block = [0.0_f32; N];
+    let mut dropped = 0_usize;
+    let mut snrs = Vec::with_capacity(LOSS_PATTERN_FRAMES - 1);
+    for index in 0..LOSS_PATTERN_FRAMES {
+        if index >= HISTORY_FRAMES && pattern.drops(index, &mut rng) {
+            dropped += 1;
+            match worker.decode_next().map_err(|error| error.to_string())? {
+                DecodeStep::Concealed { samples, .. } if samples == expected_samples => {}
+                other => return Err(format!("expected a concealed frame, got {other:?}")),
+            }
+        } else {
+            let start = index * expected_samples;
+            let len = encode_frame(
+                &mut encoder,
+                &tone_block[start..start + expected_samples],
+                &mut packet,
+            )?;
+            worker
+                .admit(
+                    u32::try_from(index).expect("loss-pattern frame index fits u32"),
+                    0,
+                    &packet[..len],
+                )
+                .map_err(|error| error.to_string())?;
+            match worker.decode_next().map_err(|error| error.to_string())? {
+                DecodeStep::Decoded { samples, .. } if samples == expected_samples => {}
+                other => return Err(format!("expected a decoded frame, got {other:?}")),
+            }
+        }
+        assert_popped_pcm(&mut consumer, &mut block, expected_samples)?;
+        let current = &block[..expected_samples];
+        let rms = block_rms(current);
+        if !rms.is_finite() || rms < PLC_RMS_MIN {
+            return Err(format!(
+                "loss-pattern frame {index} RMS {rms:.3} is silent or non-finite"
+            ));
+        }
+        // The first block predates the source tone by the codec lookahead
+        // and is skipped, so the mean covers LOSS_PATTERN_FRAMES - 1 frames.
+        if index == 0 {
+            continue;
+        }
+        let reference_start = index * expected_samples - delay;
+        let snr = snr_db(
+            &tone_block[reference_start..reference_start + expected_samples],
+            current,
+        );
+        if !snr.is_finite() {
+            return Err(format!(
+                "loss-pattern frame {index} SNR {snr:.1} dB is non-finite"
+            ));
+        }
+        snrs.push(snr);
+    }
+    let worst = snrs.iter().copied().fold(f32::INFINITY, f32::min);
+    let mean = mean_snr(&snrs);
+    Ok((dropped, worst, mean))
+}
+
+/// Runs every deterministic loss pattern for one negotiated shape and returns
+/// one success line per pattern.
+fn run_loss_patterns(frame_duration_ms: u16) -> ProbeResult<Vec<String>> {
+    match frame_duration_ms {
+        10 => run_loss_patterns_impl::<960>(frame_duration_ms),
+        20 => run_loss_patterns_impl::<MAX_PCM_SAMPLES_PER_BLOCK>(frame_duration_ms),
+        other => Err(format!("unsupported frame duration {other} ms")),
+    }
+}
+
+/// Sweeps the deterministic loss patterns with a compile-time PCM block capacity.
+fn run_loss_patterns_impl<const PCM_SAMPLES_PER_BLOCK: usize>(
+    frame_duration_ms: u16,
+) -> ProbeResult<Vec<String>> {
+    let frame = OpusFrameConfig::new(SAMPLE_RATE_HZ, 2, frame_duration_ms)
+        .map_err(|error| error.to_string())?;
+    let expected_samples = frame.interleaved_samples();
+    let mut lines = Vec::new();
+    for pattern in [
+        LossPattern::None,
+        LossPattern::Independent { percent: 1 },
+        LossPattern::Independent { percent: 3 },
+        LossPattern::Independent { percent: 5 },
+        LossPattern::PeriodicBurst {
+            burst: 5,
+            period: 50,
+        },
+    ] {
+        let (dropped, worst, mean) =
+            run_loss_pattern::<PCM_SAMPLES_PER_BLOCK>(frame, expected_samples, pattern)?;
+        if mean < LOSS_PATTERN_MEAN_SNR_MIN {
+            return Err(format!(
+                "loss pattern {} mean SNR {mean:.1} dB below the expected floor",
+                pattern.label()
+            ));
+        }
+        lines.push(format!(
+            "opus_{frame_duration_ms}ms_loss: pattern {} ok ({LOSS_PATTERN_FRAMES} frames; {dropped} dropped; mean {mean:.1} worst {worst:.1} dB)",
+            pattern.label()
+        ));
+    }
+    Ok(lines)
+}
+
 /// Returns the signal-to-noise ratio in decibels between `reference` and
 /// `decoded` over the overlapping region, or infinity when either side is
 /// digital silence.
@@ -626,6 +809,7 @@ fn run_probe() -> ProbeResult<Vec<String>> {
     for duration_ms in FRAME_DURATIONS_MS {
         lines.push(run_frame_path(duration_ms)?);
         lines.extend(run_burst_sweep(duration_ms)?);
+        lines.extend(run_loss_patterns(duration_ms)?);
     }
 
     // A malformed authenticated payload surfaces as a bounded stream-local
