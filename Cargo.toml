@@ -8,6 +8,7 @@ members = [
     "crates/sonimesh-protocol",
     "tools/latency-measurement",
     "tools/network-simulator",
+    "tools/opus-codec-prototype",
     "tools/windows-credential-prototype",
     "tools/windows-tls-provider-prototype",
     "tools/windows-wasapi-prototype",

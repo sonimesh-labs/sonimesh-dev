@@ -8,10 +8,16 @@
 - Java 21 and an Android SDK when phase 0A starts;
 - Node.js 22.22.2 when the desktop control UI starts;
 - Windows 11 and documented audio hardware for output validation.
+- CMake and a C toolchain for the native libopus build compiled by the
+  `opus-codec-prototype` workspace member; a Visual Studio install works, and
+  newer CMake releases need `CMAKE_POLICY_VERSION_MINIMUM=3.5` because the
+  bundled libopus uses a pre-3.5 policy floor.
 
 The portable Rust workspace builds without an Android SDK, audio device, or
-network service. The capture-only Android prototype requires the checked-in
-Gradle wrapper, Java 21, Android API 36, and Android Build Tools 35.0.0.
+network service; the native libopus member also needs CMake and a C toolchain
+(see the Opus codec prototype section below). The capture-only Android
+prototype requires the checked-in Gradle wrapper, Java 21, Android API 36, and
+Android Build Tools 35.0.0.
 
 When a local SDK is missing one of those components, install the same set the
 Android CI job installs before running the Gradle commands:
@@ -163,6 +169,22 @@ It has no dependencies and is covered by the ordinary `cargo test --workspace`
 gate; run `cargo run -p sonimesh-latency-measurement -- --help` for the
 `generate`, `measure`, `info`, and `summary` commands. It is a software
 measurement aid, not a physical latency proof.
+
+The `tools/opus-codec-prototype` workspace member compiles the candidate
+`opus` binding and exercises it through the `sonimesh-audio`
+`StreamDecodeWorker::new_for_opus` boundary: it encodes one deterministic
+20 ms stereo frame, decodes it, synthesizes one PLC block, and rejects a
+malformed payload as a bounded stream-local error. Run it with:
+
+~~~powershell
+cargo run -p opus-codec-prototype
+~~~
+
+Its Windows native build needs CMake on PATH and, on CMake releases that
+removed pre-3.5 compatibility, the `CMAKE_POLICY_VERSION_MINIMUM=3.5`
+environment variable; the Windows CI step sets that variable. This run is
+native-build and basic decode/PLC evidence for ADR 0009 only; it is not a
+quality, power, latency, Android ABI, or malformed-payload fuzz result.
 
 CI runs formatting, linting, and tests on Linux and Windows, and builds the
 capture-only Android bootstrap with Java 21, API 36, and Build Tools 35.0.0.

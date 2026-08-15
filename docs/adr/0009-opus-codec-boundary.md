@@ -18,8 +18,13 @@ builds bundled libopus through CMake unless a reviewed installed library path is
 supplied. On 2026-07-19, the reference workspace had no CMake executable in
 the conventional Program Files or per-user locations and no Android SDK NDK
 directory. The command host could not execute a PATH probe, so this is an
-incomplete preflight observation rather than a claim that no tool exists. No
-reviewed libopus installation is available, so no dependency is added yet.
+incomplete preflight observation rather than a claim that no tool exists.
+On 2026-08-16 the reference host had Visual Studio 18 Community (CMake
+4.2.3-msvc3, MSVC 14.50) available; the candidate built natively with the
+documented `CMAKE_POLICY_VERSION_MINIMUM=3.5` workaround (see the build
+record below). No Android SDK NDK is installed, so Android ABI packaging
+remains unverified, and no production dependency is added until the full
+gate is met.
 
 ## Decision
 
@@ -75,6 +80,12 @@ The build gate and proposed experiment cells are maintained in
 [Opus build and experiment matrix](../measurements/opus-build-and-experiment-matrix.md).
 An initial [toolchain preflight](../measurements/2026-07-20-opus-native-preflight.md) records the
 read-only availability probe; it is an observation, not a build or quality claim.
+
+A [Windows native build record](../measurements/2026-08-16-windows-opus-native-build.md)
+documents the successful `opus` 0.3.1 build on the reference host and the
+`tools/opus-codec-prototype` decode/PLC probe through
+`StreamDecodeWorker::new_for_opus`; that record is native-build and basic
+decode/PLC evidence only and does not close the Android, quality, or fuzz gates.
 Physical latency and Android capture claims remain separate tests.
 
 ## Rollback plan

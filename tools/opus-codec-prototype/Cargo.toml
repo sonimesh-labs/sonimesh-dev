@@ -1,0 +1,15 @@
+[package]
+name = "opus-codec-prototype"
+description = "Windows native libopus build and decode/PLC feasibility tool for SoniMesh"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+opus = "0.3.1"
+sonimesh-audio = { path = "../../crates/sonimesh-audio" }
+
+[lints]
+workspace = true
