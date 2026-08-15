@@ -81,6 +81,22 @@ fuzz_target!(|data: &[u8]| {
             &config.network,
             config.media_datagram_bytes,
         );
+
+        // Completion latency is bounded by the scenario's explicit hard
+        // deadline: every frame may wait at most (max_gate_ticks + 2)
+        // scheduler periods plus the worst-case one-way network delay before
+        // a forced playout.
+        let hard_slack_ms = u64::from(config.frames)
+            .saturating_mul(u64::from(config.max_gate_ticks + 2))
+            .saturating_mul(config.frame_duration_ms)
+            .saturating_add(config.network.base_delay_ms)
+            .saturating_add(config.network.jitter_ms)
+            .saturating_add(config.network.reorder_delay_ms)
+            .saturating_add(2);
+        assert!(
+            report.excess_latency_ms <= hard_slack_ms,
+            "completion must never exceed the hard deadline"
+        );
         for stream in &report.streams {
             assert_eq!(
                 stream.playout.playout_frames + stream.playout.plc_frames,

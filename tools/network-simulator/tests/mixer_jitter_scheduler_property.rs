@@ -257,45 +257,73 @@ fn check_stream_count<const S: usize>() -> (u32, u32) {
         if report.network.send_buffer_full_packets > 0 {
             backpressure_runs += 1;
         }
-        for stream in &report.streams {
-            assert_eq!(
-                stream.playout.playout_frames + stream.playout.plc_frames,
-                config.frames,
-                "every frame must be consumed by playout or PLC"
-            );
-            assert!(
-                (stream.min_frames..=stream.max_frames).contains(&stream.final_target_frames),
-                "the adaptive target must stay within its explicit bounds"
-            );
-            assert!(
-                stream.raised_steps + stream.lowered_steps <= stream.observations,
-                "step counters must not exceed the observation count"
-            );
-            assert_eq!(
-                stream.gated_ticks + config.frames,
-                stream.observations,
-                "every playout tick either consumed a frame or gated"
-            );
-            assert!(
-                stream.gain_changes <= 3,
-                "at most one mute, one unmute, and one gain event per stream"
-            );
-            assert!(
-                stream.final_gain_milli <= 1_000,
-                "published gain must stay within the bounded linear range"
-            );
-            assert!(
-                stream.quality.within_bounds(),
-                "every per-source quality ratio must stay within its bound"
-            );
-        }
-        assert_eq!(
-            report.mixer.active_streams, S,
-            "every stream must stay active in the fixed-slot mixer"
-        );
-        assert!(report.mixer.renders > 0, "the callback must render the bus");
-        assert!(report.mixer.output_finite, "the bus must stay finite");
-        assert_network_invariants(&config, &report);
+        assert_scenario_invariants(&config, &report);
     }
     (shaped_runs, backpressure_runs)
+}
+
+/// Asserts the scheduler, mixer, and network invariants that hold for every
+/// accepted report: every frame consumed, bounded adaptive targets, bounded
+/// step and gain counters, all streams active in the fixed-slot mixer, a
+/// finite bus, completion inside the scenario's hard deadline, and the
+/// finite-link sender-side accounting.
+fn assert_scenario_invariants<const S: usize>(
+    config: &MixerJitterSchedulerScenarioConfig<S>,
+    report: &MixerJitterSchedulerSimulationReport<S, SLOTS>,
+) {
+    for stream in &report.streams {
+        assert_eq!(
+            stream.playout.playout_frames + stream.playout.plc_frames,
+            config.frames,
+            "every frame must be consumed by playout or PLC"
+        );
+        assert!(
+            (stream.min_frames..=stream.max_frames).contains(&stream.final_target_frames),
+            "the adaptive target must stay within its explicit bounds"
+        );
+        assert!(
+            stream.raised_steps + stream.lowered_steps <= stream.observations,
+            "step counters must not exceed the observation count"
+        );
+        assert_eq!(
+            stream.gated_ticks + config.frames,
+            stream.observations,
+            "every playout tick either consumed a frame or gated"
+        );
+        assert!(
+            stream.gain_changes <= 3,
+            "at most one mute, one unmute, and one gain event per stream"
+        );
+        assert!(
+            stream.final_gain_milli <= 1_000,
+            "published gain must stay within the bounded linear range"
+        );
+        assert!(
+            stream.quality.within_bounds(),
+            "every per-source quality ratio must stay within its bound"
+        );
+    }
+    assert_eq!(
+        report.mixer.active_streams, S,
+        "every stream must stay active in the fixed-slot mixer"
+    );
+    assert!(report.mixer.renders > 0, "the callback must render the bus");
+    assert!(report.mixer.output_finite, "the bus must stay finite");
+
+    // Completion latency is bounded by the scenario's explicit hard
+    // deadline: every frame may wait at most (max_gate_ticks + 2)
+    // scheduler periods plus the worst-case one-way network delay before
+    // a forced playout.
+    let hard_slack_ms = u64::from(config.frames)
+        .saturating_mul(u64::from(config.max_gate_ticks + 2))
+        .saturating_mul(config.frame_duration_ms)
+        .saturating_add(config.network.base_delay_ms)
+        .saturating_add(config.network.jitter_ms)
+        .saturating_add(config.network.reorder_delay_ms)
+        .saturating_add(2);
+    assert!(
+        report.excess_latency_ms <= hard_slack_ms,
+        "completion must never exceed the hard deadline"
+    );
+    assert_network_invariants(config, report);
 }
