@@ -152,6 +152,11 @@ The network-scenario targets (`jitter_target`, `jitter_scheduler`, `multi_stream
   bounded number of decode/PLC decisions, proving adversarial post-auth bytes
   cannot panic the worker, exceed the fixed frame capacity, or grow the PCM
   queue past its bound.
+- `native_opus_decode` feeds arbitrary post-authentication bytes through
+  the bundled libopus decoder behind the fixed-capacity decode worker for
+  the 10 ms shape, proving adversarial payloads cannot panic the native
+  decoder, exceed the fixed frame or PCM bounds, or leave non-finite
+  samples in a consumer-visible block.
 - `replay_window` drives the authenticated replay window with deterministic u32 and window-width edge sequences plus fuzz-derived forward, reorder, duplicate, and far-behind operations, comparing every decision against an independent set-based model so bit-rotation or window-width bugs cannot silently change the packet-dedup admission contract.
 - `reconnect_grace` drives arbitrary begin/observe/reconnected/cancel scripts
   through the bounded reconnect-grace owner with adversarial u64 clocks and
@@ -271,6 +276,7 @@ cargo +nightly-2026-07-18 fuzz run udp_receiver_pipeline -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run media_session_sender -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run export_retention_journal -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run stream_decode_worker -- -max_len=64
+cargo +nightly-2026-07-18 fuzz run native_opus_decode -- -max_len=1200
 ```
 
 `cargo-fuzz` supports LibFuzzer execution on x86-64 Unix-like systems rather
@@ -278,5 +284,6 @@ than Windows MSVC. Windows contributors should use WSL or another Linux
 environment.
 
 The configured finite Linux CI run is a build and regression smoke check, not
-sustained fuzzing or native Opus-decoder evidence. Corpus, artifact, coverage,
-and target outputs are intentionally ignored.
+sustained fuzzing. The native Opus decoder smoke target is a bounded
+regression check; it is not a coverage or crash-hunting campaign. Corpus,
+artifact, coverage, and target outputs are intentionally ignored.

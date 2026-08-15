@@ -9,6 +9,7 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
+opus = "0.3.1"
 sonimesh-audio = { path = "../crates/sonimesh-audio" }
 sonimesh-app = { path = "../crates/sonimesh-app" }
 sonimesh-diagnostics = { path = "../crates/sonimesh-diagnostics" }
@@ -65,6 +66,13 @@ bench = false
 [[bin]]
 name = "stream_decode_worker"
 path = "fuzz_targets/stream_decode_worker.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "native_opus_decode"
+path = "fuzz_targets/native_opus_decode.rs"
 test = false
 doc = false
 bench = false

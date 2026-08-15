@@ -109,6 +109,7 @@ cargo +nightly-2026-07-18 fuzz run pairing_binding -- -max_len=4096
 cargo +nightly-2026-07-18 fuzz run untrusted_control_stream -- -max_len=65540
 cargo +nightly-2026-07-18 fuzz run negotiation -- -max_len=66052
 cargo +nightly-2026-07-18 fuzz run stream_decode_worker -- -max_len=64
+cargo +nightly-2026-07-18 fuzz run native_opus_decode -- -max_len=1200
 cargo +nightly-2026-07-18 fuzz run control_stream_coordinator -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run control_to_mixer -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run replay_window -- -max_len=1024
