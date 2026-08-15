@@ -69,14 +69,16 @@ The network-scenario targets (`jitter_target`, `jitter_scheduler`, `multi_stream
   proving an accepted configuration consumes every frame through playout or
   PLC, keeps every adaptive target inside its bounded water levels, keeps
   scheduler step counters below the observation count, keeps every stream
-  active in the fixed-slot mixer, and renders a finite bus while a rejected
-  configuration returns a clean scenario error rather than panicking.
+  active in the fixed-slot mixer, completes inside the scenario's explicit
+  hard deadline, and renders a finite bus while a rejected configuration
+  returns a clean scenario error rather than panicking.
 - `mixer_jitter_scheduler_4s` drives the same bounded scenario
   configurations at the Phase 2 four-stream upper bound: all four sources
   share one link and the full four-slot mixer table, proving the same
-  consume-every-frame, target-bounds, step-counter, all-streams-active, and
-  finite-bus invariants hold at the upper bound while a rejected
-  configuration returns a clean scenario error rather than panicking.
+  consume-every-frame, target-bounds, step-counter, all-streams-active,
+  hard-deadline, and finite-bus invariants hold at the upper bound while a
+  rejected configuration returns a clean scenario error rather than
+  panicking.
 - `mixer_controller_membership` drives arbitrary bounded scenario
   configurations through the controller-driven mixer membership simulation,
   proving an accepted configuration consumes every frame through playout or
