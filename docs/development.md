@@ -175,7 +175,8 @@ The `tools/opus-codec-prototype` workspace member compiles the candidate
 `StreamDecodeWorker::new_for_opus` boundary: it encodes one deterministic
 stereo frame for each negotiated 10 ms and 20 ms shape, decodes each, and
 synthesizes one PLC block per shape, then rejects a malformed payload as a
-bounded stream-local error. Run it with:
+bounded stream-local error, checks decoded and concealed RMS sanity, and sweeps
+1,000 deterministic malformed payloads that must stay bounded. Run it with:
 
 ~~~powershell
 cargo run -p opus-codec-prototype

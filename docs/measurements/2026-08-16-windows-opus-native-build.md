@@ -58,9 +58,10 @@ lets CMake apply the pre-3.5 policy floor, and the native build completed.
 The probe then passed every step:
 
 ```text
-opus_10ms: ok (encode 200 bytes; decode 960 / PLC 1920 interleaved samples)
-opus_20ms: ok (encode 384 bytes; decode 1920 / PLC 1920 interleaved samples)
+opus_10ms: ok (encode 200 bytes; decode 960 / PLC 1920 interleaved samples; rms 0.104/0.050)
+opus_20ms: ok (encode 384 bytes; decode 1920 / PLC 1920 interleaved samples; rms 0.146/0.178)
 opus_malformed_payload: rejected
+opus_malformed_sweep: ok (1000 payloads; 642 rejected; 358 accepted-bounded)
 opus_native_build: ok
 ```
 
@@ -69,9 +70,13 @@ opus_native_build: ok
 This is evidence that the candidate binding builds natively on the reference
 Windows host and that its decode and PLC paths work through the bounded
 `StreamDecodeWorker` boundary with decode writing into caller-owned storage.
-It does not qualify codec quality, CPU, power, 10 ms versus 20 ms trade-offs,
-FEC, or Android ABIs, and the malformed-payload check is a single bounded
-probe rather than a fuzz result.
+The decoded tone and first concealed block keep plausible finite RMS values
+(0.104/0.146 decoded and 0.050/0.178 concealed), so the decode path returns
+energy rather than silence or garbage. It does not qualify codec quality, CPU,
+power, 10 ms versus 20 ms trade-offs, FEC, or Android ABIs, and the
+malformed-payload sweep is a deterministic bounded probe (fixed-seed
+xorshift32, 1,000 payloads up to the datagram limit) rather than a
+coverage-guided fuzz result.
 
 One observable detail: for an empty packet libopus synthesizes
 `frame_size = output capacity / channels`, so with the reserved 20 ms block

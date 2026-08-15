@@ -5,9 +5,11 @@
 //! each negotiated shape (10 ms and 20 ms stereo), decodes it through the
 //! sonimesh-audio StreamDecodeWorker boundary, synthesizes one
 //! deterministic PLC block per shape (PLC fills the reserved block, as
-//! libopus synthesizes the full requested frame size), and rejects a malformed payload as a
-//! bounded stream-local error. It is not a quality, power, latency,
-//! Android ABI, or malformed-payload fuzz result.
+//! libopus synthesizes the full requested frame size), checks the decoded
+//! and concealed blocks for plausible finite energy, and sweeps bounded
+//! deterministic malformed payloads that must surface as stream-local
+//! errors or bounded decodes. It is not a quality, power, latency,
+//! Android ABI, or coverage-guided fuzz result.
 
 use sonimesh_audio::{
     DecodeStep, FrameDecoder, OPUS_CHANNELS, OpusFrameConfig, RealtimePcmConsumer,
@@ -28,6 +30,14 @@ const SAMPLE_RATE_HZ: u32 = 48_000;
 const TONE_HZ: f32 = 440.0;
 /// Negotiated frame durations probed through the native decoder.
 const FRAME_DURATIONS_MS: [u16; 2] = [10, 20];
+/// Deterministic malformed-payload sweep size.
+const MALFORMED_SWEEP_PAYLOADS: usize = 1_000;
+/// Lowest plausible RMS for a decoded 0.25-amplitude tone block.
+const DECODED_RMS_MIN: f32 = 0.05;
+/// Highest plausible RMS for a decoded 0.25-amplitude tone block.
+const DECODED_RMS_MAX: f32 = 0.35;
+/// PLC concealment must remain non-silent for the first concealed block.
+const PLC_RMS_MIN: f32 = 1.0e-3;
 
 /// Wraps the candidate libopus decoder behind the stable FrameDecoder
 /// boundary so decode and PLC stay outside the realtime output callback.
@@ -98,6 +108,12 @@ fn run_frame_path(frame_duration_ms: u16) -> ProbeResult<String> {
         other => return Err(format!("expected a decoded frame, got {other:?}")),
     }
     assert_popped_pcm(&mut consumer, &mut block, expected_samples)?;
+    let decoded_rms = block_rms(&block[..expected_samples]);
+    if !(DECODED_RMS_MIN..=DECODED_RMS_MAX).contains(&decoded_rms) {
+        return Err(format!(
+            "decoded tone RMS {decoded_rms:.3} outside the expected band"
+        ));
+    }
 
     // With no further frame buffered, the next playout decision is
     // deterministic decoder-side PLC for the confirmed missing sequence.
@@ -109,10 +125,69 @@ fn run_frame_path(frame_duration_ms: u16) -> ProbeResult<String> {
         other => return Err(format!("expected a concealed frame, got {other:?}")),
     }
     assert_popped_pcm(&mut consumer, &mut block, PCM_SAMPLES_PER_BLOCK)?;
+    let plc_rms = block_rms(&block[..PCM_SAMPLES_PER_BLOCK]);
+    if !plc_rms.is_finite() || plc_rms < PLC_RMS_MIN {
+        return Err(format!(
+            "PLC block RMS {plc_rms:.3} is silent or non-finite"
+        ));
+    }
 
     Ok(format!(
-        "opus_{frame_duration_ms}ms: ok (encode {encoded_len} bytes; decode {expected_samples} / PLC {PCM_SAMPLES_PER_BLOCK} interleaved samples)"
+        "opus_{frame_duration_ms}ms: ok (encode {encoded_len} bytes; decode {expected_samples} / PLC {PCM_SAMPLES_PER_BLOCK} interleaved samples; rms {decoded_rms:.3}/{plc_rms:.3})"
     ))
+}
+
+/// Returns the root-mean-square of a finite PCM block.
+#[must_use]
+#[allow(clippy::cast_precision_loss)]
+fn block_rms(samples: &[f32]) -> f32 {
+    if samples.is_empty() {
+        return 0.0;
+    }
+    let sum = samples.iter().map(|sample| sample * sample).sum::<f32>();
+    (sum / samples.len() as f32).sqrt()
+}
+
+/// xorshift32 PRNG used only to make the malformed sweep deterministic.
+fn next_random(state: &mut u32) -> u32 {
+    let mut value = *state;
+    value ^= value << 13;
+    value ^= value >> 17;
+    value ^= value << 5;
+    *state = value;
+    value
+}
+
+/// Sweeps deterministic malformed payloads through one native decoder.
+///
+/// Every payload must either be rejected as a stream-local decoder error or
+/// decode to a bounded sample count; none may panic or exceed the block.
+fn sweep_malformed_payloads() -> ProbeResult<(usize, usize)> {
+    let mut rng = 0x5eed_0007_u32;
+    let mut rejected = 0_usize;
+    let mut accepted = 0_usize;
+    let mut block = [0.0_f32; PCM_SAMPLES_PER_BLOCK];
+    let mut decoder = NativeOpusDecoder {
+        decoder: opus::Decoder::new(SAMPLE_RATE_HZ, opus::Channels::Stereo)
+            .map_err(|error| error.to_string())?,
+    };
+    for _ in 0..MALFORMED_SWEEP_PAYLOADS {
+        let length = (next_random(&mut rng) as usize) % (MAX_ENCODED_BYTES + 1);
+        let mut payload = [0_u8; MAX_ENCODED_BYTES];
+        for byte in &mut payload[..length] {
+            *byte = u8::try_from(next_random(&mut rng) & 0xFF).expect("masked byte fits u8");
+        }
+        match decoder.decode(&payload[..length], &mut block) {
+            Ok(samples) if (1..=PCM_SAMPLES_PER_BLOCK).contains(&samples) => accepted += 1,
+            Ok(samples) => {
+                return Err(format!(
+                    "malformed payload accepted with out-of-bounds {samples} samples"
+                ));
+            }
+            Err(_) => rejected += 1,
+        }
+    }
+    Ok((rejected, accepted))
 }
 
 /// Runs every probe step and returns the ordered success lines.
@@ -134,6 +209,11 @@ fn run_probe() -> ProbeResult<Vec<String>> {
         return Err("malformed payload decoded successfully".to_owned());
     }
     lines.push("opus_malformed_payload: rejected".to_owned());
+
+    let (rejected, accepted) = sweep_malformed_payloads()?;
+    lines.push(format!(
+        "opus_malformed_sweep: ok ({MALFORMED_SWEEP_PAYLOADS} payloads; {rejected} rejected; {accepted} accepted-bounded)"
+    ));
 
     lines.push("opus_native_build: ok".to_owned());
     Ok(lines)
