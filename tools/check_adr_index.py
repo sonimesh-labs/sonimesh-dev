@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import datetime
 import re
 import sys
 import tempfile
@@ -18,6 +19,17 @@ MARKDOWN_FENCE_PATTERN = re.compile(r"^[ \t]*(`{3,}|~{3,})")
 RECORDS_HEADING = "## Records"
 STATUS_LINE_PATTERN = re.compile(r"^-\s*Status:\s*(?P<status>[^\r\n]+)$")
 ADR_STATUS_TOKENS = ("Accepted", "Provisional")
+DATE_LINE_PATTERN = re.compile(r"^-\s*Date:\s*(?P<date>[^\r\n]+)$")
+ADR_DATE_PATTERN = re.compile(r"^20\d{2}-\d{2}-\d{2}$")
+
+
+def _valid_calendar_date(value: str) -> bool:
+    """Returns whether `value` is a real calendar date."""
+    try:
+        datetime.date.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
 
 
 def adr_files(adr_directory: Path) -> list[tuple[int, str]]:
@@ -155,6 +167,28 @@ def record_status(source: str) -> str | None:
     return "ADR record has no canonical Status metadata line"
 
 
+def record_date(source: str) -> str | None:
+    """Returns an error when the metadata block lacks a valid calendar Date.
+
+    The date line must appear between the level-one heading and the first
+    level-two heading and be a real `YYYY-MM-DD` calendar date.
+    """
+    for raw in source.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith("## "):
+            break
+        match = DATE_LINE_PATTERN.match(line)
+        if match is None:
+            continue
+        date = match.group("date").strip()
+        if ADR_DATE_PATTERN.fullmatch(date) and _valid_calendar_date(date):
+            return None
+        return f"ADR record Date must be a real calendar date: {date}"
+    return "ADR record has no canonical Date metadata line"
+
+
 def validate_sources(readme: str, adr_directory: Path) -> list[str]:
     """Returns deterministic consistency errors across the ADR index."""
     try:
@@ -201,6 +235,9 @@ def validate_sources(readme: str, adr_directory: Path) -> list[str]:
         status_error = record_status(content)
         if status_error is not None:
             errors.append(f"ADR {number:04d} ({filename}) {status_error}")
+        date_error = record_date(content)
+        if date_error is not None:
+            errors.append(f"ADR {number:04d} ({filename}) {date_error}")
         if heading_number is not None and heading_number != number:
             errors.append(
                 f"ADR {number:04d} ({filename}) heading number is ADR {heading_number:04d}"
@@ -469,6 +506,53 @@ class AdrIndexTests(unittest.TestCase):
             )
             (Path(directory) / "0002-second-decision.md").write_text(
                 "# ADR 0002: Second decision\n\n- Status: Provisional pending device evidence\n- Date: 2026-01-01\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(validate_sources(readme, Path(directory)), [])
+
+
+    def test_reports_missing_date_line(self) -> None:
+        readme = """## Records
+
+- [ADR 0001: First decision](./0001-first-decision.md) - accepted.
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            (Path(directory) / "0001-first-decision.md").write_text(
+                "# ADR 0001: First decision\n\n- Status: Accepted\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                validate_sources(readme, Path(directory)),
+                [
+                    "ADR 0001 (0001-first-decision.md) ADR record has no canonical Date metadata line"
+                ],
+            )
+
+    def test_reports_impossible_calendar_date(self) -> None:
+        readme = """## Records
+
+- [ADR 0001: First decision](./0001-first-decision.md) - accepted.
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            (Path(directory) / "0001-first-decision.md").write_text(
+                "# ADR 0001: First decision\n\n- Status: Accepted\n- Date: 2026-02-30\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                validate_sources(readme, Path(directory)),
+                [
+                    "ADR 0001 (0001-first-decision.md) ADR record Date must be a real calendar date: 2026-02-30"
+                ],
+            )
+
+    def test_accepts_leap_day_metadata(self) -> None:
+        readme = """## Records
+
+- [ADR 0001: First decision](./0001-first-decision.md) - accepted.
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            (Path(directory) / "0001-first-decision.md").write_text(
+                "# ADR 0001: First decision\n\n- Status: Accepted\n- Date: 2024-02-29\n",
                 encoding="utf-8",
             )
             self.assertEqual(validate_sources(readme, Path(directory)), [])
