@@ -7,13 +7,14 @@
 //! conceals a deterministic burst of lost frames with decoder-side PLC,
 //! confirms the stream re-locks to the source after the burst, sweeps
 //! multiple burst lengths and deterministic loss patterns to record PLC
-//! degradation and recovery, and sweeps
+//! degradation and recovery, probes bounded reorder absorption and late-drop
+//! behavior, and sweeps
 //! bounded deterministic malformed payloads that must surface as
 //! stream-local errors or bounded decodes. It is not a quality, power,
 //! latency, Android ABI, or coverage-guided fuzz result.
 
 use sonimesh_audio::{
-    DecodeStep, FrameDecoder, OPUS_CHANNELS, OpusFrameConfig, RealtimePcmConsumer,
+    DecodeStep, FrameDecoder, InsertOutcome, OPUS_CHANNELS, OpusFrameConfig, RealtimePcmConsumer,
     RealtimePcmPopOutcome, StreamDecodeWorker, realtime_pcm_queue,
 };
 
@@ -45,6 +46,10 @@ const LOSS_PATTERN_FRAMES: usize = 240;
 const LOSS_PATTERN_SEED: u32 = 0x5eed_2026;
 /// Every loss pattern must keep at least this mean SNR across the window.
 const LOSS_PATTERN_MEAN_SNR_MIN: f32 = 10.0;
+/// Frames in one deterministic reorder window after the decoded history.
+const REORDER_WINDOW_FRAMES: usize = 6;
+/// In-order reorder-window blocks must keep at least this mean SNR.
+const REORDER_MEAN_SNR_MIN: f32 = 25.0;
 /// Deterministic malformed-payload sweep size.
 const MALFORMED_SWEEP_PAYLOADS: usize = 1_000;
 /// Lowest plausible RMS for a decoded 0.25-amplitude tone block.
@@ -92,6 +97,17 @@ impl LossPattern {
             Self::PeriodicBurst { burst, period } => index % period < burst,
         }
     }
+}
+
+/// One deterministic reorder arrival case for the bounded jitter buffer.
+#[derive(Clone, Copy)]
+enum ReorderCase {
+    /// The whole window arrives out of order before playout; the buffer
+    /// reorders it and no frame is concealed.
+    Absorbed,
+    /// One frame arrives after playout passed its slot: the slot is concealed
+    /// by PLC and the late frame is dropped by the bounded buffer.
+    LateOne,
 }
 
 /// Wraps the candidate libopus decoder behind the stable FrameDecoder
@@ -690,6 +706,399 @@ fn run_loss_patterns_impl<const PCM_SAMPLES_PER_BLOCK: usize>(
     Ok(lines)
 }
 
+/// Admits one pre-encoded source frame, decodes it in order, and pops the PCM
+/// block.
+fn admit_preencoded_frame<const N: usize>(
+    worker: &mut StreamDecodeWorker<NativeOpusDecoder, JITTER_CAPACITY, MAX_ENCODED_BYTES, N>,
+    consumer: &mut RealtimePcmConsumer<N>,
+    block: &mut [f32; N],
+    packet: &[u8],
+    expected_sequence: u32,
+    expected_samples: usize,
+) -> ProbeResult<()> {
+    worker
+        .admit(expected_sequence, 0, packet)
+        .map_err(|error| error.to_string())?;
+    match worker.decode_next().map_err(|error| error.to_string())? {
+        DecodeStep::Decoded {
+            sequence: decoded,
+            samples,
+            ..
+        } if decoded == expected_sequence && samples == expected_samples => {}
+        other => return Err(format!("expected a decoded frame, got {other:?}")),
+    }
+    assert_popped_pcm(consumer, block, expected_samples)
+}
+
+/// Decodes one missing frame with decoder-side PLC and pops the PCM block.
+fn conceal_frame<const N: usize>(
+    worker: &mut StreamDecodeWorker<NativeOpusDecoder, JITTER_CAPACITY, MAX_ENCODED_BYTES, N>,
+    consumer: &mut RealtimePcmConsumer<N>,
+    block: &mut [f32; N],
+    expected_sequence: u32,
+    expected_samples: usize,
+) -> ProbeResult<()> {
+    match worker.decode_next().map_err(|error| error.to_string())? {
+        DecodeStep::Concealed {
+            sequence, samples, ..
+        } if sequence == expected_sequence && samples == expected_samples => {}
+        other => return Err(format!("expected a concealed frame, got {other:?}")),
+    }
+    assert_popped_pcm(consumer, block, expected_samples)
+}
+
+/// Asserts a popped block is non-silent and finite.
+fn assert_non_silent(block: &[f32], expected_samples: usize, label: &str) -> ProbeResult<()> {
+    let rms = block_rms(&block[..expected_samples]);
+    if !rms.is_finite() || rms < PLC_RMS_MIN {
+        return Err(format!("{label} RMS {rms:.3} is silent or non-finite"));
+    }
+    Ok(())
+}
+
+/// Returns the SNR of a popped block against its source frame at the codec's
+/// constant delay.
+///
+/// Cleanly decoded frames carry the source delayed by the encoder lookahead;
+/// a stream that shifted would collapse this SNR, so it is the robust
+/// reorder-absorption check for a periodic tone where model-free alignment
+/// can lock onto a tone-period alias instead.
+fn snr_vs_source(
+    tone_block: &[f32],
+    expected_samples: usize,
+    source_index: usize,
+    delay: usize,
+    block: &[f32],
+) -> ProbeResult<f32> {
+    let frame_start = source_index
+        .checked_mul(expected_samples)
+        .ok_or_else(|| format!("source frame {source_index} start overflow"))?;
+    let reference_start = frame_start
+        .checked_sub(delay)
+        .ok_or_else(|| format!("source frame {source_index} predates the codec delay"))?;
+    let reference_end = reference_start + expected_samples;
+    if reference_end > tone_block.len() {
+        return Err(format!(
+            "source frame {source_index} reference slice out of bounds"
+        ));
+    }
+    let snr = snr_db(
+        &tone_block[reference_start..reference_end],
+        &block[..expected_samples],
+    );
+    if !snr.is_finite() {
+        return Err(format!(
+            "source frame {source_index} SNR {snr:.1} dB is non-finite"
+        ));
+    }
+    Ok(snr)
+}
+
+/// Returns the model-free aligned SNR of a popped block against its source
+/// frame, used only for concealed blocks whose content has no fixed delay.
+fn aligned_snr_vs_source(
+    tone_block: &[f32],
+    expected_samples: usize,
+    source_index: usize,
+    block: &[f32],
+) -> ProbeResult<f32> {
+    let start = source_index
+        .checked_mul(expected_samples)
+        .ok_or_else(|| format!("source frame {source_index} start overflow"))?;
+    let end = start + expected_samples;
+    if end > tone_block.len() {
+        return Err(format!(
+            "source frame {source_index} reference slice out of bounds"
+        ));
+    }
+    let (snr, _) = best_aligned_snr(&tone_block[start..end], &block[..expected_samples]);
+    if !snr.is_finite() {
+        return Err(format!(
+            "source frame {source_index} SNR {snr:.1} dB is non-finite"
+        ));
+    }
+    Ok(snr)
+}
+
+/// Immutable source material shared by the two deterministic reorder runs.
+struct ReorderSource<'a> {
+    /// Pre-encoded packets in source order.
+    packets: &'a [[u8; MAX_ENCODED_BYTES]],
+    /// Encoded length of each packet.
+    encoded_lens: &'a [usize],
+    /// Deterministic source tone.
+    tone_block: &'a [f32],
+    /// Interleaved PCM samples per negotiated frame.
+    expected_samples: usize,
+    /// Codec lookahead delay in interleaved samples.
+    delay: usize,
+}
+
+/// Runs one deterministic reorder case through a fresh native decode worker and
+/// returns one success line.
+///
+/// A ten-frame history is always decoded first. The reorder window then either
+/// arrives in a fixed out-of-order batch within the 8-slot jitter capacity
+/// (absorbed and played out in sequence with no concealment and no alignment
+/// shift) or leaves one frame arriving one slot late so its playout slot is
+/// concealed by PLC and the late arrival is dropped.
+fn run_reorder_case<const N: usize>(
+    frame: OpusFrameConfig,
+    frame_duration_ms: u16,
+    expected_samples: usize,
+    case: ReorderCase,
+) -> ProbeResult<String> {
+    let total_frames = HISTORY_FRAMES + REORDER_WINDOW_FRAMES;
+    let tone_block = tone(total_frames * expected_samples);
+
+    let mut encoder = opus::Encoder::new(
+        SAMPLE_RATE_HZ,
+        opus::Channels::Stereo,
+        opus::Application::Audio,
+    )
+    .map_err(|error| error.to_string())?;
+    let lookahead = usize::try_from(encoder.get_lookahead().map_err(|error| error.to_string())?)
+        .expect("lookahead is non-negative");
+    let delay = lookahead * OPUS_CHANNELS as usize;
+
+    // Pre-encode the history and reorder window in source order so every
+    // packet represents the deterministic tone timeline; admission order below
+    // is independent of the encoder's sequential state.
+    let mut packets = vec![[0_u8; MAX_ENCODED_BYTES]; total_frames];
+    let mut encoded_lens = vec![0_usize; total_frames];
+    for index in 0..total_frames {
+        let start = index * expected_samples;
+        encoded_lens[index] = encode_frame(
+            &mut encoder,
+            &tone_block[start..start + expected_samples],
+            &mut packets[index],
+        )?;
+    }
+
+    let (producer, mut consumer) =
+        realtime_pcm_queue::<N>(PCM_QUEUE_CAPACITY).map_err(|error| error.to_string())?;
+    let decoder = NativeOpusDecoder {
+        decoder: opus::Decoder::new(SAMPLE_RATE_HZ, opus::Channels::Stereo)
+            .map_err(|error| error.to_string())?,
+    };
+    let mut worker: StreamDecodeWorker<NativeOpusDecoder, JITTER_CAPACITY, MAX_ENCODED_BYTES, N> =
+        StreamDecodeWorker::new_for_opus(decoder, producer, 0, frame)
+            .map_err(|error| error.to_string())?;
+
+    let mut block = [0.0_f32; N];
+    for index in 0..HISTORY_FRAMES {
+        let sequence = u32::try_from(index).expect("history frame index fits u32");
+        admit_preencoded_frame(
+            &mut worker,
+            &mut consumer,
+            &mut block,
+            &packets[index][..encoded_lens[index]],
+            sequence,
+            expected_samples,
+        )?;
+    }
+
+    let source = ReorderSource {
+        packets: &packets,
+        encoded_lens: &encoded_lens,
+        tone_block: &tone_block,
+        expected_samples,
+        delay,
+    };
+    match case {
+        ReorderCase::Absorbed => run_absorbed_reorder(
+            &mut worker,
+            &mut consumer,
+            &mut block,
+            &source,
+            frame_duration_ms,
+        ),
+        ReorderCase::LateOne => run_late_one_reorder(
+            &mut worker,
+            &mut consumer,
+            &mut block,
+            &source,
+            frame_duration_ms,
+        ),
+    }
+}
+
+/// Plays out a fixed out-of-order arrival batch in sequence order with no
+/// concealment, and asserts every block stays at the codec's constant delay.
+fn run_absorbed_reorder<const N: usize>(
+    worker: &mut StreamDecodeWorker<NativeOpusDecoder, JITTER_CAPACITY, MAX_ENCODED_BYTES, N>,
+    consumer: &mut RealtimePcmConsumer<N>,
+    block: &mut [f32; N],
+    source: &ReorderSource<'_>,
+    frame_duration_ms: u16,
+) -> ProbeResult<String> {
+    // A fixed out-of-order arrival batch within the 8-slot capacity.
+    let arrival = [13_u32, 10, 15, 12, 11, 14];
+    for sequence in arrival {
+        let index = usize::try_from(sequence).expect("reorder sequence fits usize");
+        let outcome = worker
+            .admit(
+                sequence,
+                0,
+                &source.packets[index][..source.encoded_lens[index]],
+            )
+            .map_err(|error| error.to_string())?;
+        if !matches!(outcome, InsertOutcome::Inserted | InsertOutcome::Reordered) {
+            return Err(format!(
+                "reorder batch admit {sequence} returned {outcome:?}"
+            ));
+        }
+    }
+    // Playout runs in sequence order with no concealment; every block is
+    // compared at the codec's constant delay, so an absorbed window that
+    // shifted the stream would collapse the SNR.
+    let mut snrs = Vec::with_capacity(REORDER_WINDOW_FRAMES);
+    for offset in 0..REORDER_WINDOW_FRAMES {
+        let sequence = u32::try_from(HISTORY_FRAMES + offset).expect("reorder sequence fits u32");
+        match worker.decode_next().map_err(|error| error.to_string())? {
+            DecodeStep::Decoded {
+                sequence: actual,
+                samples,
+                ..
+            } if actual == sequence && samples == source.expected_samples => {}
+            other => return Err(format!("expected an in-order decode, got {other:?}")),
+        }
+        assert_popped_pcm(consumer, block, source.expected_samples)?;
+        assert_non_silent(block, source.expected_samples, "reorder absorbed block")?;
+        snrs.push(snr_vs_source(
+            source.tone_block,
+            source.expected_samples,
+            HISTORY_FRAMES + offset,
+            source.delay,
+            block,
+        )?);
+    }
+    let worst = snrs.iter().copied().fold(f32::INFINITY, f32::min);
+    let mean = mean_snr(&snrs);
+    if mean < REORDER_MEAN_SNR_MIN {
+        return Err(format!(
+            "reorder absorbed mean SNR {mean:.1} dB below the expected floor"
+        ));
+    }
+    Ok(format!(
+        "opus_{frame_duration_ms}ms_reorder: absorbed ok ({REORDER_WINDOW_FRAMES} frames; 0 concealed; mean {mean:.1} worst {worst:.1} dB)"
+    ))
+}
+
+/// Conceals one slot whose frame arrives one step late, decodes the two
+/// following frames, and confirms the bounded buffer drops the late arrival.
+fn run_late_one_reorder<const N: usize>(
+    worker: &mut StreamDecodeWorker<NativeOpusDecoder, JITTER_CAPACITY, MAX_ENCODED_BYTES, N>,
+    consumer: &mut RealtimePcmConsumer<N>,
+    block: &mut [f32; N],
+    source: &ReorderSource<'_>,
+    frame_duration_ms: u16,
+) -> ProbeResult<String> {
+    let history = u32::try_from(HISTORY_FRAMES).expect("history frames fit u32");
+    // Frames 11 and 12 arrive before playout reaches frame 10.
+    for sequence in [history + 1, history + 2] {
+        let index = usize::try_from(sequence).expect("reorder sequence fits usize");
+        let outcome = worker
+            .admit(
+                sequence,
+                0,
+                &source.packets[index][..source.encoded_lens[index]],
+            )
+            .map_err(|error| error.to_string())?;
+        if !matches!(outcome, InsertOutcome::Inserted | InsertOutcome::Reordered) {
+            return Err(format!(
+                "reorder case admit {sequence} returned {outcome:?}"
+            ));
+        }
+    }
+    // Playout reaches frame 10 before it arrives: one PLC concealment.
+    conceal_frame(worker, consumer, block, history, source.expected_samples)?;
+    assert_non_silent(block, source.expected_samples, "reorder concealed block")?;
+    // The concealed block has no fixed delay; compare model-free.
+    let concealed_snr = aligned_snr_vs_source(
+        source.tone_block,
+        source.expected_samples,
+        HISTORY_FRAMES,
+        block,
+    )?;
+
+    // Frames 11 and 12 decode cleanly behind the concealed slot and must
+    // re-lock to the source. Their alignment can differ from the constant
+    // delay after PLC, so compare model-free like the burst probe's recovery.
+    let mut decoded_snrs = Vec::with_capacity(2);
+    for sequence in [history + 1, history + 2] {
+        match worker.decode_next().map_err(|error| error.to_string())? {
+            DecodeStep::Decoded {
+                sequence: actual,
+                samples,
+                ..
+            } if actual == sequence && samples == source.expected_samples => {}
+            other => return Err(format!("expected an in-order decode, got {other:?}")),
+        }
+        assert_popped_pcm(consumer, block, source.expected_samples)?;
+        assert_non_silent(block, source.expected_samples, "reorder decoded block")?;
+        decoded_snrs.push(aligned_snr_vs_source(
+            source.tone_block,
+            source.expected_samples,
+            usize::try_from(sequence).expect("reorder sequence fits usize"),
+            block,
+        )?);
+    }
+
+    // The late frame is dropped by the bounded buffer.
+    let late_index = usize::try_from(history).expect("history fits usize");
+    let outcome = worker
+        .admit(
+            history,
+            0,
+            &source.packets[late_index][..source.encoded_lens[late_index]],
+        )
+        .map_err(|error| error.to_string())?;
+    if outcome != InsertOutcome::Late {
+        return Err(format!(
+            "expected the late frame to be dropped, got {outcome:?}"
+        ));
+    }
+
+    let decoded_mean = mean_snr(&decoded_snrs);
+    if decoded_mean < REORDER_MEAN_SNR_MIN {
+        return Err(format!(
+            "reorder late decoded mean SNR {decoded_mean:.1} dB below the expected floor"
+        ));
+    }
+    Ok(format!(
+        "opus_{frame_duration_ms}ms_reorder: late_one ok (1 concealed snr {concealed_snr:.1} dB; late drop 1; decoded mean {decoded_mean:.1} dB)"
+    ))
+}
+
+/// Runs both deterministic reorder cases for one negotiated shape.
+fn run_reorder_probe(frame_duration_ms: u16) -> ProbeResult<Vec<String>> {
+    match frame_duration_ms {
+        10 => run_reorder_probe_impl::<960>(frame_duration_ms),
+        20 => run_reorder_probe_impl::<MAX_PCM_SAMPLES_PER_BLOCK>(frame_duration_ms),
+        other => Err(format!("unsupported frame duration {other} ms")),
+    }
+}
+
+/// Runs both reorder cases with a compile-time PCM block capacity.
+fn run_reorder_probe_impl<const PCM_SAMPLES_PER_BLOCK: usize>(
+    frame_duration_ms: u16,
+) -> ProbeResult<Vec<String>> {
+    let frame = OpusFrameConfig::new(SAMPLE_RATE_HZ, 2, frame_duration_ms)
+        .map_err(|error| error.to_string())?;
+    let expected_samples = frame.interleaved_samples();
+    let mut lines = Vec::new();
+    for case in [ReorderCase::Absorbed, ReorderCase::LateOne] {
+        lines.push(run_reorder_case::<PCM_SAMPLES_PER_BLOCK>(
+            frame,
+            frame_duration_ms,
+            expected_samples,
+            case,
+        )?);
+    }
+    Ok(lines)
+}
+
 /// Returns the signal-to-noise ratio in decibels between `reference` and
 /// `decoded` over the overlapping region, or infinity when either side is
 /// digital silence.
@@ -810,6 +1219,7 @@ fn run_probe() -> ProbeResult<Vec<String>> {
         lines.push(run_frame_path(duration_ms)?);
         lines.extend(run_burst_sweep(duration_ms)?);
         lines.extend(run_loss_patterns(duration_ms)?);
+        lines.extend(run_reorder_probe(duration_ms)?);
     }
 
     // A malformed authenticated payload surfaces as a bounded stream-local
