@@ -256,6 +256,7 @@ class ControlFrameVectorTest {
         assertEquals(8_000, MIN_CONTROL_SAMPLE_RATE_HZ)
         assertEquals(192_000, MAX_CONTROL_SAMPLE_RATE_HZ)
         assertEquals(8, MAX_CONTROL_CHANNELS)
+        assertEquals(512, MAX_CONTROL_DETAIL_BYTES)
     }
 
     @Test
@@ -337,6 +338,65 @@ class ControlFrameVectorTest {
             assertThrows(IllegalArgumentException::class.java) {
                 ControlFrame.validatedStopStream(message)
             }
+        }
+    }
+
+    @Test
+    fun statusAndErrorDetailBoundsMatchRustValidation() {
+        fun statusMessage(detail: String?): ControlFrame.DecodedMessage {
+            val frame = ControlFrame.statusFrame(7uL, 9uL, STREAM_STATE_STREAMING, detail)
+            return ControlFrame.decodeMessage(
+                ControlFrame.decodeMessage(ControlFrame.decodeFrame(frame))
+                    .requiredBytes(ENVELOPE_STREAM_STATUS_FIELD),
+            )
+        }
+
+        fun errorMessage(detail: String?): ControlFrame.DecodedMessage {
+            val frame = ControlFrame.errorFrame(ERROR_CODE_RETRY_LATER, detail)
+            return ControlFrame.decodeMessage(
+                ControlFrame.decodeMessage(ControlFrame.decodeFrame(frame))
+                    .requiredBytes(ENVELOPE_ERROR_FIELD),
+            )
+        }
+
+        val boundary = "x".repeat(MAX_CONTROL_DETAIL_BYTES)
+        val utf8Boundary = "é".repeat(MAX_CONTROL_DETAIL_BYTES / 2)
+        val over = "x".repeat(MAX_CONTROL_DETAIL_BYTES + 1)
+
+        assertEquals(
+            STREAM_STATE_STREAMING,
+            ControlFrame.validatedStreamState(statusMessage(boundary)),
+        )
+        assertEquals(
+            STREAM_STATE_STREAMING,
+            ControlFrame.validatedStreamState(statusMessage(utf8Boundary)),
+        )
+        assertEquals(
+            STREAM_STATE_STREAMING,
+            ControlFrame.validatedStreamState(statusMessage("")),
+        )
+        assertEquals(
+            STREAM_STATE_STREAMING,
+            ControlFrame.validatedStreamState(statusMessage(null)),
+        )
+        assertEquals(
+            ERROR_CODE_RETRY_LATER,
+            ControlFrame.validatedErrorCode(errorMessage(boundary)),
+        )
+        assertEquals(
+            ERROR_CODE_RETRY_LATER,
+            ControlFrame.validatedErrorCode(errorMessage("")),
+        )
+        assertEquals(
+            ERROR_CODE_RETRY_LATER,
+            ControlFrame.validatedErrorCode(errorMessage(null)),
+        )
+
+        assertThrows(IllegalArgumentException::class.java) {
+            ControlFrame.validatedStreamState(statusMessage(over))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            ControlFrame.validatedErrorCode(errorMessage(over))
         }
     }
 

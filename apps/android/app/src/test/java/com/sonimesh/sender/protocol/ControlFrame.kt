@@ -19,6 +19,9 @@ const val MAX_CONTROL_SAMPLE_RATE_HZ = 192_000
 /** Largest accepted version-one start-stream channel count. */
 const val MAX_CONTROL_CHANNELS = 8
 
+/** Maximum UTF-8 byte length for status/error detail. */
+const val MAX_CONTROL_DETAIL_BYTES = 512
+
 /** Accepted version-one start-stream frame duration in milliseconds. */
 const val START_FRAME_DURATION_10_MS = 10
 
@@ -183,43 +186,58 @@ object ControlFrame {
         mediaSessionId: ULong,
         streamId: ULong,
         state: ULong,
-    ): ByteArray = frame(
-        message(
-            varintField(ENVELOPE_PROTOCOL_VERSION_FIELD, CONTROL_PROTOCOL_VERSION),
-            varintField(ENVELOPE_REQUEST_ID_FIELD, 10u),
-            bytesField(
-                ENVELOPE_STREAM_STATUS_FIELD,
-                message(
-                    varintField(STATUS_MEDIA_SESSION_ID_FIELD, mediaSessionId),
-                    varintField(STATUS_STREAM_ID_FIELD, streamId),
-                    varintField(STATUS_STATE_FIELD, state),
-                    bytesField(STATUS_DETAIL_FIELD, "receiving".encodeToByteArray()),
+        detail: String? = "receiving",
+    ): ByteArray {
+        val status = mutableListOf(
+            varintField(STATUS_MEDIA_SESSION_ID_FIELD, mediaSessionId),
+            varintField(STATUS_STREAM_ID_FIELD, streamId),
+            varintField(STATUS_STATE_FIELD, state),
+        )
+        if (detail != null) {
+            status += bytesField(STATUS_DETAIL_FIELD, detail.encodeToByteArray())
+        }
+        return frame(
+            message(
+                varintField(ENVELOPE_PROTOCOL_VERSION_FIELD, CONTROL_PROTOCOL_VERSION),
+                varintField(ENVELOPE_REQUEST_ID_FIELD, 10u),
+                bytesField(
+                    ENVELOPE_STREAM_STATUS_FIELD,
+                    message(*status.toTypedArray()),
                 ),
             ),
-        ),
-    )
+        )
+    }
 
     /** Encodes a version-one ControlError envelope as a length-prefixed frame. */
-    fun errorFrame(code: ULong): ByteArray = frame(
-        message(
-            varintField(ENVELOPE_PROTOCOL_VERSION_FIELD, CONTROL_PROTOCOL_VERSION),
-            varintField(ENVELOPE_REQUEST_ID_FIELD, 11u),
-            bytesField(
-                ENVELOPE_ERROR_FIELD,
-                message(
-                    varintField(ERROR_CODE_FIELD, code),
-                    varintField(ERROR_RETRYABLE_FIELD, 1u),
-                    bytesField(ERROR_DETAIL_FIELD, "try again".encodeToByteArray()),
+    fun errorFrame(
+        code: ULong,
+        detail: String? = "try again",
+    ): ByteArray {
+        val error = mutableListOf(
+            varintField(ERROR_CODE_FIELD, code),
+            varintField(ERROR_RETRYABLE_FIELD, 1u),
+        )
+        if (detail != null) {
+            error += bytesField(ERROR_DETAIL_FIELD, detail.encodeToByteArray())
+        }
+        return frame(
+            message(
+                varintField(ENVELOPE_PROTOCOL_VERSION_FIELD, CONTROL_PROTOCOL_VERSION),
+                varintField(ENVELOPE_REQUEST_ID_FIELD, 11u),
+                bytesField(
+                    ENVELOPE_ERROR_FIELD,
+                    message(*error.toTypedArray()),
                 ),
             ),
-        ),
-    )
+        )
+    }
 
     /**
-     * Validates a StreamStatus message's identity and state bounds.
+     * Validates a StreamStatus message's identity, state, and detail bounds.
      *
-     * @throws IllegalArgumentException when the identity is zero or the state
-     *   is unspecified or unknown, mirroring Rust `validate_status`.
+     * @throws IllegalArgumentException when the identity is zero, the state
+     *   is unspecified or unknown, or the UTF-8 detail exceeds the byte
+     *   bound, mirroring Rust `validate_status`.
      */
     fun validatedStreamState(message: DecodedMessage): ULong {
         require(message.requiredVarint(STATUS_MEDIA_SESSION_ID_FIELD) != 0uL) {
@@ -232,19 +250,26 @@ object ControlFrame {
         require(state in STREAM_STATE_READY..STREAM_STATE_FAILED) {
             "stream status state is unspecified or unknown"
         }
+        require((message.optionalBytes(STATUS_DETAIL_FIELD)?.size ?: 0) <= MAX_CONTROL_DETAIL_BYTES) {
+            "stream status detail exceeds the byte bound"
+        }
         return state
     }
 
     /**
-     * Validates a ControlError message's code bound.
+     * Validates a ControlError message's code and detail bounds.
      *
      * @throws IllegalArgumentException when the code is unspecified or unknown,
-     *   mirroring Rust `validate_error`.
+     *   or the UTF-8 detail exceeds the byte bound, mirroring Rust
+     *   `validate_error`.
      */
     fun validatedErrorCode(message: DecodedMessage): ULong {
         val code = message.requiredVarint(ERROR_CODE_FIELD)
         require(code in ERROR_CODE_INCOMPATIBLE_VERSION..ERROR_CODE_RETRY_LATER) {
             "control error code is unspecified or unknown"
+        }
+        require((message.optionalBytes(ERROR_DETAIL_FIELD)?.size ?: 0) <= MAX_CONTROL_DETAIL_BYTES) {
+            "control error detail exceeds the byte bound"
         }
         return code
     }
@@ -470,6 +495,20 @@ object ControlFrame {
 
         fun requiredBytes(fieldNumber: Int): ByteArray {
             val matches = fields.filter { it.number == fieldNumber }
+            require(matches.size == 1) { "expected one protobuf field $fieldNumber" }
+            val field = matches.single()
+            require(field.wireType == WIRE_LENGTH_DELIMITED && field.bytesValue != null) {
+                "protobuf field $fieldNumber is not length-delimited"
+            }
+            return field.bytesValue
+        }
+
+        /** Returns the length-delimited field bytes, or null when absent. */
+        fun optionalBytes(fieldNumber: Int): ByteArray? {
+            val matches = fields.filter { it.number == fieldNumber }
+            if (matches.isEmpty()) {
+                return null
+            }
             require(matches.size == 1) { "expected one protobuf field $fieldNumber" }
             val field = matches.single()
             require(field.wireType == WIRE_LENGTH_DELIMITED && field.bytesValue != null) {

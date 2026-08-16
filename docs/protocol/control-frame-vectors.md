@@ -127,10 +127,11 @@ pinned in this document, `src/control.rs`, `src/negotiation.rs`,
 
 The Android host-JVM `ControlFrame` mirror also enforces the start-stream and
 stop-stream semantic bounds: zero media/stream identities, the 8-192 kHz sample
-rate window, the 1-8 channel window, the 10/20 ms frame duration, and the 16-bit
-media key epoch are all rejected, mirroring `src/control.rs`. The
-`tools/check_media_limits.py` verifier cross-checks the sample-rate and channel
-window (mvp-baseline capacities), the 16-bit epoch pin in this document,
+rate window, the 1-8 channel window, the 10/20 ms frame duration, the 512-byte
+status/error detail bound, and the 16-bit media key epoch are all rejected,
+mirroring `src/control.rs`. The `tools/check_media_limits.py` verifier
+cross-checks the sample-rate and channel window and the detail bound
+(mvp-baseline capacities), the 16-bit epoch pin in this document,
 `src/control.rs`, and the `ControlFrame.kt` mirror, so any drift between the
 three sources fails CI.
 

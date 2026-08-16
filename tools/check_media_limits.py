@@ -5,8 +5,8 @@ The version-one protocol publishes hard numeric bounds: the fixed 36-byte media
 header, a 128-byte extended header ceiling, a 1,200-byte complete datagram
 limit, the derived 1,164-byte encrypted payload and 1,148-byte plaintext
 limits, the 16-byte Poly1305 tag, a 4-byte frame prefix, the 64 KiB control
-frame bound, the start-stream 8-192 kHz / 1-8 channel window, and the 16-bit
-media key epoch. The Rust
+frame bound, the start-stream 8-192 kHz / 1-8 channel window, a 512-byte
+detail bound, and the 16-bit media key epoch. The Rust
 sources (crates/sonimesh-protocol/src/media_header.rs, media_crypto.rs,
 control.rs), the Android host-JVM mirrors (MediaHeader.kt, MediaCrypto.kt,
 ControlFrame.kt), and the `docs/mvp-baseline.md` capacities table all pin the
@@ -36,6 +36,7 @@ FRAME_PREFIX_BYTES = 4
 MIN_CONTROL_SAMPLE_RATE_HZ = 8_000
 MAX_CONTROL_SAMPLE_RATE_HZ = 192_000
 MAX_CONTROL_CHANNELS = 8
+MAX_CONTROL_DETAIL_BYTES = 512
 MAX_CONTROL_MEDIA_KEY_EPOCH = 65_535
 MEDIA_MAGIC = 0x534E_4D53
 MEDIA_VERSION = 1
@@ -81,6 +82,7 @@ CONTRACTS: dict[str, int] = {
     "MIN_CONTROL_SAMPLE_RATE_HZ": MIN_CONTROL_SAMPLE_RATE_HZ,
     "MAX_CONTROL_SAMPLE_RATE_HZ": MAX_CONTROL_SAMPLE_RATE_HZ,
     "MAX_CONTROL_CHANNELS": MAX_CONTROL_CHANNELS,
+    "MAX_CONTROL_DETAIL_BYTES": MAX_CONTROL_DETAIL_BYTES,
     "MAX_CONTROL_MEDIA_KEY_EPOCH": MAX_CONTROL_MEDIA_KEY_EPOCH,
     "MEDIA_MAGIC": MEDIA_MAGIC,
     "MEDIA_VERSION": MEDIA_VERSION,
@@ -103,6 +105,7 @@ RUST_CONTROL_NAMES = (
     "MIN_CONTROL_SAMPLE_RATE_HZ",
     "MAX_CONTROL_SAMPLE_RATE_HZ",
     "MAX_CONTROL_CHANNELS",
+    "MAX_CONTROL_DETAIL_BYTES",
     "MAX_CONTROL_MEDIA_KEY_EPOCH",
 )
 KOTLIN_CONTROL_NAMES = (
@@ -111,6 +114,7 @@ KOTLIN_CONTROL_NAMES = (
     "MIN_CONTROL_SAMPLE_RATE_HZ",
     "MAX_CONTROL_SAMPLE_RATE_HZ",
     "MAX_CONTROL_CHANNELS",
+    "MAX_CONTROL_DETAIL_BYTES",
     "MAX_MEDIA_KEY_EPOCH",
 )
 
@@ -121,6 +125,7 @@ DOC_BOUNDARIES: tuple[tuple[str, str], ...] = (
     ("Complete media datagram", "MAX_MEDIA_DATAGRAM_LEN"),
     ("Control Protobuf frame", "MAX_CONTROL_FRAME_BYTES"),
     ("Control frame prefix", "FRAME_PREFIX_BYTES"),
+    ("Control detail", "MAX_CONTROL_DETAIL_BYTES"),
     ("Protected media plaintext", "MAX_MEDIA_PLAINTEXT_LEN"),
     ("Encrypted payload with fixed header", "MAX_ENCRYPTED_PAYLOAD_LEN"),
 )
@@ -578,12 +583,14 @@ class MediaLimitsTests(unittest.TestCase):
         self.assertEqual(rust["MIN_CONTROL_SAMPLE_RATE_HZ"], 8_000)
         self.assertEqual(rust["MAX_CONTROL_SAMPLE_RATE_HZ"], 192_000)
         self.assertEqual(rust["MAX_CONTROL_CHANNELS"], 8)
+        self.assertEqual(rust["MAX_CONTROL_DETAIL_BYTES"], 512)
         self.assertEqual(rust["MAX_CONTROL_MEDIA_KEY_EPOCH"], 65_535)
         self.assertEqual(kotlin["FRAME_PREFIX_BYTES"], 4)
         self.assertEqual(kotlin["MAX_CONTROL_FRAME_BYTES"], 64 * 1024)
         self.assertEqual(kotlin["MIN_CONTROL_SAMPLE_RATE_HZ"], 8_000)
         self.assertEqual(kotlin["MAX_CONTROL_SAMPLE_RATE_HZ"], 192_000)
         self.assertEqual(kotlin["MAX_CONTROL_CHANNELS"], 8)
+        self.assertEqual(kotlin["MAX_CONTROL_DETAIL_BYTES"], 512)
         self.assertEqual(kotlin["MAX_MEDIA_KEY_EPOCH"], 65_535)
 
     def test_doc_parser_reads_all_capacity_rows(self) -> None:

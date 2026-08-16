@@ -185,7 +185,8 @@ test in `src/media_crypto.rs`) and the Kotlin mirrors (`ReplayWindow.kt`,
 re-reads the fixed media-plane and control-frame numeric bounds (4-byte frame
 prefix, fixed header, extended-header ceiling, complete datagram, encrypted payload,
 Poly1305 tag, plaintext, 64 KiB control frame, start-stream
-sample-rate/channel window, and media-key epoch) from `src/media_header.rs`,
+sample-rate/channel window, 512-byte detail, and media-key epoch) from
+`src/media_header.rs`,
 `src/media_crypto.rs`, `src/control.rs`, the Kotlin mirrors (`MediaHeader.kt`,
 `MediaCrypto.kt`, `ControlFrame.kt`), and the `docs/mvp-baseline.md`
 capacities table, and recomputes the derived bounds. The pairing, control-frame,

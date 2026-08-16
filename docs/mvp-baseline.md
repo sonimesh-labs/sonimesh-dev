@@ -256,6 +256,7 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
 | Control Protobuf frame | 64 KiB | Reject before Protobuf decoding |
 | Control frame prefix | 4 bytes | Reject truncated length |
 | Control start stream | 8–192 kHz, 1–8 channels, 10/20 ms | Reject invalid command parameters |
+| Control detail | 512 bytes | Reject over-long UTF-8 detail |
 | Protected media plaintext | 1,148 bytes | Reserve 16 bytes for Poly1305 tag |
 | Encrypted payload with fixed header | 1,164 bytes | Extensions reduce this available payload |
 | Replay window | 64 packets | Reject authenticated duplicate or too-old packet |
