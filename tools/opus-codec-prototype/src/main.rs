@@ -14,7 +14,8 @@
 //! throughput for both shapes, compares steady-state and loss-window
 //! quality across two deterministic content profiles (a single tone and a
 //! multi-harmonic sum), compares in-band FEC recovery against PLC for a
-//! dropped 20 ms frame across speech-like and tone content, sweeps the FEC
+//! dropped 20 ms frame across speech-like, tone, and music-like content,
+//! sweeps the FEC
 //! loss rate across the speech-like profile, measures the wall-clock cost of
 //! enabling in-band FEC, measures DTX packet-size and active-region quality
 //! on pause-gapped and continuous content at both negotiated shapes, compares
@@ -1801,14 +1802,16 @@ fn sustained_summary(
 /// Content profiles compared by the in-band FEC recovery probe.
 ///
 /// The speech-like profile models voiced speech, which libopus's SILK LBRR
-/// layer targets; the tone profile is the non-speech reference expected to
-/// show no FEC benefit.
+/// layer targets; the tone and music-like profiles are the non-speech
+/// references expected to show no FEC benefit.
 #[derive(Clone, Copy)]
 enum FecContent {
     /// Voiced speech-like profile.
     Speech,
     /// Single-tone non-speech reference profile.
     Tone,
+    /// Multi-harmonic music-like reference profile.
+    Music,
 }
 
 impl FecContent {
@@ -1818,6 +1821,7 @@ impl FecContent {
         match self {
             Self::Speech => "speech",
             Self::Tone => "tone",
+            Self::Music => "music",
         }
     }
 
@@ -1827,6 +1831,7 @@ impl FecContent {
         match self {
             Self::Speech => speech_like(samples),
             Self::Tone => tone(samples),
+            Self::Music => multi_harmonic(samples),
         }
     }
 }
@@ -1848,7 +1853,7 @@ fn run_fec_probe() -> ProbeResult<Vec<String>> {
     let expected_samples = frame.interleaved_samples();
     let source_samples = FEC_SOURCE_FRAMES * expected_samples;
     let mut lines = Vec::new();
-    for content in [FecContent::Speech, FecContent::Tone] {
+    for content in [FecContent::Speech, FecContent::Tone, FecContent::Music] {
         let source = content.content(source_samples);
         let (fec_snr, plc_snr, avg_bytes) =
             measure_fec_case(frame, &source, FEC_PACKET_LOSS_PERCENT)?;
@@ -1859,12 +1864,12 @@ fn run_fec_probe() -> ProbeResult<Vec<String>> {
                     "speech FEC gain {gain:.1} dB is below the {FEC_SPEECH_GAIN_MIN_DB:.1} dB gate"
                 ));
             }
-            FecContent::Tone if gain < -FEC_NON_SPEECH_TOLERANCE_DB => {
+            FecContent::Tone | FecContent::Music if gain < -FEC_NON_SPEECH_TOLERANCE_DB => {
                 return Err(format!(
                     "non-speech FEC {fec_snr:.1} dB is worse than PLC {plc_snr:.1} dB by {gain:.1} dB"
                 ));
             }
-            FecContent::Speech | FecContent::Tone => {}
+            FecContent::Speech | FecContent::Tone | FecContent::Music => {}
         }
         lines.push(format!(
             "opus_20ms_fec: {label} fec {fec_snr:.1} dB plc {plc_snr:.1} dB gain {gain:+.1} dB \
