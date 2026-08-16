@@ -10,9 +10,10 @@ counterparts (`matches_published_reverse_media_key_vector`,
 media directions. This script reimplements the HKDF-SHA256 derivation and the
 96-bit nonce layout from the documented labels and constants in pure
 standard-library Python, verifies the same published vectors, and parses the
-Rust unit-test pins so the two implementations cannot drift apart (roadmap
-Phase 0D: cross-language crypto and packet test vectors; testing doc:
-published vectors for media key derivation and nonce construction).
+Rust unit-test and Kotlin JVM pins so the three implementations cannot drift
+apart (roadmap Phase 0D: cross-language crypto and packet test vectors;
+testing doc: published vectors for media key derivation and nonce
+construction).
 """
 
 from __future__ import annotations
@@ -32,6 +33,20 @@ DESKTOP_TO_ANDROID_DIRECTION = 1
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 RUST_TEST_PATH = REPO_ROOT / "crates" / "sonimesh-protocol" / "src" / "media_key.rs"
+KOTLIN_TEST_PATH = (
+    REPO_ROOT
+    / "apps"
+    / "android"
+    / "app"
+    / "src"
+    / "test"
+    / "java"
+    / "com"
+    / "sonimesh"
+    / "sender"
+    / "security"
+    / "MediaKeyVectorTest.kt"
+)
 
 
 def hkdf_extract(salt: bytes, ikm: bytes) -> bytes:
@@ -127,6 +142,25 @@ def rust_vector_pins(source: str) -> dict[str, bytes]:
     return pins
 
 
+def kotlin_vector_pins(source: str) -> dict[str, bytes]:
+    """Extracts the golden byte arrays pinned by the Kotlin media-key test."""
+    pins: dict[str, bytes] = {}
+    for marker, name in (
+        ("val EXPECTED_MEDIA_KEY = hex(", "media_key"),
+        ("val EXPECTED_MEDIA_NONCE = hex(", "media_nonce"),
+        ("val EXPECTED_REVERSE_MEDIA_KEY = hex(", "media_key_reverse"),
+        ("val EXPECTED_REVERSE_MEDIA_NONCE = hex(", "media_nonce_reverse"),
+    ):
+        match = re.search(re.escape(marker) + r"(.*?)\)", source, re.DOTALL)
+        if match is None:
+            continue
+        pieces = re.findall(r'"([0-9a-fA-F]+)"', match.group(1))
+        if not pieces:
+            continue
+        pins[name] = bytes.fromhex("".join(pieces))
+    return pins
+
+
 def validate_vectors() -> list[str]:
     """Returns deterministic mismatches between recomputation and the pins."""
     recomputed = recomputed_vectors()
@@ -150,6 +184,18 @@ def validate_vectors() -> list[str]:
                 f"media {name} differs from the Rust pin: "
                 f"python {expected.hex().upper()} "
                 f"rust {rust_pin.hex().upper()}"
+            )
+    kotlin_source = KOTLIN_TEST_PATH.read_text(encoding="utf-8")
+    kotlin_pins = kotlin_vector_pins(kotlin_source)
+    for name, expected in published.items():
+        kotlin_pin = kotlin_pins.get(name)
+        if kotlin_pin is None:
+            errors.append(f"media {name}: Kotlin unit-test pin not found")
+        elif kotlin_pin != expected:
+            errors.append(
+                f"media {name} differs from the Kotlin pin: "
+                f"python {expected.hex().upper()} "
+                f"kotlin {kotlin_pin.hex().upper()}"
             )
     return errors
 
@@ -211,6 +257,21 @@ class MediaKeyVectorTests(unittest.TestCase):
         tampered = source.replace("0x3E, 0xC3, 0x55, 0xC7", "0x3E, 0xC3, 0x55, 0xC8", 1)
         pins = rust_vector_pins(tampered)
         self.assertNotEqual(pins["media_key_reverse"], published_vectors()["media_key_reverse"])
+
+    def test_kotlin_parser_extracts_all_pinned_vectors(self) -> None:
+        source = KOTLIN_TEST_PATH.read_text(encoding="utf-8")
+        pins = kotlin_vector_pins(source)
+        self.assertEqual(set(pins), set(published_vectors()))
+        for name, expected in published_vectors().items():
+            self.assertEqual(pins[name], expected, name)
+
+    def test_kotlin_parser_detects_a_tampered_pin(self) -> None:
+        source = KOTLIN_TEST_PATH.read_text(encoding="utf-8")
+        tampered = source.replace(
+            '"0B821644F0598E95080E4959E276FFCD"', '"0B821644F0598E95080E4959E276FFCE"', 1
+        )
+        pins = kotlin_vector_pins(tampered)
+        self.assertNotEqual(pins["media_key"], published_vectors()["media_key"])
 
 
 if __name__ == "__main__":
