@@ -44,6 +44,7 @@ python tools/check_pairing_vectors.py
 python tools/check_control_frame_vectors.py
 python tools/check_media_header_vectors.py
 python tools/check_media_key_vectors.py
+python tools/check_negotiation_vectors.py
 python tools/check_media_crypto_vectors.py
 python tools/check_android_capture_boundary.py
 python tools/check_output_soak_log.py --self-test
@@ -60,10 +61,11 @@ Pop-Location
 ~~~
 
 The vector pin checkers (`check_pairing_vectors.py`, `check_control_frame_vectors.py`,
-`check_media_header_vectors.py`, `check_media_key_vectors.py`, and
-`check_media_crypto_vectors.py`) reimplement each documented version-one protocol
-boundary in pure standard-library Python and cross-check the pins published in the
-protocol docs, the Rust tests, and the Kotlin tests. `check_ci_wiring.py` verifies
+`check_media_header_vectors.py`, `check_media_key_vectors.py`,
+`check_negotiation_vectors.py`, and `check_media_crypto_vectors.py`) reimplement
+each documented version-one protocol boundary in pure standard-library Python and
+cross-check the pins published in the protocol docs, the Rust tests, and the
+Kotlin tests. `check_ci_wiring.py` verifies
 that every `tools/` checker is wired into CI with its required
 mode, that the contributor-facing Core checks block documents the same tools with the
 same modes, and that every Cargo command and Gradle task listed in that block also runs
