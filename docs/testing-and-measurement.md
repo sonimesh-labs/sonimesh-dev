@@ -60,8 +60,8 @@ Cover at least:
   result does not qualify TLS-provider exporter support or QR SPKI pinning;
 - pairing expiry, single use, bounded source/attempt admission, and proof-verifier
   gating before a session can become trusted;
-- sequence exhaustion at the epoch boundary, duplicate detection, and replay
-  windows;
+- sequence exhaustion at the epoch boundary (pinned by the host-JVM
+  `MediaSequence` mirror), duplicate detection, and replay windows;
 - nonce uniqueness across streams, directions, epochs, and reconnects;
 - UDP source-endpoint pinning: bind only after a protected packet succeeds,
   reject a changed endpoint before any processing, keep automatic same-session
