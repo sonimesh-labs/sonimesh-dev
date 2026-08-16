@@ -82,6 +82,13 @@ Cover at least:
 - jitter ordering, late packets, overflow, resynchronization, and bounded memory;
 - PLC/FEC scheduling and frame-duration transitions;
 - drift-controller convergence, limits, anti-windup, and reset;
+- sustained clock-skew closed loops through the real receiver pipeline,
+  polyphase format adapter, and mixer session: a nominal clock stays at the
+  drift target without correction or resynchronization, within-cap fast and
+  slow sources publish corrections with the correct sign while occupancy
+  stays bounded and rendering continues, and a skew beyond the adjustment cap
+  degrades to bounded hard resynchronizations without escaping the bounded
+  PCM queue;
 - channel mapping, gain ramps, fades, clipping protection, and limiter behavior
   (exact-ceiling peak limiter with sample-instant attack, smooth release, and
   linked interleaved frames);

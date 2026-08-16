@@ -95,6 +95,23 @@ configuration, and a clean no-drift stream never requests a resynchronization
 even while uncorrectable siblings do. Hardware tests are still required before
 selecting gain defaults or making drift or latency claims.
 
+A real-component closed-loop test now drives the actual receiver pipeline,
+polyphase format adapter, fixed-slot mixer, and `MixerStreamDriftController`
+under a sustained virtual-clock skew
+(`crates/sonimesh-app/tests/mixer_stream_clock_skew.rs`): each control tick
+decodes a 10 ms source burst at the skewed rate, samples the adapter source
+occupancy, applies one decision, pumps the output blocks, and renders them.
+The test asserts that a nominal clock stays at the target without correction
+or resynchronization, that within-cap fast and slow sources publish
+corrections with the correct sign while occupancy stays inside the emergency
+band and rendering continues, that a skew beyond the adjustment cap degrades
+to bounded hard resynchronizations without escaping the bounded PCM queue,
+and that the whole run is deterministic. Because the adapter consumes whole
+input frames per pump and the controller samples whole-block occupancy, ppm
+authority is quantized and the real loop converges over long timescales; this
+evidence covers boundedness and correction direction, while convergence-rate
+and gain defaults remain hardware-gated.
+
 ## Rollback plan
 
 The controller exports a small decision type rather than an ASRC implementation.

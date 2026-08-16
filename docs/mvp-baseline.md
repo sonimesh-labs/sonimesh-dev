@@ -1,7 +1,7 @@
 # MVP implementation baseline
 
 > Status: foundation implemented; platform feasibility remains open
-> Updated: 2026-08-16
+> Updated: 2026-08-17
 
 This baseline turns the architecture documents into a buildable core without
 claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
@@ -131,6 +131,12 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
 - an app-domain drift coordinator that samples bounded PCM occupancy, publishes
   normal ppm changes to the source handle, and performs the matching
   stream-local hard resynchronization without touching ingress or output state.
+  A real-component clock-skew closed loop now drives the receiver pipeline,
+  polyphase adapter, mixer, and drift controller under a sustained virtual
+  clock offset: a nominal clock stays at the drift target without correction,
+  within-cap fast and slow sources publish corrections with the correct sign
+  while occupancy stays bounded and rendering continues, and a skew beyond the
+  adjustment cap degrades to bounded hard resynchronizations.
 - a pairing-invitation control owner that synchronizes bounded record expiry,
   monotonic-clock failure, user expiry, and proof outcomes with the desktop
   session state. It invokes a caller-supplied verifier only after bounded
