@@ -69,3 +69,6 @@ documented.
   provisional fixed-slot membership boundary pending Phase 2 mixer evidence.
 - [ADR 0016: Adaptive jitter target control](./0016-adaptive-jitter-target.md) —
   provisional slow bounded target control pending Phase 2 jitter evidence.
+- [ADR 0017: Authenticated control-plane reconnection supplies a fresh media session](./0017-control-reconnect-fresh-media-session.md) —
+  provisional `MediaSessionAllocator` no-reuse boundary pending the authenticated
+  control-plane transport gate.

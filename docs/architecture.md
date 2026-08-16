@@ -377,7 +377,12 @@ Commands must be idempotent or define duplicate behavior. Repeating StopStream
 must be safe. Each authenticated control transport also receives an opaque,
 non-reusable local session token. The control owner rejects a token from a lost
 or retired transport before validating its envelope, and a replacement transport
-must install a fresh token and repeat hello negotiation. Both start and stop
+must install a fresh token and repeat hello negotiation. An authenticated
+reconnection supplies the fresh media session through a bounded
+`MediaSessionAllocator` ([ADR 0017](./adr/0017-control-reconnect-fresh-media-session.md)),
+which owns the one-time pairing media root and never re-issues a key context
+within a pairing lifetime; the authenticated transport that selects the media
+identity remains a separate gate. Both start and stop
 commands fail closed until that negotiation succeeds. Prepared stream actions
 carry a separate process-unique operation token so a completion routed from
 another coordinator cannot match identical pending work. A retry is a no-op only
@@ -417,9 +422,11 @@ authentication, replay admission, and a bounded jitter decision. Later datagrams
 from another endpoint are rejected before parsing and cannot advance replay
 state. Key-epoch rotation preserves the pin; changing the pinned source
 endpoint requires a fresh authenticated media session and fresh key material
-rather than automatic address migration. The sender may retarget its routing
-destination freely without rotating media keys: the destination is routing
-metadata only and never authenticates the peer.
+rather than automatic address migration, supplied by the control domain through
+the `MediaSessionAllocator` boundary
+([ADR 0017](./adr/0017-control-reconnect-fresh-media-session.md)). The sender
+may retarget its routing destination freely without rotating media keys: the
+destination is routing metadata only and never authenticates the peer.
 
 The UDP media transport is bounded in both directions. The sender transmits
 through a non-blocking socket and caps every datagram at

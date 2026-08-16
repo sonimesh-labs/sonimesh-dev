@@ -157,9 +157,13 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
 - a non-blocking fixed-buffer UDP media receiver composition that rejects
   oversized datagrams before parser ingress, pins the source only after complete
   protected admission, rejects silent endpoint changes without advancing replay
-  state, and permits rebinding only after fresh-session installation. The
-  authenticated control-plane reconnection that supplies that fresh session
-  remains unimplemented.
+  state, and permits rebinding only after fresh-session installation.
+- a bounded `MediaSessionAllocator` (ADR 0017) that owns the one-time pairing
+  media root and issues a fresh `(secret, context)` pair for an authenticated
+  control-plane reconnection: the full key context is never re-issued within a
+  pairing lifetime, the no-reuse record is fixed at 16 entries and fails closed
+  when full, and a fresh pairing root replaces the allocator. The authenticated
+  control-plane transport that selects the media identity remains gated.
   A seeded property walk and a byte-driven libFuzzer target drive in-order
   deliveries, duplicates, tampered ciphertext, retired-epoch packets,
   oversized datagrams, rotations, and fresh sessions over real loopback
