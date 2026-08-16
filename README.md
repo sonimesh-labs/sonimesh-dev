@@ -46,6 +46,7 @@ proto/                     Control-plane Protocol Buffer schemas
 tools/
   latency-measurement/     Deterministic MLS signal generation and offset estimation
   network-simulator/       Deterministic network impairment runner
+  opus-codec-prototype/    Native Opus binding and frame-duration evidence spike
   windows-*-prototype/     Windows credential, TLS, and WASAPI feasibility spikes
   check_*.py               Consistency guards for docs, CI, and architecture boundaries
 fuzz/
