@@ -7,9 +7,9 @@ between the local sender policy and the receiver hello. The Rust tests and the
 Android host-JVM `HelloNegotiation` mirror pin the same canonical vector and
 the bounded hello admission rules. This script reimplements the version
 selection and canonical intersection in pure standard-library Python, verifies
-the published vector, and parses the Rust and Kotlin pins so the three
-implementations cannot drift apart (roadmap Phase 0D: cross-language crypto and
-packet test vectors; testing doc: bounded version-one hello negotiation).
+the published vector, and parses the doc, Rust, and Kotlin pins so the pinned
+sources cannot drift apart (roadmap Phase 0D: cross-language crypto and packet
+test vectors; testing doc: bounded version-one hello negotiation).
 """
 
 from __future__ import annotations
@@ -75,6 +75,8 @@ KOTLIN_TEST_PATH = (
     / "protocol"
     / "HelloNegotiationVectorTest.kt"
 )
+
+DOC_PATH = REPO_ROOT / "docs" / "protocol" / "control-frame-vectors.md"
 
 RUST_CONSTANT_NAMES = (
     "CONTROL_PROTOCOL_VERSION",
@@ -272,12 +274,41 @@ def kotlin_canonical_pin(source: str) -> tuple[int | None, list[int] | None]:
     return version, capabilities
 
 
+def doc_pins(source: str) -> dict[str, int | list[int] | None]:
+    """Extracts the hello-negotiation bounds and canonical order from the doc."""
+    pins: dict[str, int | list[int] | None] = {}
+    match = re.search(r"(\d+)\s+capabilities", source)
+    pins["max_capabilities"] = int(match.group(1)) if match is not None else None
+    match = re.search(r"(\d+)\s+supported versions", source)
+    pins["max_supported_versions"] = (
+        int(match.group(1)) if match is not None else None
+    )
+    match = re.search(r"(\d+)-byte display name", source)
+    pins["max_display_name_bytes"] = (
+        int(match.group(1)) if match is not None else None
+    )
+    match = re.search(
+        r"canonical capability order \(([^)]*)\)", source, re.DOTALL
+    )
+    if match is None:
+        pins["canonical_capabilities"] = None
+    else:
+        values = [
+            CAPABILITY_BY_NAME[name]
+            for name in re.findall(r"(\w+)", match.group(1))
+            if name in CAPABILITY_BY_NAME
+        ]
+        pins["canonical_capabilities"] = values or None
+    return pins
+
+
 def cross_source_errors(
     rust_constants_text: str,
     rust_src_text: str,
     rust_test_text: str,
     kotlin_text: str,
     kotlin_test_text: str,
+    doc_text: str,
 ) -> list[str]:
     """Returns deterministic mismatches across the recomputation and the pins."""
     errors: list[str] = []
@@ -386,17 +417,41 @@ def cross_source_errors(
                 f"python {vector['capabilities']} kotlin {kotlin_capabilities}"
             )
 
+    doc = doc_pins(doc_text)
+    for key, expected in (
+        ("max_capabilities", MAX_CONTROL_CAPABILITIES),
+        ("max_supported_versions", MAX_CONTROL_SUPPORTED_VERSIONS),
+        ("max_display_name_bytes", MAX_CONTROL_DISPLAY_NAME_BYTES),
+    ):
+        value = doc.get(key)
+        if value is None:
+            errors.append(f"negotiation {key}: doc pin not found")
+        elif value != expected:
+            errors.append(
+                f"negotiation {key} differs from the doc pin: "
+                f"python {expected} doc {value}"
+            )
+    canonical = doc.get("canonical_capabilities")
+    if canonical is None:
+        errors.append("negotiation: doc canonical capability order pin not found")
+    elif canonical != KNOWN_CAPABILITIES:
+        errors.append(
+            "negotiation KNOWN_CAPABILITIES differs from the doc pin: "
+            f"python {KNOWN_CAPABILITIES} doc {canonical}"
+        )
+
     return errors
 
 
 def validate_vectors() -> list[str]:
-    """Returns mismatches against the on-disk Rust and Kotlin pins."""
+    """Returns mismatches against the on-disk doc, Rust, and Kotlin pins."""
     return cross_source_errors(
         RUST_CONSTANTS_PATH.read_text(encoding="utf-8"),
         RUST_SRC_PATH.read_text(encoding="utf-8"),
         RUST_TEST_PATH.read_text(encoding="utf-8"),
         KOTLIN_MIRROR_PATH.read_text(encoding="utf-8"),
         KOTLIN_TEST_PATH.read_text(encoding="utf-8"),
+        DOC_PATH.read_text(encoding="utf-8"),
     )
 
 
@@ -583,6 +638,33 @@ class NegotiationVectorTests(unittest.TestCase):
         _, capabilities = kotlin_canonical_pin(tampered)
         self.assertNotEqual(capabilities, [2, 4])
 
+    def test_doc_pins_parser_round_trips(self) -> None:
+        pins = doc_pins(DOC_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(pins["max_capabilities"], MAX_CONTROL_CAPABILITIES)
+        self.assertEqual(
+            pins["max_supported_versions"], MAX_CONTROL_SUPPORTED_VERSIONS
+        )
+        self.assertEqual(
+            pins["max_display_name_bytes"], MAX_CONTROL_DISPLAY_NAME_BYTES
+        )
+        self.assertEqual(pins["canonical_capabilities"], KNOWN_CAPABILITIES)
+
+    def test_doc_pins_parser_detects_a_tampered_bound(self) -> None:
+        source = DOC_PATH.read_text(encoding="utf-8")
+        tampered = source.replace("16 capabilities", "17 capabilities", 1)
+        self.assertEqual(doc_pins(tampered)["max_capabilities"], 17)
+
+    def test_doc_pins_parser_detects_a_tampered_canonical_order(self) -> None:
+        source = DOC_PATH.read_text(encoding="utf-8")
+        tampered = source.replace(
+            "FrameDuration20Ms, ManualAddress, NetworkDiagnostics",
+            "FrameDuration20Ms, NetworkDiagnostics, ManualAddress",
+            1,
+        )
+        self.assertNotEqual(
+            doc_pins(tampered)["canonical_capabilities"], KNOWN_CAPABILITIES
+        )
+
     def test_validate_reports_drift_from_each_source(self) -> None:
         self.assertEqual(validate_vectors(), [])
 
@@ -591,6 +673,7 @@ class NegotiationVectorTests(unittest.TestCase):
         rust_test_text = RUST_TEST_PATH.read_text(encoding="utf-8")
         kotlin_text = KOTLIN_MIRROR_PATH.read_text(encoding="utf-8")
         kotlin_test_text = KOTLIN_TEST_PATH.read_text(encoding="utf-8")
+        doc_text = DOC_PATH.read_text(encoding="utf-8")
 
         tampered_rust_constants = rust_constants_text.replace(
             "pub const CONTROL_PROTOCOL_VERSION: u32 = 1;",
@@ -599,7 +682,7 @@ class NegotiationVectorTests(unittest.TestCase):
         )
         errors = cross_source_errors(
             tampered_rust_constants, rust_src_text, rust_test_text,
-            kotlin_text, kotlin_test_text,
+            kotlin_text, kotlin_test_text, doc_text,
         )
         self.assertTrue(
             any("CONTROL_PROTOCOL_VERSION" in e and "Rust pin" in e for e in errors)
@@ -612,10 +695,19 @@ class NegotiationVectorTests(unittest.TestCase):
         )
         errors = cross_source_errors(
             rust_constants_text, rust_src_text, rust_test_text,
-            tampered_kotlin, kotlin_test_text,
+            tampered_kotlin, kotlin_test_text, doc_text,
         )
         self.assertTrue(
             any("MAX_CONTROL_DISPLAY_NAME_BYTES" in e and "Kotlin pin" in e for e in errors)
+        )
+
+        tampered_doc = doc_text.replace("16 capabilities", "17 capabilities", 1)
+        errors = cross_source_errors(
+            rust_constants_text, rust_src_text, rust_test_text,
+            kotlin_text, kotlin_test_text, tampered_doc,
+        )
+        self.assertTrue(
+            any("max_capabilities" in e and "doc pin" in e for e in errors)
         )
 
 
