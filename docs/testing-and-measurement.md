@@ -62,7 +62,8 @@ Cover at least:
   gating before a session can become trusted;
 - sequence exhaustion at the epoch boundary (pinned by the host-JVM
   `MediaSequence` mirror), duplicate detection, and replay windows (pinned
-  by the host-JVM `ReplayWindow` mirror);
+  by the host-JVM `ReplayWindow` mirror; both are independently cross-checked
+  by the `check_sequence_replay.py` verifier);
 - nonce uniqueness across streams, directions, epochs, and reconnects;
 - UDP source-endpoint pinning: bind only after a protected packet succeeds,
   reject a changed endpoint before any processing, keep automatic same-session
@@ -175,21 +176,28 @@ five control payloads),
 `check_media_header_vectors.py` (the fixed 36-byte media header), and
 `check_media_crypto_vectors.py` (RFC 8439 ChaCha20-Poly1305 AEAD packet
 sealing for the three published vectors: derived media key, nonce,
-authenticated header, ciphertext, and tag). The pairing, control-frame,
+authenticated header, ciphertext, and tag). `check_sequence_replay.py`
+reimplements the sender-side `MediaSequence` exhaustion guard and the
+receiver-side authenticated `ReplayWindow` bitmap, then re-reads the Rust
+pins (`src/replay.rs`, `src/media_key.rs`, and the sealer-level exhaustion
+test in `src/media_crypto.rs`) and the Kotlin mirrors (`ReplayWindow.kt`,
+`MediaSequence.kt`) plus their vector tests. The pairing, control-frame,
 media-crypto, and negotiation verifiers also re-read the values pinned in the
 vector docs and the Rust pins (`src/pairing_binding.rs`,
 `tests/control_frame.rs`, `tests/media_crypto.rs`, and, for negotiation,
 `src/control.rs`, `src/negotiation.rs`, and `tests/negotiation.rs`); the
 media-key and media-header verifiers re-read the Rust pins in
-`src/media_key.rs` and `tests/media_header_vector.rs`; all six verifiers
+`src/media_key.rs` and `tests/media_header_vector.rs`; all seven verifiers
 additionally re-read their Kotlin counterparts:
 `PairingTlsBindingVectorTest` (derived through the JVM `PairingTlsBinding`
 mirror), `ControlFrameVectorTest` (encoded through the JVM `ControlFrame`
 mirror), `MediaCryptoVectorTest` (sealed through the JVM `MediaCrypto`
 mirror), `MediaHeaderVectorTest` (whose header is encoded through the JVM
 `MediaHeader` mirror), `MediaKeyVectorTest` (derived through the JVM
-`MediaKey` mirror), and, for negotiation, the `HelloNegotiation` mirror with
-`HelloNegotiationVectorTest`.
+`MediaKey` mirror), for negotiation the `HelloNegotiation` mirror with
+`HelloNegotiationVectorTest`, and the `ReplayWindowVectorTest` and
+`MediaSequenceVectorTest` pins (exercised through the JVM `ReplayWindow`
+and `MediaSequence` mirrors).
 Each pinned value
 must match the independent recomputation, so the documentation, the Rust and
 Kotlin pins, and the Python verifier cannot drift apart.
