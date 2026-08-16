@@ -4,20 +4,13 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class MediaHeaderVectorTest {
     @Test
     fun matchesPublishedMediaHeaderVector() {
-        val encoded = mediaHeader(
-            flags = FLAGS,
-            sessionId = SESSION_ID,
-            streamId = STREAM_ID,
-            sequence = SEQUENCE,
-            sampleTimestamp = SAMPLE_TIMESTAMP,
-            payloadBytes = PAYLOAD_BYTES,
-            keyEpoch = KEY_EPOCH,
-        )
+        val encoded = header().encode(PAYLOAD_BYTES)
 
         assertArrayEquals(EXPECTED_HEADER, encoded)
         assertEquals(MEDIA_HEADER_LEN, encoded.size)
@@ -38,27 +31,39 @@ class MediaHeaderVectorTest {
         assertEquals(KEY_EPOCH.toLong(), buffer.short.toLong())
     }
 
-    private fun mediaHeader(
-        flags: Byte,
-        sessionId: Long,
-        streamId: Int,
-        sequence: Int,
-        sampleTimestamp: Long,
-        payloadBytes: Int,
-        keyEpoch: Short,
-    ): ByteArray = ByteBuffer.allocate(MEDIA_HEADER_LEN)
-        .order(ByteOrder.BIG_ENDIAN)
-        .putInt(MEDIA_MAGIC)
-        .put(MEDIA_VERSION)
-        .put(flags)
-        .putShort(MEDIA_HEADER_LEN.toShort())
-        .putLong(sessionId)
-        .putInt(streamId)
-        .putInt(sequence)
-        .putLong(sampleTimestamp)
-        .putShort(payloadBytes.toShort())
-        .putShort(keyEpoch)
-        .array()
+    @Test
+    fun encodeAcceptsTheMaximumEncryptedPayload() {
+        val encoded = header().encode(MAX_ENCRYPTED_PAYLOAD_LEN)
+
+        assertEquals(MEDIA_HEADER_LEN, encoded.size)
+        assertEquals(
+            MAX_MEDIA_DATAGRAM_LEN,
+            MEDIA_HEADER_LEN + MAX_ENCRYPTED_PAYLOAD_LEN,
+        )
+    }
+
+    @Test
+    fun encodeRejectsPayloadAboveTheHardLimit() {
+        assertThrows(IllegalArgumentException::class.java) {
+            header().encode(MAX_ENCRYPTED_PAYLOAD_LEN + 1)
+        }
+    }
+
+    @Test
+    fun encodeRejectsNegativePayload() {
+        assertThrows(IllegalArgumentException::class.java) {
+            header().encode(-1)
+        }
+    }
+
+    private fun header() = MediaHeader(
+        flags = FLAGS,
+        sessionId = SESSION_ID,
+        streamId = STREAM_ID,
+        sequence = SEQUENCE,
+        sampleTimestamp = SAMPLE_TIMESTAMP,
+        keyEpoch = KEY_EPOCH,
+    )
 
     private companion object {
         private fun hex(value: String): ByteArray {
@@ -68,10 +73,7 @@ class MediaHeaderVectorTest {
             }
         }
 
-        const val MEDIA_MAGIC = 0x534E4D53
-        const val MEDIA_VERSION: Byte = 1
         const val FLAGS: Byte = 0
-        const val MEDIA_HEADER_LEN = 36
         const val SESSION_ID = 0x0102030405060708L
         const val STREAM_ID = 9
         const val SEQUENCE = 7
