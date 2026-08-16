@@ -54,5 +54,6 @@ pub use realtime_queue::{
     RealtimePcmPushOutcome, RealtimeQueueConfigError, realtime_pcm_queue,
 };
 pub use resampler::{
-    LinearResampler, MAX_RESAMPLE_RATE_HZ, MIN_RESAMPLE_RATE_HZ, ResampleOutcome, ResamplerError,
+    LinearResampler, MAX_RESAMPLE_RATE_HZ, MIN_RESAMPLE_RATE_HZ, PolyphaseResampler,
+    ResampleOutcome, ResamplerError,
 };
