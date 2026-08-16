@@ -489,7 +489,11 @@ Recovery policy:
 
 Opus LBRR/in-band FEC belongs to the SILK layer and primarily targets active
 speech. The proposed high-bitrate stereo media configuration may operate mainly
-in CELT mode, so FEC benefit must be demonstrated rather than assumed.
+in CELT mode, so FEC benefit must be demonstrated rather than assumed. A
+deterministic content-class record (see the [in-band FEC content-class
+record](./measurements/2026-08-16-windows-opus-inband-fec.md)) demonstrates a
++6.0 dB speech-like gain but no benefit for tone or music-like content; FEC
+stays disabled pending a reviewed configuration and loss/CPU/power tradeoff.
 
 Android and the output device have independent clocks. Drift compensation must
 use a slow occupancy/error controller, bounded ratio changes, anti-windup, and a
@@ -688,6 +692,11 @@ Open questions must be answered by evidence, not assumptions:
 - Which Android OEMs preserve capture and foreground-service behavior while locked?
 - What jitter-buffer target survives representative home WLANs?
 - Does the selected Opus configuration produce usable FEC for music and games?
+  Codec-level evidence on 20 ms speech-like content shows +6.0 dB FEC gain
+  over PLC, while a tone and a multi-harmonic music-like profile show no
+  benefit (FEC equals PLC at 33.1 dB and 2.4 dB); game-content mixes and the
+  latency/CPU/power policy decision remain open (see the [in-band FEC
+  content-class record](./measurements/2026-08-16-windows-opus-inband-fec.md)).
 - Can CPAL meet the Windows output budget, or is a Windows-specific backend required?
 - What Android 17 discovery/permission path gives the best user experience?
 
