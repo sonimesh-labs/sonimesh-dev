@@ -184,8 +184,9 @@ media-key and media-header verifiers re-read the Rust pins in
 additionally re-read their Kotlin counterparts:
 `PairingTlsBindingVectorTest`, `ControlFrameVectorTest`, `MediaCryptoVectorTest`,
 `MediaHeaderVectorTest` (whose header is encoded through the JVM `MediaHeader`
-mirror), `MediaKeyVectorTest`, and, for negotiation, the `HelloNegotiation`
-mirror with `HelloNegotiationVectorTest`. Each pinned value
+mirror), `MediaKeyVectorTest` (derived through the JVM `MediaKey` mirror), and,
+for negotiation, the `HelloNegotiation` mirror with `HelloNegotiationVectorTest`.
+Each pinned value
 must match the independent recomputation, so the documentation, the Rust and
 Kotlin pins, and the Python verifier cannot drift apart.
 Each script runs a `--self-test` mode and a check mode in CI; a schema
