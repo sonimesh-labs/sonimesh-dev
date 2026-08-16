@@ -942,3 +942,739 @@ mod snapshot_tests {
         assert_eq!(regressed.reconnect_remaining_ms(), None);
     }
 }
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use sonimesh_protocol::{
+        CONTROL_PROTOCOL_VERSION, Capability, ControlFrameError, Envelope, Hello, StartStream,
+        StopStream, StreamState, StreamStatus, envelope,
+    };
+
+    use super::{
+        ControlStreamCoordinator, ControlStreamError, MAX_ACTIVE_STREAMS, MediaStreamIdentity,
+        StreamStartRequest,
+    };
+    use crate::{ControlSessionToken, ControlStreamAction, SessionEvent, SessionState};
+
+    fn coordinator() -> ControlStreamCoordinator {
+        ControlStreamCoordinator::new(
+            SessionState::READY,
+            &[Capability::FrameDuration10Ms, Capability::FrameDuration20Ms],
+        )
+        .expect("fixed test coordinator is valid")
+    }
+
+    fn identity(stream_id: u32) -> MediaStreamIdentity {
+        MediaStreamIdentity {
+            session_id: 0x0102_0304,
+            stream_id,
+            key_epoch: 0,
+        }
+    }
+
+    fn request(identity: MediaStreamIdentity) -> StreamStartRequest {
+        StreamStartRequest {
+            identity,
+            sample_rate_hz: 48_000,
+            channels: 1,
+            frame_duration_ms: 10,
+        }
+    }
+
+    fn frame_capabilities() -> Vec<i32> {
+        vec![
+            Capability::FrameDuration10Ms as i32,
+            Capability::FrameDuration20Ms as i32,
+        ]
+    }
+
+    fn hello(versions: Vec<u32>, capabilities: Vec<i32>) -> Envelope {
+        Envelope {
+            protocol_version: CONTROL_PROTOCOL_VERSION,
+            request_id: 7,
+            payload: Some(envelope::Payload::Hello(Hello {
+                supported_versions: versions,
+                capabilities,
+                display_name: "test sender".to_owned(),
+            })),
+        }
+    }
+
+    fn start_envelope(request: StreamStartRequest) -> Envelope {
+        Envelope {
+            protocol_version: CONTROL_PROTOCOL_VERSION,
+            request_id: 11,
+            payload: Some(envelope::Payload::StartStream(StartStream {
+                media_session_id: request.identity.session_id,
+                stream_id: request.identity.stream_id,
+                sample_rate_hz: request.sample_rate_hz,
+                channels: request.channels,
+                frame_duration_ms: request.frame_duration_ms,
+                media_key_epoch: u32::from(request.identity.key_epoch),
+            })),
+        }
+    }
+
+    fn stop_envelope(identity: MediaStreamIdentity) -> Envelope {
+        Envelope {
+            protocol_version: CONTROL_PROTOCOL_VERSION,
+            request_id: 12,
+            payload: Some(envelope::Payload::StopStream(StopStream {
+                media_session_id: identity.session_id,
+                stream_id: identity.stream_id,
+                media_key_epoch: u32::from(identity.key_epoch),
+            })),
+        }
+    }
+
+    fn status_envelope(media_session_id: u64, stream_id: u32) -> Envelope {
+        Envelope {
+            protocol_version: CONTROL_PROTOCOL_VERSION,
+            request_id: 13,
+            payload: Some(envelope::Payload::StreamStatus(StreamStatus {
+                media_session_id,
+                stream_id,
+                state: StreamState::Ready as i32,
+                detail: String::new(),
+            })),
+        }
+    }
+
+    fn negotiate(coordinator: &mut ControlStreamCoordinator) -> ControlSessionToken {
+        let session = coordinator.install_authenticated_control_session().unwrap();
+        match coordinator.accept(
+            session,
+            &hello(vec![CONTROL_PROTOCOL_VERSION], frame_capabilities()),
+        ) {
+            Ok(ControlStreamAction::Negotiated(_)) => session,
+            other => panic!("expected negotiation, got {other:?}"),
+        }
+    }
+
+    fn start_stream(
+        coordinator: &mut ControlStreamCoordinator,
+        session: ControlSessionToken,
+        identity: MediaStreamIdentity,
+    ) {
+        let request = request(identity);
+        match coordinator.accept(session, &start_envelope(request)) {
+            Ok(ControlStreamAction::Start { token, request }) => {
+                coordinator.complete_start(token, request).unwrap();
+            }
+            other => panic!("expected a start action, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn install_requires_ready_and_only_once() {
+        let mut idle = ControlStreamCoordinator::new(
+            SessionState::default(),
+            &[Capability::FrameDuration10Ms],
+        )
+        .unwrap();
+        assert!(matches!(
+            idle.install_authenticated_control_session(),
+            Err(ControlStreamError::ControlSessionRequiresReady(state))
+                if state == SessionState::default()
+        ));
+
+        let mut ready = coordinator();
+        assert!(ready.install_authenticated_control_session().is_ok());
+        assert!(matches!(
+            ready.install_authenticated_control_session(),
+            Err(ControlStreamError::ControlSessionAlreadyInstalled)
+        ));
+    }
+
+    #[test]
+    fn accept_rejects_a_foreign_session_token_before_validation() {
+        let mut first = coordinator();
+        let first_token = first.install_authenticated_control_session().unwrap();
+        let mut second = coordinator();
+        let second_token = second.install_authenticated_control_session().unwrap();
+
+        let missing_payload = Envelope {
+            protocol_version: CONTROL_PROTOCOL_VERSION,
+            request_id: 99,
+            payload: None,
+        };
+        // The stale transport check runs before envelope validation, so even a
+        // malformed envelope cannot be attributed to a foreign session.
+        assert!(matches!(
+            first.accept(second_token, &missing_payload),
+            Err(ControlStreamError::StaleControlSession)
+        ));
+        assert!(matches!(
+            first.accept(first_token, &missing_payload),
+            Err(ControlStreamError::Protocol(
+                ControlFrameError::MissingPayload
+            ))
+        ));
+    }
+
+    #[test]
+    fn hello_negotiates_the_common_capability_set() {
+        let mut coordinator = coordinator();
+        let session = negotiate(&mut coordinator);
+
+        let negotiated = coordinator.negotiation().unwrap();
+        assert_eq!(negotiated.version(), CONTROL_PROTOCOL_VERSION);
+        assert!(negotiated.supports(Capability::FrameDuration10Ms));
+        assert!(negotiated.supports(Capability::FrameDuration20Ms));
+
+        assert!(matches!(
+            coordinator.accept(
+                session,
+                &hello(vec![CONTROL_PROTOCOL_VERSION], frame_capabilities())
+            ),
+            Err(ControlStreamError::Renegotiation)
+        ));
+    }
+
+    #[test]
+    fn hello_without_a_common_protocol_version_is_rejected() {
+        let mut coordinator = coordinator();
+        let session = coordinator.install_authenticated_control_session().unwrap();
+
+        assert!(matches!(
+            coordinator.accept(session, &hello(vec![2], frame_capabilities())),
+            Err(ControlStreamError::Negotiation(
+                sonimesh_protocol::ControlNegotiationError::NoCommonProtocolVersion
+            ))
+        ));
+    }
+
+    #[test]
+    fn hello_with_unknown_capabilities_negotiates_an_empty_set() {
+        let mut coordinator = coordinator();
+        let session = coordinator.install_authenticated_control_session().unwrap();
+
+        assert!(matches!(
+            coordinator.accept(session, &hello(vec![CONTROL_PROTOCOL_VERSION], vec![999])),
+            Ok(ControlStreamAction::Negotiated(negotiated))
+                if negotiated.capabilities().is_empty()
+        ));
+        assert!(matches!(
+            coordinator.accept(session, &start_envelope(request(identity(1)))),
+            Err(ControlStreamError::UnsupportedFrameDuration(10))
+        ));
+    }
+
+    #[test]
+    fn oversized_hello_capability_set_is_rejected_by_envelope_validation() {
+        let mut coordinator = coordinator();
+        let session = coordinator.install_authenticated_control_session().unwrap();
+
+        let oversized = hello(
+            vec![CONTROL_PROTOCOL_VERSION],
+            vec![Capability::ManualAddress as i32; 17],
+        );
+        assert!(matches!(
+            coordinator.accept(session, &oversized),
+            Err(ControlStreamError::Protocol(
+                ControlFrameError::TooManyCapabilities
+            ))
+        ));
+    }
+
+    #[test]
+    fn start_and_stop_require_a_negotiated_hello() {
+        let mut coordinator = coordinator();
+        let session = coordinator.install_authenticated_control_session().unwrap();
+
+        assert!(matches!(
+            coordinator.accept(session, &start_envelope(request(identity(1)))),
+            Err(ControlStreamError::MissingNegotiation)
+        ));
+        assert!(matches!(
+            coordinator.accept(session, &stop_envelope(identity(1))),
+            Err(ControlStreamError::MissingNegotiation)
+        ));
+    }
+
+    #[test]
+    fn start_requires_a_negotiated_frame_duration() {
+        let mut coordinator =
+            ControlStreamCoordinator::new(SessionState::READY, &[Capability::FrameDuration20Ms])
+                .unwrap();
+        let session = coordinator.install_authenticated_control_session().unwrap();
+        assert!(matches!(
+            coordinator.accept(session, &hello(vec![CONTROL_PROTOCOL_VERSION], vec![2])),
+            Ok(ControlStreamAction::Negotiated(_))
+        ));
+
+        assert!(matches!(
+            coordinator.accept(session, &start_envelope(request(identity(1)))),
+            Err(ControlStreamError::UnsupportedFrameDuration(10))
+        ));
+    }
+
+    #[test]
+    fn start_prepares_a_tokenized_action_and_completes_into_streaming() {
+        let mut coordinator = coordinator();
+        let session = negotiate(&mut coordinator);
+        let request = request(identity(1));
+
+        let ControlStreamAction::Start { token, request } = coordinator
+            .accept(session, &start_envelope(request))
+            .unwrap()
+        else {
+            panic!("expected a start action");
+        };
+        // The action is prepared but the lifecycle does not move until the
+        // platform owner acknowledges completion.
+        assert_eq!(coordinator.state().phase(), crate::SessionPhase::Ready);
+
+        coordinator.complete_start(token, request).unwrap();
+        assert_eq!(coordinator.state().phase(), crate::SessionPhase::Streaming);
+        assert_eq!(coordinator.stream_count(), 1);
+        assert_eq!(coordinator.active(), Some(identity(1)));
+    }
+
+    #[test]
+    fn pending_start_conflicts_are_fail_closed() {
+        let mut coordinator = coordinator();
+        let session = negotiate(&mut coordinator);
+        let first = request(identity(1));
+
+        let ControlStreamAction::Start { .. } =
+            coordinator.accept(session, &start_envelope(first)).unwrap()
+        else {
+            panic!("expected a start action");
+        };
+
+        // An identical pending command is a no-op, a conflicting configuration
+        // for the same identity is rejected, and an unrelated identity cannot
+        // jump ahead of the pending operation.
+        assert!(matches!(
+            coordinator.accept(session, &start_envelope(first)),
+            Ok(ControlStreamAction::Noop)
+        ));
+        let mut conflicting = first;
+        conflicting.channels = 2;
+        assert!(matches!(
+            coordinator.accept(session, &start_envelope(conflicting)),
+            Err(ControlStreamError::StreamConfigurationConflict)
+        ));
+        assert!(matches!(
+            coordinator.accept(session, &start_envelope(request(identity(2)))),
+            Err(ControlStreamError::PendingChange)
+        ));
+    }
+
+    #[test]
+    fn completion_mismatch_never_commits() {
+        let mut coordinator = coordinator();
+        let session = negotiate(&mut coordinator);
+        let first = request(identity(1));
+        let second = request(identity(2));
+
+        let ControlStreamAction::Start {
+            token: first_token,
+            request: first,
+        } = coordinator.accept(session, &start_envelope(first)).unwrap()
+        else {
+            panic!("expected a start action");
+        };
+        coordinator.complete_start(first_token, first).unwrap();
+
+        let ControlStreamAction::Start {
+            token: second_token,
+            request: second,
+        } = coordinator
+            .accept(session, &start_envelope(second))
+            .unwrap()
+        else {
+            panic!("expected a start action");
+        };
+        // A consumed token cannot complete a different pending operation.
+        assert!(matches!(
+            coordinator.complete_start(first_token, second),
+            Err(ControlStreamError::CompletionMismatch)
+        ));
+        assert_eq!(coordinator.stream_count(), 1);
+        coordinator.complete_start(second_token, second).unwrap();
+        assert_eq!(coordinator.stream_count(), 2);
+        // A consumed token cannot abort a later completed operation either.
+        assert!(matches!(
+            coordinator.abort_pending(second_token),
+            Err(ControlStreamError::CompletionMismatch)
+        ));
+    }
+
+    #[test]
+    fn abort_pending_clears_only_the_matching_operation() {
+        let mut coordinator = coordinator();
+        let session = negotiate(&mut coordinator);
+        let request = request(identity(1));
+
+        let ControlStreamAction::Start { token, request } = coordinator
+            .accept(session, &start_envelope(request))
+            .unwrap()
+        else {
+            panic!("expected a start action");
+        };
+        coordinator.abort_pending(token).unwrap();
+        // A cleared pending operation cannot be aborted twice, and a fresh
+        // command for the same identity is admitted again.
+        assert!(matches!(
+            coordinator.abort_pending(token),
+            Err(ControlStreamError::CompletionMismatch)
+        ));
+        assert!(matches!(
+            coordinator.accept(session, &start_envelope(request)),
+            Ok(ControlStreamAction::Start { .. })
+        ));
+    }
+
+    #[test]
+    fn active_stream_limit_fails_closed_at_the_slot_bound() {
+        let mut coordinator = coordinator();
+        let session = negotiate(&mut coordinator);
+
+        let slot_bound = u32::try_from(MAX_ACTIVE_STREAMS).expect("slot bound fits in u32");
+        for stream_id in 1..=slot_bound {
+            start_stream(&mut coordinator, session, identity(stream_id));
+        }
+        assert_eq!(coordinator.stream_count(), MAX_ACTIVE_STREAMS);
+        assert!(matches!(
+            coordinator.accept(session, &start_envelope(request(identity(9)))),
+            Err(ControlStreamError::ActiveStreamLimit)
+        ));
+    }
+
+    #[test]
+    fn stop_commits_and_returns_to_ready_on_the_last_stream() {
+        let mut coordinator = coordinator();
+        let session = negotiate(&mut coordinator);
+        start_stream(&mut coordinator, session, identity(1));
+        start_stream(&mut coordinator, session, identity(2));
+
+        let stop = coordinator
+            .accept(session, &stop_envelope(identity(1)))
+            .unwrap();
+        let ControlStreamAction::Stop {
+            token,
+            identity: stopped_identity,
+        } = stop
+        else {
+            panic!("expected a stop action, got {stop:?}");
+        };
+        coordinator.complete_stop(token, stopped_identity).unwrap();
+        assert_eq!(coordinator.state().phase(), crate::SessionPhase::Streaming);
+        assert_eq!(coordinator.stream_count(), 1);
+
+        let stop = coordinator
+            .accept(session, &stop_envelope(identity(2)))
+            .unwrap();
+        let ControlStreamAction::Stop {
+            token,
+            identity: stopped_identity,
+        } = stop
+        else {
+            panic!("expected a stop action, got {stop:?}");
+        };
+        coordinator.complete_stop(token, stopped_identity).unwrap();
+        assert_eq!(coordinator.state().phase(), crate::SessionPhase::Ready);
+        assert_eq!(coordinator.stream_count(), 0);
+    }
+
+    #[test]
+    fn stop_of_an_unknown_identity_is_a_noop() {
+        let mut coordinator = coordinator();
+        let session = negotiate(&mut coordinator);
+
+        assert!(matches!(
+            coordinator.accept(session, &stop_envelope(identity(9))),
+            Ok(ControlStreamAction::Noop)
+        ));
+    }
+
+    #[test]
+    fn rotation_replaces_the_identity_in_place_and_rejects_stale_epochs() {
+        let mut coordinator = coordinator();
+        let session = negotiate(&mut coordinator);
+        let first = request(identity(1));
+        let ControlStreamAction::Start {
+            token,
+            request: first_request,
+        } = coordinator.accept(session, &start_envelope(first)).unwrap()
+        else {
+            panic!("expected a start action");
+        };
+        coordinator.complete_start(token, first_request).unwrap();
+
+        let mut rotated = request(identity(1));
+        rotated.identity.key_epoch = 1;
+        let ControlStreamAction::Rotate {
+            token,
+            previous,
+            next,
+        } = coordinator
+            .accept(session, &start_envelope(rotated))
+            .unwrap()
+        else {
+            panic!("expected a rotate action");
+        };
+        assert_eq!(previous, identity(1));
+        coordinator
+            .complete_rotation(token, previous, next)
+            .unwrap();
+        assert_eq!(coordinator.stream_count(), 1);
+        assert_eq!(coordinator.active(), Some(next.identity));
+
+        // The rotated identity is now current: an identical command is a no-op
+        // and an older epoch is rejected as stale.
+        assert!(matches!(
+            coordinator.accept(session, &start_envelope(request(next.identity))),
+            Ok(ControlStreamAction::Noop)
+        ));
+        assert!(matches!(
+            coordinator.accept(session, &start_envelope(request(identity(1)))),
+            Err(ControlStreamError::StaleEpoch {
+                active: 1,
+                requested: 0
+            })
+        ));
+    }
+
+    #[test]
+    fn complete_rotation_with_a_stale_token_fails_closed() {
+        let mut coordinator = coordinator();
+        let session = negotiate(&mut coordinator);
+        let first = request(identity(1));
+        let ControlStreamAction::Start {
+            token: start_token,
+            request: first_request,
+        } = coordinator.accept(session, &start_envelope(first)).unwrap()
+        else {
+            panic!("expected a start action");
+        };
+        coordinator
+            .complete_start(start_token, first_request)
+            .unwrap();
+
+        let mut rotated = request(identity(1));
+        rotated.identity.key_epoch = 1;
+        let ControlStreamAction::Rotate {
+            token: rotate_token,
+            previous,
+            next,
+        } = coordinator
+            .accept(session, &start_envelope(rotated))
+            .unwrap()
+        else {
+            panic!("expected a rotate action");
+        };
+
+        assert!(matches!(
+            coordinator.complete_rotation(start_token, previous, next),
+            Err(ControlStreamError::CompletionMismatch)
+        ));
+        // The pending rotation survives a rejected completion, so the matching
+        // token still commits it.
+        coordinator
+            .complete_rotation(rotate_token, previous, next)
+            .unwrap();
+        assert_eq!(coordinator.active(), Some(next.identity));
+    }
+
+    #[test]
+    fn output_lost_clears_pending_and_blocks_late_commits() {
+        let mut coordinator = coordinator();
+        let session = negotiate(&mut coordinator);
+        start_stream(&mut coordinator, session, identity(1));
+
+        let second = request(identity(2));
+        let ControlStreamAction::Start {
+            token,
+            request: second_request,
+        } = coordinator
+            .accept(session, &start_envelope(second))
+            .unwrap()
+        else {
+            panic!("expected a start action");
+        };
+        coordinator
+            .acknowledge_platform_event(SessionEvent::OutputLost)
+            .unwrap();
+        assert_eq!(
+            coordinator.state().phase(),
+            crate::SessionPhase::OutputUnavailable
+        );
+
+        assert!(matches!(
+            coordinator.complete_start(token, second_request),
+            Err(ControlStreamError::CompletionMismatch)
+        ));
+        assert!(matches!(
+            coordinator.accept(session, &start_envelope(request(identity(3)))),
+            Err(ControlStreamError::StartRequiresStreaming(
+                SessionState::OUTPUT_UNAVAILABLE
+            ))
+        ));
+    }
+
+    #[test]
+    fn output_restored_returns_to_streaming_without_dropping_active_streams() {
+        let mut coordinator = coordinator();
+        let session = negotiate(&mut coordinator);
+        start_stream(&mut coordinator, session, identity(1));
+
+        coordinator
+            .acknowledge_platform_event(SessionEvent::OutputLost)
+            .unwrap();
+        coordinator
+            .acknowledge_platform_event(SessionEvent::OutputRestored)
+            .unwrap();
+        assert_eq!(coordinator.state().phase(), crate::SessionPhase::Streaming);
+        assert_eq!(coordinator.stream_count(), 1);
+        assert_eq!(coordinator.active(), Some(identity(1)));
+    }
+
+    #[test]
+    fn output_lost_from_ready_is_an_invalid_transition() {
+        let mut coordinator = coordinator();
+        let session = negotiate(&mut coordinator);
+        let _ = session;
+
+        assert!(matches!(
+            coordinator.acknowledge_platform_event(SessionEvent::OutputLost),
+            Err(ControlStreamError::Transition(_))
+        ));
+        assert_eq!(coordinator.state().phase(), crate::SessionPhase::Ready);
+    }
+
+    #[test]
+    fn connection_lost_retires_the_transport_and_pending_work() {
+        let mut coordinator = coordinator();
+        let session = negotiate(&mut coordinator);
+        start_stream(&mut coordinator, session, identity(1));
+
+        let second = request(identity(2));
+        let ControlStreamAction::Start { token, request } = coordinator
+            .accept(session, &start_envelope(second))
+            .unwrap()
+        else {
+            panic!("expected a start action");
+        };
+        coordinator
+            .acknowledge_platform_event(SessionEvent::ConnectionLost)
+            .unwrap();
+        assert_eq!(
+            coordinator.state().phase(),
+            crate::SessionPhase::Reconnecting
+        );
+
+        // The lost transport invalidates the pending operation and the session
+        // token; negotiation survives until a reconnect replaces it.
+        assert!(matches!(
+            coordinator.complete_start(token, request),
+            Err(ControlStreamError::CompletionMismatch)
+        ));
+        assert!(matches!(
+            coordinator.accept(
+                session,
+                &hello(vec![CONTROL_PROTOCOL_VERSION], frame_capabilities())
+            ),
+            Err(ControlStreamError::StaleControlSession)
+        ));
+        // A fresh transport cannot be installed until the lifecycle returns to
+        // Ready; a reconnecting session still rejects it.
+        assert!(matches!(
+            coordinator.install_authenticated_control_session(),
+            Err(ControlStreamError::ControlSessionRequiresReady(
+                SessionState::RECONNECTING
+            ))
+        ));
+
+        // Reconnecting with fresh material retires the old negotiation, so a
+        // reinstalled transport can negotiate a new capability set.
+        coordinator
+            .acknowledge_platform_event(SessionEvent::Reconnected)
+            .unwrap();
+        let fresh = coordinator.install_authenticated_control_session().unwrap();
+        assert!(matches!(
+            coordinator.accept(
+                fresh,
+                &hello(vec![CONTROL_PROTOCOL_VERSION], frame_capabilities())
+            ),
+            Ok(ControlStreamAction::Negotiated(_))
+        ));
+    }
+
+    #[test]
+    fn reconnected_clears_streams_and_allows_a_fresh_negotiation() {
+        let mut coordinator = coordinator();
+        let session = negotiate(&mut coordinator);
+        start_stream(&mut coordinator, session, identity(1));
+        coordinator
+            .acknowledge_platform_event(SessionEvent::ConnectionLost)
+            .unwrap();
+        coordinator
+            .acknowledge_platform_event(SessionEvent::Reconnected)
+            .unwrap();
+
+        assert_eq!(coordinator.state().phase(), crate::SessionPhase::Ready);
+        assert_eq!(coordinator.stream_count(), 0);
+        assert!(coordinator.negotiation().is_none());
+
+        let fresh = negotiate(&mut coordinator);
+        start_stream(&mut coordinator, fresh, identity(3));
+        assert_eq!(coordinator.state().phase(), crate::SessionPhase::Streaming);
+    }
+
+    #[test]
+    fn unsupported_lifecycle_events_are_rejected() {
+        let mut coordinator = coordinator();
+        for event in [
+            SessionEvent::StartPairing,
+            SessionEvent::StartStream,
+            SessionEvent::StopStream,
+            SessionEvent::SessionExpired,
+        ] {
+            assert!(matches!(
+                coordinator.acknowledge_platform_event(event),
+                Err(ControlStreamError::UnsupportedLifecycleEvent(found))
+                    if found == event
+            ));
+        }
+        assert_eq!(coordinator.state().phase(), crate::SessionPhase::Ready);
+    }
+
+    #[test]
+    fn expire_control_session_retires_every_session_owned_value() {
+        let mut coordinator = coordinator();
+        let session = negotiate(&mut coordinator);
+        start_stream(&mut coordinator, session, identity(1));
+
+        coordinator.expire_control_session();
+        assert_eq!(coordinator.state().phase(), crate::SessionPhase::Idle);
+        assert_eq!(coordinator.stream_count(), 0);
+        assert!(coordinator.negotiation().is_none());
+        assert!(matches!(
+            coordinator.accept(
+                session,
+                &hello(vec![CONTROL_PROTOCOL_VERSION], frame_capabilities())
+            ),
+            Err(ControlStreamError::StaleControlSession)
+        ));
+    }
+
+    #[test]
+    fn stream_status_payloads_are_ignored_after_validation() {
+        let mut coordinator = coordinator();
+        let session = negotiate(&mut coordinator);
+
+        assert!(matches!(
+            coordinator.accept(session, &status_envelope(1, 1)),
+            Ok(ControlStreamAction::Ignored)
+        ));
+        assert!(matches!(
+            coordinator.accept(session, &status_envelope(0, 1)),
+            Err(ControlStreamError::Protocol(
+                ControlFrameError::InvalidStreamStatusIdentity
+            ))
+        ));
+    }
+}
