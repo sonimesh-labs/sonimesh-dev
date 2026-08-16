@@ -8,6 +8,9 @@
 > The binding is still not enabled; Android ABI, measured CPU-time
 > utilization, allocation-profile and power, sustained coverage-guided
 > fuzzing, and CI reproducibility evidence remain pending.
+> Dependency pins (crate checksums) and license texts are recorded in the
+> build record; artifact hashes are recorded per build instance but are not
+> yet bit-reproducible across fresh CMake rebuilds on this host.
 
 This document turns the acceptance conditions in ADR 0009 into reproducible evidence. A passing Rust-only decoder mock, a dependency resolution, or a successful Windows build alone is insufficient to select a codec binding or media policy.
 
@@ -18,7 +21,7 @@ This document turns the acceptance conditions in ADR 0009 into reproducible evid
 | Windows build tools | On 2026-07-20 `cmake`, `ninja`, and `cl.exe` were absent from PATH; on 2026-08-16 Visual Studio 18 Community provided CMake `4.2.3-msvc3` and MSVC `14.50` (CMake not on PATH by default; Ninja availability not recorded) | The reference host can now build bundled libopus with the documented `CMAKE_POLICY_VERSION_MINIMUM=3.5` workaround; see the 2026-08-16 build record. |
 | Rust Windows host | Rust 1.85.0 `x86_64-pc-windows-msvc` is installed; it is the only installed Rust target | A Windows-native build still also needs the C/C++ toolchain required by libopus. Android cross-targets are not installed. |
 | Reviewed installed libopus | No workspace dependency, Cargo cache entry, Gradle cache entry, or reviewed installed library was found | Do not use an ambient library path or add an unreviewed prebuilt binary. |
-| Candidate binding metadata | `cargo info opus@0.3.1` reports `opus` 0.3.1, MIT/Apache-2.0, repository `SpaceManiac/opus-rs` | Candidate metadata only; it does not establish a libopus source revision, native build path, or libopus license evidence. |
+| Candidate binding metadata | `cargo info opus@0.3.1` reports `opus` 0.3.1, MIT/Apache-2.0, repository `SpaceManiac/opus-rs` | Candidate metadata; crate checksums, license texts, and per-instance artifact hashes are recorded in the 2026-08-16 build record; the libopus source revision is pinned by the `audiopus_sys` crate checksum, and a reproducible artifact hash remains open. |
 | Android SDK NDK directory | Android SDK exists at the local SDK root, but contains no `ndk` directory | Android ABI work is blocked until a pinned NDK is installed and its package/path are recorded. |
 | Rust decode boundary | sonimesh-audio FrameDecoder exists with caller-owned Float32 output and PLC/reset operations | Stable boundary is ready; no native implementation is selected. |
 
@@ -28,7 +31,7 @@ All rows must be recorded before enabling any optional codec feature.
 
 | Target | Required evidence | Result |
 | --- | --- | --- |
-| Windows x86_64 MSVC | Pinned Rust crate/version, libopus source/version, CMake invocation, MSVC toolset, linkage decision, artifact hash, and license texts | Partially passed on the reference host (2026-08-16): `opus` 0.3.1 / `audiopus_sys` 0.2.2 built with CMake 4.2.3-msvc3 + MSVC 14.50; artifact hash and license texts not yet recorded; CI reproducibility pending |
+| Windows x86_64 MSVC | Pinned Rust crate/version, libopus source/version, CMake invocation, MSVC toolset, linkage decision, artifact hash, and license texts | Partially passed on the reference host (2026-08-16): `opus` 0.3.1 / `audiopus_sys` 0.2.2 built with CMake 4.2.3-msvc3 + MSVC 14.50; crate checksums and license texts recorded in the build record; artifact hashes recorded per build instance but not bit-reproducible across fresh CMake rebuilds on this host; CI reproducibility pending |
 | Android arm64-v8a | NDK version, ABI build command, packaged native library inspection, and a device load test | Blocked: NDK not present |
 | Android x86_64 | Same evidence as arm64-v8a for emulator/CI coverage | Blocked: NDK not present |
 | Rust CI | Fresh Windows build plus workspace Clippy/tests with the codec feature enabled | Wired into CI (Windows probe step plus workspace clippy/test compile the member); CI execution not yet observed |

@@ -272,6 +272,69 @@ concealment per missing frame on both shapes. The earlier full-block PLC for
 the 10 ms shape is gone; a production 10 ms stream should size its block to
 960 samples.
 
+## Dependency and artifact provenance
+
+Recorded on the reference host on 2026-08-16 so the native build can be
+reproduced and reviewed. The crate pins come from the workspace
+`Cargo.lock`; the license texts are the files shipped inside the pinned
+crates.io sources; the artifact hashes are SHA-256 of the files produced by
+the release build described above.
+
+### Pinned dependency checksums
+
+| Dependency | Version | Cargo.lock checksum |
+| --- | --- | --- |
+| `opus` | 0.3.1 | `4d3809943dff6fbad5f0484449ea26bdb9cb7d8efdf26ed50d3c7f227f69eb5c` |
+| `audiopus_sys` | 0.2.2 | `62314a1546a2064e033665d658e88c620a62904be945f8147e6b16c3db9f8651` |
+| `cmake` (build) | 0.1.58 | `c0f78a02292a74a88ac736019ab962ece0bc380e3f977bf72e376c5d78ff0678` |
+| `cc` | 1.3.0 | `c89588d05638b5b4594a3348a2d6c20277e43a7f5c5202b05cc56888475a47b8` |
+| `libc` | 0.2.186 | `68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66` |
+
+### License provenance
+
+| Component | License | Source file in the pinned crate |
+| --- | --- | --- |
+| `opus` crate | MIT OR Apache-2.0 | `LICENSE-MIT` (1,057 B), `LICENSE-APACHE` (10,847 B) |
+| `audiopus_sys` crate | ISC | `LICENSE.md` (740 B) |
+| Vendored libopus snapshot | BSD-3-Clause | `opus/COPYING` (1,928 B) inside `audiopus_sys` |
+
+The vendored libopus tree has no `package_version` file and no `.git`
+metadata, so CMake falls back and records `CMAKE_PROJECT_VERSION=0` in the
+release CMake cache. The exact upstream libopus tag is therefore pinned only
+by the `audiopus_sys` 0.2.2 crate checksum above; identifying the upstream
+release would require comparing the vendored tree against
+`opus/releases.sha2` or the audiopus_sys repository history, and that
+comparison is not part of this record.
+
+### Linkage decision
+
+`audiopus_sys` links statically on Windows by default
+(`default_library_linking` returns static for Windows), no
+`LIBOPUS_LIB_DIR` or `OPUS_LIB_DIR` override is set, and the build uses the
+bundled `opus/` source through `cmake::build` with
+`CMAKE_POLICY_VERSION_MINIMUM=3.5`. No ambient or pre-installed libopus path
+is used; the release CMake cache records the policy override.
+
+### Artifact hashes (release build)
+
+| Artifact | First 2026-08-16 build | Fresh clean rebuild (2026-08-16) | Bytes |
+| --- | --- | --- | --- |
+| Static `opus.lib` under `target/release/build/audiopus_sys-514e8c93d00e7be0/out/lib/` | `D4B1157F5415399BA41FDBBA0F5EB572364E08B77193A76026259E1159B8F959` | `79755BAD779844F525DE4A4C64A3B4277A6ED0DC323CD956E6ABE8BE7E47AF9E` | 978,948 |
+| Probe binary `target/release/opus-codec-prototype.exe` | `1869537D9C338612EB002E4E17688688915BCA4279120FC681D385B1BAC16A88` | `1341293ADAB30E0CEF2D884B76CD96B059DB6820D1144EBD369B5B81113D9D06` | 1,028,608 |
+
+The static `opus.lib` artifact is not bit-reproducible across fresh CMake
+rebuilds on this host: the first 2026-08-16 build and a clean rebuild with
+the same environment (same build-dir suffix `514e8c93`, same 978,948-byte
+size, same `CMAKE_POLICY_VERSION_MINIMUM=3.5`) produced different SHA-256
+values, and the probe executable differs between builds as well (PE
+metadata). Both fresh-build hashes are recorded so a specific instance can
+be identified, but the reproducibility gate remains open: a deterministic
+native build (for example fixed timestamps or `/Brepro`-style flags) and CI
+reproducibility are still required before the Windows native build row can
+be closed. The fresh-rebuild binary passed every probe cell
+(`opus_native_build: ok`), so the hash variance is a build-determinism gap,
+not a functional one.
+
 ## Remaining ADR 0009 gates
 
 - reproducible native build on the Android ABIs (`arm64-v8a`, `x86_64`) with
