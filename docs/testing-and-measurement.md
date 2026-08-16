@@ -167,18 +167,20 @@ Independent cross-language vector verifiers in `tools/` recompute the published
 Rust vectors from the documented labels, constants, and byte layouts using only
 the Python standard library: `check_pairing_vectors.py` (HMAC/HKDF-SHA256
 pairing proofs and media root), `check_media_key_vectors.py` (media key
-derivation and the 96-bit nonce layout), `check_control_frame_vectors.py`
-(Protobuf wire encoding of all five control payloads),
+derivation and the 96-bit nonce layout for both directions),
+`check_control_frame_vectors.py` (Protobuf wire encoding of all five control
+payloads),
 `check_media_header_vectors.py` (the fixed 36-byte media header), and
 `check_media_crypto_vectors.py` (RFC 8439 ChaCha20-Poly1305 AEAD packet
-sealing for both published vectors: derived media key, nonce, authenticated
-header, ciphertext, and tag). The pairing, control-frame, and media-crypto
-verifiers also re-read the values pinned in the vector docs and the Rust
-pins (`src/pairing_binding.rs`, `tests/control_frame.rs`, and
-`tests/media_crypto.rs`); the control-frame and media-crypto verifiers
-additionally re-read the Kotlin `ControlFrameVectorTest` and
-`MediaCryptoVectorTest`. Each pinned value must match the independent
-recomputation, so the documentation, the Rust and Kotlin pins, and the
+sealing for the three published vectors: derived media key, nonce,
+authenticated header, ciphertext, and tag). The pairing, control-frame, and
+media-crypto verifiers also re-read the values pinned in the vector docs and
+the Rust pins (`src/pairing_binding.rs`, `tests/control_frame.rs`, and
+`tests/media_crypto.rs`); the media-key verifier re-reads the Rust pins in
+`src/media_key.rs`; the control-frame and media-crypto verifiers additionally
+re-read the Kotlin `ControlFrameVectorTest` and `MediaCryptoVectorTest`. Each
+pinned value must match the independent recomputation, so the documentation,
+the Rust and Kotlin pins, and the
 Python verifier cannot drift apart.
 Each script runs a `--self-test` mode and a check mode in CI; a schema
 renumbering, layout reordering, label, salt, or byte-order change on either
