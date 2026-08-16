@@ -266,3 +266,53 @@ fn matches_published_cross_language_aead_packet_vector() {
     let length = opener.open(packet, &mut plaintext).unwrap();
     assert_eq!(&plaintext[..length], b"cross-language packet vector");
 }
+
+/// The reverse-direction (desktop-to-Android) sealed datagram is pinned
+/// byte-for-byte so the direction byte in both the HKDF media-key info and the
+/// 96-bit nonce stays domain-separated from the Android-to-desktop path
+/// (architecture section 10); a third-party implementation can verify its
+/// reverse path against this vector.
+#[test]
+fn matches_published_cross_language_reverse_direction_vector() {
+    let secret = SessionSecret::new([
+        0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E,
+        0x1F, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x2B, 0x2C, 0x2D,
+        0x2E, 0x2F,
+    ]);
+    let context = MediaKeyContext::new(
+        0x0F0E_0D0C_0B0A_0908,
+        0x1234_5678,
+        0x002A,
+        MediaDirection::DesktopToAndroid,
+    )
+    .unwrap();
+    let mut sealer = MediaSealer::new(&secret, context).unwrap();
+    let opener = MediaOpener::new(&secret, context).unwrap();
+    let protected = sealer
+        .seal(
+            0x00,
+            0x8899_AABB_CCDD_EEFF,
+            b"SoniMesh reverse direction vector",
+        )
+        .unwrap();
+
+    assert_eq!(
+        protected.datagram,
+        [
+            0x53, 0x4E, 0x4D, 0x53, 0x01, 0x00, 0x00, 0x24, // magic, version, flags, length
+            0x0F, 0x0E, 0x0D, 0x0C, 0x0B, 0x0A, 0x09, 0x08, // session_id
+            0x12, 0x34, 0x56, 0x78, 0x00, 0x00, 0x00, 0x00, // stream_id, sequence 0
+            0x88, 0x99, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, // sample_timestamp
+            0x00, 0x31, 0x00, 0x2A, // payload length 49, key_epoch 0x002a
+            0xA0, 0x85, 0x33, 0x60, 0x82, 0x5E, 0xFA, 0x8A, 0xB1, 0x52, 0x99, 0x00, 0xAA, 0x24,
+            0x03, 0xA2, 0xE8, 0x2B, 0x06, 0xC3, 0xC8, 0xFB, 0xB2, 0xB8, 0x0B, 0x20, 0x53, 0x93,
+            0xDF, 0xFF, 0x19, 0x15, 0x94, 0x30, 0xB6, 0xA0, 0x33, 0xE6, 0x99, 0xE1, 0x61, 0x3D,
+            0x86, 0x89, 0x45, 0x5D, 0xC9, 0x5A, 0x99, // Poly1305 tag
+        ]
+    );
+
+    let packet = parse_media_packet(&protected.datagram).unwrap();
+    let mut plaintext = [0_u8; 64];
+    let length = opener.open(packet, &mut plaintext).unwrap();
+    assert_eq!(&plaintext[..length], b"SoniMesh reverse direction vector");
+}

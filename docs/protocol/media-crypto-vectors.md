@@ -71,6 +71,40 @@ c7c85145360f62f4361efe335f16149a
 The first 36 bytes are the header; the final 44 bytes are the 28-byte encrypted
 plaintext followed by the 16-byte Poly1305 tag.
 
+## Vector 3: reverse-direction cross-language packet vector
+
+### Inputs
+
+| Field | Value |
+| --- | --- |
+| Control-session secret | `101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f` |
+| Protocol version | `1` |
+| Direction | Desktop-to-Android (`1`) |
+| Session ID | `0x0f0e0d0c0b0a0908` |
+| Stream ID | `0x12345678` |
+| Key epoch | `0x002a` |
+| Sequence | `0` |
+| Flags | `0x00` |
+| Sample timestamp | `0x8899aabbccddeeff` |
+| Plaintext UTF-8 | `SoniMesh reverse direction vector` |
+
+The 96-bit nonce is `002a01001234567800000000`.
+
+### Expected protected datagram
+
+```text
+534e4d53010000240f0e0d0c0b0a090812345678000000008899aabbccddeeff
+0031002aa0853360825efa8ab1529900aa2403a2e82b06c3c8fbb2b80b20539
+3dfff19159430b6a033e699e1613d8689455dc95a99
+```
+
+The first 36 bytes are the header; the final 49 bytes are the 33-byte encrypted
+plaintext followed by the 16-byte Poly1305 tag. This vector pins the
+desktop-to-Android direction byte in both the HKDF media-key info and the
+96-bit nonce, so a third-party implementation can verify that its
+reverse-direction key and nonce stay domain-separated from the
+Android-to-desktop path (architecture section 10).
+
 ## Verification status
 
 Implementations must reject a modified byte in either part of either datagram
@@ -81,13 +115,13 @@ The Rust integration tests `matches_published_cross_language_media_vector`
 (vector 1) and `matches_published_cross_language_aead_packet_vector` (vector 2)
 in `crates/sonimesh-protocol/tests/media_crypto.rs` reproduce the HKDF info
 layout, nonce, fixed header, associated data, ciphertext, and Poly1305 tag of
-both vectors. The Kotlin/JVM `MediaCryptoVectorTest` pins vector 1 and also
-decrypts the published datagram and rejects independently tampered header and
+all three vectors. The Kotlin/JVM `MediaCryptoVectorTest` pins vectors 1 and 3 and also
+decrypts the published datagrams and rejects independently tampered header and
 ciphertext bytes. The `tools/check_media_crypto_vectors.py` verifier
-independently reseals both vectors from the documented constants using a pure
+independently reseals all three vectors from the documented constants using a pure
 standard-library implementation of RFC 8439 ChaCha20-Poly1305 that is itself
 validated against the RFC vectors, so a label, salt, key, nonce, or header
-change on either side fails CI.
+change on any side fails CI.
 
 The Rust integration suite additionally pins the rejection matrix at the
 protected-media boundary: a datagram that still parses with fewer than 16

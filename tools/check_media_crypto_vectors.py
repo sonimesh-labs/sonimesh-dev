@@ -2,11 +2,12 @@
 """Cross-language check of the published protected media AEAD packet vectors.
 
 The Rust media plane seals packets with ChaCha20-Poly1305 (RFC 8439) using the
-HKDF media key and the 96-bit media nonce. Both published vectors are pinned in
+HKDF media key and the 96-bit media nonce. All three published vectors are pinned in
 crates/sonimesh-protocol/tests/media_crypto.rs
-(`matches_published_cross_language_media_vector` and
-`matches_published_cross_language_aead_packet_vector`), and vector 1 is also
-pinned by the Kotlin/JVM `MediaCryptoVectorTest`. This script reimplements
+(`matches_published_cross_language_media_vector`,
+`matches_published_cross_language_aead_packet_vector`, and
+`matches_published_cross_language_reverse_direction_vector`), and vectors 1 and
+3 are also pinned by the Kotlin/JVM `MediaCryptoVectorTest`. This script reimplements
 ChaCha20, Poly1305, and the AEAD construction plus the media key/nonce/header
 boundaries in pure standard-library Python and independently reseals every
 published datagram, so an AEAD crate, key, nonce, or header change is caught by
@@ -36,6 +37,7 @@ MEDIA_VERSION = 1
 MEDIA_MAGIC = 0x534E_4D53
 MEDIA_HEADER_LEN = 36
 ANDROID_TO_DESKTOP_DIRECTION = 0
+DESKTOP_TO_ANDROID_DIRECTION = 1
 POLY1305_TAG_BYTES = 16
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -74,22 +76,33 @@ def hkdf_expand(prk: bytes, info: bytes, length: int) -> bytes:
     return bytes(output[:length])
 
 
-def derive_media_key(secret: bytes, session_id: int, stream_id: int, key_epoch: int) -> bytes:
+def derive_media_key(
+    secret: bytes,
+    session_id: int,
+    stream_id: int,
+    key_epoch: int,
+    direction: int = ANDROID_TO_DESKTOP_DIRECTION,
+) -> bytes:
     info = (
         STREAM_KEY_LABEL
         + bytes([MEDIA_VERSION])
         + session_id.to_bytes(8, "big")
         + stream_id.to_bytes(4, "big")
         + key_epoch.to_bytes(2, "big")
-        + bytes([ANDROID_TO_DESKTOP_DIRECTION])
+        + bytes([direction])
     )
     return hkdf_expand(hkdf_extract(ROOT_SALT, secret), info, 32)
 
 
-def media_nonce(stream_id: int, key_epoch: int, sequence: int) -> bytes:
+def media_nonce(
+    stream_id: int,
+    key_epoch: int,
+    sequence: int,
+    direction: int = ANDROID_TO_DESKTOP_DIRECTION,
+) -> bytes:
     return (
         key_epoch.to_bytes(2, "big")
-        + bytes([ANDROID_TO_DESKTOP_DIRECTION, 0])
+        + bytes([direction, 0])
         + stream_id.to_bytes(4, "big")
         + sequence.to_bytes(4, "big")
     )
@@ -198,11 +211,14 @@ class PublishedVector:
     sample_timestamp: int
     plaintext: bytes
     datagram: bytes
+    direction: int = ANDROID_TO_DESKTOP_DIRECTION
 
     def recompute(self) -> bytes:
         """Independently reseals this vector from its documented constants."""
-        key = derive_media_key(self.secret, self.session_id, self.stream_id, self.key_epoch)
-        nonce = media_nonce(self.stream_id, self.key_epoch, 0)
+        key = derive_media_key(
+            self.secret, self.session_id, self.stream_id, self.key_epoch, self.direction
+        )
+        nonce = media_nonce(self.stream_id, self.key_epoch, 0, self.direction)
         header = encode_media_header(
             flags=self.flags,
             session_id=self.session_id,
@@ -249,6 +265,24 @@ PUBLISHED_VECTORS: tuple[PublishedVector, ...] = (
             "C7C85145360F62F4361EFE335F16149A"
         ),
     ),
+    PublishedVector(
+        name="vector 3: reverse-direction cross-language packet vector",
+        secret=bytes.fromhex(
+            "101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f"
+        ),
+        session_id=0x0F0E0D0C0B0A0908,
+        stream_id=0x12345678,
+        key_epoch=0x002A,
+        flags=0x00,
+        sample_timestamp=0x8899AABBCCDDEEFF,
+        plaintext=b"SoniMesh reverse direction vector",
+        direction=DESKTOP_TO_ANDROID_DIRECTION,
+        datagram=bytes.fromhex(
+            "534E4D53010000240F0E0D0C0B0A090812345678000000008899AABBCCDDEEFF"
+            "0031002AA0853360825EFA8AB1529900AA2403A2E82B06C3C8FBB2B80B20539"
+            "3DFFF19159430B6A033E699E1613D8689455DC95A99"
+        ),
+    ),
 )
 
 
@@ -274,7 +308,7 @@ def validate_vectors() -> list[str]:
 def doc_vector_sections(source: str) -> list[tuple[str, str]]:
     """Returns (``"1"``/``"2"``, section) pairs from the vector doc headings."""
     headings = list(
-        re.finditer(r"^## Vector (?P<name>[12]):[^\r\n]*$", source, re.MULTILINE)
+        re.finditer(r"^## Vector (?P<name>[123]):[^\r\n]*$", source, re.MULTILINE)
     )
     sections: list[tuple[str, str]] = []
     for index, heading in enumerate(headings):
@@ -331,6 +365,10 @@ def parse_doc_vector(section: str) -> tuple[PublishedVector, bytes, int, int]:
     secret = bytes.fromhex(doc_table_value(section, "Control-session secret"))
     if len(secret) != 32:
         raise ValueError("media crypto doc control-session secret is not 32 bytes")
+    protocol_version = doc_integer(doc_table_value(section, "Protocol version"))
+    direction_value = doc_integer(doc_table_value(section, "Direction"))
+    if doc_integer(doc_table_value(section, "Sequence")) != 0:
+        raise ValueError("media crypto doc sequence must be 0")
     vector = PublishedVector(
         name="",
         secret=secret,
@@ -341,11 +379,8 @@ def parse_doc_vector(section: str) -> tuple[PublishedVector, bytes, int, int]:
         sample_timestamp=doc_integer(doc_table_value(section, "Sample timestamp")),
         plaintext=doc_table_value(section, "Plaintext UTF-8").encode("utf-8"),
         datagram=doc_datagram(section),
+        direction=direction_value,
     )
-    protocol_version = doc_integer(doc_table_value(section, "Protocol version"))
-    direction_value = doc_integer(doc_table_value(section, "Direction"))
-    if doc_integer(doc_table_value(section, "Sequence")) != 0:
-        raise ValueError("media crypto doc sequence must be 0")
     return vector, doc_nonce(section), protocol_version, direction_value
 
 
@@ -355,6 +390,7 @@ def rust_test_datagrams(source: str) -> dict[str, bytes]:
     for test_name, number in (
         ("matches_published_cross_language_media_vector", "1"),
         ("matches_published_cross_language_aead_packet_vector", "2"),
+        ("matches_published_cross_language_reverse_direction_vector", "3"),
     ):
         function_start = source.index(f"fn {test_name}(")
         datagram_start = source.index("protected.datagram,", function_start)
@@ -389,6 +425,29 @@ def kotlin_expected_nonce(source: str) -> bytes | None:
     return bytes.fromhex(match.group(1))
 
 
+def kotlin_reverse_expected_datagram(source: str) -> bytes | None:
+    """Extracts the Kotlin reverse-direction vector's pinned datagram hex."""
+    match = re.search(
+        r"val EXPECTED_REVERSE_DATAGRAM = hex\((.*?)\)", source, re.DOTALL
+    )
+    if match is None:
+        return None
+    pieces = re.findall(r'"([0-9a-fA-F]+)"', match.group(1))
+    if not pieces:
+        return None
+    return bytes.fromhex("".join(pieces))
+
+
+def kotlin_reverse_expected_nonce(source: str) -> bytes | None:
+    """Extracts the Kotlin reverse-direction vector's pinned nonce hex."""
+    match = re.search(
+        r'val EXPECTED_REVERSE_NONCE = hex\("([0-9a-fA-F]+)"\)', source
+    )
+    if match is None:
+        return None
+    return bytes.fromhex(match.group(1))
+
+
 def cross_source_errors(
     doc_source: str | None = None,
     rust_source: str | None = None,
@@ -412,19 +471,25 @@ def cross_source_errors(
         return [f"cannot read media crypto vector sources: {exc}"]
 
     sections = doc_vector_sections(doc_source)
-    if [number for number, _ in sections] != ["1", "2"]:
+    if [number for number, _ in sections] != ["1", "2", "3"]:
         errors.append(
-            "media crypto doc must contain exactly Vector 1 then Vector 2 sections"
+            "media crypto doc must contain exactly Vector 1, Vector 2 then Vector 3 sections"
         )
     rust_datagrams = rust_test_datagrams(rust_source)
-    if set(rust_datagrams) != {"1", "2"}:
-        errors.append("Rust media crypto test must pin both vector datagrams")
+    if set(rust_datagrams) != {"1", "2", "3"}:
+        errors.append("Rust media crypto test must pin all three vector datagrams")
     kotlin_datagram = kotlin_expected_datagram(kotlin_source)
     if kotlin_datagram is None:
         errors.append("Kotlin media crypto test must pin the vector 1 datagram")
     kotlin_nonce = kotlin_expected_nonce(kotlin_source)
     if kotlin_nonce is None:
         errors.append("Kotlin media crypto test must pin the vector 1 nonce")
+    kotlin_reverse_datagram = kotlin_reverse_expected_datagram(kotlin_source)
+    if kotlin_reverse_datagram is None:
+        errors.append("Kotlin media crypto test must pin the vector 3 datagram")
+    kotlin_reverse_nonce = kotlin_reverse_expected_nonce(kotlin_source)
+    if kotlin_reverse_nonce is None:
+        errors.append("Kotlin media crypto test must pin the vector 3 nonce")
     published = {
         vector.name.split(":", 1)[0].split()[-1]: vector
         for vector in PUBLISHED_VECTORS
@@ -445,10 +510,10 @@ def cross_source_errors(
                 f"vector {number}: doc protocol version {protocol_version} "
                 f"!= {MEDIA_VERSION}"
             )
-        if direction_value != ANDROID_TO_DESKTOP_DIRECTION:
+        if direction_value != expected.direction:
             errors.append(
                 f"vector {number}: doc direction {direction_value} "
-                f"!= {ANDROID_TO_DESKTOP_DIRECTION}"
+                f"!= pin direction {expected.direction}"
             )
         if vector.datagram != expected.datagram:
             errors.append(
@@ -470,7 +535,9 @@ def cross_source_errors(
                 f"vector {number}: doc datagram does not match the independent "
                 "recomputation"
             )
-        recomputed_nonce = media_nonce(vector.stream_id, vector.key_epoch, 0)
+        recomputed_nonce = media_nonce(
+            vector.stream_id, vector.key_epoch, 0, vector.direction
+        )
         if recomputed_nonce != nonce:
             errors.append(
                 f"vector {number}: doc nonce {nonce.hex().upper()} "
@@ -488,6 +555,19 @@ def cross_source_errors(
                     f"vector {number}: doc nonce differs from the Kotlin pin: "
                     f"doc {nonce.hex().upper()} "
                     f"kotlin {kotlin_nonce.hex().upper()}"
+                )
+        if number == "3":
+            if kotlin_reverse_datagram is not None and vector.datagram != kotlin_reverse_datagram:
+                errors.append(
+                    f"vector {number}: doc datagram differs from the Kotlin reverse pin: "
+                    f"doc {vector.datagram.hex().upper()} "
+                    f"kotlin {kotlin_reverse_datagram.hex().upper()}"
+                )
+            if kotlin_reverse_nonce is not None and nonce != kotlin_reverse_nonce:
+                errors.append(
+                    f"vector {number}: doc nonce differs from the Kotlin reverse pin: "
+                    f"doc {nonce.hex().upper()} "
+                    f"kotlin {kotlin_reverse_nonce.hex().upper()}"
                 )
         expected_len = MEDIA_HEADER_LEN + len(vector.plaintext) + POLY1305_TAG_BYTES
         if len(vector.datagram) != expected_len:
@@ -547,8 +627,8 @@ class MediaCryptoVectorTests(unittest.TestCase):
         self.assertEqual(ciphertext, expected_ciphertext)
         self.assertEqual(tag, expected_tag)
 
-    def test_both_published_datagrams_recompute(self) -> None:
-        self.assertEqual(len(PUBLISHED_VECTORS), 2)
+    def test_all_published_datagrams_recompute(self) -> None:
+        self.assertEqual(len(PUBLISHED_VECTORS), 3)
         for vector in PUBLISHED_VECTORS:
             self.assertEqual(vector.recompute(), vector.datagram, vector.name)
             self.assertEqual(
@@ -563,7 +643,7 @@ class MediaCryptoVectorTests(unittest.TestCase):
         lines = [
             f"| Control-session secret | `{vector.secret.hex()}` |",
             f"| Protocol version | `{MEDIA_VERSION}` |",
-            f"| Direction | Android-to-desktop (`{ANDROID_TO_DESKTOP_DIRECTION}`) |",
+            f"| Direction | {'Desktop-to-Android' if vector.direction == DESKTOP_TO_ANDROID_DIRECTION else 'Android-to-desktop'} (`{vector.direction}`) |",
             f"| Session ID | `0x{vector.session_id:016x}` |",
             f"| Stream ID | `0x{vector.stream_id:08x}` |",
             f"| Key epoch | `0x{vector.key_epoch:04x}` |",
@@ -580,7 +660,7 @@ class MediaCryptoVectorTests(unittest.TestCase):
         return (
             "\n".join(lines)
             + "\n\nThe 96-bit nonce is `"
-            + media_nonce(vector.stream_id, vector.key_epoch, 0).hex()
+            + media_nonce(vector.stream_id, vector.key_epoch, 0, vector.direction).hex()
             + "`.\n\n```text\n"
             + "\n".join(hex_lines)
             + "\n```\n"
@@ -592,8 +672,12 @@ class MediaCryptoVectorTests(unittest.TestCase):
             parsed, nonce, protocol_version, direction_value = parse_doc_vector(section)
             self.assertEqual(parsed.datagram, vector.datagram)
             self.assertEqual(protocol_version, MEDIA_VERSION)
-            self.assertEqual(direction_value, ANDROID_TO_DESKTOP_DIRECTION)
-            self.assertEqual(nonce, media_nonce(vector.stream_id, vector.key_epoch, 0))
+            self.assertEqual(direction_value, vector.direction)
+            self.assertEqual(parsed.direction, vector.direction)
+            self.assertEqual(
+                nonce,
+                media_nonce(vector.stream_id, vector.key_epoch, 0, vector.direction),
+            )
 
     def test_doc_parser_detects_a_tampered_datagram(self) -> None:
         vector = PUBLISHED_VECTORS[0]
@@ -602,10 +686,10 @@ class MediaCryptoVectorTests(unittest.TestCase):
         parsed, _, _, _ = parse_doc_vector(section)
         self.assertNotEqual(parsed.recompute(), parsed.datagram)
 
-    def test_rust_parser_extracts_both_pinned_datagrams(self) -> None:
+    def test_rust_parser_extracts_all_pinned_datagrams(self) -> None:
         source = RUST_TEST_PATH.read_text(encoding="utf-8")
         datagrams = rust_test_datagrams(source)
-        self.assertEqual(set(datagrams), {"1", "2"})
+        self.assertEqual(set(datagrams), {"1", "2", "3"})
         by_number = {
             vector.name.split(":", 1)[0].split()[-1]: vector
             for vector in PUBLISHED_VECTORS
@@ -629,6 +713,22 @@ class MediaCryptoVectorTests(unittest.TestCase):
             media_nonce(
                 PUBLISHED_VECTORS[0].stream_id, PUBLISHED_VECTORS[0].key_epoch, 0
             ),
+        )
+
+    def test_kotlin_parser_extracts_the_reverse_vector_pin(self) -> None:
+        source = KOTLIN_TEST_PATH.read_text(encoding="utf-8")
+        vector = PUBLISHED_VECTORS[2]
+        self.assertEqual(kotlin_reverse_expected_datagram(source), vector.datagram)
+        self.assertEqual(
+            kotlin_reverse_expected_nonce(source),
+            media_nonce(vector.stream_id, vector.key_epoch, 0, vector.direction),
+        )
+
+    def test_kotlin_parser_detects_a_tampered_reverse_pin(self) -> None:
+        source = KOTLIN_TEST_PATH.read_text(encoding="utf-8")
+        tampered = source.replace("C95A99", "C95A98", 1)
+        self.assertNotEqual(
+            kotlin_reverse_expected_datagram(tampered), PUBLISHED_VECTORS[2].datagram
         )
 
     def test_kotlin_parser_detects_a_tampered_pin(self) -> None:
