@@ -10,10 +10,11 @@ boundaries in pure standard-library Python and verifies the same published
 vectors, so a Rust implementation change is caught by an independent
 implementation before it becomes a release boundary (roadmap Phase 0D:
 cross-language crypto and packet test vectors). It also re-reads the outputs
-pinned in docs/protocol/pairing-tls-binding-vectors.md and
+pinned in docs/protocol/pairing-tls-binding-vectors.md,
 `matches_published_role_proof_and_media_root_vector` in
-crates/sonimesh-protocol/src/pairing_binding.rs and verifies that the doc,
-the Rust pins, and this verifier cannot drift apart.
+crates/sonimesh-protocol/src/pairing_binding.rs, and the Kotlin
+`PairingTlsBindingVectorTest` and verifies that the doc, the Rust pins, the
+Kotlin pin, and this verifier cannot drift apart.
 """
 
 from __future__ import annotations
@@ -39,6 +40,20 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DOC_PATH = REPO_ROOT / "docs" / "protocol" / "pairing-tls-binding-vectors.md"
 RUST_TEST_PATH = (
     REPO_ROOT / "crates" / "sonimesh-protocol" / "src" / "pairing_binding.rs"
+)
+KOTLIN_TEST_PATH = (
+    REPO_ROOT
+    / "apps"
+    / "android"
+    / "app"
+    / "src"
+    / "test"
+    / "java"
+    / "com"
+    / "sonimesh"
+    / "sender"
+    / "security"
+    / "PairingTlsBindingVectorTest.kt"
 )
 
 
@@ -184,15 +199,35 @@ def rust_test_vectors(source: str) -> dict[str, bytes]:
         vectors[vector] = bytes(int(token, 16) for token in hex_tokens)
     return vectors
 
+KOTLIN_MARKER_TO_VECTOR = {
+    "localProof(PairingRole.ANDROID_CLIENT)": "client_proof",
+    "localProof(PairingRole.DESKTOP_SERVER)": "server_proof",
+    "mediaRoot()": "media_root",
+}
+
+
+def kotlin_test_vectors(source: str) -> dict[str, bytes]:
+    """Extracts the three pinned hex literals from the Kotlin vector test."""
+    vectors: dict[str, bytes] = {}
+    for marker, vector in KOTLIN_MARKER_TO_VECTOR.items():
+        marker_start = source.index(marker)
+        match = re.search(r'hex\("([0-9a-fA-F]+)"\)', source[marker_start:])
+        if match is None:
+            continue
+        vectors[vector] = bytes.fromhex(match.group(1))
+    return vectors
+
 
 def cross_source_errors(
-    doc_source: str | None = None, rust_source: str | None = None
+    doc_source: str | None = None,
+    rust_source: str | None = None,
+    kotlin_source: str | None = None,
 ) -> list[str]:
-    """Checks the doc and Rust pins against the Python pins.
+    """Checks the doc, Rust, and Kotlin pins against the Python pins.
 
     Reads the pinned sources when not supplied, so the published doc
-    outputs, the Rust unit-test pins, and the Python pins can never drift
-    apart without failing CI.
+    outputs, the Rust unit-test pins, the Kotlin pin, and the Python pins can
+    never drift apart without failing CI.
     """
     errors: list[str] = []
     try:
@@ -200,15 +235,20 @@ def cross_source_errors(
             doc_source = DOC_PATH.read_text(encoding="utf-8")
         if rust_source is None:
             rust_source = RUST_TEST_PATH.read_text(encoding="utf-8")
+        if kotlin_source is None:
+            kotlin_source = KOTLIN_TEST_PATH.read_text(encoding="utf-8")
     except OSError as exc:
         return [f"cannot read pairing vector sources: {exc}"]
 
     doc = doc_vectors(doc_source)
     rust = rust_test_vectors(rust_source)
+    kotlin = kotlin_test_vectors(kotlin_source)
     if set(doc) != set(VECTOR_NAMES):
         errors.append("pairing vector doc must pin all three expected outputs")
     if set(rust) != set(VECTOR_NAMES):
         errors.append("Rust pairing test must pin all three vectors")
+    if set(kotlin) != set(VECTOR_NAMES):
+        errors.append("Kotlin pairing test must pin all three vectors")
     for vector in VECTOR_NAMES:
         expected = published_vectors()[vector]
         doc_value = doc.get(vector)
@@ -223,6 +263,13 @@ def cross_source_errors(
             errors.append(
                 f"pairing {vector} Rust pin differs from the Python pin: "
                 f"rust {rust_value.hex().upper()} "
+                f"pin {expected.hex().upper()}"
+            )
+        kotlin_value = kotlin.get(vector)
+        if kotlin_value is not None and kotlin_value != expected:
+            errors.append(
+                f"pairing {vector} Kotlin pin differs from the Python pin: "
+                f"kotlin {kotlin_value.hex().upper()} "
                 f"pin {expected.hex().upper()}"
             )
     return errors
@@ -317,6 +364,34 @@ class PairingVectorTests(unittest.TestCase):
         vectors = rust_test_vectors(tampered)
         self.assertNotEqual(
             vectors["client_proof"], published_vectors()["client_proof"]
+        )
+
+    def test_kotlin_parser_extracts_all_three_pins(self) -> None:
+        source = KOTLIN_TEST_PATH.read_text(encoding="utf-8")
+        vectors = kotlin_test_vectors(source)
+        self.assertEqual(set(vectors), set(published_vectors()))
+        for name, expected in published_vectors().items():
+            self.assertEqual(vectors[name], expected, name)
+
+    def test_kotlin_parser_detects_a_tampered_pin(self) -> None:
+        source = KOTLIN_TEST_PATH.read_text(encoding="utf-8")
+        tampered = source.replace("c274dfe72135ae55", "c274dfe72135ae54", 1)
+        vectors = kotlin_test_vectors(tampered)
+        self.assertNotEqual(
+            vectors["client_proof"], published_vectors()["client_proof"]
+        )
+
+    def test_cross_source_detects_kotlin_drift(self) -> None:
+        doc_source = DOC_PATH.read_text(encoding="utf-8")
+        rust_source = RUST_TEST_PATH.read_text(encoding="utf-8")
+        kotlin_source = KOTLIN_TEST_PATH.read_text(encoding="utf-8")
+        self.assertEqual(cross_source_errors(doc_source, rust_source, kotlin_source), [])
+        tampered_kotlin = kotlin_source.replace(
+            "c274dfe72135ae55", "c274dfe72135ae54", 1
+        )
+        errors = cross_source_errors(doc_source, rust_source, tampered_kotlin)
+        self.assertTrue(
+            any("client_proof" in error and "Kotlin pin" in error for error in errors)
         )
 
     def test_cross_source_detects_doc_and_rust_drift(self) -> None:
