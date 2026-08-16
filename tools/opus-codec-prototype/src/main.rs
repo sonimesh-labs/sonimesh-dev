@@ -17,7 +17,8 @@
 //! dropped 20 ms frame across speech-like and tone content, sweeps the FEC
 //! loss rate across the speech-like profile, measures the wall-clock cost of
 //! enabling in-band FEC, measures DTX packet-size and active-region quality
-//! on pause-gapped and continuous content, compares the negotiated 10 ms and
+//! on pause-gapped and continuous content at both negotiated shapes, compares
+//! the negotiated 10 ms and
 //! 20 ms shapes at equal per-second codec bitrates (steady-state quality,
 //! per-packet wire overhead, wall-clock-matched PLC, and per-second CPU
 //! cost), and sweeps bounded deterministic malformed payloads that must
@@ -134,6 +135,11 @@ const FEC_CPU_DROP_EVERY: usize = 10;
 const FEC_CPU_LOW_BITRATE_BPS: i32 = 24_000;
 /// Frame duration of the DTX probe in milliseconds.
 const DTX_FRAME_MS: u16 = 20;
+/// Frame durations measured by the DTX probe. The 20 ms cell keeps the
+/// original reduction/quality gates; the 10 ms cell is report-only because
+/// the shorter pause window changes the DTX benefit and no gate is calibrated
+/// for it yet.
+const DTX_FRAME_DURATIONS_MS: [u16; 2] = [DTX_FRAME_MS, 10];
 /// Frames encoded by the DTX probe at `DTX_FRAME_MS`.
 const DTX_SOURCE_FRAMES: usize = 240;
 /// Active speech-like frames per DTX cycle.
@@ -2287,17 +2293,29 @@ fn measure_dtx_case(
 }
 
 /// Measures DTX on pause-gapped speech-like content and on the continuous
-/// tone control, returning one deterministic line per profile.
+/// tone control, returning one deterministic line per profile and duration.
 ///
 /// The pause profile must show a material average-byte reduction from DTX
 /// without dropping active-region SNR, and the tone control must neither
 /// emit DTX packets nor lose quality, because DTX is a bandwidth/power
 /// optimization that must not corrupt continuous non-speech content.
+/// The reduction and quality gates are enforced only for the calibrated
+/// 20 ms cell; the 10 ms cell reports the same numbers without gating them.
 /// This is codec-level evidence, not a power measurement and not a
 /// `FrameDecoder`-boundary result.
 fn run_dtx_probe() -> ProbeResult<Vec<String>> {
-    let frame =
-        OpusFrameConfig::new(SAMPLE_RATE_HZ, 2, DTX_FRAME_MS).map_err(|error| error.to_string())?;
+    let mut lines = Vec::new();
+    for duration_ms in DTX_FRAME_DURATIONS_MS {
+        lines.extend(run_dtx_probe_for_duration(duration_ms)?);
+    }
+    Ok(lines)
+}
+
+/// Runs the DTX pause/tone cells for one negotiated frame duration.
+fn run_dtx_probe_for_duration(frame_duration_ms: u16) -> ProbeResult<Vec<String>> {
+    let gated = frame_duration_ms == DTX_FRAME_MS;
+    let frame = OpusFrameConfig::new(SAMPLE_RATE_HZ, 2, frame_duration_ms)
+        .map_err(|error| error.to_string())?;
     let expected_samples = frame.interleaved_samples();
     let mut lines = Vec::new();
 
@@ -2306,20 +2324,20 @@ fn run_dtx_probe() -> ProbeResult<Vec<String>> {
     let pauses_on = measure_dtx_case(frame, &pauses, true)?;
     let reduction_pct = (pauses_off.avg_bytes - pauses_on.avg_bytes) / pauses_off.avg_bytes * 100.0;
     let active_drop_db = pauses_off.active_snr - pauses_on.active_snr;
-    if reduction_pct < f64::from(DTX_PAUSES_AVG_BYTES_MIN_REDUCTION_PCT) {
+    if gated && reduction_pct < f64::from(DTX_PAUSES_AVG_BYTES_MIN_REDUCTION_PCT) {
         return Err(format!(
             "DTX reduced pause content by {reduction_pct:.1}%, below the required \
              {DTX_PAUSES_AVG_BYTES_MIN_REDUCTION_PCT:.0}%"
         ));
     }
-    if active_drop_db > DTX_ACTIVE_SNR_MAX_DROP_DB {
+    if gated && active_drop_db > DTX_ACTIVE_SNR_MAX_DROP_DB {
         return Err(format!(
             "DTX dropped active-region SNR by {active_drop_db:.1} dB, above the allowed \
              {DTX_ACTIVE_SNR_MAX_DROP_DB:.1} dB"
         ));
     }
     lines.push(format!(
-        "opus_20ms_dtx: pauses avg {:.0} -> {:.0} B ({reduction_pct:.0}% smaller); \
+        "opus_{frame_duration_ms}ms_dtx: pauses avg {:.0} -> {:.0} B ({reduction_pct:.0}% smaller); \
          dtx pkts {}/{DTX_SOURCE_FRAMES}; active snr {:.1} vs {:.1} dB",
         pauses_off.avg_bytes,
         pauses_on.avg_bytes,
@@ -2339,14 +2357,14 @@ fn run_dtx_probe() -> ProbeResult<Vec<String>> {
             tone_on.dtx_packets
         ));
     }
-    if tone_drop_db > DTX_ACTIVE_SNR_MAX_DROP_DB {
+    if gated && tone_drop_db > DTX_ACTIVE_SNR_MAX_DROP_DB {
         return Err(format!(
             "DTX dropped tone SNR by {tone_drop_db:.1} dB, above the allowed \
              {DTX_ACTIVE_SNR_MAX_DROP_DB:.1} dB"
         ));
     }
     lines.push(format!(
-        "opus_20ms_dtx: tone avg {:.0} -> {:.0} B ({tone_reduction_pct:.0}% smaller); \
+        "opus_{frame_duration_ms}ms_dtx: tone avg {:.0} -> {:.0} B ({tone_reduction_pct:.0}% smaller); \
          dtx pkts {}/{DTX_SOURCE_FRAMES}; snr {:.1} vs {:.1} dB",
         tone_off.avg_bytes,
         tone_on.avg_bytes,
