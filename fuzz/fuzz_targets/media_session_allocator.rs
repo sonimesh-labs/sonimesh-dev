@@ -93,7 +93,9 @@ impl AllocatorModel {
             "issued count drifted from the model"
         );
         assert!(
-            self.issued.iter().all(|issued| self.allocator.contains(*issued)),
+            self.issued
+                .iter()
+                .all(|issued| self.allocator.contains(*issued)),
             "an issued context vanished from the allocator record"
         );
     }
@@ -131,7 +133,10 @@ fuzz_target!(|data: &[u8]| {
                 let session_id = next_u64(data, &mut offset);
                 let stream_id = next_u32(data, &mut offset);
                 let key_epoch = (next_u32(data, &mut offset) & 0xFFFF) as u16;
-                model.supply(identity(session_id, stream_id, key_epoch), direction_from(data, &mut offset));
+                model.supply(
+                    identity(session_id, stream_id, key_epoch),
+                    direction_from(data, &mut offset),
+                );
             }
             1 => {
                 if let Some(context) = model.issued.first() {
@@ -144,14 +149,20 @@ fuzz_target!(|data: &[u8]| {
                 if zero_session {
                     model.supply(identity(0, next_u32(data, &mut offset) | 1, 0), DIRECTION);
                 } else {
-                    model.supply(identity(u64::from(next_u32(data, &mut offset)) | 1, 0, 0), DIRECTION);
+                    model.supply(
+                        identity(u64::from(next_u32(data, &mut offset)) | 1, 0, 0),
+                        DIRECTION,
+                    );
                 }
             }
             _ => {
                 let session_id = u64::from(next_u32(data, &mut offset) % 3) + 1;
                 let stream_id = next_u32(data, &mut offset) % 4 + 1;
                 let key_epoch = (next_u32(data, &mut offset) % 3) as u16;
-                model.supply(identity(session_id, stream_id, key_epoch), direction_from(data, &mut offset));
+                model.supply(
+                    identity(session_id, stream_id, key_epoch),
+                    direction_from(data, &mut offset),
+                );
             }
         }
     }
