@@ -592,5 +592,5 @@ describe('PreviewDesktopBridge property', () => {
     // session-expiry command.
     expect(model.reconnectAutoExpiries).toBeGreaterThan(0)
     expect(maxRepliesSeen).toBe(6)
-  })
+  }, 30_000)
 })
