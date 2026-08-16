@@ -5,22 +5,29 @@
 the fixed 36-byte header used as AEAD associated data. The Rust test
 `matches_published_media_header_vector` pins the canonical bytes. This script
 reconstructs the same big-endian layout from the documented constants and
-fields in pure standard-library Python and verifies the published vector, so a
-header reordering or constant change is caught by an independent
-implementation before it becomes a release boundary (roadmap Phase 0D:
-cross-language crypto and packet test vectors).
+fields in pure standard-library Python, verifies the published vector, and
+parses the Rust pin so the two implementations cannot drift apart; a header
+reordering or constant change is caught before it becomes a release boundary
+(roadmap Phase 0D: cross-language crypto and packet test vectors).
 """
 
 from __future__ import annotations
 
+import re
 import sys
 import unittest
+from pathlib import Path
 
 MEDIA_MAGIC = 0x534E_4D53
 MEDIA_VERSION = 1
 MEDIA_HEADER_LEN = 36
 MAX_MEDIA_DATAGRAM_LEN = 1_200
 MAX_ENCRYPTED_PAYLOAD_LEN = MAX_MEDIA_DATAGRAM_LEN - MEDIA_HEADER_LEN
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+RUST_TEST_PATH = (
+    REPO_ROOT / "crates" / "sonimesh-protocol" / "tests" / "media_header_vector.rs"
+)
 
 
 def encode_header(
@@ -69,14 +76,33 @@ def recomputed_header() -> bytes:
     )
 
 
+def rust_header_pin(source: str) -> bytes:
+    """Extracts the golden byte array pinned by the Rust header test."""
+    function_start = source.index("fn matches_published_media_header_vector(")
+    # Anchor at assert_eq! so helper arrays before the golden pin are skipped.
+    assert_start = source.index("assert_eq!(", function_start)
+    bracket_start = source.index("[", assert_start)
+    bracket_end = source.index("]", bracket_start)
+    body = re.sub(r"//[^\r\n]*", "", source[bracket_start + 1 : bracket_end])
+    hex_tokens = re.findall(r"0x([0-9a-fA-F]{2})", body)
+    return bytes(int(token, 16) for token in hex_tokens)
+
+
 def validate_vectors() -> list[str]:
-    """Returns deterministic mismatches between recomputation and the pin."""
+    """Returns deterministic mismatches between recomputation and the pins."""
     recomputed = recomputed_header()
     published = published_header()
     if recomputed != published:
         return [
             "media header does not match the published vector: "
             f"recomputed {recomputed.hex().upper()} published {published.hex().upper()}"
+        ]
+    rust_source = RUST_TEST_PATH.read_text(encoding="utf-8")
+    rust_pin = rust_header_pin(rust_source)
+    if rust_pin != published:
+        return [
+            "media header differs from the Rust pin: "
+            f"python {published.hex().upper()} rust {rust_pin.hex().upper()}"
         ]
     return []
 
@@ -114,6 +140,15 @@ class MediaHeaderVectorTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             encode_header(0, 1, 1, 1, 0, 0, MAX_ENCRYPTED_PAYLOAD_LEN + 1)
         encode_header(0, 1, 1, 1, 0, 0, MAX_ENCRYPTED_PAYLOAD_LEN)
+
+    def test_rust_parser_extracts_the_pinned_header(self) -> None:
+        source = RUST_TEST_PATH.read_text(encoding="utf-8")
+        self.assertEqual(rust_header_pin(source), published_header())
+
+    def test_rust_parser_detects_a_tampered_pin(self) -> None:
+        source = RUST_TEST_PATH.read_text(encoding="utf-8")
+        tampered = source.replace("0x53, 0x4E, 0x4D, 0x53", "0x53, 0x4E, 0x4D, 0x54", 1)
+        self.assertNotEqual(rust_header_pin(tampered), published_header())
 
 
 if __name__ == "__main__":
