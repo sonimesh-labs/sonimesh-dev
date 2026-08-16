@@ -103,6 +103,14 @@ codec-level evidence through
 the opus binding directly; the `FrameDecoder` boundary has no FEC flag, the
 10 ms shape cannot carry LBRR redundancy, and FEC remains disabled.
 
+A [DTX content-class record](../measurements/2026-08-16-windows-opus-dtx.md)
+documents that libopus DTX reduces the average packet size by 35% on
+pause-gapped speech-like content (249 to 163 bytes, 84 of 240 one-byte
+DTX packets) with no measurable active-region SNR change (14.1 dB), and
+does not engage on a continuous tone (0 DTX packets, 45.1 dB). It is
+codec-level evidence through the opus binding directly and not a power
+measurement; DTX remains disabled.
+
 ## Rollback plan
 
 The optional feature remains behind `FrameDecoder`. It can be disabled or

@@ -142,6 +142,16 @@ sweep and CPU numbers are codec-level, wall-clock evidence; they do not
 select an FEC policy, and FEC stays disabled in every cell (see the
 in-band FEC content-class record above).
 
+On the same date the probe added a deterministic DTX (discontinuous
+transmission) comparison by content class: on pause-gapped speech-like
+content, DTX turns 84 of 240 packets into one-byte DTX packets and
+reduces the average packet size from 249 to 163 bytes (35% smaller)
+with no measurable active-region SNR change (14.1 dB), while a
+continuous tone never goes inactive and stays unchanged (0 DTX packets,
+45.1 dB). The comparison is codec-level evidence only; DTX stays
+disabled in every cell and is not a power measurement (see the
+[DTX content-class record](../measurements/2026-08-16-windows-opus-dtx.md)).
+
 ## Codec-neutral media-path regression
 
 The deterministic cross-crate test in
