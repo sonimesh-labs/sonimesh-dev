@@ -113,21 +113,24 @@ fn adapted_stream_renders_rate_and_channel_converted_audio() {
     assert_eq!(admitted.adapter.output_channels(), 1);
 
     // 96 kHz stereo: frame i carries (0.01*i, 0.1 + 0.01*i). The adapter
-    // downsamples to 48 kHz (selecting frames 0,2,...,14) and folds stereo to
-    // mono by averaging each pair: 0.05 + 0.02*index.
+    // downsamples to 48 kHz and folds stereo to mono by averaging each pair:
+    // 0.05 + 0.02*index. The windowed-sinc kernel needs 16 past frames, so the
+    // first output block is a start-up transient; assert the steady-state
+    // block that follows it (outputs 8..16, centered on source frames 16..30).
     let mut input = Vec::new();
-    for frame in 0..16_u16 {
+    for frame in 0..64_u16 {
         input.push(f32::from(frame) * 0.01);
         input.push(0.1 + f32::from(frame) * 0.01);
     }
     push_frames(&mut admitted.source_producer, &input, 2);
     admitted.adapter.pump().unwrap();
+    admitted.adapter.pump().unwrap();
 
-    let output = render(&mut source, 1);
+    let output = render(&mut source, 2);
     let expected: Vec<f32> = (0..8_u16)
-        .map(|index| 0.05 + f32::from(index) * 0.02)
+        .map(|index| 0.05 + f32::from(index + 8) * 0.02)
         .collect();
-    assert_samples(&output, &expected);
+    assert_samples(&output[OUTPUT_BLOCK..], &expected);
 }
 
 #[test]
@@ -136,14 +139,15 @@ fn removing_an_adapted_stream_renders_silence() {
     let mut membership = controller(&source);
     let mut admitted = admit_adapted(&mut membership);
     let mut input = Vec::new();
-    for frame in 0..16_u16 {
+    for frame in 0..64_u16 {
         input.push(f32::from(frame) * 0.01);
         input.push(0.1 + f32::from(frame) * 0.01);
     }
     push_frames(&mut admitted.source_producer, &input, 2);
     admitted.adapter.pump().unwrap();
+    admitted.adapter.pump().unwrap();
     assert!(
-        render(&mut source, 1)
+        render(&mut source, 2)[OUTPUT_BLOCK..]
             .iter()
             .any(|sample| sample.abs() > TOLERANCE),
         "converted audio must reach the output before removal"

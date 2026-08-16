@@ -147,19 +147,30 @@ fn sealer() -> MediaSealer {
     MediaSealer::new(&SessionSecret::new([0xA5; 32]), context(1, 1)).unwrap()
 }
 
-/// Seals, receives, decodes, pumps, and renders one output block.
+/// Decoded source blocks needed before the windowed-sinc resampler can push
+/// its first output block. The 33-tap kernel keeps 16 future input frames of
+/// lookahead, so one 8-frame output block at 6x upsampling (8 kHz to 48 kHz)
+/// needs `floor(7/6) + 33 = 34` input frames, rounded up to whole blocks.
+const STEADY_STATE_BLOCKS: u32 = 5;
+
+/// Seals, receives, decodes, and pumps `STEADY_STATE_BLOCKS` decoded blocks,
+/// then renders one output block. Earlier pumps only fill the resampler's
+/// lookahead window, so the output is rendered once at the end.
 fn feed_cycle(
     session: &mut Session,
     pipeline: &mut Pipeline,
     sealer: &mut MediaSealer,
-    sequence: u32,
+    first_sequence: u32,
 ) -> [f32; BLOCK] {
-    let payload = [0x2A; 8];
-    let packet = sealer.seal(0, u64::from(sequence) * 8, &payload).unwrap();
-    let mut plaintext = [0_u8; 8];
-    pipeline.receive(&packet.datagram, &mut plaintext).unwrap();
-    pipeline.decode_next().unwrap();
-    session.pump_all().unwrap();
+    for block in 0..STEADY_STATE_BLOCKS {
+        let sequence = first_sequence + block;
+        let payload = [0x2A; 8];
+        let packet = sealer.seal(0, u64::from(sequence) * 8, &payload).unwrap();
+        let mut plaintext = [0_u8; 8];
+        pipeline.receive(&packet.datagram, &mut plaintext).unwrap();
+        pipeline.decode_next().unwrap();
+        session.pump_all().unwrap();
+    }
     let mut rendered = [0.0_f32; BLOCK];
     session.output_mut().render(&mut rendered);
     rendered
@@ -533,16 +544,24 @@ fn session_exposes_queue_diagnostics() {
     let identity = request(1, 1).identity;
 
     assert_eq!(session.queued_source_blocks(identity).unwrap(), 0);
-    let payload = [0x2A; 8];
-    let packet = sealer.seal(0, 0, &payload).unwrap();
-    let mut plaintext = [0_u8; 8];
-    pipeline.receive(&packet.datagram, &mut plaintext).unwrap();
-    pipeline.decode_next().unwrap();
+    let mut feed_one = |sequence: u32| {
+        let payload = [0x2A; 8];
+        let packet = sealer.seal(0, u64::from(sequence) * 8, &payload).unwrap();
+        let mut plaintext = [0_u8; 8];
+        pipeline.receive(&packet.datagram, &mut plaintext).unwrap();
+        pipeline.decode_next().unwrap();
+    };
+
+    feed_one(0);
     assert!(
         session.queued_source_blocks(identity).unwrap() >= 1,
         "decoded source blocks must be visible before the pump"
     );
-
+    // Feed the remaining blocks so the windowed-sinc resampler has its 33-tap
+    // lookahead window; one pump then converts and pushes an output block.
+    for sequence in 1..STEADY_STATE_BLOCKS {
+        feed_one(sequence);
+    }
     session.pump_all().unwrap();
     assert_eq!(session.queued_source_blocks(identity).unwrap(), 0);
     assert!(

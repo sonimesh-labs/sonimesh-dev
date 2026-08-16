@@ -17,7 +17,7 @@
 use core::fmt;
 
 use sonimesh_audio::{
-    ChannelMapper, ChannelMappingError, LinearResampler, MAX_DRIFT_ADJUSTMENT_PPM,
+    ChannelMapper, ChannelMappingError, MAX_DRIFT_ADJUSTMENT_PPM, PolyphaseResampler,
     RealtimePcmConsumer, RealtimePcmPopOutcome, RealtimePcmProducer, RealtimePcmPushOutcome,
     ResamplerError,
 };
@@ -102,7 +102,7 @@ pub struct StreamFormatAdapter<
 > {
     source: RealtimePcmConsumer<SOURCE_SAMPLES_PER_BLOCK>,
     output: RealtimePcmProducer<OUTPUT_SAMPLES_PER_BLOCK>,
-    resampler: LinearResampler,
+    resampler: PolyphaseResampler,
     mapper: ChannelMapper,
     source_channels: usize,
     output_channels: usize,
@@ -143,7 +143,7 @@ impl<const SOURCE_SAMPLES_PER_BLOCK: usize, const OUTPUT_SAMPLES_PER_BLOCK: usiz
             return Err(StreamFormatAdapterError::BlockTooSmallForLayout);
         }
 
-        let mut resampler = LinearResampler::new(
+        let mut resampler = PolyphaseResampler::new(
             source_format.sample_rate_hz,
             output_format.sample_rate_hz,
             source_format.channels,
