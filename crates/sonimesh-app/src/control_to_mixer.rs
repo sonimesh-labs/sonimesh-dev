@@ -640,3 +640,674 @@ where
         self.mixer.snapshot()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use sonimesh_audio::{MAX_PCM_QUEUE_BLOCKS, RealtimePcmProducer, RealtimeQueueConfigError};
+    use sonimesh_platform::{
+        AudioOutput, OutputConfig, OutputDeviceId, OutputDeviceInfo, OutputError, OutputHealth,
+        RenderSource, SampleFormat,
+    };
+    use sonimesh_protocol::{
+        CONTROL_PROTOCOL_VERSION, Capability, Envelope, Hello, StartStream, StopStream, envelope,
+    };
+
+    use super::{ControlToMixerBridge, ControlToMixerError};
+    use crate::{
+        ControlOperationToken, ControlSessionToken, ControlStreamAction, ControlStreamError,
+        MediaStreamIdentity, MixerAdmissionError, MixerOutputLifecycleError,
+        MixerStreamSessionError, OutputSelection, ReceiverPcmProducerInstaller,
+        ReconnectGraceObservation, SessionEvent, SessionPhase, SessionState, StreamStartRequest,
+    };
+
+    const SLOTS: usize = 2;
+    const OUTPUT_SAMPLES: usize = 256;
+    const SOURCE_SAMPLES: usize = 480;
+
+    struct FakeOutput {
+        started: bool,
+        stopped: bool,
+        health: OutputHealth,
+        fail_start: bool,
+    }
+
+    impl Default for FakeOutput {
+        fn default() -> Self {
+            Self {
+                started: false,
+                stopped: false,
+                health: OutputHealth::Healthy,
+                fail_start: false,
+            }
+        }
+    }
+
+    impl AudioOutput for FakeOutput {
+        fn devices(&self) -> Result<Vec<OutputDeviceInfo>, OutputError> {
+            Ok(Vec::new())
+        }
+
+        fn start(
+            &mut self,
+            _device: Option<&OutputDeviceId>,
+            _config: OutputConfig,
+            _source: Box<dyn RenderSource>,
+        ) -> Result<(), OutputError> {
+            if self.fail_start {
+                return Err(OutputError::DeviceUnavailable);
+            }
+            self.started = true;
+            self.stopped = false;
+            Ok(())
+        }
+
+        fn stop(&mut self) {
+            self.started = false;
+            self.stopped = true;
+        }
+
+        fn health(&self) -> OutputHealth {
+            self.health
+        }
+    }
+
+    struct FakePipeline<const S: usize> {
+        replaced: usize,
+        producer: Option<RealtimePcmProducer<S>>,
+    }
+
+    impl<const S: usize> Default for FakePipeline<S> {
+        fn default() -> Self {
+            Self {
+                replaced: 0,
+                producer: None,
+            }
+        }
+    }
+
+    impl<const S: usize> ReceiverPcmProducerInstaller<S> for FakePipeline<S> {
+        fn replace_pcm_producer(&mut self, producer: RealtimePcmProducer<S>) {
+            self.replaced += 1;
+            self.producer = Some(producer);
+        }
+    }
+
+    fn selection(device: Option<OutputDeviceId>) -> OutputSelection {
+        OutputSelection {
+            device,
+            config: OutputConfig {
+                sample_rate_hz: 48_000,
+                channels: 2,
+                sample_format: SampleFormat::Float32,
+                requested_callback_frames: Some(480),
+                maximum_callback_frames: 1_024,
+            },
+        }
+    }
+
+    fn identity(stream_id: u32) -> MediaStreamIdentity {
+        MediaStreamIdentity {
+            session_id: 0x0102_0304,
+            stream_id,
+            key_epoch: 0,
+        }
+    }
+
+    fn request(identity: MediaStreamIdentity) -> StreamStartRequest {
+        StreamStartRequest {
+            identity,
+            sample_rate_hz: 48_000,
+            channels: 1,
+            frame_duration_ms: 10,
+        }
+    }
+
+    fn bridge(output: FakeOutput) -> ControlToMixerBridge<FakeOutput, SLOTS, OUTPUT_SAMPLES> {
+        ControlToMixerBridge::new(
+            SessionState::READY,
+            &[Capability::FrameDuration10Ms, Capability::FrameDuration20Ms],
+            output,
+            selection(None),
+            8,
+            8,
+        )
+        .expect("fixed test bridge is valid")
+    }
+
+    fn hello_envelope() -> Envelope {
+        Envelope {
+            protocol_version: CONTROL_PROTOCOL_VERSION,
+            request_id: 7,
+            payload: Some(envelope::Payload::Hello(Hello {
+                supported_versions: vec![CONTROL_PROTOCOL_VERSION],
+                capabilities: vec![
+                    Capability::FrameDuration10Ms as i32,
+                    Capability::FrameDuration20Ms as i32,
+                ],
+                display_name: "test sender".to_owned(),
+            })),
+        }
+    }
+
+    fn start_envelope(request: StreamStartRequest) -> Envelope {
+        Envelope {
+            protocol_version: CONTROL_PROTOCOL_VERSION,
+            request_id: 11,
+            payload: Some(envelope::Payload::StartStream(StartStream {
+                media_session_id: request.identity.session_id,
+                stream_id: request.identity.stream_id,
+                sample_rate_hz: request.sample_rate_hz,
+                channels: request.channels,
+                frame_duration_ms: request.frame_duration_ms,
+                media_key_epoch: u32::from(request.identity.key_epoch),
+            })),
+        }
+    }
+
+    fn stop_envelope(identity: MediaStreamIdentity) -> Envelope {
+        Envelope {
+            protocol_version: CONTROL_PROTOCOL_VERSION,
+            request_id: 12,
+            payload: Some(envelope::Payload::StopStream(StopStream {
+                media_session_id: identity.session_id,
+                stream_id: identity.stream_id,
+                media_key_epoch: u32::from(identity.key_epoch),
+            })),
+        }
+    }
+
+    fn start_one(
+        bridge: &mut ControlToMixerBridge<FakeOutput, SLOTS, OUTPUT_SAMPLES>,
+        session: ControlSessionToken,
+        identity: MediaStreamIdentity,
+        pipeline: &mut FakePipeline<SOURCE_SAMPLES>,
+    ) {
+        let request = request(identity);
+        match bridge.accept(session, &start_envelope(request)) {
+            Ok(ControlStreamAction::Start { token, request }) => {
+                bridge
+                    .execute_start(token, request, None, pipeline)
+                    .unwrap();
+            }
+            other => panic!("expected a start action, got {other:?}"),
+        }
+    }
+
+    fn stop_one(
+        bridge: &mut ControlToMixerBridge<FakeOutput, SLOTS, OUTPUT_SAMPLES>,
+        session: ControlSessionToken,
+        identity: MediaStreamIdentity,
+    ) {
+        match bridge.accept(session, &stop_envelope(identity)) {
+            Ok(ControlStreamAction::Stop { token, identity }) => {
+                bridge.execute_stop(token, identity).unwrap();
+            }
+            other => panic!("expected a stop action, got {other:?}"),
+        }
+    }
+
+    fn prepare_start(
+        bridge: &mut ControlToMixerBridge<FakeOutput, SLOTS, OUTPUT_SAMPLES>,
+        session: ControlSessionToken,
+        identity: MediaStreamIdentity,
+    ) -> (ControlOperationToken, StreamStartRequest) {
+        let request = request(identity);
+        match bridge.accept(session, &start_envelope(request)) {
+            Ok(ControlStreamAction::Start { token, request }) => (token, request),
+            other => panic!("expected a start action, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn new_rejects_zero_or_oversized_source_queue_capacity() {
+        let capabilities = [Capability::FrameDuration10Ms, Capability::FrameDuration20Ms];
+        assert!(matches!(
+            ControlToMixerBridge::<FakeOutput, SLOTS, OUTPUT_SAMPLES>::new(
+                SessionState::READY,
+                &capabilities,
+                FakeOutput::default(),
+                selection(None),
+                8,
+                0,
+            ),
+            Err(ControlToMixerError::Mixer(
+                MixerStreamSessionError::Membership(MixerAdmissionError::Queue(
+                    RealtimeQueueConfigError::ZeroCapacity
+                ))
+            ))
+        ));
+        assert!(matches!(
+            ControlToMixerBridge::<FakeOutput, SLOTS, OUTPUT_SAMPLES>::new(
+                SessionState::READY,
+                &capabilities,
+                FakeOutput::default(),
+                selection(None),
+                8,
+                MAX_PCM_QUEUE_BLOCKS + 1,
+            ),
+            Err(ControlToMixerError::Mixer(
+                MixerStreamSessionError::Membership(MixerAdmissionError::Queue(
+                    RealtimeQueueConfigError::CapacityTooLarge
+                ))
+            ))
+        ));
+    }
+
+    #[test]
+    fn new_rejects_zero_or_oversized_mixer_queue_capacity() {
+        let capabilities = [Capability::FrameDuration10Ms, Capability::FrameDuration20Ms];
+        assert!(matches!(
+            ControlToMixerBridge::<FakeOutput, SLOTS, OUTPUT_SAMPLES>::new(
+                SessionState::READY,
+                &capabilities,
+                FakeOutput::default(),
+                selection(None),
+                0,
+                8,
+            ),
+            Err(ControlToMixerError::Mixer(
+                MixerStreamSessionError::Membership(MixerAdmissionError::Queue(
+                    RealtimeQueueConfigError::ZeroCapacity
+                ))
+            ))
+        ));
+        assert!(matches!(
+            ControlToMixerBridge::<FakeOutput, SLOTS, OUTPUT_SAMPLES>::new(
+                SessionState::READY,
+                &capabilities,
+                FakeOutput::default(),
+                selection(None),
+                MAX_PCM_QUEUE_BLOCKS + 1,
+                8,
+            ),
+            Err(ControlToMixerError::Mixer(
+                MixerStreamSessionError::Membership(MixerAdmissionError::Queue(
+                    RealtimeQueueConfigError::CapacityTooLarge
+                ))
+            ))
+        ));
+    }
+
+    #[test]
+    fn new_rejects_an_oversized_local_capability_policy() {
+        let capabilities = [Capability::Unspecified; 17];
+        assert!(matches!(
+            ControlToMixerBridge::<FakeOutput, SLOTS, OUTPUT_SAMPLES>::new(
+                SessionState::READY,
+                &capabilities,
+                FakeOutput::default(),
+                selection(None),
+                8,
+                8,
+            ),
+            Err(ControlToMixerError::Control(
+                ControlStreamError::LocalCapabilityPolicyTooLarge
+            ))
+        ));
+    }
+
+    #[test]
+    fn snapshot_reflects_idle_and_streaming_bridge_state() {
+        let mut bridge = bridge(FakeOutput::default());
+        let idle = bridge.snapshot();
+        assert_eq!(idle.session(), SessionPhase::Ready);
+        assert!(!idle.output_active());
+        assert_eq!(idle.active_streams(), 0);
+        assert_eq!(idle.pending_mixer_commands(), 0);
+
+        let session = bridge.install_authenticated_control_session().unwrap();
+        bridge.accept(session, &hello_envelope()).unwrap();
+        let mut pipeline = FakePipeline::<SOURCE_SAMPLES>::default();
+        start_one(&mut bridge, session, identity(1), &mut pipeline);
+
+        let streaming = bridge.snapshot();
+        assert_eq!(streaming.session(), SessionPhase::Streaming);
+        assert!(streaming.output_active());
+        assert_eq!(streaming.active_streams(), 1);
+        assert!(streaming.pending_mixer_commands() >= 1);
+        assert!(streaming.output().stream_active());
+    }
+
+    #[test]
+    fn lifecycle_starts_output_with_first_stream_and_stops_with_last() {
+        let mut bridge = bridge(FakeOutput::default());
+        let session = bridge.install_authenticated_control_session().unwrap();
+        assert!(matches!(
+            bridge.accept(session, &hello_envelope()),
+            Ok(ControlStreamAction::Negotiated(_))
+        ));
+        let mut pipeline = FakePipeline::<SOURCE_SAMPLES>::default();
+
+        start_one(&mut bridge, session, identity(1), &mut pipeline);
+        assert_eq!(bridge.state().phase(), SessionPhase::Streaming);
+        assert!(bridge.output_active());
+        assert_eq!(bridge.mixer().stream_count(), 1);
+        assert_eq!(pipeline.replaced, 1);
+        assert!(bridge.mixer().output().started);
+
+        stop_one(&mut bridge, session, identity(1));
+        assert_eq!(bridge.state().phase(), SessionPhase::Ready);
+        assert!(!bridge.output_active());
+        assert_eq!(bridge.mixer().stream_count(), 0);
+        assert!(bridge.mixer().output().stopped);
+    }
+
+    #[test]
+    fn first_stream_output_failure_rolls_back_without_dangling_pending() {
+        let output = FakeOutput {
+            fail_start: true,
+            ..Default::default()
+        };
+        let mut bridge = bridge(output);
+        let session = bridge.install_authenticated_control_session().unwrap();
+        bridge.accept(session, &hello_envelope()).unwrap();
+        let mut pipeline = FakePipeline::<SOURCE_SAMPLES>::default();
+        let (token, request) = prepare_start(&mut bridge, session, identity(1));
+
+        assert!(matches!(
+            bridge.execute_start(token, request, None, &mut pipeline),
+            Err(ControlToMixerError::Mixer(MixerStreamSessionError::Output(
+                MixerOutputLifecycleError::Output(OutputError::DeviceUnavailable)
+            )))
+        ));
+        assert!(!bridge.output_active());
+        assert_eq!(bridge.state().phase(), SessionPhase::Ready);
+        assert_eq!(bridge.mixer().stream_count(), 0);
+        assert!(!bridge.mixer().output().started);
+
+        // The aborted pending operation must not block a later admission.
+        bridge.mixer_mut().output_mut().fail_start = false;
+        start_one(&mut bridge, session, identity(1), &mut pipeline);
+        assert_eq!(bridge.state().phase(), SessionPhase::Streaming);
+        assert!(bridge.output_active());
+        assert_eq!(bridge.mixer().stream_count(), 1);
+    }
+
+    #[test]
+    fn output_stays_active_while_any_stream_runs() {
+        let mut bridge = bridge(FakeOutput::default());
+        let session = bridge.install_authenticated_control_session().unwrap();
+        bridge.accept(session, &hello_envelope()).unwrap();
+        let mut pipeline = FakePipeline::<SOURCE_SAMPLES>::default();
+
+        start_one(&mut bridge, session, identity(1), &mut pipeline);
+        start_one(&mut bridge, session, identity(2), &mut pipeline);
+        assert_eq!(bridge.mixer().stream_count(), 2);
+        assert!(bridge.output_active());
+
+        stop_one(&mut bridge, session, identity(1));
+        assert_eq!(bridge.mixer().stream_count(), 1);
+        assert!(bridge.output_active());
+        assert!(!bridge.mixer().output().stopped);
+
+        stop_one(&mut bridge, session, identity(2));
+        assert_eq!(bridge.mixer().stream_count(), 0);
+        assert!(!bridge.output_active());
+        assert!(bridge.mixer().output().stopped);
+        assert_eq!(bridge.state().phase(), SessionPhase::Ready);
+    }
+
+    #[test]
+    fn monitor_fault_retires_membership_and_recovery_readmits_streams() {
+        let output = FakeOutput {
+            health: OutputHealth::StreamError,
+            ..Default::default()
+        };
+        let mut bridge = bridge(output);
+        let session = bridge.install_authenticated_control_session().unwrap();
+        bridge.accept(session, &hello_envelope()).unwrap();
+        let mut pipeline = FakePipeline::<SOURCE_SAMPLES>::default();
+        start_one(&mut bridge, session, identity(1), &mut pipeline);
+        start_one(&mut bridge, session, identity(2), &mut pipeline);
+
+        assert!(matches!(
+            bridge.monitor(),
+            Ok(Some(OutputHealth::StreamError))
+        ));
+        assert!(matches!(bridge.monitor(), Ok(None)));
+        assert_eq!(bridge.state().phase(), SessionPhase::OutputUnavailable);
+        assert!(!bridge.output_active());
+        assert_eq!(bridge.mixer().stream_count(), 2);
+        assert!(bridge.mixer().output().stopped);
+        assert!(bridge.snapshot().output().fault_reported());
+
+        let identities = bridge.recover_output().unwrap();
+        assert_eq!(identities, vec![identity(1), identity(2)]);
+        assert_eq!(bridge.state().phase(), SessionPhase::Streaming);
+        assert!(bridge.output_active());
+
+        bridge.recover_stream(identity(1), &mut pipeline).unwrap();
+        bridge.recover_stream(identity(2), &mut pipeline).unwrap();
+        assert_eq!(pipeline.replaced, 4);
+        assert_eq!(bridge.mixer().stream_count(), 2);
+        assert!(bridge.mixer().output().started);
+    }
+
+    #[test]
+    fn recovery_failure_rolls_the_coordinator_back_to_output_unavailable() {
+        let output = FakeOutput {
+            health: OutputHealth::CallbackCapacityExceeded,
+            ..Default::default()
+        };
+        let mut bridge = bridge(output);
+        let session = bridge.install_authenticated_control_session().unwrap();
+        bridge.accept(session, &hello_envelope()).unwrap();
+        let mut pipeline = FakePipeline::<SOURCE_SAMPLES>::default();
+        start_one(&mut bridge, session, identity(1), &mut pipeline);
+        assert!(matches!(
+            bridge.monitor(),
+            Ok(Some(OutputHealth::CallbackCapacityExceeded))
+        ));
+        assert_eq!(bridge.state().phase(), SessionPhase::OutputUnavailable);
+
+        bridge.mixer_mut().output_mut().fail_start = true;
+        assert!(matches!(
+            bridge.recover_output(),
+            Err(ControlToMixerError::Mixer(MixerStreamSessionError::Output(
+                MixerOutputLifecycleError::Output(OutputError::DeviceUnavailable)
+            )))
+        ));
+        // Both domains must agree the output is still down so recovery can retry.
+        assert_eq!(bridge.state().phase(), SessionPhase::OutputUnavailable);
+        assert!(!bridge.output_active());
+        assert_eq!(bridge.mixer().stream_count(), 1);
+    }
+
+    #[test]
+    fn reconnect_grace_expiry_stops_the_mixer_output() {
+        let mut bridge = bridge(FakeOutput::default());
+        let session = bridge.install_authenticated_control_session().unwrap();
+        bridge.accept(session, &hello_envelope()).unwrap();
+        let mut pipeline = FakePipeline::<SOURCE_SAMPLES>::default();
+        start_one(&mut bridge, session, identity(1), &mut pipeline);
+
+        bridge
+            .acknowledge_platform_event(SessionEvent::ConnectionLost)
+            .unwrap();
+        assert_eq!(bridge.state().phase(), SessionPhase::Reconnecting);
+        bridge.begin_reconnect_grace(1_000, 500).unwrap();
+        assert!(matches!(
+            bridge.observe_reconnect_grace(1_000),
+            Ok(ReconnectGraceObservation::InGrace { remaining_ms })
+                if remaining_ms == 500
+        ));
+        assert!(bridge.output_active());
+
+        assert!(matches!(
+            bridge.observe_reconnect_grace(1_501),
+            Ok(ReconnectGraceObservation::Expired)
+        ));
+        assert_eq!(bridge.state().phase(), SessionPhase::Idle);
+        assert!(!bridge.output_active());
+        assert_eq!(bridge.mixer().stream_count(), 0);
+        assert!(bridge.mixer().output().stopped);
+    }
+
+    #[test]
+    fn reconnected_stops_mixer_and_retires_the_control_session() {
+        let mut bridge = bridge(FakeOutput::default());
+        let session = bridge.install_authenticated_control_session().unwrap();
+        bridge.accept(session, &hello_envelope()).unwrap();
+        let mut pipeline = FakePipeline::<SOURCE_SAMPLES>::default();
+        start_one(&mut bridge, session, identity(1), &mut pipeline);
+
+        bridge
+            .acknowledge_platform_event(SessionEvent::ConnectionLost)
+            .unwrap();
+        bridge
+            .acknowledge_platform_event(SessionEvent::Reconnected)
+            .unwrap();
+        assert_eq!(bridge.state().phase(), SessionPhase::Ready);
+        assert!(!bridge.output_active());
+        assert_eq!(bridge.mixer().stream_count(), 0);
+        assert!(bridge.mixer().output().stopped);
+        assert!(bridge.coordinator().negotiation().is_none());
+    }
+
+    #[test]
+    fn directly_acknowledged_output_restoration_stops_stale_producers() {
+        let mut bridge = bridge(FakeOutput::default());
+        let session = bridge.install_authenticated_control_session().unwrap();
+        bridge.accept(session, &hello_envelope()).unwrap();
+        let mut pipeline = FakePipeline::<SOURCE_SAMPLES>::default();
+        start_one(&mut bridge, session, identity(1), &mut pipeline);
+
+        bridge
+            .acknowledge_platform_event(SessionEvent::OutputLost)
+            .unwrap();
+        assert_eq!(bridge.state().phase(), SessionPhase::OutputUnavailable);
+
+        bridge
+            .acknowledge_platform_event(SessionEvent::OutputRestored)
+            .unwrap();
+        assert_eq!(bridge.state().phase(), SessionPhase::Streaming);
+        assert!(!bridge.output_active());
+        assert_eq!(bridge.mixer().stream_count(), 0);
+        assert!(bridge.mixer().output().stopped);
+    }
+
+    #[test]
+    fn expire_control_session_stops_mixer_and_output() {
+        let mut bridge = bridge(FakeOutput::default());
+        let session = bridge.install_authenticated_control_session().unwrap();
+        bridge.accept(session, &hello_envelope()).unwrap();
+        let mut pipeline = FakePipeline::<SOURCE_SAMPLES>::default();
+        start_one(&mut bridge, session, identity(1), &mut pipeline);
+
+        bridge.expire_control_session();
+        assert_eq!(bridge.state().phase(), SessionPhase::Idle);
+        assert!(!bridge.output_active());
+        assert_eq!(bridge.mixer().stream_count(), 0);
+        assert!(bridge.mixer().output().stopped);
+    }
+
+    #[test]
+    fn stale_start_token_fails_closed_without_touching_active_media() {
+        let mut bridge = bridge(FakeOutput::default());
+        let session = bridge.install_authenticated_control_session().unwrap();
+        bridge.accept(session, &hello_envelope()).unwrap();
+        let mut pipeline = FakePipeline::<SOURCE_SAMPLES>::default();
+        start_one(&mut bridge, session, identity(1), &mut pipeline);
+
+        // Prepare a second start, then lose the connection so the coordinator
+        // retires the pending operation before the platform executes it.
+        let (token, request) = prepare_start(&mut bridge, session, identity(2));
+        bridge
+            .acknowledge_platform_event(SessionEvent::ConnectionLost)
+            .unwrap();
+
+        assert!(matches!(
+            bridge.execute_start(token, request, None, &mut pipeline),
+            Err(ControlToMixerError::Control(
+                ControlStreamError::CompletionMismatch
+            ))
+        ));
+        assert_eq!(bridge.state().phase(), SessionPhase::Reconnecting);
+        assert_eq!(bridge.mixer().stream_count(), 1);
+        assert!(bridge.output_active());
+    }
+
+    #[test]
+    fn stale_rotation_token_rotates_the_mixer_back_to_the_previous_identity() {
+        let mut bridge = bridge(FakeOutput::default());
+        let session = bridge.install_authenticated_control_session().unwrap();
+        bridge.accept(session, &hello_envelope()).unwrap();
+        let mut pipeline = FakePipeline::<SOURCE_SAMPLES>::default();
+        start_one(&mut bridge, session, identity(1), &mut pipeline);
+
+        // Peer rotates stream 1 to a newer key epoch.
+        let mut rotated = request(identity(1));
+        rotated.identity.key_epoch = 1;
+        let rotated = match bridge.accept(session, &start_envelope(rotated)) {
+            Ok(ControlStreamAction::Rotate {
+                token,
+                previous,
+                next,
+            }) => (token, previous, next),
+            other => panic!("expected a rotate action, got {other:?}"),
+        };
+        let (token, previous, next) = rotated;
+        assert_eq!(previous, identity(1));
+        assert_eq!(next.identity.key_epoch, 1);
+
+        // The output faults between accept and execute, retiring the pending
+        // operation; the platform must not commit the rotation.
+        bridge
+            .acknowledge_platform_event(SessionEvent::OutputLost)
+            .unwrap();
+        assert!(matches!(
+            bridge.execute_rotation(token, previous, next),
+            Err(ControlToMixerError::Control(
+                ControlStreamError::CompletionMismatch
+            ))
+        ));
+
+        assert_eq!(bridge.state().phase(), SessionPhase::OutputUnavailable);
+        assert_eq!(bridge.mixer().stream_count(), 1);
+        assert!(bridge.mixer().gain(identity(1)).is_ok());
+        assert!(matches!(
+            bridge.mixer().gain(MediaStreamIdentity {
+                key_epoch: 1,
+                ..identity(1)
+            }),
+            Err(MixerStreamSessionError::UnknownStream(_))
+        ));
+    }
+
+    #[test]
+    fn monitor_fault_during_reconnect_still_marks_output_down() {
+        let mut bridge = bridge(FakeOutput::default());
+        let session = bridge.install_authenticated_control_session().unwrap();
+        bridge.accept(session, &hello_envelope()).unwrap();
+        let mut pipeline = FakePipeline::<SOURCE_SAMPLES>::default();
+        start_one(&mut bridge, session, identity(1), &mut pipeline);
+        bridge
+            .acknowledge_platform_event(SessionEvent::ConnectionLost)
+            .unwrap();
+
+        bridge.mixer_mut().output_mut().health = OutputHealth::StreamError;
+        assert!(matches!(
+            bridge.monitor(),
+            Err(ControlToMixerError::Control(
+                ControlStreamError::Transition(_)
+            ))
+        ));
+        // The bridge still marks the output down even when the lifecycle cannot
+        // represent the fault during reconnect.
+        assert!(!bridge.output_active());
+        assert!(bridge.mixer().output().stopped);
+        assert_eq!(bridge.state().phase(), SessionPhase::Reconnecting);
+    }
+
+    #[test]
+    fn error_display_is_actionable() {
+        assert_eq!(
+            ControlToMixerError::Control(ControlStreamError::CompletionMismatch).to_string(),
+            "control-to-mixer control failure: stream lifecycle completion did not match pending state"
+        );
+        assert_eq!(
+            ControlToMixerError::Mixer(MixerStreamSessionError::OutputNotActive).to_string(),
+            "control-to-mixer mixer failure: mixer session output is not active"
+        );
+    }
+}
