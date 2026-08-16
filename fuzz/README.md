@@ -230,6 +230,10 @@ The network-scenario targets (`jitter_target`, `jitter_scheduler`, `multi_stream
   length-prefixed control framing state machine in a deterministic per-input
   chunk size, exercising partial length and payload reads, oversize and
   zero-length rejection, and peer-close retirement.
+- `media_session_allocator` drives arbitrary identity/direction supply
+  scripts through the ADR 0017 no-reuse record, comparing every outcome
+  against an independent append-only set model so replay, capacity, and
+  zero-identifier handling cannot drift from the pairing-lifetime contract.
 
 ## Run a target
 
@@ -275,6 +279,7 @@ cargo +nightly-2026-07-18 fuzz run receiver_pipeline -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run udp_receiver_pipeline -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run media_session_sender -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run export_retention_journal -- -max_len=1024
+cargo +nightly-2026-07-18 fuzz run media_session_allocator -- -max_len=64
 cargo +nightly-2026-07-18 fuzz run stream_decode_worker -- -max_len=64
 cargo +nightly-2026-07-18 fuzz run native_opus_decode -- -max_len=1200
 ```

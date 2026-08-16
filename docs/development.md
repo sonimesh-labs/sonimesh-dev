@@ -141,6 +141,7 @@ cargo +nightly-2026-07-18 fuzz run receiver_pipeline -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run udp_receiver_pipeline -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run media_session_sender -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run export_retention_journal -- -max_len=1024
+cargo +nightly-2026-07-18 fuzz run media_session_allocator -- -max_len=64
 ~~~
 
 `cargo-fuzz` supports LibFuzzer execution on x86-64 Unix-like systems rather
