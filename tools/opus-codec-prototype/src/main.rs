@@ -16,10 +16,11 @@
 //! multi-harmonic sum), compares in-band FEC recovery against PLC for a
 //! dropped 20 ms frame across speech-like and tone content, sweeps the FEC
 //! loss rate across the speech-like profile, measures the wall-clock cost of
-//! enabling in-band FEC, and sweeps bounded deterministic malformed payloads
-//! that must surface as stream-local errors or bounded decodes. It is not a
-//! quality, power,
-//! latency, Android ABI, or coverage-guided fuzz result.
+//! enabling in-band FEC, measures DTX packet-size and active-region quality
+//! on pause-gapped and continuous content, and sweeps bounded deterministic
+//! malformed payloads that must surface as stream-local errors or bounded
+//! decodes. It is not a quality, power, latency, Android ABI, or
+//! coverage-guided fuzz result.
 
 use sonimesh_audio::{
     DecodeStep, FrameDecoder, InsertOutcome, OPUS_CHANNELS, OpusFrameConfig, RealtimePcmConsumer,
@@ -114,6 +115,28 @@ const FEC_LOSS_PERCENTS: [i32; 2] = [5, 20];
 const FEC_CPU_DROP_EVERY: usize = 10;
 /// Low bitrate swept by the FEC CPU pass to record mode-dependent overhead.
 const FEC_CPU_LOW_BITRATE_BPS: i32 = 24_000;
+/// Frame duration of the DTX probe in milliseconds.
+const DTX_FRAME_MS: u16 = 20;
+/// Frames encoded by the DTX probe at `DTX_FRAME_MS`.
+const DTX_SOURCE_FRAMES: usize = 240;
+/// Active speech-like frames per DTX cycle.
+const DTX_ACTIVE_FRAMES: usize = 16;
+/// Silent pause frames per DTX cycle; the pause must exceed the roughly
+/// 200 ms of inactivity libopus requires before DTX engages
+/// (`NB_SPEECH_FRAMES_BEFORE_DTX` in `silk/define.h` is 10 x 20 ms).
+const DTX_PAUSE_FRAMES: usize = 24;
+/// Packets no larger than this many bytes are classified as DTX packets.
+///
+/// libopus generalized DTX emits exactly the TOC byte
+/// (`data[0] = gen_toc(...); return 1` in `opus_encode_native`), so a real
+/// DTX packet is one byte.
+const DTX_PACKET_MAX_BYTES: usize = 1;
+/// Source frames at or below this RMS are treated as pauses, not active speech.
+const DTX_ACTIVE_RMS_MIN: f32 = 0.02;
+/// Required average byte reduction from DTX on pause content, in percent.
+const DTX_PAUSES_AVG_BYTES_MIN_REDUCTION_PCT: f32 = 20.0;
+/// Allowed active-region SNR drop from DTX, in decibels.
+const DTX_ACTIVE_SNR_MAX_DROP_DB: f32 = 1.5;
 /// Glottal pulse rate of the speech-like content profile in hertz.
 const SPEECH_F0_HZ: u32 = 120;
 /// Glottal pulse period in samples at `SPEECH_F0_HZ` and `SAMPLE_RATE_HZ`.
@@ -2149,6 +2172,167 @@ fn run_fec_cpu_probe() -> ProbeResult<Vec<String>> {
     Ok(lines)
 }
 
+/// One DTX-on/off measurement over the same deterministic source.
+struct DtxObservation {
+    /// Mean encoded packet size in bytes.
+    avg_bytes: f64,
+    /// Packets classified as DTX packets (at most `DTX_PACKET_MAX_BYTES`).
+    dtx_packets: usize,
+    /// Mean aligned SNR over active (non-pause) source frames in decibels.
+    active_snr: f32,
+}
+
+/// Encodes `DTX_SOURCE_FRAMES` frames of `source` with DTX `enabled` and
+/// returns the average packet size, the DTX-packet count, and the mean SNR
+/// over active frames.
+///
+/// Pause frames (source RMS at or below `DTX_ACTIVE_RMS_MIN`) are excluded
+/// from the SNR so the measurement reflects whether DTX degrades real
+/// speech, not that silence decodes as silence. A packet is classified as a
+/// DTX packet when its encoded length is at most `DTX_PACKET_MAX_BYTES`;
+/// libopus generalized DTX emits exactly the TOC byte.
+#[allow(clippy::cast_precision_loss)]
+fn measure_dtx_case(
+    frame: OpusFrameConfig,
+    source: &[f32],
+    enabled: bool,
+) -> ProbeResult<DtxObservation> {
+    let expected_samples = frame.interleaved_samples();
+    let per_channel_samples = frame.samples_per_channel();
+    let mut encoder = opus::Encoder::new(
+        SAMPLE_RATE_HZ,
+        opus::Channels::Stereo,
+        opus::Application::Audio,
+    )
+    .map_err(|error| error.to_string())?;
+    encoder
+        .set_dtx(enabled)
+        .map_err(|error| error.to_string())?;
+    let mut packets = vec![[0_u8; MAX_ENCODED_BYTES]; DTX_SOURCE_FRAMES];
+    let mut encoded_lens = vec![0_usize; DTX_SOURCE_FRAMES];
+    for index in 0..DTX_SOURCE_FRAMES {
+        let start = index * expected_samples;
+        encoded_lens[index] = encode_frame(
+            &mut encoder,
+            &source[start..start + expected_samples],
+            &mut packets[index],
+        )?;
+    }
+
+    let dtx_packets = encoded_lens
+        .iter()
+        .filter(|&&length| length <= DTX_PACKET_MAX_BYTES)
+        .count();
+    let total_bytes = encoded_lens.iter().copied().sum::<usize>();
+    let avg_bytes = total_bytes as f64 / encoded_lens.len() as f64;
+
+    let mut decoder = opus::Decoder::new(SAMPLE_RATE_HZ, opus::Channels::Stereo)
+        .map_err(|error| error.to_string())?;
+    let mut block = [0.0_f32; MAX_PCM_SAMPLES_PER_BLOCK];
+    let mut active_snr_sum = 0.0_f32;
+    let mut active_count = 0_usize;
+    for index in 0..DTX_SOURCE_FRAMES {
+        let start = index * expected_samples;
+        let source_block = &source[start..start + expected_samples];
+        if block_rms(source_block) <= DTX_ACTIVE_RMS_MIN {
+            continue;
+        }
+        let samples = decoder
+            .decode_float(&packets[index][..encoded_lens[index]], &mut block, false)
+            .map_err(|error| error.to_string())?;
+        if samples != per_channel_samples {
+            return Err(format!(
+                "DTX-path decode produced {samples} samples, expected {per_channel_samples}"
+            ));
+        }
+        let (snr, _) = best_aligned_snr(source_block, &block[..expected_samples]);
+        if !snr.is_finite() {
+            return Err("DTX-path active frame SNR is non-finite".to_owned());
+        }
+        active_snr_sum += snr;
+        active_count += 1;
+    }
+    if active_count == 0 {
+        return Err("DTX probe found no active source frames".to_owned());
+    }
+    Ok(DtxObservation {
+        avg_bytes,
+        dtx_packets,
+        active_snr: active_snr_sum / active_count as f32,
+    })
+}
+
+/// Measures DTX on pause-gapped speech-like content and on the continuous
+/// tone control, returning one deterministic line per profile.
+///
+/// The pause profile must show a material average-byte reduction from DTX
+/// without dropping active-region SNR, and the tone control must neither
+/// emit DTX packets nor lose quality, because DTX is a bandwidth/power
+/// optimization that must not corrupt continuous non-speech content.
+/// This is codec-level evidence, not a power measurement and not a
+/// `FrameDecoder`-boundary result.
+fn run_dtx_probe() -> ProbeResult<Vec<String>> {
+    let frame =
+        OpusFrameConfig::new(SAMPLE_RATE_HZ, 2, DTX_FRAME_MS).map_err(|error| error.to_string())?;
+    let expected_samples = frame.interleaved_samples();
+    let mut lines = Vec::new();
+
+    let pauses = speech_with_pauses(DTX_SOURCE_FRAMES * expected_samples);
+    let pauses_off = measure_dtx_case(frame, &pauses, false)?;
+    let pauses_on = measure_dtx_case(frame, &pauses, true)?;
+    let reduction_pct = (pauses_off.avg_bytes - pauses_on.avg_bytes) / pauses_off.avg_bytes * 100.0;
+    let active_drop_db = pauses_off.active_snr - pauses_on.active_snr;
+    if reduction_pct < f64::from(DTX_PAUSES_AVG_BYTES_MIN_REDUCTION_PCT) {
+        return Err(format!(
+            "DTX reduced pause content by {reduction_pct:.1}%, below the required \
+             {DTX_PAUSES_AVG_BYTES_MIN_REDUCTION_PCT:.0}%"
+        ));
+    }
+    if active_drop_db > DTX_ACTIVE_SNR_MAX_DROP_DB {
+        return Err(format!(
+            "DTX dropped active-region SNR by {active_drop_db:.1} dB, above the allowed \
+             {DTX_ACTIVE_SNR_MAX_DROP_DB:.1} dB"
+        ));
+    }
+    lines.push(format!(
+        "opus_20ms_dtx: pauses avg {:.0} -> {:.0} B ({reduction_pct:.0}% smaller); \
+         dtx pkts {}/{DTX_SOURCE_FRAMES}; active snr {:.1} vs {:.1} dB",
+        pauses_off.avg_bytes,
+        pauses_on.avg_bytes,
+        pauses_on.dtx_packets,
+        pauses_on.active_snr,
+        pauses_off.active_snr,
+    ));
+
+    let tone_source = tone(DTX_SOURCE_FRAMES * expected_samples);
+    let tone_off = measure_dtx_case(frame, &tone_source, false)?;
+    let tone_on = measure_dtx_case(frame, &tone_source, true)?;
+    let tone_reduction_pct = (tone_off.avg_bytes - tone_on.avg_bytes) / tone_off.avg_bytes * 100.0;
+    let tone_drop_db = tone_off.active_snr - tone_on.active_snr;
+    if tone_on.dtx_packets != 0 {
+        return Err(format!(
+            "DTX emitted {} packets on continuous tone, expected none",
+            tone_on.dtx_packets
+        ));
+    }
+    if tone_drop_db > DTX_ACTIVE_SNR_MAX_DROP_DB {
+        return Err(format!(
+            "DTX dropped tone SNR by {tone_drop_db:.1} dB, above the allowed \
+             {DTX_ACTIVE_SNR_MAX_DROP_DB:.1} dB"
+        ));
+    }
+    lines.push(format!(
+        "opus_20ms_dtx: tone avg {:.0} -> {:.0} B ({tone_reduction_pct:.0}% smaller); \
+         dtx pkts {}/{DTX_SOURCE_FRAMES}; snr {:.1} vs {:.1} dB",
+        tone_off.avg_bytes,
+        tone_on.avg_bytes,
+        tone_on.dtx_packets,
+        tone_on.active_snr,
+        tone_off.active_snr,
+    ));
+    Ok(lines)
+}
+
 /// Returns the signal-to-noise ratio in decibels between `reference` and
 /// `decoded` over the overlapping region, or infinity when either side is
 /// digital silence.
@@ -2280,6 +2464,7 @@ fn run_probe() -> ProbeResult<Vec<String>> {
     // The loss sweep and the FEC CPU pass share that shape.
     lines.extend(run_fec_probe()?);
     lines.extend(run_fec_cpu_probe()?);
+    lines.extend(run_dtx_probe()?);
 
     // A malformed authenticated payload surfaces as a bounded stream-local
     // decoder error and never reaches the PCM queue.
@@ -2438,6 +2623,30 @@ fn speech_like(samples: usize) -> Vec<f32> {
     out.into_iter().map(|sample| sample * scale).collect()
 }
 
+/// Builds one deterministic stereo block with `samples` interleaved samples
+/// that alternates continuous speech-like bursts with true silent pauses.
+///
+/// Each cycle is `DTX_ACTIVE_FRAMES` active frames followed by
+/// `DTX_PAUSE_FRAMES` silent frames at `DTX_FRAME_MS`, scaled to the tone
+/// profile's peak amplitude, so the SILK VAD has long deterministic inactive
+/// regions that exercise DTX.
+#[must_use]
+#[allow(clippy::cast_precision_loss)]
+fn speech_with_pauses(samples: usize) -> Vec<f32> {
+    let frame_samples =
+        SAMPLE_RATE_HZ as usize * DTX_FRAME_MS as usize * OPUS_CHANNELS as usize / 1_000;
+    let cycle_frames = DTX_ACTIVE_FRAMES + DTX_PAUSE_FRAMES;
+    let mut out = speech_like(samples);
+    for frame_index in 0..(samples / frame_samples) {
+        let position = frame_index % cycle_frames;
+        if position >= DTX_ACTIVE_FRAMES {
+            let start = frame_index * frame_samples;
+            out[start..start + frame_samples].fill(0.0);
+        }
+    }
+    out
+}
+
 /// Pops one complete PCM block from the consumer or fails the probe.
 fn assert_popped_pcm<const N: usize>(
     consumer: &mut RealtimePcmConsumer<N>,
@@ -2467,8 +2676,9 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::{
+        DTX_ACTIVE_FRAMES, DTX_FRAME_MS, DTX_PAUSE_FRAMES, OPUS_CHANNELS, SAMPLE_RATE_HZ,
         TONE_AMPLITUDE, best_aligned_snr, block_rms, is_dropped, snr_db, speech_like,
-        sustained_summary,
+        speech_with_pauses, sustained_summary,
     };
 
     #[test]
@@ -2584,5 +2794,27 @@ mod tests {
         assert!(!is_dropped(9, Some(10)));
         assert!(is_dropped(10, Some(10)));
         assert!(!is_dropped(19, Some(10)));
+    }
+    #[test]
+    fn speech_with_pauses_has_deterministic_silent_gaps() {
+        let frame_samples =
+            SAMPLE_RATE_HZ as usize * DTX_FRAME_MS as usize * OPUS_CHANNELS as usize / 1_000;
+        let cycle_frames = DTX_ACTIVE_FRAMES + DTX_PAUSE_FRAMES;
+        let source = speech_with_pauses(cycle_frames * frame_samples);
+
+        assert_eq!(source.len(), cycle_frames * frame_samples);
+        let active_rms = block_rms(&source[..DTX_ACTIVE_FRAMES * frame_samples]);
+        assert!(active_rms > TONE_AMPLITUDE * 0.05);
+        let pause_start = DTX_ACTIVE_FRAMES * frame_samples;
+        assert!(
+            source[pause_start..pause_start + frame_samples]
+                .iter()
+                .all(|&sample| sample == 0.0)
+        );
+        assert!(
+            source[pause_start + frame_samples..pause_start + 2 * frame_samples]
+                .iter()
+                .all(|&sample| sample == 0.0)
+        );
     }
 }
