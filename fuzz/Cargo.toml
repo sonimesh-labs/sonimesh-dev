@@ -71,6 +71,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "stream_format_adapter"
+path = "fuzz_targets/stream_format_adapter.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "native_opus_decode"
 path = "fuzz_targets/native_opus_decode.rs"
 test = false

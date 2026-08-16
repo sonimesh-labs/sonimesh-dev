@@ -152,6 +152,11 @@ The network-scenario targets (`jitter_target`, `jitter_scheduler`, `multi_stream
   bounded number of decode/PLC decisions, proving adversarial post-auth bytes
   cannot panic the worker, exceed the fixed frame capacity, or grow the PCM
   queue past its bound.
+- `stream_format_adapter` pushes arbitrary decoded source blocks through the
+  per-stream source-to-output pump (nominal resampling, channel mapping, and
+  the bounded mixer-slot queue) with adversarial drift corrections and epoch
+  resets, proving the pump cannot panic, exceed the fixed source or output
+  queue bound, or leave non-finite samples in a consumer-visible output block.
 - `native_opus_decode` feeds arbitrary post-authentication bytes through
   the bundled libopus decoder behind the fixed-capacity decode worker for
   the 10 ms shape, proving adversarial payloads cannot panic the native
@@ -281,6 +286,7 @@ cargo +nightly-2026-07-18 fuzz run media_session_sender -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run export_retention_journal -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run media_session_allocator -- -max_len=64
 cargo +nightly-2026-07-18 fuzz run stream_decode_worker -- -max_len=64
+cargo +nightly-2026-07-18 fuzz run stream_format_adapter -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run native_opus_decode -- -max_len=1200
 ```
 
