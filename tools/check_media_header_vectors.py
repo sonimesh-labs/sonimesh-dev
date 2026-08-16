@@ -28,6 +28,20 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 RUST_TEST_PATH = (
     REPO_ROOT / "crates" / "sonimesh-protocol" / "tests" / "media_header_vector.rs"
 )
+KOTLIN_TEST_PATH = (
+    REPO_ROOT
+    / "apps"
+    / "android"
+    / "app"
+    / "src"
+    / "test"
+    / "java"
+    / "com"
+    / "sonimesh"
+    / "sender"
+    / "protocol"
+    / "MediaHeaderVectorTest.kt"
+)
 
 
 def encode_header(
@@ -88,6 +102,19 @@ def rust_header_pin(source: str) -> bytes:
     return bytes(int(token, 16) for token in hex_tokens)
 
 
+def kotlin_header_pin(source: str) -> bytes | None:
+    """Extracts the golden byte array pinned by the Kotlin header test."""
+    match = re.search(
+        r"val EXPECTED_HEADER = hex\((.*?)\)", source, re.DOTALL
+    )
+    if match is None:
+        return None
+    pieces = re.findall(r'"([0-9a-fA-F]+)"', match.group(1))
+    if not pieces:
+        return None
+    return bytes.fromhex("".join(pieces))
+
+
 def validate_vectors() -> list[str]:
     """Returns deterministic mismatches between recomputation and the pins."""
     recomputed = recomputed_header()
@@ -103,6 +130,15 @@ def validate_vectors() -> list[str]:
         return [
             "media header differs from the Rust pin: "
             f"python {published.hex().upper()} rust {rust_pin.hex().upper()}"
+        ]
+    kotlin_source = KOTLIN_TEST_PATH.read_text(encoding="utf-8")
+    kotlin_pin = kotlin_header_pin(kotlin_source)
+    if kotlin_pin is None:
+        return ["media header: Kotlin unit-test pin not found"]
+    if kotlin_pin != published:
+        return [
+            "media header differs from the Kotlin pin: "
+            f"python {published.hex().upper()} kotlin {kotlin_pin.hex().upper()}"
         ]
     return []
 
@@ -149,6 +185,17 @@ class MediaHeaderVectorTests(unittest.TestCase):
         source = RUST_TEST_PATH.read_text(encoding="utf-8")
         tampered = source.replace("0x53, 0x4E, 0x4D, 0x53", "0x53, 0x4E, 0x4D, 0x54", 1)
         self.assertNotEqual(rust_header_pin(tampered), published_header())
+
+    def test_kotlin_parser_extracts_the_pinned_header(self) -> None:
+        source = KOTLIN_TEST_PATH.read_text(encoding="utf-8")
+        self.assertEqual(kotlin_header_pin(source), published_header())
+
+    def test_kotlin_parser_detects_a_tampered_pin(self) -> None:
+        source = KOTLIN_TEST_PATH.read_text(encoding="utf-8")
+        tampered = source.replace(
+            "534E4D53010000240102030405060708", "534E4D53010000240102030405060709", 1
+        )
+        self.assertNotEqual(kotlin_header_pin(tampered), published_header())
 
 
 if __name__ == "__main__":
