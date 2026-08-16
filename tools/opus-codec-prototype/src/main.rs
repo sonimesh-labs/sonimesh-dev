@@ -17,10 +17,12 @@
 //! dropped 20 ms frame across speech-like and tone content, sweeps the FEC
 //! loss rate across the speech-like profile, measures the wall-clock cost of
 //! enabling in-band FEC, measures DTX packet-size and active-region quality
-//! on pause-gapped and continuous content, and sweeps bounded deterministic
-//! malformed payloads that must surface as stream-local errors or bounded
-//! decodes. It is not a quality, power, latency, Android ABI, or
-//! coverage-guided fuzz result.
+//! on pause-gapped and continuous content, compares the negotiated 10 ms and
+//! 20 ms shapes at equal per-second codec bitrates (steady-state quality,
+//! per-packet wire overhead, wall-clock-matched PLC, and per-second CPU
+//! cost), and sweeps bounded deterministic malformed payloads that must
+//! surface as stream-local errors or bounded decodes. It is not a quality,
+//! power, latency, Android ABI, or coverage-guided fuzz result.
 
 use sonimesh_audio::{
     DecodeStep, FrameDecoder, InsertOutcome, OPUS_CHANNELS, OpusFrameConfig, RealtimePcmConsumer,
@@ -44,6 +46,21 @@ const TONE_HZ: f32 = 440.0;
 const TONE_AMPLITUDE: f32 = 0.25;
 /// Negotiated frame durations probed through the native decoder.
 const FRAME_DURATIONS_MS: [u16; 2] = [10, 20];
+/// Fixed per-second codec bitrates compared across the 10 ms and 20 ms
+/// shapes: a voice-class SILK bitrate and a music-class hybrid/CELT bitrate.
+const FRAME_DURATION_BITRATES_BPS: [i32; 2] = [24_000, 96_000];
+/// Wall-clock audio window compared per shape in the frame-duration cell.
+const CMP_WINDOW_AUDIO_MS: u32 = 4_800;
+/// Wall-clock loss window concealed by PLC in the frame-duration cell so the
+/// two shapes are compared at equal lost-audio time rather than frame count.
+const CMP_PLC_AUDIO_MS: u32 = 160;
+/// Timed encode+decode passes per frame-duration case; the minimum is reported.
+const CMP_CPU_REPEATS: usize = 3;
+/// Fixed version-one media header bytes, mirrored from `sonimesh-protocol` so
+/// the prototype stays buildable without the protocol crate's proto toolchain.
+const MEDIA_HEADER_BYTES: usize = 36;
+/// ChaCha20-Poly1305 tag bytes appended to every encrypted media payload.
+const AEAD_TAG_BYTES: usize = 16;
 /// Tone frames decoded before the loss burst begins.
 const HISTORY_FRAMES: usize = 10;
 /// Consecutive frames dropped after the history to probe sustained-loss PLC.
@@ -1503,8 +1520,8 @@ fn run_jitter_wait_probe_impl<const PCM_SAMPLES_PER_BLOCK: usize>(
     Ok(lines)
 }
 
-/// Times one deterministic encode+decode pass over `frames` source frames and
-/// returns the total wall time in microseconds.
+/// Times one deterministic encode+decode pass over `frames` source frames at
+/// one `bitrate` and returns the total wall time in microseconds.
 ///
 /// Each timed frame runs the full per-stream path: encode into a reused
 /// packet, admit through the bounded jitter buffer, decode outside the realtime
@@ -1515,6 +1532,7 @@ fn timed_encode_decode_pass<const N: usize>(
     expected_samples: usize,
     tone_block: &[f32],
     frames: usize,
+    bitrate: opus::Bitrate,
 ) -> ProbeResult<f64> {
     let mut encoder = opus::Encoder::new(
         SAMPLE_RATE_HZ,
@@ -1522,6 +1540,9 @@ fn timed_encode_decode_pass<const N: usize>(
         opus::Application::Audio,
     )
     .map_err(|error| error.to_string())?;
+    encoder
+        .set_bitrate(bitrate)
+        .map_err(|error| error.to_string())?;
     let (producer, mut consumer) =
         realtime_pcm_queue::<N>(PCM_QUEUE_CAPACITY).map_err(|error| error.to_string())?;
     let decoder = NativeOpusDecoder {
@@ -1661,6 +1682,7 @@ fn run_cpu_probe_impl<const PCM_SAMPLES_PER_BLOCK: usize>(
         expected_samples,
         &tone_block,
         CPU_WARMUP_FRAMES,
+        opus::Bitrate::Auto,
     )?;
     timed_decode_only_pass::<PCM_SAMPLES_PER_BLOCK>(
         frame,
@@ -1678,6 +1700,7 @@ fn run_cpu_probe_impl<const PCM_SAMPLES_PER_BLOCK: usize>(
             expected_samples,
             &tone_block,
             CPU_PROBE_FRAMES,
+            opus::Bitrate::Auto,
         )?);
         decode_only_us = decode_only_us.min(timed_decode_only_pass::<PCM_SAMPLES_PER_BLOCK>(
             frame,
@@ -1731,6 +1754,7 @@ fn run_sustained_probe_impl<const PCM_SAMPLES_PER_BLOCK: usize>(
             expected_samples,
             &tone_block,
             frames,
+            opus::Bitrate::Auto,
         )?);
     }
     Ok(sustained_summary(
@@ -2333,6 +2357,286 @@ fn run_dtx_probe() -> ProbeResult<Vec<String>> {
     Ok(lines)
 }
 
+/// Returns the number of `frame_duration_ms` frames covering `audio_ms` of
+/// audio.
+///
+/// Both arguments are milliseconds, so the count is a plain division; keeping
+/// the unit in the name and the arithmetic in one tested helper prevents the
+/// seconds-to-milliseconds confusion that would otherwise turn a 4.8 s window
+/// into 480,000 frames.
+#[must_use]
+fn frames_for_audio(audio_ms: u32, frame_duration_ms: u16) -> usize {
+    usize::try_from(audio_ms / u32::from(frame_duration_ms))
+        .expect("frame count for a bounded audio window fits usize")
+}
+
+/// Compares the negotiated 10 ms and 20 ms shapes at equal per-second codec
+/// bitrates across the content profiles.
+///
+/// Each case records the delay-compensated window mean SNR, the encoded
+/// payload size per frame and its complete-datagram bitrate (fixed media
+/// header plus AEAD tag per packet), a wall-clock-matched PLC window, and the
+/// per-second-of-audio encode+decode wall cost. The 10 ms shape sends twice
+/// the packets per second, so the per-packet wire overhead and per-frame
+/// scheduling cost are the tradeoffs being measured against its finer PLC
+/// granularity.
+fn run_frame_duration_comparison() -> ProbeResult<Vec<String>> {
+    let mut lines = Vec::new();
+    for bitrate_bps in FRAME_DURATION_BITRATES_BPS {
+        for profile in ContentProfile::ALL {
+            for duration_ms in FRAME_DURATIONS_MS {
+                lines.push(run_duration_comparison_case(
+                    bitrate_bps,
+                    profile,
+                    duration_ms,
+                )?);
+            }
+        }
+    }
+    Ok(lines)
+}
+
+/// Runs one fixed-bitrate frame-duration comparison case.
+fn run_duration_comparison_case(
+    bitrate_bps: i32,
+    profile: ContentProfile,
+    frame_duration_ms: u16,
+) -> ProbeResult<String> {
+    match frame_duration_ms {
+        10 => run_duration_comparison_impl::<960>(bitrate_bps, profile, frame_duration_ms),
+        20 => run_duration_comparison_impl::<MAX_PCM_SAMPLES_PER_BLOCK>(
+            bitrate_bps,
+            profile,
+            frame_duration_ms,
+        ),
+        other => Err(format!("unsupported frame duration {other} ms")),
+    }
+}
+
+/// Runs one fixed-bitrate comparison case with a compile-time PCM block size.
+#[allow(clippy::cast_precision_loss)]
+fn run_duration_comparison_impl<const PCM_SAMPLES_PER_BLOCK: usize>(
+    bitrate_bps: i32,
+    profile: ContentProfile,
+    frame_duration_ms: u16,
+) -> ProbeResult<String> {
+    let frame = OpusFrameConfig::new(SAMPLE_RATE_HZ, 2, frame_duration_ms)
+        .map_err(|error| error.to_string())?;
+    let expected_samples = frame.interleaved_samples();
+    let window_frames = frames_for_audio(CMP_WINDOW_AUDIO_MS, frame_duration_ms);
+    let plc_frames = frames_for_audio(CMP_PLC_AUDIO_MS, frame_duration_ms);
+    let content = profile.content((window_frames + plc_frames) * expected_samples);
+
+    let mut encoder = opus::Encoder::new(
+        SAMPLE_RATE_HZ,
+        opus::Channels::Stereo,
+        opus::Application::Audio,
+    )
+    .map_err(|error| error.to_string())?;
+    encoder
+        .set_bitrate(opus::Bitrate::Bits(bitrate_bps))
+        .map_err(|error| error.to_string())?;
+    let lookahead = usize::try_from(encoder.get_lookahead().map_err(|error| error.to_string())?)
+        .expect("lookahead is non-negative");
+    let delay = lookahead * OPUS_CHANNELS as usize;
+
+    let (producer, mut consumer) = realtime_pcm_queue::<PCM_SAMPLES_PER_BLOCK>(PCM_QUEUE_CAPACITY)
+        .map_err(|error| error.to_string())?;
+    let decoder = NativeOpusDecoder {
+        decoder: opus::Decoder::new(SAMPLE_RATE_HZ, opus::Channels::Stereo)
+            .map_err(|error| error.to_string())?,
+    };
+    let mut worker: StreamDecodeWorker<
+        NativeOpusDecoder,
+        JITTER_CAPACITY,
+        MAX_ENCODED_BYTES,
+        PCM_SAMPLES_PER_BLOCK,
+    > = StreamDecodeWorker::new_for_opus(decoder, producer, 0, frame)
+        .map_err(|error| error.to_string())?;
+
+    let (window_snr, payload_bytes_total) = measure_duration_cmp_window(
+        &mut worker,
+        &mut consumer,
+        &mut encoder,
+        &content,
+        expected_samples,
+        window_frames,
+        delay,
+    )?;
+    let (plc_mean, plc_min) = measure_duration_cmp_plc(
+        &mut worker,
+        &mut consumer,
+        &content,
+        expected_samples,
+        window_frames,
+        plc_frames,
+    )?;
+
+    // Per-second-of-audio encode+decode wall cost at the same bitrate and
+    // content; the minimum of the timed passes is reported.
+    let mut elapsed_us = f64::INFINITY;
+    for _ in 0..CMP_CPU_REPEATS {
+        elapsed_us = elapsed_us.min(timed_encode_decode_pass::<PCM_SAMPLES_PER_BLOCK>(
+            frame,
+            expected_samples,
+            &content,
+            window_frames,
+            opus::Bitrate::Bits(bitrate_bps),
+        )?);
+    }
+    let cpu_us_per_audio_second =
+        elapsed_us / window_frames as f64 / (f64::from(frame_duration_ms) / 1.0e3);
+
+    let wire = duration_cmp_wire(payload_bytes_total / window_frames, frame_duration_ms);
+    let kbps = bitrate_bps / 1_000;
+    Ok(format!(
+        "opus_cmp_{frame_duration_ms}ms_{}_{kbps}k: snr {window_snr:.1} dB; \
+         payload {:.1} B/frame ({:.1} kb/s); datagram {:.1} B/frame ({:.1} kb/s); \
+         plc {CMP_PLC_AUDIO_MS} ms mean {plc_mean:.1} min {plc_min:.1} dB; \
+         cpu {cpu_us_per_audio_second:.0} us per audio-second",
+        profile.label(),
+        wire.payload_bytes_per_frame,
+        wire.payload_kbps,
+        wire.datagram_bytes_per_frame,
+        wire.datagram_kbps,
+    ))
+}
+
+/// Encodes and decodes one fixed-bitrate window through `worker` and returns
+/// the delay-compensated window mean SNR and the total encoded payload bytes.
+///
+/// The first decoded frames still carry the encoder-lookahead delay, so
+/// delay-compensated SNR is only accumulated once a frame predates it.
+#[allow(clippy::cast_precision_loss)]
+fn measure_duration_cmp_window<const N: usize>(
+    worker: &mut StreamDecodeWorker<NativeOpusDecoder, JITTER_CAPACITY, MAX_ENCODED_BYTES, N>,
+    consumer: &mut RealtimePcmConsumer<N>,
+    encoder: &mut opus::Encoder,
+    content: &[f32],
+    expected_samples: usize,
+    window_frames: usize,
+    delay: usize,
+) -> ProbeResult<(f32, usize)> {
+    let mut packet = [0_u8; MAX_ENCODED_BYTES];
+    let mut block = [0.0_f32; N];
+    let mut payload_bytes_total = 0_usize;
+    let mut snr_sum = 0.0_f32;
+    let mut snr_count = 0_usize;
+    for index in 0..window_frames {
+        let source_start = index * expected_samples;
+        let len = encode_frame(
+            encoder,
+            &content[source_start..source_start + expected_samples],
+            &mut packet,
+        )?;
+        payload_bytes_total += len;
+        worker
+            .admit(
+                u32::try_from(index).expect("comparison frame index fits u32"),
+                0,
+                &packet[..len],
+            )
+            .map_err(|error| error.to_string())?;
+        match worker.decode_next().map_err(|error| error.to_string())? {
+            DecodeStep::Decoded { samples, .. } if samples == expected_samples => {}
+            other => return Err(format!("expected a decoded frame, got {other:?}")),
+        }
+        match consumer.pop_into(&mut block) {
+            RealtimePcmPopOutcome::Filled { samples, .. } if samples == expected_samples => {}
+            other => return Err(format!("expected a filled PCM block, got {other:?}")),
+        }
+        if index * expected_samples >= delay {
+            snr_sum += snr_vs_source(content, expected_samples, index, delay, &block)?;
+            snr_count += 1;
+        }
+    }
+    if snr_count == 0 {
+        return Err("comparison window left no delay-compensated frames".to_owned());
+    }
+    Ok((snr_sum / snr_count as f32, payload_bytes_total))
+}
+
+/// Conceals `plc_frames` missing frames through the same `worker` and returns
+/// the mean and worst aligned SNR over the concealed blocks.
+///
+/// Every concealed block must stay non-silent and finite; quality degradation
+/// across the wall-clock window is reported rather than gated.
+#[allow(clippy::cast_precision_loss)]
+fn measure_duration_cmp_plc<const N: usize>(
+    worker: &mut StreamDecodeWorker<NativeOpusDecoder, JITTER_CAPACITY, MAX_ENCODED_BYTES, N>,
+    consumer: &mut RealtimePcmConsumer<N>,
+    content: &[f32],
+    expected_samples: usize,
+    window_frames: usize,
+    plc_frames: usize,
+) -> ProbeResult<(f32, f32)> {
+    let mut block = [0.0_f32; N];
+    let mut plc_min = f32::INFINITY;
+    let mut plc_sum = 0.0_f32;
+    for drop_index in 0..plc_frames {
+        match worker.decode_next().map_err(|error| error.to_string())? {
+            DecodeStep::Concealed { samples, .. } if samples == expected_samples => {}
+            other => return Err(format!("expected a concealed frame, got {other:?}")),
+        }
+        match consumer.pop_into(&mut block) {
+            RealtimePcmPopOutcome::Filled { samples, .. } if samples == expected_samples => {}
+            other => return Err(format!("expected a concealed PCM block, got {other:?}")),
+        }
+        let concealed = &block[..expected_samples];
+        let concealed_rms = block_rms(concealed);
+        if !concealed_rms.is_finite() || concealed_rms < PLC_RMS_MIN {
+            return Err(format!(
+                "comparison concealed block {drop_index} RMS {concealed_rms:.3} is silent or non-finite"
+            ));
+        }
+        let dropped_start = (window_frames + drop_index) * expected_samples;
+        let (snr, _) = best_aligned_snr(
+            &content[dropped_start..dropped_start + expected_samples],
+            concealed,
+        );
+        if !snr.is_finite() {
+            return Err(format!(
+                "comparison concealed block {drop_index} SNR {snr:.1} dB is non-finite"
+            ));
+        }
+        plc_min = plc_min.min(snr);
+        plc_sum += snr;
+    }
+    Ok((plc_sum / plc_frames as f32, plc_min))
+}
+
+/// Wire-accounting summary for one frame-shape comparison case.
+struct DurationCmpWire {
+    /// Mean encoded Opus payload bytes per frame.
+    payload_bytes_per_frame: f64,
+    /// Mean datagram bytes per frame, including the media header and AEAD tag.
+    datagram_bytes_per_frame: f64,
+    /// Payload-only bitrate in kilobits per second.
+    payload_kbps: f64,
+    /// Complete-datagram bitrate in kilobits per second.
+    datagram_kbps: f64,
+}
+
+/// Computes the per-frame payload and complete-datagram bitrates for a shape.
+///
+/// Every datagram carries the fixed version-one media header and the AEAD tag
+/// on top of the encoded payload, so the fixed per-second overhead doubles
+/// when the frame duration halves.
+#[must_use]
+#[allow(clippy::cast_precision_loss)]
+fn duration_cmp_wire(payload_bytes_per_frame: usize, frame_duration_ms: u16) -> DurationCmpWire {
+    let payload_bytes_per_frame = payload_bytes_per_frame as f64;
+    let seconds_per_frame = f64::from(frame_duration_ms) / 1.0e3;
+    let datagram_bytes_per_frame =
+        payload_bytes_per_frame + (MEDIA_HEADER_BYTES + AEAD_TAG_BYTES) as f64;
+    DurationCmpWire {
+        payload_bytes_per_frame,
+        datagram_bytes_per_frame,
+        payload_kbps: payload_bytes_per_frame * 8.0 / seconds_per_frame / 1.0e3,
+        datagram_kbps: datagram_bytes_per_frame * 8.0 / seconds_per_frame / 1.0e3,
+    }
+}
+
 /// Returns the signal-to-noise ratio in decibels between `reference` and
 /// `decoded` over the overlapping region, or infinity when either side is
 /// digital silence.
@@ -2458,6 +2762,10 @@ fn run_probe() -> ProbeResult<Vec<String>> {
         lines.push(run_cpu_probe(duration_ms)?);
         lines.push(run_sustained_probe(duration_ms)?);
     }
+
+    // Equal-bitrate 10 ms vs 20 ms comparison across the content profiles;
+    // the per-duration probes above already record both shapes separately.
+    lines.extend(run_frame_duration_comparison()?);
 
     // In-band FEC recovery is probed once at the 20 ms shape; libopus codes
     // LBRR only when a packet carries more than one frame, so 10 ms cannot.
@@ -2676,9 +2984,9 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::{
-        DTX_ACTIVE_FRAMES, DTX_FRAME_MS, DTX_PAUSE_FRAMES, OPUS_CHANNELS, SAMPLE_RATE_HZ,
-        TONE_AMPLITUDE, best_aligned_snr, block_rms, is_dropped, snr_db, speech_like,
-        speech_with_pauses, sustained_summary,
+        DTX_ACTIVE_FRAMES, DTX_FRAME_MS, DTX_PAUSE_FRAMES, DurationCmpWire, OPUS_CHANNELS,
+        SAMPLE_RATE_HZ, TONE_AMPLITUDE, best_aligned_snr, block_rms, duration_cmp_wire,
+        frames_for_audio, is_dropped, snr_db, speech_like, speech_with_pauses, sustained_summary,
     };
 
     #[test]
@@ -2816,5 +3124,30 @@ mod tests {
                 .iter()
                 .all(|&sample| sample == 0.0)
         );
+    }
+
+    #[test]
+    fn duration_cmp_wire_matches_expected_rates() {
+        let wire = duration_cmp_wire(273, 20);
+        assert!((wire.payload_kbps - 109.2).abs() < 0.1);
+        assert!((wire.datagram_bytes_per_frame - 325.0).abs() < 1.0e-6);
+        assert!((wire.datagram_kbps - 130.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn duration_cmp_wire_doubles_per_second_overhead_when_frame_halves() {
+        let ten = duration_cmp_wire(141, 10);
+        let twenty = duration_cmp_wire(273, 20);
+        let per_second_overhead =
+            |wire: &DurationCmpWire| (wire.datagram_kbps - wire.payload_kbps) * 1.0e3;
+        assert!((per_second_overhead(&ten) - per_second_overhead(&twenty) * 2.0).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn frames_for_audio_matches_frame_duration() {
+        assert_eq!(frames_for_audio(4_800, 10), 480);
+        assert_eq!(frames_for_audio(4_800, 20), 240);
+        assert_eq!(frames_for_audio(160, 10), 16);
+        assert_eq!(frames_for_audio(160, 20), 8);
     }
 }
