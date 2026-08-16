@@ -253,6 +253,91 @@ class ControlFrameVectorTest {
     fun pinsTheControlFrameBounds() {
         assertEquals(4, FRAME_PREFIX_BYTES)
         assertEquals(64 * 1024, MAX_CONTROL_FRAME_BYTES)
+        assertEquals(8_000, MIN_CONTROL_SAMPLE_RATE_HZ)
+        assertEquals(192_000, MAX_CONTROL_SAMPLE_RATE_HZ)
+        assertEquals(8, MAX_CONTROL_CHANNELS)
+    }
+
+    @Test
+    fun startStreamSemanticBoundsMatchRustValidation() {
+        fun startMessage(
+            mediaSessionId: ULong = 7uL,
+            streamId: ULong = 9uL,
+            sampleRate: ULong = 48_000uL,
+            channels: ULong = 2uL,
+            frameDuration: ULong = 20uL,
+            epoch: ULong = MEDIA_KEY_EPOCH,
+        ): ControlFrame.DecodedMessage {
+            val frame = ControlFrame.startFrame(
+                epoch,
+                mediaSessionId = mediaSessionId,
+                streamId = streamId,
+                sampleRate = sampleRate,
+                channels = channels,
+                frameDuration = frameDuration,
+            )
+            return ControlFrame.decodeMessage(
+                ControlFrame.decodeMessage(ControlFrame.decodeFrame(frame))
+                    .requiredBytes(ENVELOPE_START_STREAM_FIELD),
+            )
+        }
+
+        assertEquals(
+            MEDIA_KEY_EPOCH,
+            ControlFrame.validatedStartStream(startMessage()),
+        )
+
+        val rejected = listOf(
+            startMessage(mediaSessionId = 0uL),
+            startMessage(streamId = 0uL),
+            startMessage(sampleRate = 7_999uL),
+            startMessage(sampleRate = 192_001uL),
+            startMessage(channels = 0uL),
+            startMessage(channels = 9uL),
+            startMessage(frameDuration = 5uL),
+            startMessage(frameDuration = 30uL),
+            startMessage(epoch = MAX_MEDIA_KEY_EPOCH + 1u),
+        )
+        rejected.forEach { message ->
+            assertThrows(IllegalArgumentException::class.java) {
+                ControlFrame.validatedStartStream(message)
+            }
+        }
+    }
+
+    @Test
+    fun stopStreamSemanticBoundsMatchRustValidation() {
+        fun stopMessage(
+            mediaSessionId: ULong = 7uL,
+            streamId: ULong = 9uL,
+            epoch: ULong = MEDIA_KEY_EPOCH,
+        ): ControlFrame.DecodedMessage {
+            val frame = ControlFrame.stopFrame(
+                epoch,
+                mediaSessionId = mediaSessionId,
+                streamId = streamId,
+            )
+            return ControlFrame.decodeMessage(
+                ControlFrame.decodeMessage(ControlFrame.decodeFrame(frame))
+                    .requiredBytes(ENVELOPE_STOP_STREAM_FIELD),
+            )
+        }
+
+        assertEquals(
+            MEDIA_KEY_EPOCH,
+            ControlFrame.validatedStopStream(stopMessage()),
+        )
+
+        val rejected = listOf(
+            stopMessage(mediaSessionId = 0uL),
+            stopMessage(streamId = 0uL),
+            stopMessage(epoch = MAX_MEDIA_KEY_EPOCH + 1u),
+        )
+        rejected.forEach { message ->
+            assertThrows(IllegalArgumentException::class.java) {
+                ControlFrame.validatedStopStream(message)
+            }
+        }
     }
 
     private companion object {

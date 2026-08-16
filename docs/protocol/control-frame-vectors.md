@@ -125,6 +125,15 @@ pinned in this document, `src/control.rs`, `src/negotiation.rs`,
 `tests/negotiation.rs`, the `HelloNegotiation` mirror, and
 `HelloNegotiationVectorTest`, so any drift between the six sources fails CI.
 
+The Android host-JVM `ControlFrame` mirror also enforces the start-stream and
+stop-stream semantic bounds: zero media/stream identities, the 8-192 kHz sample
+rate window, the 1-8 channel window, the 10/20 ms frame duration, and the 16-bit
+media key epoch are all rejected, mirroring `src/control.rs`. The
+`tools/check_media_limits.py` verifier cross-checks the sample-rate and channel
+window (mvp-baseline capacities), the 16-bit epoch pin in this document,
+`src/control.rs`, and the `ControlFrame.kt` mirror, so any drift between the
+three sources fails CI.
+
 This is wire-format and host-test evidence only. The Android production source
 set still contains no control transport, generated Protobuf client, pairing, or
 TLS session.

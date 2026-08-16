@@ -10,6 +10,21 @@ const val FRAME_PREFIX_BYTES = 4
 /** Largest length-prefixed Protobuf control payload. */
 const val MAX_CONTROL_FRAME_BYTES = 64 * 1024
 
+/** Smallest accepted version-one start-stream sample rate in Hz. */
+const val MIN_CONTROL_SAMPLE_RATE_HZ = 8_000
+
+/** Largest accepted version-one start-stream sample rate in Hz. */
+const val MAX_CONTROL_SAMPLE_RATE_HZ = 192_000
+
+/** Largest accepted version-one start-stream channel count. */
+const val MAX_CONTROL_CHANNELS = 8
+
+/** Accepted version-one start-stream frame duration in milliseconds. */
+const val START_FRAME_DURATION_10_MS = 10
+
+/** Accepted version-one start-stream frame duration in milliseconds. */
+const val START_FRAME_DURATION_20_MS = 20
+
 /** Exact control protocol version accepted by the controlled-lab implementation. */
 val CONTROL_PROTOCOL_VERSION = 1uL
 
@@ -118,18 +133,25 @@ object ControlFrame {
     )
 
     /** Encodes the published epoch-bearing StartStream envelope as a frame. */
-    fun startFrame(epoch: ULong): ByteArray = frame(
+    fun startFrame(
+        epoch: ULong,
+        mediaSessionId: ULong = 7u,
+        streamId: ULong = 9u,
+        sampleRate: ULong = 48_000u,
+        channels: ULong = 2u,
+        frameDuration: ULong = 20u,
+    ): ByteArray = frame(
         message(
             varintField(ENVELOPE_PROTOCOL_VERSION_FIELD, CONTROL_PROTOCOL_VERSION),
             varintField(ENVELOPE_REQUEST_ID_FIELD, 8u),
             bytesField(
                 ENVELOPE_START_STREAM_FIELD,
                 message(
-                    varintField(START_MEDIA_SESSION_ID_FIELD, 7u),
-                    varintField(START_STREAM_ID_FIELD, 9u),
-                    varintField(START_SAMPLE_RATE_FIELD, 48_000u),
-                    varintField(START_CHANNELS_FIELD, 2u),
-                    varintField(START_FRAME_DURATION_FIELD, 20u),
+                    varintField(START_MEDIA_SESSION_ID_FIELD, mediaSessionId),
+                    varintField(START_STREAM_ID_FIELD, streamId),
+                    varintField(START_SAMPLE_RATE_FIELD, sampleRate),
+                    varintField(START_CHANNELS_FIELD, channels),
+                    varintField(START_FRAME_DURATION_FIELD, frameDuration),
                     varintField(START_MEDIA_KEY_EPOCH_FIELD, epoch),
                 ),
             ),
@@ -137,15 +159,19 @@ object ControlFrame {
     )
 
     /** Encodes the published epoch-bearing StopStream envelope as a frame. */
-    fun stopFrame(epoch: ULong): ByteArray = frame(
+    fun stopFrame(
+        epoch: ULong,
+        mediaSessionId: ULong = 7u,
+        streamId: ULong = 9u,
+    ): ByteArray = frame(
         message(
             varintField(ENVELOPE_PROTOCOL_VERSION_FIELD, CONTROL_PROTOCOL_VERSION),
             varintField(ENVELOPE_REQUEST_ID_FIELD, 9u),
             bytesField(
                 ENVELOPE_STOP_STREAM_FIELD,
                 message(
-                    varintField(STOP_MEDIA_SESSION_ID_FIELD, 7u),
-                    varintField(STOP_STREAM_ID_FIELD, 9u),
+                    varintField(STOP_MEDIA_SESSION_ID_FIELD, mediaSessionId),
+                    varintField(STOP_STREAM_ID_FIELD, streamId),
                     varintField(STOP_MEDIA_KEY_EPOCH_FIELD, epoch),
                 ),
             ),
@@ -236,6 +262,59 @@ object ControlFrame {
         val epoch = message.requiredVarint(fieldNumber)
         require(epoch <= MAX_MEDIA_KEY_EPOCH) { "media key epoch exceeds uint16" }
         return epoch
+    }
+
+    /**
+     * Validates a StartStream message's identity and parameter bounds.
+     *
+     * @throws IllegalArgumentException when the session or stream identity is
+     *   zero, the sample rate is outside 8-192 kHz, the channel count is
+     *   outside 1-8, the frame duration is not 10 or 20 ms, or the media key
+     *   epoch exceeds uint16, mirroring Rust `validate_start_stream`.
+     */
+    fun validatedStartStream(message: DecodedMessage): ULong {
+        require(message.requiredVarint(START_MEDIA_SESSION_ID_FIELD) != 0uL) {
+            "start stream media session ID must be non-zero"
+        }
+        require(message.requiredVarint(START_STREAM_ID_FIELD) != 0uL) {
+            "start stream stream ID must be non-zero"
+        }
+        val sampleRate = message.requiredVarint(START_SAMPLE_RATE_FIELD)
+        require(
+            sampleRate in
+                MIN_CONTROL_SAMPLE_RATE_HZ.toULong()..MAX_CONTROL_SAMPLE_RATE_HZ.toULong(),
+        ) {
+            "start stream sample rate is outside 8-192 kHz"
+        }
+        val channels = message.requiredVarint(START_CHANNELS_FIELD)
+        require(channels in 1uL..MAX_CONTROL_CHANNELS.toULong()) {
+            "start stream channel count is outside 1-8"
+        }
+        val frameDuration = message.requiredVarint(START_FRAME_DURATION_FIELD)
+        require(
+            frameDuration == START_FRAME_DURATION_10_MS.toULong() ||
+                frameDuration == START_FRAME_DURATION_20_MS.toULong(),
+        ) {
+            "start stream frame duration must be 10 or 20 ms"
+        }
+        return validatedMediaKeyEpoch(message)
+    }
+
+    /**
+     * Validates a StopStream message's identity and epoch bounds.
+     *
+     * @throws IllegalArgumentException when the session or stream identity is
+     *   zero or the media key epoch exceeds uint16, mirroring Rust
+     *   `validate_stop_stream`.
+     */
+    fun validatedStopStream(message: DecodedMessage): ULong {
+        require(message.requiredVarint(STOP_MEDIA_SESSION_ID_FIELD) != 0uL) {
+            "stop stream media session ID must be non-zero"
+        }
+        require(message.requiredVarint(STOP_STREAM_ID_FIELD) != 0uL) {
+            "stop stream stream ID must be non-zero"
+        }
+        return validatedMediaKeyEpoch(message, STOP_MEDIA_KEY_EPOCH_FIELD)
     }
 
     /** Strips and verifies the big-endian length prefix of one control frame. */

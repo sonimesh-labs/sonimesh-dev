@@ -4,8 +4,9 @@
 The version-one protocol publishes hard numeric bounds: the fixed 36-byte media
 header, a 128-byte extended header ceiling, a 1,200-byte complete datagram
 limit, the derived 1,164-byte encrypted payload and 1,148-byte plaintext
-limits, the 16-byte Poly1305 tag, a 4-byte frame prefix, and the 64 KiB control frame
-bound. The Rust
+limits, the 16-byte Poly1305 tag, a 4-byte frame prefix, the 64 KiB control
+frame bound, the start-stream 8-192 kHz / 1-8 channel window, and the 16-bit
+media key epoch. The Rust
 sources (crates/sonimesh-protocol/src/media_header.rs, media_crypto.rs,
 control.rs), the Android host-JVM mirrors (MediaHeader.kt, MediaCrypto.kt,
 ControlFrame.kt), and the `docs/mvp-baseline.md` capacities table all pin the
@@ -32,6 +33,10 @@ POLY1305_TAG_BYTES = 16
 MAX_MEDIA_PLAINTEXT_LEN = 1_148
 MAX_CONTROL_FRAME_BYTES = 64 * 1024
 FRAME_PREFIX_BYTES = 4
+MIN_CONTROL_SAMPLE_RATE_HZ = 8_000
+MAX_CONTROL_SAMPLE_RATE_HZ = 192_000
+MAX_CONTROL_CHANNELS = 8
+MAX_CONTROL_MEDIA_KEY_EPOCH = 65_535
 MEDIA_MAGIC = 0x534E_4D53
 MEDIA_VERSION = 1
 
@@ -59,6 +64,9 @@ KOTLIN_MEDIA_HEADER_PATH = KOTLIN_DIR / "protocol" / "MediaHeader.kt"
 KOTLIN_MEDIA_CRYPTO_PATH = KOTLIN_DIR / "security" / "MediaCrypto.kt"
 KOTLIN_CONTROL_PATH = KOTLIN_DIR / "protocol" / "ControlFrame.kt"
 MVP_BASELINE_PATH = REPO_ROOT / "docs" / "mvp-baseline.md"
+CONTROL_FRAME_VECTORS_PATH = (
+    REPO_ROOT / "docs" / "protocol" / "control-frame-vectors.md"
+)
 
 # Every contract constant and the file that declares it on each side.
 CONTRACTS: dict[str, int] = {
@@ -70,6 +78,10 @@ CONTRACTS: dict[str, int] = {
     "MAX_MEDIA_PLAINTEXT_LEN": MAX_MEDIA_PLAINTEXT_LEN,
     "MAX_CONTROL_FRAME_BYTES": MAX_CONTROL_FRAME_BYTES,
     "FRAME_PREFIX_BYTES": FRAME_PREFIX_BYTES,
+    "MIN_CONTROL_SAMPLE_RATE_HZ": MIN_CONTROL_SAMPLE_RATE_HZ,
+    "MAX_CONTROL_SAMPLE_RATE_HZ": MAX_CONTROL_SAMPLE_RATE_HZ,
+    "MAX_CONTROL_CHANNELS": MAX_CONTROL_CHANNELS,
+    "MAX_CONTROL_MEDIA_KEY_EPOCH": MAX_CONTROL_MEDIA_KEY_EPOCH,
     "MEDIA_MAGIC": MEDIA_MAGIC,
     "MEDIA_VERSION": MEDIA_VERSION,
 }
@@ -85,7 +97,22 @@ MEDIA_HEADER_NAMES = (
     "MEDIA_VERSION",
 )
 MEDIA_CRYPTO_NAMES = ("POLY1305_TAG_BYTES", "MAX_MEDIA_PLAINTEXT_LEN")
-CONTROL_NAMES = ("FRAME_PREFIX_BYTES", "MAX_CONTROL_FRAME_BYTES")
+RUST_CONTROL_NAMES = (
+    "FRAME_PREFIX_BYTES",
+    "MAX_CONTROL_FRAME_BYTES",
+    "MIN_CONTROL_SAMPLE_RATE_HZ",
+    "MAX_CONTROL_SAMPLE_RATE_HZ",
+    "MAX_CONTROL_CHANNELS",
+    "MAX_CONTROL_MEDIA_KEY_EPOCH",
+)
+KOTLIN_CONTROL_NAMES = (
+    "FRAME_PREFIX_BYTES",
+    "MAX_CONTROL_FRAME_BYTES",
+    "MIN_CONTROL_SAMPLE_RATE_HZ",
+    "MAX_CONTROL_SAMPLE_RATE_HZ",
+    "MAX_CONTROL_CHANNELS",
+    "MAX_MEDIA_KEY_EPOCH",
+)
 
 # (documented boundary, contract constant)
 DOC_BOUNDARIES: tuple[tuple[str, str], ...] = (
@@ -105,9 +132,26 @@ KOTLIN_CONST_PATTERN = re.compile(
     r"const val\s+([A-Z_][A-Z0-9_]*)(?::\s*[A-Za-z0-9_]+)?\s*=\s*(.*)$",
     re.MULTILINE,
 )
+# ULong mirrors cannot use `const val`; capture their plain `val` pins too.
+KOTLIN_VAL_PATTERN = re.compile(
+    r"(?<!const )val\s+([A-Z_][A-Z0-9_]*)(?::\s*[A-Za-z0-9_]+)?\s*=\s*(.*)$",
+    re.MULTILINE,
+)
 DOC_CAPACITY_PATTERN = re.compile(
     r"^\|\s*([A-Za-z][A-Za-z ]+?)\s*\|\s*([0-9][0-9,]*)\s*(bytes|KiB|packets)\s*\|",
     re.MULTILINE,
+)
+START_STREAM_PATTERN = re.compile(
+    r"^\|\s*Control start stream\s*\|\s*(\d+)[–-](\d+) kHz,\s*(\d+)[–-](\d+)"
+    r" channels,\s*(\d+)/(\d+) ms\s*\|",
+    re.MULTILINE,
+)
+EPOCH_PIN_PATTERN = re.compile(r"must not exceed\s*`?(\d+)`?")
+_NUMERIC_SUFFIX_PATTERN = re.compile(
+    r"(?P<num>0[xX][0-9a-fA-F][0-9a-fA-F_]*|\d[\d_]*)(?P<suffix>[uUlL]+)\b"
+)
+_CAST_PATTERN = re.compile(
+    r"\s+as\s+(?:u8|u16|u32|u64|usize|i8|i16|i32|i64|isize)"
 )
 
 _TOKEN_PATTERN = re.compile(
@@ -129,7 +173,7 @@ class ExpressionParser:
     """
 
     def __init__(self, source: str, values: dict[str, int]) -> None:
-        self.tokens = self._tokenize(source)
+        self.tokens = self._tokenize(_normalize_expression(source))
         self.index = 0
         self.values = values
 
@@ -205,6 +249,15 @@ def evaluate_expression(expression: str, values: dict[str, int]) -> int:
     return ExpressionParser(expression, values).parse()
 
 
+def _normalize_expression(source: str) -> str:
+    """Normalizes Rust/Kotlin literal syntax the tokenizer cannot read."""
+    source = _NUMERIC_SUFFIX_PATTERN.sub(
+        lambda match: match.group("num"), source
+    )
+    source = source.replace("u16::MAX", "65535")
+    return _CAST_PATTERN.sub("", source)
+
+
 def resolve_constants(
     source: str, names: list[str], seed: dict[str, int] | None = None
 ) -> dict[str, int]:
@@ -220,6 +273,8 @@ def resolve_constants(
     for name, expression in RUST_CONST_PATTERN.findall(source):
         raw[name] = expression
     for name, expression in KOTLIN_CONST_PATTERN.findall(source):
+        raw[name] = expression
+    for name, expression in KOTLIN_VAL_PATTERN.findall(source):
         raw[name] = expression
 
     values: dict[str, int] = dict(seed or {})
@@ -252,6 +307,26 @@ def parse_doc_capacities(source: str) -> dict[str, int]:
     return capacities
 
 
+def parse_doc_start_stream(
+    source: str,
+) -> tuple[int, int, int, tuple[int, int]] | None:
+    """Reads the start-stream sample-rate/channel/duration window."""
+    match = START_STREAM_PATTERN.search(source)
+    if match is None:
+        return None
+    min_khz = int(match.group(1))
+    max_khz = int(match.group(2))
+    max_channels = int(match.group(4))
+    durations = tuple(sorted((int(match.group(5)), int(match.group(6)))))
+    return min_khz * 1000, max_khz * 1000, max_channels, durations
+
+
+def parse_control_epoch_pin(source: str) -> int | None:
+    """Reads the 16-bit media key epoch pin from the vector doc."""
+    match = EPOCH_PIN_PATTERN.search(source)
+    return int(match.group(1)) if match is not None else None
+
+
 def validate_media_limits() -> list[str]:
     """Returns every drift error across the Rust, Kotlin, and doc pins."""
     errors: list[str] = []
@@ -280,7 +355,7 @@ def validate_media_limits() -> list[str]:
         rust_values.update(
             resolve_constants(
                 RUST_CONTROL_PATH.read_text(encoding="utf-8"),
-                list(CONTROL_NAMES),
+                list(RUST_CONTROL_NAMES),
             )
         )
     except ValueError as error:
@@ -310,9 +385,12 @@ def validate_media_limits() -> list[str]:
         kotlin_values.update(
             resolve_constants(
                 KOTLIN_CONTROL_PATH.read_text(encoding="utf-8"),
-                list(CONTROL_NAMES),
+                list(KOTLIN_CONTROL_NAMES),
             )
         )
+        kotlin_values["MAX_CONTROL_MEDIA_KEY_EPOCH"] = kotlin_values[
+            "MAX_MEDIA_KEY_EPOCH"
+        ]
     except ValueError as error:
         errors.append(f"Kotlin ControlFrame.kt: {error}")
 
@@ -339,6 +417,15 @@ def validate_media_limits() -> list[str]:
         errors.append("control frame bound is not 64 KiB")
     if FRAME_PREFIX_BYTES != 4:
         errors.append("control frame prefix is not 4 bytes")
+    if MAX_CONTROL_MEDIA_KEY_EPOCH != 65_535:
+        errors.append("media key epoch bound is not 65535")
+    if (
+        MIN_CONTROL_SAMPLE_RATE_HZ != 8_000
+        or MAX_CONTROL_SAMPLE_RATE_HZ != 192_000
+    ):
+        errors.append("start-stream sample rate window is not 8-192 kHz")
+    if MAX_CONTROL_CHANNELS != 8:
+        errors.append("start-stream channel bound is not 8")
 
     capacities = parse_doc_capacities(MVP_BASELINE_PATH.read_text(encoding="utf-8"))
     for boundary, name in DOC_BOUNDARIES:
@@ -352,6 +439,35 @@ def validate_media_limits() -> list[str]:
                 f"mvp-baseline documents {boundary} as {documented}, "
                 f"expected {expected}"
             )
+
+    start_stream = parse_doc_start_stream(
+        MVP_BASELINE_PATH.read_text(encoding="utf-8")
+    )
+    if start_stream is None:
+        errors.append("mvp-baseline capacities table is missing the start-stream row")
+    else:
+        min_hz, max_hz, max_channels, durations = start_stream
+        if min_hz != MIN_CONTROL_SAMPLE_RATE_HZ:
+            errors.append(f"mvp-baseline start-stream minimum is {min_hz} Hz")
+        if max_hz != MAX_CONTROL_SAMPLE_RATE_HZ:
+            errors.append(f"mvp-baseline start-stream maximum is {max_hz} Hz")
+        if max_channels != MAX_CONTROL_CHANNELS:
+            errors.append(
+                f"mvp-baseline start-stream channel bound is {max_channels}"
+            )
+        if durations != (10, 20):
+            errors.append(f"mvp-baseline start-stream durations are {durations}")
+
+    epoch_pin = parse_control_epoch_pin(
+        CONTROL_FRAME_VECTORS_PATH.read_text(encoding="utf-8")
+    )
+    if epoch_pin is None:
+        errors.append("control-frame-vectors.md is missing the media key epoch pin")
+    elif epoch_pin != MAX_CONTROL_MEDIA_KEY_EPOCH:
+        errors.append(
+            f"control-frame-vectors.md pins epoch {epoch_pin}, "
+            f"expected {MAX_CONTROL_MEDIA_KEY_EPOCH}"
+        )
 
     return errors
 
@@ -371,6 +487,13 @@ class MediaLimitsTests(unittest.TestCase):
     def test_expression_parser_handles_hex_and_underscores(self) -> None:
         self.assertEqual(evaluate_expression("0x534E_4D53", {}), 0x534E4D53)
         self.assertEqual(evaluate_expression("1_200", {}), 1_200)
+
+    def test_expression_parser_handles_literal_suffixes_and_epoch_casts(
+        self,
+    ) -> None:
+        self.assertEqual(evaluate_expression("0xFFFFuL", {}), 65_535)
+        self.assertEqual(evaluate_expression("48_000u", {}), 48_000)
+        self.assertEqual(evaluate_expression("u16::MAX as u32", {}), 65_535)
 
     def test_expression_parser_handles_references_and_operators(self) -> None:
         values = {"A": 1_200, "B": 36}
@@ -444,21 +567,44 @@ class MediaLimitsTests(unittest.TestCase):
     def test_control_frame_bound_resolves_in_rust_and_kotlin(self) -> None:
         rust = resolve_constants(
             RUST_CONTROL_PATH.read_text(encoding="utf-8"),
-            ["FRAME_PREFIX_BYTES", "MAX_CONTROL_FRAME_BYTES"],
+            list(RUST_CONTROL_NAMES),
         )
         kotlin = resolve_constants(
             KOTLIN_CONTROL_PATH.read_text(encoding="utf-8"),
-            ["FRAME_PREFIX_BYTES", "MAX_CONTROL_FRAME_BYTES"],
+            list(KOTLIN_CONTROL_NAMES),
         )
         self.assertEqual(rust["FRAME_PREFIX_BYTES"], 4)
         self.assertEqual(rust["MAX_CONTROL_FRAME_BYTES"], 64 * 1024)
+        self.assertEqual(rust["MIN_CONTROL_SAMPLE_RATE_HZ"], 8_000)
+        self.assertEqual(rust["MAX_CONTROL_SAMPLE_RATE_HZ"], 192_000)
+        self.assertEqual(rust["MAX_CONTROL_CHANNELS"], 8)
+        self.assertEqual(rust["MAX_CONTROL_MEDIA_KEY_EPOCH"], 65_535)
         self.assertEqual(kotlin["FRAME_PREFIX_BYTES"], 4)
         self.assertEqual(kotlin["MAX_CONTROL_FRAME_BYTES"], 64 * 1024)
+        self.assertEqual(kotlin["MIN_CONTROL_SAMPLE_RATE_HZ"], 8_000)
+        self.assertEqual(kotlin["MAX_CONTROL_SAMPLE_RATE_HZ"], 192_000)
+        self.assertEqual(kotlin["MAX_CONTROL_CHANNELS"], 8)
+        self.assertEqual(kotlin["MAX_MEDIA_KEY_EPOCH"], 65_535)
 
     def test_doc_parser_reads_all_capacity_rows(self) -> None:
         capacities = parse_doc_capacities(MVP_BASELINE_PATH.read_text(encoding="utf-8"))
         for boundary, name in DOC_BOUNDARIES:
             self.assertEqual(capacities[boundary], CONTRACTS[name], boundary)
+
+    def test_start_stream_doc_row_parses(self) -> None:
+        source = MVP_BASELINE_PATH.read_text(encoding="utf-8")
+        self.assertEqual(parse_doc_start_stream(source), (8_000, 192_000, 8, (10, 20)))
+
+    def test_epoch_doc_pin_parses(self) -> None:
+        source = CONTROL_FRAME_VECTORS_PATH.read_text(encoding="utf-8")
+        self.assertEqual(parse_control_epoch_pin(source), 65_535)
+
+    def test_kotlin_ulong_val_constant_resolves(self) -> None:
+        kotlin = resolve_constants(
+            KOTLIN_CONTROL_PATH.read_text(encoding="utf-8"),
+            ["MAX_MEDIA_KEY_EPOCH"],
+        )
+        self.assertEqual(kotlin["MAX_MEDIA_KEY_EPOCH"], 65_535)
 
     def test_doc_parser_detects_a_tampered_capacity(self) -> None:
         source = MVP_BASELINE_PATH.read_text(encoding="utf-8")
