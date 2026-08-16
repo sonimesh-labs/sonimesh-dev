@@ -131,6 +131,17 @@ The comparison is codec-level evidence only; FEC stays disabled in every cell
 and the 10 ms shape cannot carry LBRR redundancy (see the
 [in-band FEC content-class record](../measurements/2026-08-16-windows-opus-inband-fec.md)).
 
+On the same date the probe extended that FEC comparison with a speech-like
+loss-rate sweep and a wall-clock FEC CPU pass. At 5% announced loss the
+encoder stays in CELT-only mode and codes no LBRR, so FEC equals PLC exactly
+(18.6 dB, no gain); at 20% it gains +4.3 dB over PLC (21.5 dB versus
+17.2 dB). Enabling FEC raises direct codec-level encode+decode wall time by
+about +214-232% at the auto bitrate (hybrid mode) and +108-116% at 24 kb/s
+(SILK mode), so the cost is mode-dependent rather than a flat FEC tax. The
+sweep and CPU numbers are codec-level, wall-clock evidence; they do not
+select an FEC policy, and FEC stays disabled in every cell (see the
+in-band FEC content-class record above).
+
 ## Codec-neutral media-path regression
 
 The deterministic cross-crate test in

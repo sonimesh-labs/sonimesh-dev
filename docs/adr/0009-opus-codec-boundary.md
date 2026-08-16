@@ -93,7 +93,13 @@ Physical latency and Android capture claims remain separate tests.
 A [deterministic in-band FEC content-class record](../measurements/2026-08-16-windows-opus-inband-fec.md)
 documents that 20 ms in-band FEC recovers a dropped speech-like frame at
 22.3 dB versus 16.3 dB for PLC (+6.0 dB) and adds nothing for a tone
-reference (FEC equals PLC at 33.1 dB). It is codec-level evidence through
+reference (FEC equals PLC at 33.1 dB). A speech-like loss-rate sweep shows
+the benefit appears only once the announced loss is high enough for the
+encoder to leave CELT-only mode and code LBRR (measured +6.0 dB at 10% and
++4.3 dB at 20%, with FEC equal to PLC at 5%), and a wall-clock pass shows
+enabling FEC costs about +214-232% direct codec-level encode+decode time at
+the auto bitrate (hybrid mode) and +108-116% at 24 kb/s (SILK mode). It is
+codec-level evidence through
 the opus binding directly; the `FrameDecoder` boundary has no FEC flag, the
 10 ms shape cannot carry LBRR redundancy, and FEC remains disabled.
 

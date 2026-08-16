@@ -4,8 +4,12 @@
 > that libopus in-band FEC recovers one dropped 20 ms frame with 22.3 dB
 > aligned SNR versus 16.3 dB for decoder-side PLC on voiced speech-like
 > content (+6.0 dB), and adds nothing for a single-tone non-speech reference
-> (FEC equals PLC at 33.1 dB). FEC remains disabled in every experiment cell
-> and ADR 0009 stays Provisional.
+> (FEC equals PLC at 33.1 dB). A speech-like loss-rate sweep shows the
+> benefit appears at 10% and 20% announced loss but not at 5% (FEC equals
+> PLC), and a wall-clock pass shows enabling FEC costs about +213-232%
+> direct codec-level encode+decode time at the auto bitrate and +108-116%
+> at 24 kb/s. FEC remains disabled in every experiment cell and ADR 0009
+> stays Provisional.
 > Updated: 2026-08-16
 
 ## Summary
@@ -23,6 +27,16 @@ otherwise packet `k - 1` is decoded normally with `fec = false`. A fresh
 decoder conceals the same dropped frame with PLC for comparison. Both
 recovered blocks are scored against their source frame with the same
 model-free aligned SNR used by the build record's concealed-block checks.
+
+The same probe then sweeps the announced loss rate on the speech-like
+profile (`set_packet_loss_perc(5)` and `set_packet_loss_perc(20)`, each
+with the same single dropped frame 120) so the recovery benefit is
+recorded as a function of the loss the encoder is told to expect.
+Finally it times three direct codec-level encode+decode scenarios - no
+FEC, FEC with no actual loss, and FEC with every 10th packet recovered -
+at the auto bitrate and at 24 kb/s, repeating each pass three times and
+reporting the minimum wall time, so the cost of enabling FEC is
+recorded per bitrate mode.
 
 ## Content profiles
 
@@ -45,15 +59,24 @@ cargo run --release -p opus-codec-prototype
 
 ## Output
 
-The probe adds two deterministic lines after the 20 ms sustained pass:
+The probe adds two deterministic FEC recovery lines, a deterministic
+loss-rate sweep on the speech-like profile, and two wall-clock FEC CPU lines
+after the 20 ms sustained pass:
 
 ```text
 opus_20ms_fec: speech fec 22.3 dB plc 16.3 dB gain +6.0 dB (loss 10% drop 120 avg 187 B)
 opus_20ms_fec: tone fec 33.1 dB plc 33.1 dB gain +0.0 dB (loss 10% drop 120 avg 170 B)
+opus_20ms_fec_loss: speech loss 5% fec 18.6 dB plc 18.6 dB gain +0.0 dB (drop 120 avg 245 B)
+opus_20ms_fec_loss: speech loss 20% fec 21.5 dB plc 17.2 dB gain +4.3 dB (drop 120 avg 190 B)
+opus_20ms_fec_cpu: auto no-fec 1484-1536 us/frame; fec no-loss +214-224%; fec loss +222-232% (speech, min of 3)
+opus_20ms_fec_cpu: 24k no-fec 1174-1176 us/frame; fec no-loss +108%; fec loss +109-116% (speech, min of 3)
 ```
 
-The two FEC lines are byte-identical across two release invocations, and all
-other quality lines remain identical to the committed build record.
+The four deterministic quality lines are byte-identical across two release
+invocations, and all other quality lines remain identical to the committed
+build record. The two `fec_cpu` lines are wall-clock and vary within the
+ranges shown above across runs; they are codec-level estimates and are not
+comparable to the worker-path `opus_*ms_cpu` numbers.
 
 ## Interpretation
 
@@ -69,11 +92,32 @@ other quality lines remain identical to the committed build record.
 - This is codec-level evidence through `opus::Decoder::decode_float(..., fec)`
   directly; the stable `sonimesh-audio` `FrameDecoder` boundary has no FEC
   flag and is not involved.
+- Loss-rate sweep (speech-like): at 5% announced loss the encoder stays in
+  CELT-only mode and codes no LBRR, so the FEC decode falls back to PLC and
+  the sweep reports FEC equal to PLC at 18.6 dB with no gain. At 10% and
+  20% the encoder leaves CELT-only mode and codes redundancy, recovering
+  +6.0 dB (22.3 dB FEC versus 16.3 dB PLC) and +4.3 dB (21.5 dB FEC versus
+  17.2 dB PLC) respectively. The benefit is therefore tied to the
+  encoder's mode decision, not merely to the presence of a drop.
+- Wall-clock FEC CPU pass: enabling in-band FEC at the auto bitrate forces
+  the encoder into hybrid mode (CELT plus SILK LBRR), which triples direct
+  codec-level encode+decode wall time (about +214-232% depending on loss);
+  at 24 kb/s the encoder switches to SILK mode and the same pass costs
+  about +108-116%. These numbers are wall-clock min-of-3 estimates from
+  direct `opus` calls, not a measured CPU-time trace and not the
+  worker-path `StreamDecodeWorker` cost; the real in-stream overhead
+  depends on the negotiated bitrate and frame shape.
 
 ## Gates enforced by the probe
 
-- Speech-like FEC gain must be at least 4.0 dB (measured +6.0, deterministic).
+- Speech-like FEC gain must be at least 4.0 dB at the 10% announced-loss
+  cell (measured +6.0) and at the 20% sweep cell (measured +4.3). The 5%
+  sweep cell is report-only: the encoder codes no LBRR there, so FEC equals
+  PLC and the gain is 0.0 dB by design.
 - Non-speech FEC must stay within 2.0 dB of PLC (measured +0.0).
+- The FEC CPU pass is report-only: wall-clock min-of-3 estimates are not
+  gated because they vary run to run; the recorded mode-dependent overhead
+  is evidence for a later loss/CPU/power tradeoff decision.
 
 ## Remaining ADR 0009 gates
 
