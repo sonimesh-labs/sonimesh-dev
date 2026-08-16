@@ -85,6 +85,9 @@ jobs:
       - name: Run Windows TLS provider spike
         if: runner.os == 'Windows'
         run: cargo run -p windows-tls-provider-prototype
+      - name: Run Windows credential store prototype
+        if: runner.os == 'Windows'
+        run: cargo run -p windows-credential-prototype
       - name: Run Windows Opus codec prototype
         if: runner.os == 'Windows'
         run: cargo run -p opus-codec-prototype
