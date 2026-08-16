@@ -107,9 +107,11 @@ A [DTX content-class record](../measurements/2026-08-16-windows-opus-dtx.md)
 documents that libopus DTX reduces the average packet size by 35% on
 pause-gapped speech-like content (249 to 163 bytes, 84 of 240 one-byte
 DTX packets) with no measurable active-region SNR change (14.1 dB), and
-does not engage on a continuous tone (0 DTX packets, 45.1 dB). It is
-codec-level evidence through the opus binding directly and not a power
-measurement; DTX remains disabled.
+does not engage on a continuous tone (0 DTX packets, 45.1 dB). The same
+35% reduction (129 to 84 bytes) and 84/240 DTX-packet count now also hold
+at 10 ms, with no active-region SNR change (15.4 dB) and no DTX packets on
+tone (41.2 dB). It is codec-level evidence through the opus binding
+directly and not a power measurement; DTX remains disabled.
 
 A [10 ms vs 20 ms frame-duration record](../measurements/2026-08-16-windows-opus-10ms-vs-20ms.md)
 documents that at equal per-second codec bitrates the 20 ms shape keeps a

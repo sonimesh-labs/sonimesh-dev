@@ -148,8 +148,12 @@ content, DTX turns 84 of 240 packets into one-byte DTX packets and
 reduces the average packet size from 249 to 163 bytes (35% smaller)
 with no measurable active-region SNR change (14.1 dB), while a
 continuous tone never goes inactive and stays unchanged (0 DTX packets,
-45.1 dB). The comparison is codec-level evidence only; DTX stays
-disabled in every cell and is not a power measurement (see the
+45.1 dB). The same DTX cells now also run at 10 ms: the average packet
+size drops from 129 to 84 bytes (also 35%) with the same 84/240
+DTX-packet count and no active-region SNR change (15.4 dB), and the
+tone control still emits no DTX packets (41.2 dB). The comparison is
+codec-level evidence only; DTX stays disabled in every cell and is not a
+power measurement (see the
 [DTX content-class record](../measurements/2026-08-16-windows-opus-dtx.md)).
 
 On the same date the probe added a deterministic 10 ms vs 20 ms

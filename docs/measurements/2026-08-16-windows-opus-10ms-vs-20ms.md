@@ -142,8 +142,9 @@ the committed build record.
 - This is codec-level evidence through the opus binding directly; it is not a
   frame-duration selection, a latency measurement, a power measurement, an
   allocation-profile result, or an Android result.
-- Speech-like 10 ms DTX, 10 ms FEC (which cannot carry LBRR), and real-device
-  playback behavior remain later experiment cells.
+- 10 ms FEC (which cannot carry LBRR) and real-device playback behavior
+  remain later experiment cells; the 10 ms DTX cell is recorded in the
+  [DTX content-class record](../measurements/2026-08-16-windows-opus-dtx.md).
 - Reproducible native builds on Android ABIs, measured CPU-time utilization,
   allocation profile, power evidence, and sustained coverage-guided
   malformed-payload fuzzing remain pending before ADR 0009 can close.
