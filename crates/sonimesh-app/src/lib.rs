@@ -8,6 +8,7 @@ mod control_to_mixer;
 mod diagnostic_export_action;
 mod export_store;
 mod format_adapted_render_source_factory;
+mod media_session_allocator;
 mod mixer_membership_controller;
 mod mixer_output_controller;
 mod mixer_render_source;
@@ -46,6 +47,9 @@ pub use diagnostic_export_action::{
 pub use export_store::{ExportStore, ExportStoreError};
 pub use format_adapted_render_source_factory::{
     FormatAdaptedRenderSourceFactory, SourcePcmFormat, SourcePcmFormatError,
+};
+pub use media_session_allocator::{
+    MAX_RETAINED_MEDIA_IDENTITIES, MediaSessionAllocator, MediaSessionAllocatorError,
 };
 pub use mixer_membership_controller::{
     AdmittedAdaptedStream, AdmittedStream, MixerAdmissionError, MixerMembershipController,
