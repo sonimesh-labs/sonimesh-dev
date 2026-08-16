@@ -177,12 +177,12 @@ authenticated header, ciphertext, and tag). The pairing, control-frame, and
 media-crypto verifiers also re-read the values pinned in the vector docs and
 the Rust pins (`src/pairing_binding.rs`, `tests/control_frame.rs`, and
 `tests/media_crypto.rs`); the media-key and media-header verifiers re-read the
-Rust pins in `src/media_key.rs` and `tests/media_header_vector.rs`; the
-pairing, control-frame, media-crypto, and media-header verifiers additionally
-re-read the Kotlin `PairingTlsBindingVectorTest`, `ControlFrameVectorTest`,
-`MediaCryptoVectorTest`, and `MediaHeaderVectorTest`. Each pinned value must
-match the independent recomputation, so the documentation, the Rust and Kotlin
-pins, and the Python verifier cannot drift apart.
+Rust pins in `src/media_key.rs` and `tests/media_header_vector.rs`; all five
+verifiers additionally re-read the Kotlin `PairingTlsBindingVectorTest`,
+`ControlFrameVectorTest`, `MediaCryptoVectorTest`, `MediaHeaderVectorTest`,
+and `MediaKeyVectorTest`. Each pinned value must match the independent
+recomputation, so the documentation, the Rust and Kotlin pins, and the Python
+verifier cannot drift apart.
 Each script runs a `--self-test` mode and a check mode in CI; a schema
 renumbering, layout reordering, label, salt, or byte-order change on either
 side fails the job.
