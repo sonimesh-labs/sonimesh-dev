@@ -5,7 +5,7 @@
 > across viewport widths and busy preview states; it does not assess visual
 > aesthetics, color, or pixel-perfect rendering, and it is not an audio or
 > transport measurement.
-> Updated: 2026-08-16
+> Updated: 2026-08-17
 
 ## Purpose
 
@@ -77,3 +77,21 @@ not part of the repository.
   the desktop shell remains out of scope for this check.
 - Browser layout engines can differ; this run reflects the reference host's
   Chromium only.
+
+## Follow-up: pixel-level sanity check of screenshots (2026-08-17)
+
+> Status: supplementary automated check on the saved artifacts. It confirms the
+> screenshots contain rendered UI content; it does not replace a human
+> aesthetic/contrast review.
+
+| Artifact | Size (px) | Avg RGB | Dark px | Light px | Accent px |
+| --- | --- | --- | ---: | ---: | ---: |
+| `sonimesh-desktop-1440.png` | 1425x2361 | (203,208,206) | 14.6% | 79.2% | 2.9% |
+| `sonimesh-mobile-390.png` | 375x4628 | (203,208,206) | 15.7% | 78.5% | 2.5% |
+| `sonimesh-mobile-320.png` | 320x4764 | (210,215,213) | 10.0% | 83.1% | 4.2% |
+
+The three full-page artifacts are non-blank with the expected light-background /
+dark-text distribution and small accent-color share, consistent with the
+programmatic layout audit above. A true visual pass (aesthetics, contrast,
+font rendering) remains open: the current agent tool environment rejected image
+input, so no model-based visual review was performed.
