@@ -116,7 +116,12 @@ The Android host-JVM `HelloNegotiation` mirror, exercised by
 tests, pins `negotiate_hello`'s canonical capability intersection and the
 bounded hello admission rules (16 capabilities, 8 supported versions, 128-byte
 display name) so the sender and receiver select the same version-one control
-capability set.
+capability set. The `tools/check_negotiation_vectors.py` verifier reimplements
+the version selection and canonical intersection in pure Python and
+cross-checks the constants, capability values, canonical capability order, and
+canonical result pinned in `src/control.rs`, `src/negotiation.rs`,
+`tests/negotiation.rs`, the `HelloNegotiation` mirror, and
+`HelloNegotiationVectorTest`, so any drift between the five sources fails CI.
 
 This is wire-format and host-test evidence only. The Android production source
 set still contains no control transport, generated Protobuf client, pairing, or

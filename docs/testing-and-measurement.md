@@ -168,8 +168,9 @@ Rust vectors from the documented labels, constants, and byte layouts using only
 the Python standard library: `check_pairing_vectors.py` (HMAC/HKDF-SHA256
 pairing proofs and media root), `check_media_key_vectors.py` (media key
 derivation and the 96-bit nonce layout for both directions),
-`check_control_frame_vectors.py` (Protobuf wire encoding of all five control
-payloads),
+`check_negotiation_vectors.py` (bounded version-one hello capability
+negotiation), `check_control_frame_vectors.py` (Protobuf wire encoding of all
+five control payloads),
 `check_media_header_vectors.py` (the fixed 36-byte media header), and
 `check_media_crypto_vectors.py` (RFC 8439 ChaCha20-Poly1305 AEAD packet
 sealing for the three published vectors: derived media key, nonce,
@@ -177,12 +178,13 @@ authenticated header, ciphertext, and tag). The pairing, control-frame, and
 media-crypto verifiers also re-read the values pinned in the vector docs and
 the Rust pins (`src/pairing_binding.rs`, `tests/control_frame.rs`, and
 `tests/media_crypto.rs`); the media-key and media-header verifiers re-read the
-Rust pins in `src/media_key.rs` and `tests/media_header_vector.rs`; all five
-verifiers additionally re-read the Kotlin `PairingTlsBindingVectorTest`,
-`ControlFrameVectorTest`, `MediaCryptoVectorTest`, `MediaHeaderVectorTest`,
-and `MediaKeyVectorTest`. Each pinned value must match the independent
-recomputation, so the documentation, the Rust and Kotlin pins, and the Python
-verifier cannot drift apart.
+Rust pins in `src/media_key.rs` and `tests/media_header_vector.rs`; all six
+verifiers additionally re-read their Kotlin counterparts:
+`PairingTlsBindingVectorTest`, `ControlFrameVectorTest`, `MediaCryptoVectorTest`,
+`MediaHeaderVectorTest`, `MediaKeyVectorTest`, and, for negotiation, the
+`HelloNegotiation` mirror with `HelloNegotiationVectorTest`. Each pinned value
+must match the independent recomputation, so the documentation, the Rust and
+Kotlin pins, and the Python verifier cannot drift apart.
 Each script runs a `--self-test` mode and a check mode in CI; a schema
 renumbering, layout reordering, label, salt, or byte-order change on either
 side fails the job.
