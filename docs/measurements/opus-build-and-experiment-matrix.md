@@ -130,6 +130,8 @@ On the same date the probe added a deterministic in-band FEC recovery
 comparison by content class: for one dropped 20 ms frame, speech-like content
 recovers at 22.3 dB through in-band FEC versus 16.3 dB through PLC (+6.0 dB),
 while a single-tone reference shows no benefit (FEC equals PLC at 33.1 dB).
+A multi-harmonic music-like reference shows the same result (FEC equals PLC
+at 2.4 dB), so non-speech content gains nothing from LBRR at the codec level.
 The comparison is codec-level evidence only; FEC stays disabled in every cell
 and the 10 ms shape cannot carry LBRR redundancy (see the
 [in-band FEC content-class record](../measurements/2026-08-16-windows-opus-inband-fec.md)).

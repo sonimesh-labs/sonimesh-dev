@@ -3,8 +3,10 @@
 > Status: deterministic codec-level evidence on the reference Windows host
 > that libopus in-band FEC recovers one dropped 20 ms frame with 22.3 dB
 > aligned SNR versus 16.3 dB for decoder-side PLC on voiced speech-like
-> content (+6.0 dB), and adds nothing for a single-tone non-speech reference
-> (FEC equals PLC at 33.1 dB). A speech-like loss-rate sweep shows the
+> content (+6.0 dB), and adds nothing for non-speech references - a
+> single-tone profile (FEC equals PLC at 33.1 dB) and a multi-harmonic
+> music-like profile (FEC equals PLC at 2.4 dB). A speech-like loss-rate
+> sweep shows the
 > benefit appears at 10% and 20% announced loss but not at 5% (FEC equals
 > PLC), and a wall-clock pass shows enabling FEC costs about +213-232%
 > direct codec-level encode+decode time at the auto bitrate and +108-116%
@@ -46,6 +48,10 @@ recorded per bitrate mode.
   amplitude modulation, scaled to the tone profile's peak amplitude. No
   randomness is used, so the quality lines are reproducible across runs.
 - **Tone**: the existing 440 Hz single-sine reference.
+- **Music-like** (new): the deterministic five-harmonic sum used by the
+  frame-path quality profiles - 220, 330, 440, 550, and 880 Hz partials at
+  0.7 rad phase offsets, scaled to the tone profile's RMS. It adds spectral
+  content beyond a single tone to the FEC question.
 
 ## Command
 
@@ -59,20 +65,21 @@ cargo run --release -p opus-codec-prototype
 
 ## Output
 
-The probe adds two deterministic FEC recovery lines, a deterministic
+The probe adds three deterministic FEC recovery lines, a deterministic
 loss-rate sweep on the speech-like profile, and two wall-clock FEC CPU lines
 after the 20 ms sustained pass:
 
 ```text
 opus_20ms_fec: speech fec 22.3 dB plc 16.3 dB gain +6.0 dB (loss 10% drop 120 avg 187 B)
 opus_20ms_fec: tone fec 33.1 dB plc 33.1 dB gain +0.0 dB (loss 10% drop 120 avg 170 B)
+opus_20ms_fec: music fec 2.4 dB plc 2.4 dB gain +0.0 dB (loss 10% drop 120 avg 208 B)
 opus_20ms_fec_loss: speech loss 5% fec 18.6 dB plc 18.6 dB gain +0.0 dB (drop 120 avg 245 B)
 opus_20ms_fec_loss: speech loss 20% fec 21.5 dB plc 17.2 dB gain +4.3 dB (drop 120 avg 190 B)
 opus_20ms_fec_cpu: auto no-fec 1484-1536 us/frame; fec no-loss +214-224%; fec loss +222-232% (speech, min of 3)
 opus_20ms_fec_cpu: 24k no-fec 1174-1176 us/frame; fec no-loss +108%; fec loss +109-116% (speech, min of 3)
 ```
 
-The four deterministic quality lines are byte-identical across two release
+The five deterministic quality lines are byte-identical across two release
 invocations, and all other quality lines remain identical to the committed
 build record. The two `fec_cpu` lines are wall-clock and vary within the
 ranges shown above across runs; they are codec-level estimates and are not
@@ -86,6 +93,13 @@ comparable to the worker-path `opus_*ms_cpu` numbers.
   codes LBRR only when the SILK VAD reports speech activity above
   `LBRR_SPEECH_ACTIVITY_THRES` (0.3), so a pure tone carries no redundancy and
   the FEC decode falls back to PLC.
+- Music-like reference: the five-harmonic profile also shows FEC equal to PLC
+  exactly (2.4 dB). The same VAD gate means no LBRR is coded for content that
+  is not voiced-speech-like, so the FEC decode falls back to PLC. The 2.4 dB
+  absolute level is low because single-frame concealed quality on the
+  multi-harmonic profile is poor - the frame-path record measures worst
+  single-frame PLC at about 1-4 dB - so FEC neither helps nor hurts this
+  content class at the codec level.
 - The 10 ms shape cannot carry FEC: bundled libopus flushes LBRR data only
   when `nFramesPerPacket > 1` (`silk/enc_API.c`), so a 10 ms single-frame
   packet has no redundancy to recover. The probe therefore runs at 20 ms only.
@@ -114,7 +128,8 @@ comparable to the worker-path `opus_*ms_cpu` numbers.
   cell (measured +6.0) and at the 20% sweep cell (measured +4.3). The 5%
   sweep cell is report-only: the encoder codes no LBRR there, so FEC equals
   PLC and the gain is 0.0 dB by design.
-- Non-speech FEC must stay within 2.0 dB of PLC (measured +0.0).
+- Non-speech FEC must stay within 2.0 dB of PLC for the tone and music-like
+  profiles (measured +0.0 each).
 - The FEC CPU pass is report-only: wall-clock min-of-3 estimates are not
   gated because they vary run to run; the recorded mode-dependent overhead
   is evidence for a later loss/CPU/power tradeoff decision.
