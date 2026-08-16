@@ -276,8 +276,11 @@ jitter, and output-backend ADRs using measured 10/20 ms and device results.
 - complete Android capture hardware/OEM evidence, lifecycle matrix results, and
   power measurements; partial Vivo capture and background evidence is recorded
   in the [Android capture matrix](./measurements/android-capture-matrix.md);
-- Opus encoder/decoder bindings, PLC/FEC evidence, and authenticated malformed
-  payload fuzzing against the eventual native decoder;
+- enabling an Opus encoder/decoder binding in the core; prototype-level
+  PLC/FEC/DTX, authenticated malformed-payload, and 10 ms vs 20 ms evidence
+  is recorded in the dated opus measurement records, and the binding stays
+  behind the ADR 0009 gate until Windows/Android ABI, power, and sustained
+  coverage-guided fuzz evidence exists;
 - first pairing, TLS, QR bootstrap, identity storage, revocation, or actual
   root-secret provisioning; the pure TLS-exporter vector does not prove a TLS
   provider can pin the QR SPKI or export the required bytes. AEAD/HKDF media
@@ -325,7 +328,10 @@ and no build should leave a controlled lab network before phase 0D is reviewed.
 2. Measure CPAL and prototype direct WASAPI behind `sonimesh-platform`; record
    callback size, negotiated format, device lifecycle, and latency in ADR 0003.
 3. Validate the provisional Opus binding/build policy in ADR 0009 on Windows and
-   Android, then compare 10 ms and 20 ms frames without adding latency claims.
+   Android; the deterministic 10 ms vs 20 ms comparison is now recorded
+   (codec-level quality, wire overhead, PLC, and wall-clock CPU), and the
+   remaining evidence is Android ABI packaging, power, and sustained
+   coverage-guided fuzzing.
 4. Implement the reviewed QR-pinned TLS pairing design only after Android
    Keystore and Windows credential-store spikes; do not enable any non-lab
    network build before that validation.

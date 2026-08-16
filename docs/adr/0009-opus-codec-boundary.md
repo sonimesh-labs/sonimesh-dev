@@ -111,6 +111,18 @@ does not engage on a continuous tone (0 DTX packets, 45.1 dB). It is
 codec-level evidence through the opus binding directly and not a power
 measurement; DTX remains disabled.
 
+A [10 ms vs 20 ms frame-duration record](../measurements/2026-08-16-windows-opus-10ms-vs-20ms.md)
+documents that at equal per-second codec bitrates the 20 ms shape keeps a
+steady-state SNR lead on the tone and multi-harmonic profiles (largest at
+24 kb/s: +11.4 dB tone, +4.7 dB multi-harmonic), conceals a
+wall-clock-matched 160 ms PLC window better, and costs no more per
+audio-second, while the 10 ms shape raises complete-datagram bitrate by
+about +47% at 24 kb/s and +18% at 96 kb/s because it doubles the
+per-packet media-header and AEAD-tag overhead. This partially addresses
+the 10 ms vs 20 ms quality, CPU, and loss/PLC evidence gate; it is
+codec-level evidence only and does not select a frame duration, and power,
+Android ABI, and sustained coverage-guided fuzz evidence remain open.
+
 ## Rollback plan
 
 The optional feature remains behind `FrameDecoder`. It can be disabled or

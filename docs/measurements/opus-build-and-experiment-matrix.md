@@ -152,6 +152,22 @@ continuous tone never goes inactive and stays unchanged (0 DTX packets,
 disabled in every cell and is not a power measurement (see the
 [DTX content-class record](../measurements/2026-08-16-windows-opus-dtx.md)).
 
+On the same date the probe added a deterministic 10 ms vs 20 ms
+frame-duration comparison at equal per-second codec bitrates (24 kb/s and
+96 kb/s) across the tone and multi-harmonic profiles: the 20 ms shape
+keeps a steady-state SNR lead (largest at 24 kb/s, +11.4 dB on tone and
++4.7 dB on multi-harmonic), and the 10 ms shape pays a per-packet wire
+overhead that raises complete-datagram bitrate by about +47% at 24 kb/s
+and +18% at 96 kb/s (fixed 36-byte media header plus 16-byte AEAD tag per
+packet). A wall-clock-matched 160 ms PLC window is also concealed better
+by the 20 ms shape on these content classes, and the per-second
+encode+decode wall cost is the same order of magnitude for both shapes
+(20 ms about 3-13% lower in a second short-window run; the 120 s
+sustained pass favors 20 ms by about 6%). The comparison is codec-level
+evidence only; it does not select a frame duration and is not a latency,
+power, or Android result (see the
+[10 ms vs 20 ms record](../measurements/2026-08-16-windows-opus-10ms-vs-20ms.md)).
+
 ## Codec-neutral media-path regression
 
 The deterministic cross-crate test in
