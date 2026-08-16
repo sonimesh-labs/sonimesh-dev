@@ -107,6 +107,7 @@ cargo +nightly-2026-07-18 fuzz run control_frame -- -max_len=66052
 cargo +nightly-2026-07-18 fuzz run adaptive_jitter_target -- -max_len=64
 cargo +nightly-2026-07-18 fuzz run media_packet -- -max_len=1264
 cargo +nightly-2026-07-18 fuzz run nominal_resampler -- -max_len=1024
+cargo +nightly-2026-07-18 fuzz run polyphase_resampler -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run channel_mapper -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run peak_limiter -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run drift_controller -- -max_len=1024

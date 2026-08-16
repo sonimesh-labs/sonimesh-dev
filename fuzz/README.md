@@ -25,6 +25,11 @@ The network-scenario targets (`jitter_target`, `jitter_scheduler`, `multi_stream
   linear resampler, proving adversarial rate metadata cannot panic the
   interpolation loop, exceed the consumed/produced bounds, or leave output
   uninitialized on a rejected step.
+- `polyphase_resampler` feeds arbitrary sender-declared input and output sample
+  rates, channel counts, drift corrections, and buffer lengths into the bounded
+  windowed-sinc resampler, proving adversarial rate metadata cannot panic the
+  convolution loop, exceed the consumed/produced bounds, or leave output
+  uninitialized on a rejected step.
 - `channel_mapper` feeds arbitrary negotiated input/output channel layouts,
   buffer lengths, and finite sample payloads into the bounded interleaved
   mapper, proving layout metadata cannot panic the mapping loop, inflate the
@@ -252,6 +257,7 @@ cargo +nightly-2026-07-18 fuzz run adaptive_jitter_target -- -max_len=64
 
 cargo +nightly-2026-07-18 fuzz run media_packet -- -max_len=1264
 cargo +nightly-2026-07-18 fuzz run nominal_resampler -- -max_len=1024
+cargo +nightly-2026-07-18 fuzz run polyphase_resampler -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run channel_mapper -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run peak_limiter -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run drift_controller -- -max_len=1024

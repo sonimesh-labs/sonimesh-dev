@@ -13,8 +13,10 @@ use libfuzzer_sys::fuzz_target;
 use sonimesh_app::{PumpOutcome, SourcePcmFormat, StreamFormatAdapter};
 use sonimesh_audio::{RealtimePcmPopOutcome, RealtimePcmPushOutcome, realtime_pcm_queue};
 
-const SOURCE_SAMPLES_PER_BLOCK: usize = 8;
-const OUTPUT_SAMPLES_PER_BLOCK: usize = 8;
+// Blocks must exceed the windowed-sinc kernel's 16-frame look-ahead so a
+// source block alone can reach the `Pushed` path in steady state.
+const SOURCE_SAMPLES_PER_BLOCK: usize = 96;
+const OUTPUT_SAMPLES_PER_BLOCK: usize = 96;
 const SOURCE_QUEUE_CAPACITY: usize = 4;
 const OUTPUT_QUEUE_CAPACITY: usize = 4;
 const MAX_OUTPUT_FRAMES: usize = OUTPUT_SAMPLES_PER_BLOCK / 2;
