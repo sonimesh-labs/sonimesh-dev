@@ -162,8 +162,11 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   media root and issues a fresh `(secret, context)` pair for an authenticated
   control-plane reconnection: the full key context is never re-issued within a
   pairing lifetime, the no-reuse record is fixed at 16 entries and fails closed
-  when full, and a fresh pairing root replaces the allocator. The authenticated
-  control-plane transport that selects the media identity remains gated.
+  when full, and a fresh pairing root replaces the allocator. A seeded property
+  walk and a byte-driven libFuzzer target drive arbitrary identity/direction
+  supplies against an independent no-reuse model, asserting the exact outcome
+  after every step. The authenticated control-plane transport that selects the
+  media identity remains gated.
   A seeded property walk and a byte-driven libFuzzer target drive in-order
   deliveries, duplicates, tampered ciphertext, retired-epoch packets,
   oversized datagrams, rotations, and fresh sessions over real loopback

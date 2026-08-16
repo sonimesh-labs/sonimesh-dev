@@ -66,6 +66,13 @@ than silently weakening the guarantee.
   session installs through `install_fresh_session`, packets sealed under the
   retired session are then rejected, and the fresh session's packets admit and
   decode.
+- A seeded property walk drives randomized identity/direction supply scripts
+  against an independent append-only set model, asserting the exact outcome
+  after every step: no re-issue, no record growth past the bound, no recording
+  of a failed supply, and `contains` agreement with the model.
+- A byte-driven libFuzzer target (`media_session_allocator` in the `fuzz/`
+  workspace) drives the same contract with a deterministic edge prologue and
+  fuzz-derived supplies, committed through the finite CI smoke.
 - The full `sonimesh-app` test suite passes. No wire schema or cross-language
   vector changes: this is an application-domain component only.
 
