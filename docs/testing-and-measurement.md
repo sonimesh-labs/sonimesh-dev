@@ -326,7 +326,9 @@ pins the authenticated-reconnection supply boundary: a fresh session issues for
 an authenticated identity, the full key context is never re-issued within a
 pairing lifetime, the bounded no-reuse record fails closed when full, and an
 integration test wires the allocator into the receiver pipeline so packets
-sealed under a retired session are rejected after a fresh session installs.
+sealed under a retired session are rejected after a fresh session installs,
+and a loopback test repeats the same rejection over a real UDP socket with
+the allocator supplying the pairing root and both contexts.
 
 A deterministic control reconnect scenario now delays a command from the old
 transport until after the replacement transport installs a fresh local token and

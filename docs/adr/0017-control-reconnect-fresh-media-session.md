@@ -66,6 +66,11 @@ than silently weakening the guarantee.
   session installs through `install_fresh_session`, packets sealed under the
   retired session are then rejected, and the fresh session's packets admit and
   decode.
+- A UDP loopback integration test drives the same flow through the real socket
+  path: the allocator's retained root backs the sealer and the bind, a fresh
+  reconnection session installs over the same socket, packets sealed under the
+  retired session are rejected without rebinding the cleared source pin, and
+  the fresh session's packets rebind the source and decode.
 - A seeded property walk drives randomized identity/direction supply scripts
   against an independent append-only set model, asserting the exact outcome
   after every step: no re-issue, no record growth past the bound, no recording
