@@ -71,6 +71,7 @@ than silently weakening the guarantee.
   reconnection session installs over the same socket, packets sealed under the
   retired session are rejected without rebinding the cleared source pin, and
   the fresh session's packets rebind the source and decode.
+- A control-domain integration test drives the same reconnection through `ControlStreamCoordinator`: connection loss arms a bounded reconnect window while the live UDP path keeps admitting packets, the reconnected transport installs a fresh token and repeats hello negotiation, the allocator supplies a fresh context for the re-admitted stream, `install_fresh_session` keeps the socket, packets sealed under the retired session are rejected, and the fresh session's packets rebind and decode; the no-reuse record then rejects both issued contexts.
 - A seeded property walk drives randomized identity/direction supply scripts
   against an independent append-only set model, asserting the exact outcome
   after every step: no re-issue, no record growth past the bound, no recording
