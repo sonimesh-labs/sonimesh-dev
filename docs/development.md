@@ -55,8 +55,13 @@ python tools/android_capture_preflight.py --self-test
 python tools/check_android_capture_record.py --self-test
 python tools/check_ci_wiring.py
 Push-Location apps/android
-.\gradlew.bat testDebugUnitTest --no-daemon
+.\gradlew.bat lintDebug testDebugUnitTest assembleDebug --no-daemon
 .\gradlew.bat :tls-provider-spike:assembleDebugAndroidTest --no-daemon
+Pop-Location
+
+Push-Location apps/desktop-ui
+npm test
+npm run build
 Pop-Location
 ~~~
 
@@ -243,9 +248,11 @@ npm run dev
 
 Use `npm ci` instead of `npm install` when reproducing the CI dependency graph.
 CI runs `npm ci`, `npm test`, and `npm run build` on current Ubuntu and
-Windows runners with Node.js 22.22.2. This validates the deterministic preview UI
-tests and production bundle only; it does not validate a Tauri integration or any
-audio, pairing, or platform capability.
+Windows runners with Node.js 22.22.2. `npm test` and `npm run build` are the
+enforced gates repeated in the Core checks pre-CI contract; `npm install` and
+`npm run dev` are local-dev conveniences only. This validates the deterministic
+preview UI tests and production bundle only; it does not validate a Tauri
+integration or any audio, pairing, or platform capability.
 
 The bundled preview bridge is intentionally not a Tauri implementation. It
 exists to validate the control surface without turning pending Windows output,

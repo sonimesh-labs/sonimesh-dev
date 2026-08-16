@@ -13,8 +13,8 @@ The contributor-facing `## Core checks` block in `docs/development.md` is the
 same contract from the developer side: a contributor following the documented
 gates must run the same tools with the same modes CI enforces, so the block is
 checked against the same inventory and mode rules. The non-Python gates in the
-block (Cargo commands and Gradle tasks) must also run in CI, otherwise a gate
-documented for contributors could silently stop being enforced.
+block (Cargo commands, Gradle tasks, and npm commands) must also run in CI,
+otherwise a gate documented for contributors could silently stop being enforced.
 """
 
 from __future__ import annotations
@@ -126,14 +126,15 @@ def core_checks_errors(development_text: str) -> list[str]:
     return errors
 
 
-def cargo_gradle_errors(ci_text: str, core_block: str) -> list[str]:
-    r"""Returns Core-check Cargo and Gradle gates that CI does not run.
+def non_python_gate_errors(ci_text: str, core_block: str) -> list[str]:
+    r"""Returns Core-check Cargo, Gradle, and npm gates that CI does not run.
 
-    Every `cargo ...` command documented in the Core checks block must appear
-    verbatim in the CI workflow, and every Gradle task token (for example
-    `testDebugUnitTest` or `:tls-provider-spike:assembleDebugAndroidTest`) must
-    appear somewhere in CI, tolerating the `.\gradlew.bat` versus `./gradlew`
-    and the combined single-line invocation differences between platforms.
+    Every `cargo ...` or `npm ...` command documented in the Core checks block
+    must appear verbatim in the CI workflow, and every Gradle task token (for
+    example `testDebugUnitTest` or `:tls-provider-spike:assembleDebugAndroidTest`)
+    must appear somewhere in CI, tolerating the `.\gradlew.bat` versus
+    `./gradlew` and the combined single-line invocation differences between
+    platforms.
     """
     ci_text = ci_text.replace("\r", "")
     errors: list[str] = []
@@ -143,6 +144,11 @@ def cargo_gradle_errors(ci_text: str, core_block: str) -> list[str]:
             if stripped not in ci_text:
                 errors.append(
                     f"Core checks runs cargo command not present in CI: {stripped}"
+                )
+        elif stripped.startswith("npm "):
+            if stripped not in ci_text:
+                errors.append(
+                    f"Core checks runs npm command not present in CI: {stripped}"
                 )
         elif "gradlew" in stripped:
             for token in stripped.split():
@@ -170,7 +176,7 @@ def main() -> int:
     ci_errors = ci_wiring_errors(ci_text)
     core_errors = core_checks_errors(development_text)
     core_block, _ = core_checks_block(development_text)
-    core_errors.extend(cargo_gradle_errors(ci_text, core_block))
+    core_errors.extend(non_python_gate_errors(ci_text, core_block))
     for error in ci_errors:
         print(error, file=sys.stderr)
     for error in core_errors:
@@ -199,7 +205,9 @@ def wired_ci_text() -> str:
             "run: cargo clippy --workspace --all-targets --all-features -- -D warnings",
             "run: cargo test --workspace --all-targets --all-features",
             "run: cargo run -p sonimesh-network-simulator",
-            "run: ./gradlew testDebugUnitTest :tls-provider-spike:assembleDebugAndroidTest --no-daemon",
+            "run: npm test",
+            "run: npm run build",
+            "run: ./gradlew lintDebug testDebugUnitTest assembleDebug :tls-provider-spike:assembleDebugAndroidTest --no-daemon",
         ]
     )
     return "\n".join(lines) + "\n"
@@ -222,8 +230,12 @@ def wired_core_checks_text() -> str:
     lines.extend(
         [
             "Push-Location apps/android",
-            ".\\gradlew.bat testDebugUnitTest --no-daemon",
+            ".\\gradlew.bat lintDebug testDebugUnitTest assembleDebug --no-daemon",
             ".\\gradlew.bat :tls-provider-spike:assembleDebugAndroidTest --no-daemon",
+            "Pop-Location",
+            "Push-Location apps/desktop-ui",
+            "npm test",
+            "npm run build",
             "Pop-Location",
             "~~~",
             "",
@@ -329,14 +341,14 @@ class CiWiringTests(unittest.TestCase):
             ["development docs are missing the Core checks section"],
         )
 
-    def test_accepts_core_cargo_and_gradle_gates_present_in_ci(self) -> None:
+    def test_accepts_core_non_python_gates_present_in_ci(self) -> None:
         self.assertEqual(
-            cargo_gradle_errors(wired_ci_text(), wired_core_checks_text()), []
+            non_python_gate_errors(wired_ci_text(), wired_core_checks_text()), []
         )
 
     def test_reports_core_cargo_command_missing_from_ci(self) -> None:
         ci = wired_ci_text().replace("run: cargo run -p sonimesh-network-simulator\n", "")
-        errors = cargo_gradle_errors(ci, wired_core_checks_text())
+        errors = non_python_gate_errors(ci, wired_core_checks_text())
         self.assertTrue(
             any(
                 "cargo run -p sonimesh-network-simulator" in error
@@ -347,10 +359,22 @@ class CiWiringTests(unittest.TestCase):
 
     def test_reports_core_gradle_task_missing_from_ci(self) -> None:
         ci = wired_ci_text().replace("testDebugUnitTest", "")
-        errors = cargo_gradle_errors(ci, wired_core_checks_text())
+        errors = non_python_gate_errors(ci, wired_core_checks_text())
         self.assertTrue(
             any(
                 "testDebugUnitTest" in error and "not present in CI" in error
+                for error in errors
+            )
+        )
+
+    def test_reports_core_npm_command_missing_from_ci(self) -> None:
+        ci = wired_ci_text().replace("run: npm test\n", "")
+        errors = non_python_gate_errors(ci, wired_core_checks_text())
+        self.assertTrue(
+            any(
+                "npm command" in error
+                and "npm test" in error
+                and "not present in CI" in error
                 for error in errors
             )
         )
