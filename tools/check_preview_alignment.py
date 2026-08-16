@@ -56,6 +56,32 @@ ERROR_CODE_ALIGNMENT = ("ControlErrorCode", "ErrorCode", "ERROR_CODE_")
 REPLY_RUST_PATH = "crates/sonimesh-app/src/control_stream/reply.rs"
 PROTO_PATH = "proto/control.proto"
 
+# The preview bridge pins two cross-language bounds that are not part of an
+# enum, struct, or reply contract: the fixed diagnostic bundle size and the
+# fixed export receipt retention bound. They mirror Rust constants in separate
+# crates, so the guard re-reads each Rust source directly.
+BRIDGE_PATH = "apps/desktop-ui/src/bridge.ts"
+EXPORT_RUST_PATH = "crates/sonimesh-diagnostics/src/export.rs"
+DIAGNOSTIC_ACTION_RUST_PATH = "crates/sonimesh-app/src/diagnostic_export_action.rs"
+
+# (TypeScript constant, Rust constant, TypeScript source path, Rust source path)
+CONSTANT_ALIGNMENTS = (
+    ("PREVIEW_EXPORT_BYTES", "MAX_EXPORT_BYTES", BRIDGE_PATH, EXPORT_RUST_PATH),
+    (
+        "MAX_PREVIEW_DIAGNOSTIC_EXPORTS",
+        "DEFAULT_MAX_RETAINED_EXPORTS",
+        BRIDGE_PATH,
+        DIAGNOSTIC_ACTION_RUST_PATH,
+    ),
+)
+
+TS_CONST_LINE_PATTERN = re.compile(
+    r"^\s*const\s+([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$"
+)
+RUST_CONST_LINE_PATTERN = re.compile(
+    r"^\s*pub\s+const\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*[A-Za-z_][A-Za-z0-9_]*\s*=\s*(.*?)\s*;\s*$"
+)
+
 
 def rust_enum_variants(source: str, enum_name: str) -> list[str]:
     """Returns variant names of one Rust enum, in declaration order.
@@ -352,6 +378,94 @@ def validate_reply_sources(
     return errors
 
 
+def evaluate_constant_expression(expression: str) -> int:
+    """Evaluates a small integer constant expression.
+
+    Supports decimal literals with `_` separators, `+`, `-`, `*`, `/`, and
+    parentheses; any other token is rejected so the verifier never evaluates
+    arbitrary text.
+    """
+    tokens: list[tuple[str, object]] = []
+    for token in re.findall(r"\d+|[-+*/()]", expression.replace("_", "")):
+        if token.isdigit():
+            tokens.append(("num", int(token)))
+        else:
+            tokens.append((token, token))
+    tokens.append(("end", None))
+
+    def parse_expression(index: int) -> tuple[int, int]:
+        value, index = parse_term(index)
+        while tokens[index][0] in ("+", "-"):
+            operator = tokens[index][0]
+            right, index = parse_term(index + 1)
+            value = value + right if operator == "+" else value - right
+        return value, index
+
+    def parse_term(index: int) -> tuple[int, int]:
+        value, index = parse_factor(index)
+        while tokens[index][0] in ("*", "/"):
+            operator = tokens[index][0]
+            right, index = parse_factor(index + 1)
+            if operator == "*":
+                value *= right
+            else:
+                value //= right
+        return value, index
+
+    def parse_factor(index: int) -> tuple[int, int]:
+        token = tokens[index]
+        if token[0] == "num":
+            return int(token[1]), index + 1
+        if token[0] == "(":
+            value, index = parse_expression(index + 1)
+            if tokens[index][0] != ")":
+                raise ValueError("unbalanced parentheses in constant expression")
+            return value, index + 1
+        raise ValueError(f"unsupported token in constant expression: {token[0]!r}")
+
+    value, index = parse_expression(0)
+    if tokens[index][0] != "end":
+        raise ValueError("trailing text in constant expression")
+    return value
+
+
+def ts_constant_value(source: str, constant_name: str) -> int:
+    """Returns the numeric value of one TypeScript const declaration."""
+    for line in source.splitlines():
+        match = TS_CONST_LINE_PATTERN.match(line)
+        if match is None or match.group(1) != constant_name:
+            continue
+        return evaluate_constant_expression(match.group(2))
+    raise ValueError(f"TypeScript constant {constant_name} is not declared")
+
+
+def rust_constant_value(source: str, constant_name: str) -> int:
+    """Returns the numeric value of one Rust const declaration."""
+    for line in source.splitlines():
+        match = RUST_CONST_LINE_PATTERN.match(line)
+        if match is None or match.group(1) != constant_name:
+            continue
+        return evaluate_constant_expression(match.group(2))
+    raise ValueError(f"Rust constant {constant_name} is not declared")
+
+
+def validate_constant_sources(sources: dict[str, str]) -> list[str]:
+    """Returns deterministic alignment errors for the preview constant mirrors."""
+    errors: list[str] = []
+    for ts_name, rust_name, ts_path, rust_path in CONSTANT_ALIGNMENTS:
+        try:
+            ts_value = ts_constant_value(sources[ts_path], ts_name)
+            rust_value = rust_constant_value(sources[rust_path], rust_name)
+        except ValueError as error:
+            errors.append(f"preview alignment is invalid: {error}")
+            continue
+        if ts_value != rust_value:
+            errors.append(
+                f"{ts_name} ({ts_value}) does not match {rust_name} ({rust_value})"
+            )
+    return errors
+
+
 def validate_workspace(root: Path) -> list[str]:
     """Returns errors for the checked-in preview, Rust, and wire sources."""
     try:
@@ -364,10 +478,16 @@ def validate_workspace(root: Path) -> list[str]:
             encoding="utf-8"
         )
         proto_source = (root / PROTO_PATH).read_text(encoding="utf-8")
+        constant_sources = {
+            path: (root / path).read_text(encoding="utf-8")
+            for path in (BRIDGE_PATH, EXPORT_RUST_PATH, DIAGNOSTIC_ACTION_RUST_PATH)
+        }
     except OSError as error:
         return [f"unable to read preview alignment sources: {error}"]
-    return validate_sources(rust_source, ts_source) + validate_reply_sources(
-        rust_source, ts_source, proto_source
+    return (
+        validate_sources(rust_source, ts_source)
+        + validate_reply_sources(rust_source, ts_source, proto_source)
+        + validate_constant_sources(constant_sources)
     )
 
 
@@ -752,6 +872,80 @@ enum ErrorCode {
             [
                 "preview alignment is invalid: "
                 "TypeScript union type ControlErrorCode is not declared"
+            ],
+        )
+
+
+    TS_BRIDGE = """
+/** Fixed preview bundle size mirroring the Rust MAX_EXPORT_BYTES (16 KiB). */
+const PREVIEW_EXPORT_BYTES = 16 * 1024
+
+/** Fixed preview retention bound mirroring the Rust DEFAULT_MAX_RETAINED_EXPORTS. */
+const MAX_PREVIEW_DIAGNOSTIC_EXPORTS = 8
+"""
+
+    RUST_EXPORT = """
+pub const EXPORT_FORMAT_VERSION: u32 = 1;
+
+/// Fixed upper bound for one serialized diagnostic bundle in bytes.
+pub const MAX_EXPORT_BYTES: usize = 16 * 1024;
+"""
+
+    RUST_ACTION = """
+/// Default hard bound on retained export records.
+pub const DEFAULT_MAX_RETAINED_EXPORTS: usize = 8;
+/// Default hard bound on total retained export bytes (eight maximum bundles).
+pub const DEFAULT_MAX_RETAINED_EXPORT_BYTES: usize = 8 * MAX_EXPORT_BYTES;
+"""
+
+    def constant_sources(self) -> dict[str, str]:
+        return {
+            BRIDGE_PATH: self.TS_BRIDGE,
+            EXPORT_RUST_PATH: self.RUST_EXPORT,
+            DIAGNOSTIC_ACTION_RUST_PATH: self.RUST_ACTION,
+        }
+
+    def test_matching_constant_mirrors_are_valid(self) -> None:
+        self.assertEqual(validate_constant_sources(self.constant_sources()), [])
+
+    def test_reports_constant_value_drift(self) -> None:
+        ts = self.TS_BRIDGE.replace("16 * 1024", "17 * 1024")
+        self.assertEqual(
+            validate_constant_sources({**self.constant_sources(), BRIDGE_PATH: ts}),
+            ["PREVIEW_EXPORT_BYTES (17408) does not match MAX_EXPORT_BYTES (16384)"],
+        )
+
+        action = self.RUST_ACTION.replace("= 8;", "= 9;")
+        self.assertEqual(
+            validate_constant_sources(
+                {**self.constant_sources(), DIAGNOSTIC_ACTION_RUST_PATH: action}
+            ),
+            [
+                "MAX_PREVIEW_DIAGNOSTIC_EXPORTS (8) "
+                "does not match DEFAULT_MAX_RETAINED_EXPORTS (9)"
+            ],
+        )
+
+    def test_reports_missing_constant_declarations(self) -> None:
+        ts = self.TS_BRIDGE.replace("const PREVIEW_EXPORT_BYTES = 16 * 1024\n", "")
+        self.assertEqual(
+            validate_constant_sources({**self.constant_sources(), BRIDGE_PATH: ts}),
+            [
+                "preview alignment is invalid: "
+                "TypeScript constant PREVIEW_EXPORT_BYTES is not declared"
+            ],
+        )
+
+        action = self.RUST_ACTION.replace(
+            "pub const DEFAULT_MAX_RETAINED_EXPORTS: usize = 8;\n", ""
+        )
+        self.assertEqual(
+            validate_constant_sources(
+                {**self.constant_sources(), DIAGNOSTIC_ACTION_RUST_PATH: action}
+            ),
+            [
+                "preview alignment is invalid: "
+                "Rust constant DEFAULT_MAX_RETAINED_EXPORTS is not declared"
             ],
         )
 
