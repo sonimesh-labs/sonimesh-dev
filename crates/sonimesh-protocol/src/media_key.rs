@@ -343,4 +343,29 @@ mod tests {
             ]
         );
     }
+
+    #[test]
+    fn matches_published_reverse_media_key_vector() {
+        let secret = SessionSecret::new([4; 32]);
+        let context = context(MediaDirection::DesktopToAndroid);
+        assert_eq!(
+            derive_media_key(&secret, context).unwrap(),
+            [
+                0x3E, 0xC3, 0x55, 0xC7, 0xCD, 0xCE, 0x6A, 0x0A, 0xA0, 0xA4, 0x39, 0xFF, 0xCD, 0x53,
+                0xA3, 0xE2, 0x7A, 0x2A, 0x6A, 0x1C, 0xA0, 0xDF, 0xBC, 0x58, 0x32, 0x22, 0x3A, 0xAE,
+                0xB0, 0x94, 0x85, 0x2C,
+            ]
+        );
+    }
+
+    #[test]
+    fn matches_published_reverse_media_nonce_vector() {
+        let context = context(MediaDirection::DesktopToAndroid);
+        assert_eq!(
+            media_nonce(context, 1),
+            [
+                0x00, 0x03, 0x01, 0x00, 0x00, 0x00, 0x00, 0x09, 0x00, 0x00, 0x00, 0x01
+            ]
+        );
+    }
 }

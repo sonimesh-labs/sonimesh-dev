@@ -3,28 +3,35 @@
 
 `derive_media_key` and `media_nonce` (crates/sonimesh-protocol/src/media_key.rs)
 define the media-plane key and AEAD nonce boundary. The in-crate tests
-`matches_published_media_key_derivation_vector` and
-`matches_published_media_nonce_vector` pin the golden bytes. This script
-reimplements the HKDF-SHA256 derivation and the 96-bit nonce layout from the
-documented labels and constants in pure standard-library Python and verifies
-the same published vectors, so a label, salt, or byte-order change is caught by
-an independent implementation (roadmap Phase 0D: cross-language crypto and
-packet test vectors; testing doc: published vectors for media key derivation
-and nonce construction).
+`matches_published_media_key_derivation_vector`,
+`matches_published_media_nonce_vector`, and their reverse-direction
+counterparts (`matches_published_reverse_media_key_vector`,
+`matches_published_reverse_media_nonce_vector`) pin the golden bytes for both
+media directions. This script reimplements the HKDF-SHA256 derivation and the
+96-bit nonce layout from the documented labels and constants in pure
+standard-library Python, verifies the same published vectors, and parses the
+Rust unit-test pins so the two implementations cannot drift apart (roadmap
+Phase 0D: cross-language crypto and packet test vectors; testing doc:
+published vectors for media key derivation and nonce construction).
 """
 
 from __future__ import annotations
 
 import hashlib
 import hmac
+import re
 import sys
 import unittest
+from pathlib import Path
 
 ROOT_SALT = b"sonimesh media root v1"
 STREAM_KEY_LABEL = b"sonimesh media stream key v1"
 MEDIA_VERSION = 1
 ANDROID_TO_DESKTOP_DIRECTION = 0
 DESKTOP_TO_ANDROID_DIRECTION = 1
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+RUST_TEST_PATH = REPO_ROOT / "crates" / "sonimesh-protocol" / "src" / "media_key.rs"
 
 
 def hkdf_extract(salt: bytes, ikm: bytes) -> bytes:
@@ -81,6 +88,10 @@ def published_vectors() -> dict[str, bytes]:
             "0B821644F0598E95080E4959E276FFCD5ECFFF53775BCFC804CC17B23344D546"
         ),
         "media_nonce": bytes.fromhex("000300000000000900000001"),
+        "media_key_reverse": bytes.fromhex(
+            "3EC355C7CDCE6A0AA0A439FFCD53A3E27A2A6A1CA0DFBC5832223AAEB094852C"
+        ),
+        "media_nonce_reverse": bytes.fromhex("000301000000000900000001"),
     }
 
 
@@ -90,7 +101,30 @@ def recomputed_vectors() -> dict[str, bytes]:
     return {
         "media_key": derive_media_key(secret, 7, 9, 3, ANDROID_TO_DESKTOP_DIRECTION),
         "media_nonce": media_nonce(9, 3, ANDROID_TO_DESKTOP_DIRECTION, 1),
+        "media_key_reverse": derive_media_key(secret, 7, 9, 3, DESKTOP_TO_ANDROID_DIRECTION),
+        "media_nonce_reverse": media_nonce(9, 3, DESKTOP_TO_ANDROID_DIRECTION, 1),
     }
+
+
+def rust_vector_pins(source: str) -> dict[str, bytes]:
+    """Extracts the golden byte arrays pinned by each Rust media-key test."""
+    pins: dict[str, bytes] = {}
+    for test_name, name in (
+        ("matches_published_media_key_derivation_vector", "media_key"),
+        ("matches_published_media_nonce_vector", "media_nonce"),
+        ("matches_published_reverse_media_key_vector", "media_key_reverse"),
+        ("matches_published_reverse_media_nonce_vector", "media_nonce_reverse"),
+    ):
+        function_start = source.index(f"fn {test_name}(")
+        # Anchor at assert_eq! so SessionSecret::new([4; 32]) or similar
+        # helper arrays are never mistaken for the golden pin.
+        assert_start = source.index("assert_eq!(", function_start)
+        bracket_start = source.index("[", assert_start)
+        bracket_end = source.index("]", bracket_start)
+        body = re.sub(r"//[^\r\n]*", "", source[bracket_start + 1 : bracket_end])
+        hex_tokens = re.findall(r"0x([0-9a-fA-F]{2})", body)
+        pins[name] = bytes(int(token, 16) for token in hex_tokens)
+    return pins
 
 
 def validate_vectors() -> list[str]:
@@ -104,6 +138,18 @@ def validate_vectors() -> list[str]:
                 f"media {name} does not match the published vector: "
                 f"recomputed {recomputed[name].hex().upper()} "
                 f"published {expected.hex().upper()}"
+            )
+    rust_source = RUST_TEST_PATH.read_text(encoding="utf-8")
+    rust_pins = rust_vector_pins(rust_source)
+    for name, expected in published.items():
+        rust_pin = rust_pins.get(name)
+        if rust_pin is None:
+            errors.append(f"media {name}: Rust unit-test pin not found")
+        elif rust_pin != expected:
+            errors.append(
+                f"media {name} differs from the Rust pin: "
+                f"python {expected.hex().upper()} "
+                f"rust {rust_pin.hex().upper()}"
             )
     return errors
 
@@ -152,6 +198,19 @@ class MediaKeyVectorTests(unittest.TestCase):
         self.assertEqual(forward[0:2], reverse[0:2])
         self.assertEqual(forward[4:12], reverse[4:12])
         self.assertEqual(reverse[2], DESKTOP_TO_ANDROID_DIRECTION)
+
+    def test_rust_parser_extracts_all_pinned_vectors(self) -> None:
+        source = RUST_TEST_PATH.read_text(encoding="utf-8")
+        pins = rust_vector_pins(source)
+        self.assertEqual(set(pins), set(published_vectors()))
+        for name, expected in published_vectors().items():
+            self.assertEqual(pins[name], expected, name)
+
+    def test_rust_parser_detects_a_tampered_pin(self) -> None:
+        source = RUST_TEST_PATH.read_text(encoding="utf-8")
+        tampered = source.replace("0x3E, 0xC3, 0x55, 0xC7", "0x3E, 0xC3, 0x55, 0xC8", 1)
+        pins = rust_vector_pins(tampered)
+        self.assertNotEqual(pins["media_key_reverse"], published_vectors()["media_key_reverse"])
 
 
 if __name__ == "__main__":
