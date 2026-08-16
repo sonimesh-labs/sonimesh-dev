@@ -85,6 +85,10 @@ Cover at least:
 - channel mapping, gain ramps, fades, clipping protection, and limiter behavior
   (exact-ceiling peak limiter with sample-instant attack, smooth release, and
   linked interleaved frames);
+- nominal sample-rate conversion: equal-rate passthrough, upsampling/downsampling
+  positions, drift bounds, the windowed-sinc start-up transient, and permanent
+  SNR/passband regressions (997 Hz SNR above 100 dB for 48↔44.1 kHz conversion,
+  passband gain within 0.1 dB, and out-of-band tone attenuation below −20 dB);
 - capacity-clamped PCM queue occupancy, bounded callback refill exhaustion,
   coherent level/high-water snapshots, and saturating cumulative diagnostics
   counters under concurrent publication;
@@ -112,7 +116,8 @@ The pairing target exercises both local roles, rejects reflected and altered
 proofs, and checks arbitrary proof input against the exact opposite-role proof.
 The realtime audio targets feed adversarial rate metadata, sample payloads,
 occupancy snapshots, arrival ticks, and membership scripts into the bounded
-nominal resampler, peak limiter, channel mapper, drift controller, fixed-slot
+windowed-sinc nominal resampler, peak limiter, channel mapper, drift
+controller, fixed-slot
 mixer, arrival-jitter estimator, adaptive target controller, and per-stream
 decode worker, and the realtime PCM render source, asserting the fixed
 capacity, consumed/produced, gain, and initialized-output guarantees hold

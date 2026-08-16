@@ -506,10 +506,13 @@ Android and the output device have independent clocks. Drift compensation must
 use a slow occupancy/error controller, bounded ratio changes, anti-windup, and a
 hard resynchronization policy when occupancy leaves the safe region.
 
-A bounded linear nominal-rate adapter now covers the feasibility path for rate
-mismatches such as 48 kHz to 44.1 kHz. It is not automatically a high-quality
-general converter or a drift controller; nominal conversion and small-ratio
-clock correction remain separate stages until measurement selects their filters.
+A bounded windowed-sinc (polyphase) nominal-rate adapter now covers the
+feasibility path for rate mismatches such as 48 kHz to 44.1 kHz. It carries
+strong software quality evidence (SNR and passband-flatness regressions in
+`sonimesh-audio`), but it is not automatically a hardware-qualified general
+converter or a drift controller; nominal conversion and small-ratio clock
+correction remain separate stages until hardware measurement selects their
+filters.
 
 ## 12. Mixing and DSP
 
