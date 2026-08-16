@@ -174,12 +174,14 @@ five control payloads),
 `check_media_header_vectors.py` (the fixed 36-byte media header), and
 `check_media_crypto_vectors.py` (RFC 8439 ChaCha20-Poly1305 AEAD packet
 sealing for the three published vectors: derived media key, nonce,
-authenticated header, ciphertext, and tag). The pairing, control-frame, and
-media-crypto verifiers also re-read the values pinned in the vector docs and
-the Rust pins (`src/pairing_binding.rs`, `tests/control_frame.rs`, and
-`tests/media_crypto.rs`); the media-key and media-header verifiers re-read the
-Rust pins in `src/media_key.rs` and `tests/media_header_vector.rs`; all six
-verifiers additionally re-read their Kotlin counterparts:
+authenticated header, ciphertext, and tag). The pairing, control-frame,
+media-crypto, and negotiation verifiers also re-read the values pinned in the
+vector docs and the Rust pins (`src/pairing_binding.rs`,
+`tests/control_frame.rs`, `tests/media_crypto.rs`, and, for negotiation,
+`src/control.rs`, `src/negotiation.rs`, and `tests/negotiation.rs`); the
+media-key and media-header verifiers re-read the Rust pins in
+`src/media_key.rs` and `tests/media_header_vector.rs`; all six verifiers
+additionally re-read their Kotlin counterparts:
 `PairingTlsBindingVectorTest`, `ControlFrameVectorTest`, `MediaCryptoVectorTest`,
 `MediaHeaderVectorTest`, `MediaKeyVectorTest`, and, for negotiation, the
 `HelloNegotiation` mirror with `HelloNegotiationVectorTest`. Each pinned value
