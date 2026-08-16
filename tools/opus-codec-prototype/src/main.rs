@@ -14,9 +14,11 @@
 //! throughput for both shapes, compares steady-state and loss-window
 //! quality across two deterministic content profiles (a single tone and a
 //! multi-harmonic sum), compares in-band FEC recovery against PLC for a
-//! dropped 20 ms frame across speech-like and tone content, and sweeps
-//! bounded deterministic malformed payloads that must surface as
-//! stream-local errors or bounded decodes. It is not a quality, power,
+//! dropped 20 ms frame across speech-like and tone content, sweeps the FEC
+//! loss rate across the speech-like profile, measures the wall-clock cost of
+//! enabling in-band FEC, and sweeps bounded deterministic malformed payloads
+//! that must surface as stream-local errors or bounded decodes. It is not a
+//! quality, power,
 //! latency, Android ABI, or coverage-guided fuzz result.
 
 use sonimesh_audio::{
@@ -106,6 +108,12 @@ const FEC_PACKET_LOSS_PERCENT: i32 = 10;
 const FEC_SPEECH_GAIN_MIN_DB: f32 = 4.0;
 /// Non-speech FEC recovery must not fall more than this many decibels below PLC.
 const FEC_NON_SPEECH_TOLERANCE_DB: f32 = 2.0;
+/// Speech-like loss rates swept by the in-band FEC recovery probe.
+const FEC_LOSS_PERCENTS: [i32; 2] = [5, 20];
+/// Deterministic drop stride that exercises FEC recovery in the FEC CPU pass.
+const FEC_CPU_DROP_EVERY: usize = 10;
+/// Low bitrate swept by the FEC CPU pass to record mode-dependent overhead.
+const FEC_CPU_LOW_BITRATE_BPS: i32 = 24_000;
 /// Glottal pulse rate of the speech-like content profile in hertz.
 const SPEECH_F0_HZ: u32 = 120;
 /// Glottal pulse period in samples at `SPEECH_F0_HZ` and `SAMPLE_RATE_HZ`.
@@ -1778,7 +1786,9 @@ impl FecContent {
 /// encodes `FEC_SOURCE_FRAMES` frames with in-band FEC enabled, drops one
 /// deterministic frame, and compares the aligned SNR of that frame recovered
 /// through in-band FEC against the same frame concealed by decoder-side PLC.
-/// This is codec-level evidence, not a `FrameDecoder`-boundary result.
+/// The speech-like profile additionally sweeps `FEC_LOSS_PERCENTS` so the
+/// recovery benefit is recorded across announced loss rates. This is
+/// codec-level evidence, not a `FrameDecoder`-boundary result.
 fn run_fec_probe() -> ProbeResult<Vec<String>> {
     let frame =
         OpusFrameConfig::new(SAMPLE_RATE_HZ, 2, FEC_FRAME_MS).map_err(|error| error.to_string())?;
@@ -1787,21 +1797,8 @@ fn run_fec_probe() -> ProbeResult<Vec<String>> {
     let mut lines = Vec::new();
     for content in [FecContent::Speech, FecContent::Tone] {
         let source = content.content(source_samples);
-        let mut encoder = opus::Encoder::new(
-            SAMPLE_RATE_HZ,
-            opus::Channels::Stereo,
-            opus::Application::Audio,
-        )
-        .map_err(|error| error.to_string())?;
-        encoder
-            .set_inband_fec(true)
-            .map_err(|error| error.to_string())?;
-        encoder
-            .set_packet_loss_perc(FEC_PACKET_LOSS_PERCENT)
-            .map_err(|error| error.to_string())?;
-        let (packets, encoded_lens) = encode_fec_frames(&mut encoder, frame, &source)?;
         let (fec_snr, plc_snr, avg_bytes) =
-            measure_fec_recovery(&packets, &encoded_lens, frame, &source)?;
+            measure_fec_case(frame, &source, FEC_PACKET_LOSS_PERCENT)?;
         let gain = fec_snr - plc_snr;
         match content {
             FecContent::Speech if gain < FEC_SPEECH_GAIN_MIN_DB => {
@@ -1822,7 +1819,53 @@ fn run_fec_probe() -> ProbeResult<Vec<String>> {
             label = content.label(),
         ));
     }
+
+    // Sweep the configured loss rate on the speech-like profile while the same
+    // single frame is dropped, so the sweep isolates how LBRR coding reacts to
+    // the announced loss rate rather than to the actual drop.
+    let speech = speech_like(source_samples);
+    for loss_percent in FEC_LOSS_PERCENTS {
+        let (fec_snr, plc_snr, avg_bytes) = measure_fec_case(frame, &speech, loss_percent)?;
+        let gain = fec_snr - plc_snr;
+        if gain < 0.0 {
+            return Err(format!(
+                "speech FEC gain {gain:.1} dB is negative at {loss_percent}% loss"
+            ));
+        }
+        lines.push(format!(
+            "opus_20ms_fec_loss: speech loss {loss_percent}% fec {fec_snr:.1} dB plc {plc_snr:.1} dB gain {gain:+.1} dB (drop {FEC_DROP_FRAME} avg {avg_bytes:.0} B)"
+        ));
+    }
     Ok(lines)
+}
+
+/// Encodes one content block with in-band FEC enabled at `loss_percent` and
+/// measures recovery of the dropped frame through FEC and through PLC.
+fn measure_fec_case(
+    frame: OpusFrameConfig,
+    source: &[f32],
+    loss_percent: i32,
+) -> ProbeResult<(f32, f32, f64)> {
+    let mut encoder = opus::Encoder::new(
+        SAMPLE_RATE_HZ,
+        opus::Channels::Stereo,
+        opus::Application::Audio,
+    )
+    .map_err(|error| error.to_string())?;
+    encoder
+        .set_inband_fec(true)
+        .map_err(|error| error.to_string())?;
+    encoder
+        .set_packet_loss_perc(loss_percent)
+        .map_err(|error| error.to_string())?;
+    let (packets, encoded_lens) = encode_fec_frames(&mut encoder, frame, source)?;
+    measure_fec_recovery(&packets, &encoded_lens, frame, source)
+}
+
+/// Returns whether packet `k` is treated as lost under the drop stride.
+#[must_use]
+fn is_dropped(k: usize, drop_every: Option<usize>) -> bool {
+    drop_every.is_some_and(|stride| k % stride == 0)
 }
 
 /// Encodes `FEC_SOURCE_FRAMES` frames of `source` with in-band FEC enabled.
@@ -1945,6 +1988,165 @@ fn measure_fec_recovery(
     let total_bytes = encoded_lens.iter().copied().sum::<usize>();
     let avg_bytes = total_bytes as f64 / encoded_lens.len() as f64;
     Ok((fec_snr, plc_snr, avg_bytes))
+}
+
+/// Times one encode+decode pass over `frames` speech-like frames and returns
+/// the total wall time in microseconds.
+///
+/// When `encoder_fec` is set the encoder enables in-band FEC at
+/// `loss_percent`, so LBRR is coded into every packet. When `bitrate` is set
+/// the encoder targets that bitrate, so the pass records mode-dependent FEC
+/// overhead. When `drop_every` is set, every `drop_every`-th packet is
+/// treated as lost and the following packet decodes it with `fec = true`,
+/// exercising the FEC recovery path. The pass uses the same direct `opus`
+/// calls for every scenario so the three FEC CPU measurements share one code
+/// path.
+fn timed_fec_pass(
+    frame: OpusFrameConfig,
+    source: &[f32],
+    frames: usize,
+    encoder_fec: bool,
+    loss_percent: i32,
+    bitrate: Option<i32>,
+    drop_every: Option<usize>,
+) -> ProbeResult<f64> {
+    let expected_samples = frame.interleaved_samples();
+    let per_channel_samples = frame.samples_per_channel();
+    let mut encoder = opus::Encoder::new(
+        SAMPLE_RATE_HZ,
+        opus::Channels::Stereo,
+        opus::Application::Audio,
+    )
+    .map_err(|error| error.to_string())?;
+    if let Some(bitrate) = bitrate {
+        encoder
+            .set_bitrate(opus::Bitrate::Bits(bitrate))
+            .map_err(|error| error.to_string())?;
+    }
+    if encoder_fec {
+        encoder
+            .set_inband_fec(true)
+            .map_err(|error| error.to_string())?;
+        encoder
+            .set_packet_loss_perc(loss_percent)
+            .map_err(|error| error.to_string())?;
+    }
+    let mut decoder = opus::Decoder::new(SAMPLE_RATE_HZ, opus::Channels::Stereo)
+        .map_err(|error| error.to_string())?;
+    let mut packets = vec![[0_u8; MAX_ENCODED_BYTES]; frames];
+    let mut encoded_lens = vec![0_usize; frames];
+    let mut block = [0.0_f32; MAX_PCM_SAMPLES_PER_BLOCK];
+    let start = Instant::now();
+    let mut prev_lost = false;
+    for k in 0..frames {
+        let source_start = k * expected_samples;
+        encoded_lens[k] = encode_frame(
+            &mut encoder,
+            &source[source_start..source_start + expected_samples],
+            &mut packets[k],
+        )?;
+        if k >= 1 {
+            let (payload, fec) = if prev_lost {
+                (&packets[k][..encoded_lens[k]], true)
+            } else {
+                (&packets[k - 1][..encoded_lens[k - 1]], false)
+            };
+            let samples = decoder
+                .decode_float(payload, &mut block, fec)
+                .map_err(|error| error.to_string())?;
+            if samples != per_channel_samples {
+                return Err(format!(
+                    "FEC CPU decode produced {samples} samples, expected {per_channel_samples}"
+                ));
+            }
+        }
+        prev_lost = is_dropped(k, drop_every);
+    }
+    Ok(start.elapsed().as_secs_f64() * 1.0e6)
+}
+
+/// Measures the wall-clock cost of enabling in-band FEC and returns one line
+/// per swept bitrate.
+///
+/// At each bitrate three scenarios share the direct codec-level pass over
+/// `CPU_PROBE_FRAMES` speech-like frames at the 20 ms shape: no FEC, FEC with
+/// no actual loss (LBRR coded but unused), and FEC with every
+/// `FEC_CPU_DROP_EVERY`-th packet recovered by FEC. Each pass is repeated
+/// `CPU_PROBE_REPEATS` times and the minimum wall time is reported. The auto
+/// bitrate shows the mode-switch cost of forcing hybrid coding; the
+/// `FEC_CPU_LOW_BITRATE_BPS` case shows the smaller SILK-mode cost. This is a
+/// wall-clock estimate, not a measured CPU-time trace, and is not comparable
+/// to the worker-path `run_cpu_probe` numbers.
+#[allow(clippy::cast_precision_loss)]
+fn run_fec_cpu_probe() -> ProbeResult<Vec<String>> {
+    let frame =
+        OpusFrameConfig::new(SAMPLE_RATE_HZ, 2, FEC_FRAME_MS).map_err(|error| error.to_string())?;
+    let expected_samples = frame.interleaved_samples();
+    let source = speech_like(CPU_PROBE_FRAMES * expected_samples);
+    let mut lines = Vec::new();
+    for (bitrate, label) in [(None, "auto"), (Some(FEC_CPU_LOW_BITRATE_BPS), "24k")] {
+        timed_fec_pass(frame, &source, CPU_WARMUP_FRAMES, false, 0, bitrate, None)?;
+        timed_fec_pass(
+            frame,
+            &source,
+            CPU_WARMUP_FRAMES,
+            true,
+            FEC_PACKET_LOSS_PERCENT,
+            bitrate,
+            None,
+        )?;
+        timed_fec_pass(
+            frame,
+            &source,
+            CPU_WARMUP_FRAMES,
+            true,
+            FEC_PACKET_LOSS_PERCENT,
+            bitrate,
+            Some(FEC_CPU_DROP_EVERY),
+        )?;
+
+        let mut baseline_us = f64::INFINITY;
+        let mut fec_no_loss_us = f64::INFINITY;
+        let mut fec_loss_us = f64::INFINITY;
+        for _ in 0..CPU_PROBE_REPEATS {
+            baseline_us = baseline_us.min(timed_fec_pass(
+                frame,
+                &source,
+                CPU_PROBE_FRAMES,
+                false,
+                0,
+                bitrate,
+                None,
+            )?);
+            fec_no_loss_us = fec_no_loss_us.min(timed_fec_pass(
+                frame,
+                &source,
+                CPU_PROBE_FRAMES,
+                true,
+                FEC_PACKET_LOSS_PERCENT,
+                bitrate,
+                None,
+            )?);
+            fec_loss_us = fec_loss_us.min(timed_fec_pass(
+                frame,
+                &source,
+                CPU_PROBE_FRAMES,
+                true,
+                FEC_PACKET_LOSS_PERCENT,
+                bitrate,
+                Some(FEC_CPU_DROP_EVERY),
+            )?);
+        }
+
+        let baseline_per_frame = baseline_us / CPU_PROBE_FRAMES as f64;
+        let fec_no_loss_overhead = (fec_no_loss_us - baseline_us) / baseline_us * 100.0;
+        let fec_loss_overhead = (fec_loss_us - baseline_us) / baseline_us * 100.0;
+        lines.push(format!(
+            "opus_20ms_fec_cpu: {label} no-fec {baseline_per_frame:.1} us/frame; fec no-loss \
+             {fec_no_loss_overhead:+.1}%; fec loss {fec_loss_overhead:+.1}% (speech, min of {CPU_PROBE_REPEATS})",
+        ));
+    }
+    Ok(lines)
 }
 
 /// Returns the signal-to-noise ratio in decibels between `reference` and
@@ -2075,7 +2277,9 @@ fn run_probe() -> ProbeResult<Vec<String>> {
 
     // In-band FEC recovery is probed once at the 20 ms shape; libopus codes
     // LBRR only when a packet carries more than one frame, so 10 ms cannot.
+    // The loss sweep and the FEC CPU pass share that shape.
     lines.extend(run_fec_probe()?);
+    lines.extend(run_fec_cpu_probe()?);
 
     // A malformed authenticated payload surfaces as a bounded stream-local
     // decoder error and never reaches the PCM queue.
@@ -2263,7 +2467,8 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::{
-        TONE_AMPLITUDE, best_aligned_snr, block_rms, snr_db, speech_like, sustained_summary,
+        TONE_AMPLITUDE, best_aligned_snr, block_rms, is_dropped, snr_db, speech_like,
+        sustained_summary,
     };
 
     #[test]
@@ -2369,5 +2574,15 @@ mod tests {
         assert!((peak - TONE_AMPLITUDE).abs() < 1.0e-3);
         let rms = block_rms(&block);
         assert!(rms > 0.0 && rms < TONE_AMPLITUDE);
+    }
+
+    #[test]
+    fn fec_drop_predicate_is_deterministic() {
+        assert!(!is_dropped(0, None));
+        assert!(!is_dropped(9, None));
+        assert!(is_dropped(0, Some(10)));
+        assert!(!is_dropped(9, Some(10)));
+        assert!(is_dropped(10, Some(10)));
+        assert!(!is_dropped(19, Some(10)));
     }
 }
