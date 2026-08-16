@@ -249,6 +249,12 @@ class ControlFrameVectorTest {
         }
     }
 
+    @Test
+    fun pinsTheControlFrameBounds() {
+        assertEquals(4, FRAME_PREFIX_BYTES)
+        assertEquals(64 * 1024, MAX_CONTROL_FRAME_BYTES)
+    }
+
     private companion object {
         private fun hex(value: String): ByteArray {
             require(value.length % 2 == 0)

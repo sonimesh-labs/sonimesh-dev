@@ -11,6 +11,8 @@ use crate::{
 pub const CONTROL_PROTOCOL_VERSION: u32 = 1;
 /// Largest length-prefixed Protobuf control payload.
 pub const MAX_CONTROL_FRAME_BYTES: usize = 64 * 1024;
+/// Four-byte big-endian length prefix before every version-one control payload.
+pub const FRAME_PREFIX_BYTES: usize = 4;
 /// Maximum advertised capabilities in one hello message.
 pub const MAX_CONTROL_CAPABILITIES: usize = 16;
 /// Maximum advertised protocol versions in one hello message.
@@ -164,7 +166,7 @@ pub fn encode_control_frame(envelope: &Envelope) -> Result<Vec<u8>, ControlFrame
         return Err(ControlFrameError::FrameTooLarge);
     }
     let length = u32::try_from(payload_len).map_err(|_| ControlFrameError::FrameTooLarge)?;
-    let mut frame = Vec::with_capacity(4 + payload_len);
+    let mut frame = Vec::with_capacity(FRAME_PREFIX_BYTES + payload_len);
     frame.extend_from_slice(&length.to_be_bytes());
     envelope
         .encode(&mut frame)
@@ -179,10 +181,10 @@ pub fn encode_control_frame(envelope: &Envelope) -> Result<Vec<u8>, ControlFrame
 /// Returns [`ControlFrameError`] before Protobuf decode when framing is truncated,
 /// oversized, or inconsistent, and after decode for invalid envelope semantics.
 pub fn decode_control_frame(frame: &[u8]) -> Result<Envelope, ControlFrameError> {
-    if frame.len() < 4 {
+    if frame.len() < FRAME_PREFIX_BYTES {
         return Err(ControlFrameError::TruncatedLength);
     }
-    let length_bytes: [u8; 4] = frame[..4]
+    let length_bytes: [u8; FRAME_PREFIX_BYTES] = frame[..FRAME_PREFIX_BYTES]
         .try_into()
         .map_err(|_| ControlFrameError::TruncatedLength)?;
     let payload_len = usize::try_from(u32::from_be_bytes(length_bytes))
@@ -190,10 +192,11 @@ pub fn decode_control_frame(frame: &[u8]) -> Result<Envelope, ControlFrameError>
     if payload_len > MAX_CONTROL_FRAME_BYTES {
         return Err(ControlFrameError::FrameTooLarge);
     }
-    if frame.len().checked_sub(4) != Some(payload_len) {
+    if frame.len().checked_sub(FRAME_PREFIX_BYTES) != Some(payload_len) {
         return Err(ControlFrameError::LengthMismatch);
     }
-    let envelope = Envelope::decode(&frame[4..]).map_err(ControlFrameError::Decode)?;
+    let envelope =
+        Envelope::decode(&frame[FRAME_PREFIX_BYTES..]).map_err(ControlFrameError::Decode)?;
     validate_control_envelope(&envelope)?;
     Ok(envelope)
 }

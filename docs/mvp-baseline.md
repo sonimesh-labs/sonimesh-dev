@@ -254,6 +254,7 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
 | Media extended header | 128 bytes | Reject larger declared header |
 | Complete media datagram | 1,200 bytes | Reject before authentication/allocation |
 | Control Protobuf frame | 64 KiB | Reject before Protobuf decoding |
+| Control frame prefix | 4 bytes | Reject truncated length |
 | Control start stream | 8–192 kHz, 1–8 channels, 10/20 ms | Reject invalid command parameters |
 | Protected media plaintext | 1,148 bytes | Reserve 16 bytes for Poly1305 tag |
 | Encrypted payload with fixed header | 1,164 bytes | Extensions reduce this available payload |

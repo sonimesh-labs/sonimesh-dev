@@ -4,7 +4,8 @@
 The version-one protocol publishes hard numeric bounds: the fixed 36-byte media
 header, a 128-byte extended header ceiling, a 1,200-byte complete datagram
 limit, the derived 1,164-byte encrypted payload and 1,148-byte plaintext
-limits, the 16-byte Poly1305 tag, and the 64 KiB control frame bound. The Rust
+limits, the 16-byte Poly1305 tag, a 4-byte frame prefix, and the 64 KiB control frame
+bound. The Rust
 sources (crates/sonimesh-protocol/src/media_header.rs, media_crypto.rs,
 control.rs), the Android host-JVM mirrors (MediaHeader.kt, MediaCrypto.kt,
 ControlFrame.kt), and the `docs/mvp-baseline.md` capacities table all pin the
@@ -30,6 +31,7 @@ MAX_ENCRYPTED_PAYLOAD_LEN = 1_164
 POLY1305_TAG_BYTES = 16
 MAX_MEDIA_PLAINTEXT_LEN = 1_148
 MAX_CONTROL_FRAME_BYTES = 64 * 1024
+FRAME_PREFIX_BYTES = 4
 MEDIA_MAGIC = 0x534E_4D53
 MEDIA_VERSION = 1
 
@@ -67,6 +69,7 @@ CONTRACTS: dict[str, int] = {
     "POLY1305_TAG_BYTES": POLY1305_TAG_BYTES,
     "MAX_MEDIA_PLAINTEXT_LEN": MAX_MEDIA_PLAINTEXT_LEN,
     "MAX_CONTROL_FRAME_BYTES": MAX_CONTROL_FRAME_BYTES,
+    "FRAME_PREFIX_BYTES": FRAME_PREFIX_BYTES,
     "MEDIA_MAGIC": MEDIA_MAGIC,
     "MEDIA_VERSION": MEDIA_VERSION,
 }
@@ -82,7 +85,7 @@ MEDIA_HEADER_NAMES = (
     "MEDIA_VERSION",
 )
 MEDIA_CRYPTO_NAMES = ("POLY1305_TAG_BYTES", "MAX_MEDIA_PLAINTEXT_LEN")
-CONTROL_NAMES = ("MAX_CONTROL_FRAME_BYTES",)
+CONTROL_NAMES = ("FRAME_PREFIX_BYTES", "MAX_CONTROL_FRAME_BYTES")
 
 # (documented boundary, contract constant)
 DOC_BOUNDARIES: tuple[tuple[str, str], ...] = (
@@ -90,6 +93,7 @@ DOC_BOUNDARIES: tuple[tuple[str, str], ...] = (
     ("Media extended header", "MAX_HEADER_LEN"),
     ("Complete media datagram", "MAX_MEDIA_DATAGRAM_LEN"),
     ("Control Protobuf frame", "MAX_CONTROL_FRAME_BYTES"),
+    ("Control frame prefix", "FRAME_PREFIX_BYTES"),
     ("Protected media plaintext", "MAX_MEDIA_PLAINTEXT_LEN"),
     ("Encrypted payload with fixed header", "MAX_ENCRYPTED_PAYLOAD_LEN"),
 )
@@ -333,6 +337,8 @@ def validate_media_limits() -> list[str]:
         errors.append("plaintext limit is not the encrypted payload minus the tag")
     if MAX_CONTROL_FRAME_BYTES != 64 * 1024:
         errors.append("control frame bound is not 64 KiB")
+    if FRAME_PREFIX_BYTES != 4:
+        errors.append("control frame prefix is not 4 bytes")
 
     capacities = parse_doc_capacities(MVP_BASELINE_PATH.read_text(encoding="utf-8"))
     for boundary, name in DOC_BOUNDARIES:
@@ -438,13 +444,15 @@ class MediaLimitsTests(unittest.TestCase):
     def test_control_frame_bound_resolves_in_rust_and_kotlin(self) -> None:
         rust = resolve_constants(
             RUST_CONTROL_PATH.read_text(encoding="utf-8"),
-            ["MAX_CONTROL_FRAME_BYTES"],
+            ["FRAME_PREFIX_BYTES", "MAX_CONTROL_FRAME_BYTES"],
         )
         kotlin = resolve_constants(
             KOTLIN_CONTROL_PATH.read_text(encoding="utf-8"),
-            ["MAX_CONTROL_FRAME_BYTES"],
+            ["FRAME_PREFIX_BYTES", "MAX_CONTROL_FRAME_BYTES"],
         )
+        self.assertEqual(rust["FRAME_PREFIX_BYTES"], 4)
         self.assertEqual(rust["MAX_CONTROL_FRAME_BYTES"], 64 * 1024)
+        self.assertEqual(kotlin["FRAME_PREFIX_BYTES"], 4)
         self.assertEqual(kotlin["MAX_CONTROL_FRAME_BYTES"], 64 * 1024)
 
     def test_doc_parser_reads_all_capacity_rows(self) -> None:

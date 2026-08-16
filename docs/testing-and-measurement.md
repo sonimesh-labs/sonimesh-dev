@@ -182,8 +182,8 @@ receiver-side authenticated `ReplayWindow` bitmap, then re-reads the Rust
 pins (`src/replay.rs`, `src/media_key.rs`, and the sealer-level exhaustion
 test in `src/media_crypto.rs`) and the Kotlin mirrors (`ReplayWindow.kt`,
 `MediaSequence.kt`) plus their vector tests. `check_media_limits.py`
-re-reads the fixed media-plane and control-frame numeric bounds (fixed
-header, extended-header ceiling, complete datagram, encrypted payload,
+re-reads the fixed media-plane and control-frame numeric bounds (4-byte frame
+prefix, fixed header, extended-header ceiling, complete datagram, encrypted payload,
 Poly1305 tag, plaintext, and 64 KiB control frame) from `src/media_header.rs`,
 `src/media_crypto.rs`, `src/control.rs`, the Kotlin mirrors (`MediaHeader.kt`,
 `MediaCrypto.kt`, `ControlFrame.kt`), and the `docs/mvp-baseline.md`

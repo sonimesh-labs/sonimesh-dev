@@ -77,8 +77,8 @@ Kotlin tests. The sequence/replay verifier reimplements the sender-side
 `MediaSequence` exhaustion guard and the receiver-side 64-packet `ReplayWindow`
 and cross-checks the Rust and Kotlin mirrors against the published boundary
 semantics. `check_media_limits.py` re-reads the fixed media-plane and
-control-frame numeric bounds (header, extended-header, datagram, tag, plaintext,
-and frame limits) from the Rust sources, the Kotlin mirrors, and the
+control-frame numeric bounds (frame prefix, header, extended-header, datagram, tag,
+plaintext, and frame limits) from the Rust sources, the Kotlin mirrors, and the
 `docs/mvp-baseline.md` capacities table, and recomputes the derived bounds.
 `check_ci_wiring.py` verifies
 that every `tools/` checker is wired into CI with its required
