@@ -182,11 +182,12 @@ vector docs and the Rust pins (`src/pairing_binding.rs`,
 media-key and media-header verifiers re-read the Rust pins in
 `src/media_key.rs` and `tests/media_header_vector.rs`; all six verifiers
 additionally re-read their Kotlin counterparts:
-`PairingTlsBindingVectorTest`, `ControlFrameVectorTest`, `MediaCryptoVectorTest`
-(sealed through the JVM `MediaCrypto` mirror), `MediaHeaderVectorTest` (whose
-header is encoded through the JVM `MediaHeader` mirror), `MediaKeyVectorTest`
-(derived through the JVM `MediaKey` mirror), and, for negotiation, the
-`HelloNegotiation` mirror with `HelloNegotiationVectorTest`.
+`PairingTlsBindingVectorTest` (derived through the JVM `PairingTlsBinding`
+mirror), `ControlFrameVectorTest`, `MediaCryptoVectorTest` (sealed through the
+JVM `MediaCrypto` mirror), `MediaHeaderVectorTest` (whose header is encoded
+through the JVM `MediaHeader` mirror), `MediaKeyVectorTest` (derived through
+the JVM `MediaKey` mirror), and, for negotiation, the `HelloNegotiation`
+mirror with `HelloNegotiationVectorTest`.
 Each pinned value
 must match the independent recomputation, so the documentation, the Rust and
 Kotlin pins, and the Python verifier cannot drift apart.
