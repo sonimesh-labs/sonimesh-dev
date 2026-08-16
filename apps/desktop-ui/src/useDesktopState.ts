@@ -1,4 +1,4 @@
-import { computed, onMounted, ref } from 'vue'
+import { onMounted, ref } from 'vue'
 
 import { desktopBridge } from './bridge'
 import type { DesktopSnapshot } from './types'
@@ -7,8 +7,6 @@ export function useDesktopState() {
   const snapshot = ref<DesktopSnapshot | null>(null)
   const busy = ref(false)
   const error = ref<string | null>(null)
-
-  const isStreaming = computed(() => snapshot.value?.session === 'streaming')
 
   async function run(command: () => Promise<DesktopSnapshot>) {
     if (busy.value) return
@@ -50,7 +48,6 @@ export function useDesktopState() {
     snapshot,
     busy,
     error,
-    isStreaming,
     refresh,
     start,
     stop,
