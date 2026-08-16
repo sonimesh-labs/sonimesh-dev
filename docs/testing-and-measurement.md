@@ -181,13 +181,19 @@ reimplements the sender-side `MediaSequence` exhaustion guard and the
 receiver-side authenticated `ReplayWindow` bitmap, then re-reads the Rust
 pins (`src/replay.rs`, `src/media_key.rs`, and the sealer-level exhaustion
 test in `src/media_crypto.rs`) and the Kotlin mirrors (`ReplayWindow.kt`,
-`MediaSequence.kt`) plus their vector tests. The pairing, control-frame,
+`MediaSequence.kt`) plus their vector tests. `check_media_limits.py`
+re-reads the fixed media-plane and control-frame numeric bounds (fixed
+header, extended-header ceiling, complete datagram, encrypted payload,
+Poly1305 tag, plaintext, and 64 KiB control frame) from `src/media_header.rs`,
+`src/media_crypto.rs`, `src/control.rs`, the Kotlin mirrors (`MediaHeader.kt`,
+`MediaCrypto.kt`, `ControlFrame.kt`), and the `docs/mvp-baseline.md`
+capacities table, and recomputes the derived bounds. The pairing, control-frame,
 media-crypto, and negotiation verifiers also re-read the values pinned in the
 vector docs and the Rust pins (`src/pairing_binding.rs`,
 `tests/control_frame.rs`, `tests/media_crypto.rs`, and, for negotiation,
 `src/control.rs`, `src/negotiation.rs`, and `tests/negotiation.rs`); the
 media-key and media-header verifiers re-read the Rust pins in
-`src/media_key.rs` and `tests/media_header_vector.rs`; all seven verifiers
+`src/media_key.rs` and `tests/media_header_vector.rs`; all eight verifiers
 additionally re-read their Kotlin counterparts:
 `PairingTlsBindingVectorTest` (derived through the JVM `PairingTlsBinding`
 mirror), `ControlFrameVectorTest` (encoded through the JVM `ControlFrame`
@@ -195,9 +201,11 @@ mirror), `MediaCryptoVectorTest` (sealed through the JVM `MediaCrypto`
 mirror), `MediaHeaderVectorTest` (whose header is encoded through the JVM
 `MediaHeader` mirror), `MediaKeyVectorTest` (derived through the JVM
 `MediaKey` mirror), for negotiation the `HelloNegotiation` mirror with
-`HelloNegotiationVectorTest`, and the `ReplayWindowVectorTest` and
+`HelloNegotiationVectorTest`, the `ReplayWindowVectorTest` and
 `MediaSequenceVectorTest` pins (exercised through the JVM `ReplayWindow`
-and `MediaSequence` mirrors).
+and `MediaSequence` mirrors), and the `MediaHeaderVectorTest` and
+`MediaCryptoVectorTest` bound pins (exercised through the JVM `MediaHeader`
+and `MediaCrypto` mirrors).
 Each pinned value
 must match the independent recomputation, so the documentation, the Rust and
 Kotlin pins, and the Python verifier cannot drift apart.

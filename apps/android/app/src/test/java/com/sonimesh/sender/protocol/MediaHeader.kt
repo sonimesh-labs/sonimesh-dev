@@ -6,6 +6,9 @@ import java.nio.ByteOrder
 /** Fixed portion of the version-one media header. */
 const val MEDIA_HEADER_LEN = 36
 
+/** Maximum declared header length, including any extended header bytes. */
+const val MAX_HEADER_LEN = 128
+
 /** Maximum complete media datagram to avoid relying on IP fragmentation. */
 const val MAX_MEDIA_DATAGRAM_LEN = 1_200
 

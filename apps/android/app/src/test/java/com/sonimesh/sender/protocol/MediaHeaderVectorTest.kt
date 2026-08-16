@@ -5,6 +5,7 @@ import java.nio.ByteOrder
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MediaHeaderVectorTest {
@@ -54,6 +55,18 @@ class MediaHeaderVectorTest {
         assertThrows(IllegalArgumentException::class.java) {
             header().encode(-1)
         }
+    }
+
+    @Test
+    fun pinsTheFixedMediaPlaneBounds() {
+        assertEquals(36, MEDIA_HEADER_LEN)
+        assertEquals(128, MAX_HEADER_LEN)
+        assertEquals(1_200, MAX_MEDIA_DATAGRAM_LEN)
+        assertEquals(
+            MAX_MEDIA_DATAGRAM_LEN - MEDIA_HEADER_LEN,
+            MAX_ENCRYPTED_PAYLOAD_LEN,
+        )
+        assertTrue(MAX_HEADER_LEN in MEDIA_HEADER_LEN..MAX_MEDIA_DATAGRAM_LEN)
     }
 
     private fun header() = MediaHeader(

@@ -1,12 +1,23 @@
 package com.sonimesh.sender.security
 
+import com.sonimesh.sender.protocol.MAX_ENCRYPTED_PAYLOAD_LEN
 import com.sonimesh.sender.protocol.MEDIA_HEADER_LEN
 import java.security.GeneralSecurityException
 import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class MediaCryptoVectorTest {
+    @Test
+    fun pinsTheFixedCryptoBounds() {
+        assertEquals(16, POLY1305_TAG_BYTES)
+        assertEquals(
+            MAX_ENCRYPTED_PAYLOAD_LEN - POLY1305_TAG_BYTES,
+            MAX_MEDIA_PLAINTEXT_LEN,
+        )
+    }
+
     @Test
     fun matches_published_media_datagram_vector() {
         val context = forwardContext()
