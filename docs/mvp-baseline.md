@@ -278,6 +278,7 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
 | Requested callback | default or 16–8192 frames | Fixed request may be unsupported |
 | Maximum callback | 16–8192 frames | Oversized callback emits silence and a fault |
 | Active source count | One for MVP | Separate ingress and buffers per future source |
+| Retained media identities per pairing | 16 entries | Fail closed when full; fresh pairing root required |
 
 Compile-time capacities make accidental unbounded growth impossible in these
 containers. Concrete frame count and block size must be selected by the frame,

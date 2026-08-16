@@ -10,10 +10,13 @@ detail bound, and the 16-bit media key epoch. The Rust
 sources (crates/sonimesh-protocol/src/media_header.rs, media_crypto.rs,
 control.rs), the Android host-JVM mirrors (MediaHeader.kt, MediaCrypto.kt,
 ControlFrame.kt), and the `docs/mvp-baseline.md` capacities table all pin the
-same contract. This script re-reads every pin with a tiny expression evaluator,
-recomputes the derived bounds, and reports any drift so a renumbering or bound
-change on either side fails the job (roadmap Phase 0D: cross-language crypto
-and packet test vectors; testing doc: packet header size limits).
+same contract. The app-domain allocator no-reuse record
+(crates/sonimesh-app/src/media_session_allocator.rs, ADR 0017) is pinned the
+same way as a 16-entry per-pairing bound. This script re-reads every pin with a
+tiny expression evaluator, recomputes the derived bounds, and reports any drift
+so a renumbering or bound change on either side fails the job (roadmap Phase 0D:
+cross-language crypto and packet test vectors; testing doc: packet header size
+limits).
 """
 
 from __future__ import annotations
@@ -38,6 +41,7 @@ MAX_CONTROL_SAMPLE_RATE_HZ = 192_000
 MAX_CONTROL_CHANNELS = 8
 MAX_CONTROL_DETAIL_BYTES = 512
 MAX_CONTROL_MEDIA_KEY_EPOCH = 65_535
+MAX_RETAINED_MEDIA_IDENTITIES = 16
 MEDIA_MAGIC = 0x534E_4D53
 MEDIA_VERSION = 1
 
@@ -49,6 +53,9 @@ RUST_MEDIA_CRYPTO_PATH = (
     REPO_ROOT / "crates" / "sonimesh-protocol" / "src" / "media_crypto.rs"
 )
 RUST_CONTROL_PATH = REPO_ROOT / "crates" / "sonimesh-protocol" / "src" / "control.rs"
+RUST_ALLOCATOR_PATH = (
+    REPO_ROOT / "crates" / "sonimesh-app" / "src" / "media_session_allocator.rs"
+)
 KOTLIN_DIR = (
     REPO_ROOT
     / "apps"
@@ -84,6 +91,7 @@ CONTRACTS: dict[str, int] = {
     "MAX_CONTROL_CHANNELS": MAX_CONTROL_CHANNELS,
     "MAX_CONTROL_DETAIL_BYTES": MAX_CONTROL_DETAIL_BYTES,
     "MAX_CONTROL_MEDIA_KEY_EPOCH": MAX_CONTROL_MEDIA_KEY_EPOCH,
+    "MAX_RETAINED_MEDIA_IDENTITIES": MAX_RETAINED_MEDIA_IDENTITIES,
     "MEDIA_MAGIC": MEDIA_MAGIC,
     "MEDIA_VERSION": MEDIA_VERSION,
 }
@@ -128,6 +136,7 @@ DOC_BOUNDARIES: tuple[tuple[str, str], ...] = (
     ("Control detail", "MAX_CONTROL_DETAIL_BYTES"),
     ("Protected media plaintext", "MAX_MEDIA_PLAINTEXT_LEN"),
     ("Encrypted payload with fixed header", "MAX_ENCRYPTED_PAYLOAD_LEN"),
+    ("Retained media identities per pairing", "MAX_RETAINED_MEDIA_IDENTITIES"),
 )
 
 RUST_CONST_PATTERN = re.compile(
@@ -143,7 +152,7 @@ KOTLIN_VAL_PATTERN = re.compile(
     re.MULTILINE,
 )
 DOC_CAPACITY_PATTERN = re.compile(
-    r"^\|\s*([A-Za-z][A-Za-z ]+?)\s*\|\s*([0-9][0-9,]*)\s*(bytes|KiB|packets)\s*\|",
+    r"^\|\s*([A-Za-z][A-Za-z ]+?)\s*\|\s*([0-9][0-9,]*)\s*(bytes|KiB|packets|entries)\s*\|",
     re.MULTILINE,
 )
 START_STREAM_PATTERN = re.compile(
@@ -365,6 +374,15 @@ def validate_media_limits() -> list[str]:
         )
     except ValueError as error:
         errors.append(f"Rust control.rs: {error}")
+    try:
+        rust_values.update(
+            resolve_constants(
+                RUST_ALLOCATOR_PATH.read_text(encoding="utf-8"),
+                ["MAX_RETAINED_MEDIA_IDENTITIES"],
+            )
+        )
+    except ValueError as error:
+        errors.append(f"Rust media_session_allocator.rs: {error}")
 
     kotlin_values: dict[str, int] = {}
     try:
@@ -629,6 +647,35 @@ class MediaLimitsTests(unittest.TestCase):
             )
             errors = validate_media_limits()
             self.assertTrue(any("Media fixed header" in error for error in errors))
+        finally:
+            MVP_BASELINE_PATH.write_text(original, encoding="utf-8", newline="\n")
+
+    def test_allocator_capacity_doc_row_parses(self) -> None:
+        capacities = parse_doc_capacities(MVP_BASELINE_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(capacities["Retained media identities per pairing"], 16)
+
+    def test_allocator_rust_pin_resolves(self) -> None:
+        resolved = resolve_constants(
+            RUST_ALLOCATOR_PATH.read_text(encoding="utf-8"),
+            ["MAX_RETAINED_MEDIA_IDENTITIES"],
+        )
+        self.assertEqual(resolved["MAX_RETAINED_MEDIA_IDENTITIES"], 16)
+
+    def test_validation_reports_a_tampered_allocator_capacity(self) -> None:
+        original = MVP_BASELINE_PATH.read_text(encoding="utf-8")
+        try:
+            MVP_BASELINE_PATH.write_text(
+                original.replace(
+                    "| Retained media identities per pairing | 16 entries |",
+                    "| Retained media identities per pairing | 32 entries |",
+                ),
+                encoding="utf-8",
+                newline="\n",
+            )
+            errors = validate_media_limits()
+            self.assertTrue(
+                any("Retained media identities" in error for error in errors)
+            )
         finally:
             MVP_BASELINE_PATH.write_text(original, encoding="utf-8", newline="\n")
 
