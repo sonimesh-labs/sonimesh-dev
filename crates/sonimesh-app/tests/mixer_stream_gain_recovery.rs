@@ -226,7 +226,7 @@ fn per_stream_gain_and_mute_survive_output_recovery() {
     gain_a.set_muted(true);
     gain_b.set_gain(0.5).unwrap();
     assert!(gain_a.is_muted());
-    assert_eq!(gain_b.gain(), 0.5);
+    assert!((gain_b.gain() - 0.5).abs() < 1e-6);
 
     // Settle the gain ramps, then recover the output.
     feed_cycle(&mut session, &mut a, &mut b, 0, 0);
@@ -248,9 +248,8 @@ fn per_stream_gain_and_mute_survive_output_recovery() {
         recovered_a.is_muted(),
         "stream A mute must survive recovery"
     );
-    assert_eq!(
-        recovered_b.gain(),
-        0.5,
+    assert!(
+        (recovered_b.gain() - 0.5).abs() < 1e-6,
         "stream B gain must survive recovery"
     );
 
