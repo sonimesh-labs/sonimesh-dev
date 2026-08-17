@@ -16,6 +16,7 @@ mod limiter;
 mod mixer_membership;
 mod opus_frame;
 mod pcm_ring;
+mod playout_scheduler;
 mod realtime_queue;
 mod resampler;
 
@@ -49,6 +50,10 @@ pub use opus_frame::{
     OpusFrameConfig, OpusFrameConfigError,
 };
 pub use pcm_ring::{PcmBlockRing, PcmPopOutcome, PcmPushOutcome};
+pub use playout_scheduler::{
+    MAX_GATE_TICKS, PlayoutDecision, PlayoutSchedulerConfigError, TargetGatedPlayout,
+    TargetGatedPlayoutConfig,
+};
 pub use realtime_queue::{
     MAX_PCM_QUEUE_BLOCKS, RealtimePcmConsumer, RealtimePcmPopOutcome, RealtimePcmProducer,
     RealtimePcmPushOutcome, RealtimeQueueConfigError, realtime_pcm_queue,
