@@ -209,8 +209,12 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   the controller moves the target water level within configured limits, an
   opt-in receiver-pipeline configuration supplies a monotonic arrival clock and
   feeds live authenticated packets, and the published water levels (one atomic
-  set), smoothed jitter, and step counts reach the diagnostic export. The
-  product playout scheduler that consumes the target remains Phase 2 work.
+  set), smoothed jitter, and step counts reach the diagnostic export. A
+  bounded target-gated playout decision primitive (`TargetGatedPlayout` in
+  `sonimesh-audio`) now implements the scheduler's per-tick decision and its
+  bounded gate/counter state, and both deterministic jitter-scheduler
+  scenarios drive every playout tick through it; the product output-callback
+  wiring that consumes the scheduler remains Phase 2 work.
 - an independent LibFuzzer workspace for bounded control decoding, media packet
   parsing, protected ingress, and the bounded diagnostic export journal. The
   ingress target covers arbitrary bytes, valid authenticated arbitrary

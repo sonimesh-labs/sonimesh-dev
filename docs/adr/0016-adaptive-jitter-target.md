@@ -118,7 +118,16 @@ configured run completes. A combined multi-stream scenario
 (`mixer_jitter_scheduler_scenario.rs`) now ties that target-gated scheduler
 to the fixed-slot mixer over one shared link and additionally publishes
 bounded per-source gain, mute, and quality evidence
-([ADR 0015](./0015-realtime-stream-membership.md)); the product playout
+([ADR 0015](./0015-realtime-stream-membership.md)). The bounded
+target-gated decision primitive now lives in `sonimesh-audio` as
+`TargetGatedPlayout`: it returns the per-tick `Play`/`Gate` decision, owns
+the bounded counters (consecutive-gated streak capped at the configured
+deadline, total gated ticks, and forced playouts), resets for a fresh
+stream epoch, and is covered by unit tests plus a deterministic seeded
+property walk (`tests/playout_scheduler_property.rs`). Both deterministic
+scheduler scenarios (`jitter_scheduler_scenario.rs` and
+`mixer_jitter_scheduler_scenario.rs`) now drive every playout tick through
+that primitive. The product output-callback wiring that consumes the
 scheduler remains Phase 2 work.
 Deterministic property walks (`jitter_scheduler_property.rs`,
 `multi_stream_jitter_target_property.rs`) and libFuzzer targets

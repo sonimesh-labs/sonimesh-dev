@@ -481,8 +481,12 @@ estimator and the adaptive target controller against the live authenticated
 packet stream: an opt-in configuration supplies a monotonic arrival clock,
 each admitted packet feeds the per-packet deviation and jitter occupancy
 into the controller, and the active target state is published through the
-per-stream diagnostics. The product playout scheduler that consumes the
-target remains Phase 2 work.
+per-stream diagnostics. The bounded target-gated playout decision lives in
+`sonimesh-audio` as `TargetGatedPlayout` (wait while below the target with
+arrivals pending, drain when no frames are in flight, force a playout at
+the gate deadline), and both deterministic scheduler scenarios drive their
+ticks through it. The product output-callback wiring that consumes that
+scheduler remains Phase 2 work.
 
 Recovery policy:
 
@@ -615,8 +619,10 @@ once the receiver pipeline feeds it from live authenticated packets
 (section 11). The three water levels are stored as one atomic set, so a
 snapshot always reads a coherent `min <= target <= max` triple; the
 smoothed jitter and step counters are cumulative telemetry and may briefly
-span an epoch transition. The product playout scheduler that consumes the
-target remains Phase 2 work.
+span an epoch transition. The product output-callback wiring that consumes
+the bounded `TargetGatedPlayout` decision primitive remains Phase 2 work;
+the primitive itself (decision, counters, and reset) now lives in
+`sonimesh-audio` and is covered by unit and property tests.
 
 Realtime code updates counters only. Structured logs are emitted by non-realtime
 domains, use stable event codes, and redact keys, audio payloads, full IPs, and
