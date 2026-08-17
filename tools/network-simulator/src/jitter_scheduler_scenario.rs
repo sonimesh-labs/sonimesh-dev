@@ -14,8 +14,9 @@ use std::fmt;
 
 use sonimesh_audio::{
     AdaptiveJitterTarget, EncodedFrame, InsertOutcome, JitterBuffer, JitterMode,
-    JitterTargetConfig, JitterTargetConfigError, JitterTargetStep, OPUS_CHANNELS,
-    OPUS_SAMPLE_RATE_HZ, OpusFrameConfig, PlayoutOutcome,
+    JitterTargetConfig, JitterTargetConfigError, JitterTargetStep, MAX_GATE_TICKS, OPUS_CHANNELS,
+    OPUS_SAMPLE_RATE_HZ, OpusFrameConfig, PlayoutDecision, PlayoutOutcome, TargetGatedPlayout,
+    TargetGatedPlayoutConfig,
 };
 use sonimesh_protocol::MAX_MEDIA_DATAGRAM_LEN;
 
@@ -31,7 +32,7 @@ const DEFAULT_MEDIA_DATAGRAM_BYTES: u16 = 256;
 /// Encoded-frame capacity of the scenario's jitter buffer.
 const JITTER_BUFFER_CAPACITY: usize = 64;
 /// Hard bound on consecutive gated playout ticks before a forced playout.
-const MAX_GATE_TICKS_BOUND: u32 = 64;
+const MAX_GATE_TICKS_BOUND: u32 = MAX_GATE_TICKS;
 
 /// One deterministic target-gated scheduler simulation configuration.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -204,6 +205,7 @@ impl std::error::Error for JitterSchedulerScenarioError {
 /// configuration does not match the transport frame duration or buffer
 /// capacity, when virtual time overflows, or when the hard deadline elapses
 /// before every frame is consumed.
+#[allow(clippy::too_many_lines)]
 pub fn simulate_jitter_scheduler(
     config: JitterSchedulerScenarioConfig,
 ) -> Result<JitterSchedulerSimulationReport, JitterSchedulerScenarioError> {
@@ -231,7 +233,13 @@ pub fn simulate_jitter_scheduler(
         forced_playouts: 0,
         excess_latency_ms: 0,
     };
-    let mut state = SchedulerState::default();
+    let mut state = SchedulerState {
+        consumed_frames: 0,
+        playout: TargetGatedPlayout::new(TargetGatedPlayoutConfig {
+            max_gate_ticks: config.max_gate_ticks,
+        })
+        .map_err(|_| JitterSchedulerScenarioError::InternalCapacityInvariant)?,
+    };
     let mut last_arrival_jitter_ms = 0_u32;
     let mut next_send_sequence = 0_u32;
     let mut next_send_ms = 0_u64;
@@ -284,9 +292,8 @@ pub fn simulate_jitter_scheduler(
                 &mut jitter,
                 last_arrival_jitter_ms,
                 arrivals_pending,
-                config.max_gate_ticks,
                 &mut state,
-            );
+            )?;
             if state.consumed_frames == config.frames && completion_ms.is_none() {
                 completion_ms = Some(now_ms);
             }
@@ -298,6 +305,8 @@ pub fn simulate_jitter_scheduler(
     }
 
     report.network = network.stats();
+    report.gated_ticks = u32::try_from(state.playout.gated_ticks()).unwrap_or(u32::MAX);
+    report.forced_playouts = u32::try_from(state.playout.forced_playouts()).unwrap_or(u32::MAX);
     report.final_target_frames = target.target_frames();
     report.final_smoothed_jitter_ms = target.smoothed_jitter_ms();
     report.final_buffered_frames = jitter.len();
@@ -311,10 +320,9 @@ pub fn simulate_jitter_scheduler(
 }
 
 /// Mutable scheduler bookkeeping shared by one playout tick.
-#[derive(Default)]
 struct SchedulerState {
     consumed_frames: u32,
-    gated_in_a_row: u32,
+    playout: TargetGatedPlayout,
 }
 
 /// Records one delivered encoded frame and updates the transport counters.
@@ -347,38 +355,36 @@ fn record_delivery(
 }
 
 /// Applies one target-gated scheduler tick and feeds the adaptive target.
+///
+/// The target-gated decision and its counters live in the shared
+/// [`TargetGatedPlayout`] primitive; this function plays out one consumed
+/// frame (or conceals a missing one) on a play decision.
 fn apply_playout_tick(
     report: &mut JitterSchedulerSimulationReport,
     target: &mut AdaptiveJitterTarget,
     jitter: &mut JitterBuffer<JITTER_BUFFER_CAPACITY, 8>,
     arrival_jitter_ms: u32,
     arrivals_pending: bool,
-    max_gate_ticks: u32,
     state: &mut SchedulerState,
-) {
+) -> Result<(), JitterSchedulerScenarioError> {
     let buffered = jitter.len();
-    let below_target = buffered < target.target_frames();
-    let gate_expired = state.gated_in_a_row >= max_gate_ticks;
-    let mut took = false;
-    if !arrivals_pending || !below_target || gate_expired {
+    let target_frames = target.target_frames();
+    if matches!(
+        state
+            .playout
+            .decide(buffered, target_frames, arrivals_pending),
+        PlayoutDecision::Play
+    ) {
         match jitter.take_next() {
             PlayoutOutcome::Frame(_) => report.playout.playout_frames += 1,
             PlayoutOutcome::Missing { .. } => report.playout.plc_frames += 1,
             // Playout is pre-armed at the negotiated sequence, so this
             // no-op is defensive and unreachable.
-            PlayoutOutcome::NotReady => {}
+            PlayoutOutcome::NotReady => {
+                return Err(JitterSchedulerScenarioError::InternalCapacityInvariant);
+            }
         }
-        took = report.playout.playout_frames + report.playout.plc_frames > state.consumed_frames;
-    }
-    if took {
         state.consumed_frames += 1;
-        state.gated_in_a_row = 0;
-        if below_target && arrivals_pending {
-            report.forced_playouts += 1;
-        }
-    } else {
-        report.gated_ticks += 1;
-        state.gated_in_a_row += 1;
     }
     report.observations += 1;
     match target.observe(arrival_jitter_ms, buffered) {
@@ -386,6 +392,7 @@ fn apply_playout_tick(
         JitterTargetStep::Lowered => report.lowered_steps += 1,
         JitterTargetStep::Held => {}
     }
+    Ok(())
 }
 
 fn validate(

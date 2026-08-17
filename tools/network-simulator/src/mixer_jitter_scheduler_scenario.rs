@@ -19,8 +19,9 @@ use std::sync::Arc;
 use sonimesh_audio::{
     AdaptiveJitterTarget, CommandDrivenMixer, EncodedFrame, GainControlError, GainControlHandle,
     InsertOutcome, JitterBuffer, JitterMode, JitterTargetConfig, JitterTargetConfigError,
-    JitterTargetStep, MIXER_GAIN_RAMP_SAMPLES, OPUS_CHANNELS, OPUS_SAMPLE_RATE_HZ, OpusFrameConfig,
-    PlayoutOutcome, RealtimePcmProducer, RealtimeQueueConfigError, realtime_pcm_queue,
+    JitterTargetStep, MAX_GATE_TICKS, MIXER_GAIN_RAMP_SAMPLES, OPUS_CHANNELS, OPUS_SAMPLE_RATE_HZ,
+    OpusFrameConfig, PlayoutDecision, PlayoutOutcome, RealtimePcmProducer,
+    RealtimeQueueConfigError, TargetGatedPlayout, TargetGatedPlayoutConfig, realtime_pcm_queue,
 };
 use sonimesh_diagnostics::StreamCounters;
 use sonimesh_protocol::MAX_MEDIA_DATAGRAM_LEN;
@@ -36,7 +37,7 @@ const DEFAULT_MEDIA_DATAGRAM_BYTES: u16 = 256;
 /// Encoded-frame capacity of every stream's jitter buffer and PCM queue.
 const JITTER_BUFFER_CAPACITY: usize = 64;
 /// Hard bound on consecutive gated playout ticks before a forced playout.
-const MAX_GATE_TICKS_BOUND: u32 = 64;
+const MAX_GATE_TICKS_BOUND: u32 = MAX_GATE_TICKS;
 /// Unity gain in milli-units; per-stream gain scripts stay within this bound.
 const MAX_GAIN_MILLI: u16 = 1_000;
 /// Default fixed slot count of the mixer membership table.
@@ -370,10 +371,10 @@ fn sample_timestamp(sequence: u32, frame: OpusFrameConfig) -> u64 {
 }
 
 /// Mutable per-stream scheduler bookkeeping shared by one playout tick.
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy)]
 struct SchedulerState {
     consumed_frames: u32,
-    gated_in_a_row: u32,
+    playout: TargetGatedPlayout,
 }
 
 /// Runs one deterministic combined jitter-scheduler and mixer simulation.
@@ -388,6 +389,12 @@ struct SchedulerState {
 /// Returns a configuration or virtual-time error when the scenario cannot be
 /// run deterministically, or [`MixerJitterSchedulerScenarioError::SimulationDidNotFinish`]
 /// when the hard deadline elapses before every stream consumed every frame.
+///
+/// # Panics
+///
+/// Panics only when the gate deadline passes the per-stream primitive
+/// construction after the upfront validation already accepted it, which is an
+/// internal invariant violation rather than a user-configurable path.
 #[allow(clippy::too_many_lines)]
 pub fn simulate_mixer_jitter_scheduler<
     const STREAMS: usize,
@@ -427,7 +434,15 @@ pub fn simulate_mixer_jitter_scheduler<
         streams[stream].base_frames = targets[stream].base_frames();
         streams[stream].max_frames = targets[stream].max_frames();
     }
-    let mut states = [SchedulerState::default(); STREAMS];
+    // `validate` above already bound the gate deadline within
+    // `MAX_GATE_TICKS`, so constructing the per-stream primitives cannot fail.
+    let mut states: [SchedulerState; STREAMS] = std::array::from_fn(|_| SchedulerState {
+        consumed_frames: 0,
+        playout: TargetGatedPlayout::new(TargetGatedPlayoutConfig {
+            max_gate_ticks: config.max_gate_ticks,
+        })
+        .expect("gate deadline validated by scenario configuration"),
+    });
     let mut last_arrival_jitter_ms = [0_u32; STREAMS];
     let mut next_send_sequence = [0_u32; STREAMS];
     let mut next_send_ms = [0_u64; STREAMS];
@@ -560,10 +575,9 @@ pub fn simulate_mixer_jitter_scheduler<
                     &mut jitters[stream],
                     last_arrival_jitter_ms[stream],
                     arrivals_pending,
-                    config.max_gate_ticks,
                     &mut states[stream],
                     producers[stream].as_mut(),
-                );
+                )?;
                 next_playout_ms[stream] =
                     next_playout_ms[stream].saturating_add(config.frame_duration_ms);
             }
@@ -612,6 +626,12 @@ pub fn simulate_mixer_jitter_scheduler<
     if !all_consumed(&states) {
         return Err(MixerJitterSchedulerScenarioError::SimulationDidNotFinish);
     }
+    for stream in 0..STREAMS {
+        streams[stream].gated_ticks =
+            u32::try_from(states[stream].playout.gated_ticks()).unwrap_or(u32::MAX);
+        streams[stream].forced_playouts =
+            u32::try_from(states[stream].playout.forced_playouts()).unwrap_or(u32::MAX);
+    }
     let mut slot_underflows = [0_u64; SLOTS];
     let mut slot_refill_limit_hits = [0_u64; SLOTS];
     let mut slot_discontinuities = [0_u64; SLOTS];
@@ -659,6 +679,10 @@ pub fn simulate_mixer_jitter_scheduler<
 
 /// Applies one target-gated scheduler tick, feeds the adaptive target, and
 /// pushes any consumed frame into the stream's mixer slot.
+///
+/// The target-gated decision and its counters live in the shared
+/// [`TargetGatedPlayout`] primitive; this function plays out one consumed
+/// frame (or conceals a missing one) on a play decision.
 #[allow(clippy::too_many_arguments)]
 fn apply_playout_tick<const PCM_SAMPLES_PER_BLOCK: usize>(
     stream: usize,
@@ -667,15 +691,17 @@ fn apply_playout_tick<const PCM_SAMPLES_PER_BLOCK: usize>(
     jitter: &mut JitterBuffer<JITTER_BUFFER_CAPACITY, 8>,
     arrival_jitter_ms: u32,
     arrivals_pending: bool,
-    max_gate_ticks: u32,
     state: &mut SchedulerState,
     producer: Option<&mut RealtimePcmProducer<PCM_SAMPLES_PER_BLOCK>>,
-) {
+) -> Result<(), MixerJitterSchedulerScenarioError> {
     let buffered = jitter.len();
-    let below_target = buffered < target.target_frames();
-    let gate_expired = state.gated_in_a_row >= max_gate_ticks;
-    let mut took = false;
-    if !arrivals_pending || !below_target || gate_expired {
+    let target_frames = target.target_frames();
+    if matches!(
+        state
+            .playout
+            .decide(buffered, target_frames, arrivals_pending),
+        PlayoutDecision::Play
+    ) {
         match jitter.take_next() {
             PlayoutOutcome::Frame(_) => {
                 report.playout.playout_frames += 1;
@@ -686,19 +712,11 @@ fn apply_playout_tick<const PCM_SAMPLES_PER_BLOCK: usize>(
             PlayoutOutcome::Missing { .. } => report.playout.plc_frames += 1,
             // Playout is pre-armed at the negotiated sequence, so this
             // no-op is defensive and unreachable.
-            PlayoutOutcome::NotReady => {}
+            PlayoutOutcome::NotReady => {
+                return Err(MixerJitterSchedulerScenarioError::InternalCapacityInvariant);
+            }
         }
-        took = report.playout.playout_frames + report.playout.plc_frames > state.consumed_frames;
-    }
-    if took {
         state.consumed_frames += 1;
-        state.gated_in_a_row = 0;
-        if below_target && arrivals_pending {
-            report.forced_playouts += 1;
-        }
-    } else {
-        report.gated_ticks += 1;
-        state.gated_in_a_row += 1;
     }
     report.observations += 1;
     match target.observe(arrival_jitter_ms, buffered) {
@@ -706,6 +724,7 @@ fn apply_playout_tick<const PCM_SAMPLES_PER_BLOCK: usize>(
         JitterTargetStep::Lowered => report.lowered_steps += 1,
         JitterTargetStep::Held => {}
     }
+    Ok(())
 }
 
 /// PCM blocks a muted slot must render after its last gain or mute event
