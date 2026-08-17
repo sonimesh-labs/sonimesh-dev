@@ -91,6 +91,10 @@ Cover at least:
   PCM queue; and that in a two-stream mixer session one stream's sustained
   hard resynchronizations leave the other stream's occupancy, correction, and
   rendering undisturbed;
+- per-stream gain and mute survival across output-device recreation: two
+  admitted streams with distinct gain and mute settings render the expected
+  mixed steady-state levels after the mixer session recovers the output, and a
+  gain published to the recovered handle scales only its own stream;
 - channel mapping, gain ramps, fades, clipping protection, and limiter behavior
   (exact-ceiling peak limiter with sample-instant attack, smooth release, and
   linked interleaved frames);

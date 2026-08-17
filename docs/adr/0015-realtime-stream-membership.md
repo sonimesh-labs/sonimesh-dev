@@ -356,6 +356,13 @@ Evidence produced so far:
   reported at most once and retires both, and recovery reuses the last
   successful selection;
 
+- a mixer-session integration test (`mixer_stream_gain_recovery.rs`) driving
+  two admitted streams with distinct per-stream gain and mute settings through
+  a real decode-and-adapt cycle, faulting and recovering the output, and
+  asserting that the recovered mixed bus reflects each stream's setting at
+  steady state, that a gain published to the recovered handle scales only its
+  own stream, and that the retained `GainControlHandle` keeps working after
+  output-device recreation without a replay command;
 Still open before Phase 2 can claim multi-source streaming: the roadmap's 24-hour
 soak and hardware callback timing on actual WASAPI devices.
 

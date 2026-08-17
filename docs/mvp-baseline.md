@@ -46,6 +46,10 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   receiver pipeline can install the paired producer without resetting ingress.
   The factory retains the per-stream gain and mute handle, so a user's choice
   survives output-device recreation without a replay command.
+  A mixer-session integration test now proves the survival: distinct per-stream
+  gain and mute settings render the expected mixed steady-state levels after
+  output recovery, and a gain published to the recovered handle scales only
+  its own stream.
 - a receiver output lifecycle controller that starts a matching platform source
   before swapping its paired producer into the receiver pipeline; failed output
   starts leave the existing producer intact for retry. The controller accepts
