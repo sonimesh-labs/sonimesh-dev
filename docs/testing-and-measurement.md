@@ -88,7 +88,9 @@ Cover at least:
   slow sources publish corrections with the correct sign while occupancy
   stays bounded and rendering continues, and a skew beyond the adjustment cap
   degrades to bounded hard resynchronizations without escaping the bounded
-  PCM queue;
+  PCM queue; and that in a two-stream mixer session one stream's sustained
+  hard resynchronizations leave the other stream's occupancy, correction, and
+  rendering undisturbed;
 - channel mapping, gain ramps, fades, clipping protection, and limiter behavior
   (exact-ceiling peak limiter with sample-instant attack, smooth release, and
   linked interleaved frames);

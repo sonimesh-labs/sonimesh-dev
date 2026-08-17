@@ -136,7 +136,10 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   clock offset: a nominal clock stays at the drift target without correction,
   within-cap fast and slow sources publish corrections with the correct sign
   while occupancy stays bounded and rendering continues, and a skew beyond the
-  adjustment cap degrades to bounded hard resynchronizations.
+ A two-stream
+  real-component scenario adds stream isolation: one stream's repeated hard
+  resynchronizations leave a second stream's occupancy, correction, and
+  rendering undisturbed.
 - a pairing-invitation control owner that synchronizes bounded record expiry,
   monotonic-clock failure, user expiry, and proof outcomes with the desktop
   session state. It invokes a caller-supplied verifier only after bounded

@@ -112,6 +112,18 @@ authority is quantized and the real loop converges over long timescales; this
 evidence covers boundedness and correction direction, while convergence-rate
 and gain defaults remain hardware-gated.
 
+A real-component multi-stream isolation test extends that evidence to the
+Phase 2 two-stream set
+(`crates/sonimesh-app/tests/mixer_stream_clock_skew_isolation.rs`): one stream
+runs a skew beyond the correction cap and keeps triggering hard
+resynchronizations while a second admitted stream runs either at nominal or at
+a within-cap fast skew in the same mixer session. The test asserts that the
+resynchronizing stream stays inside the bounded queues, that the second
+stream's occupancy, correction, and hard-resync count exactly match its
+single-stream behavior, and that the shared mixed output keeps rendering.
+Both streams are pumped in the same pass, so a stream-local retirement cannot
+starve or disturb the other stream's adapter.
+
 ## Rollback plan
 
 The controller exports a small decision type rather than an ASRC implementation.
