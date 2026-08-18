@@ -7,12 +7,18 @@
 
 use core::convert::Infallible;
 use std::collections::VecDeque;
+use std::net::{SocketAddr, UdpSocket};
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::thread;
 
-use sonimesh_app::{AdaptiveTargetConfig, FreshSessionInstallError, ReceiverStreamPipeline};
+use sonimesh_app::{
+    AdaptiveTargetConfig, FreshSessionInstallError, ReceiverStreamPipeline, UdpPollOutcome,
+    UdpReceiverPipeline,
+};
 use sonimesh_audio::{
-    DecodeStep, FrameDecoder, InsertOutcome, JitterMode, JitterTargetConfig, realtime_pcm_queue,
+    DecodeStep, FrameDecoder, InsertOutcome, JitterMode, JitterTargetConfig, RealtimePcmConsumer,
+    realtime_pcm_queue,
 };
 use sonimesh_diagnostics::{ExportSessionSnapshot, StreamCounters, build_export_bundle};
 use sonimesh_protocol::{MediaDirection, MediaKeyContext, MediaSealer, SessionSecret};
@@ -39,6 +45,8 @@ impl FrameDecoder for ByteDecoder {
 
 type Pipeline =
     ReceiverStreamPipeline<ByteDecoder, JITTER_CAPACITY, MAX_ENCODED_BYTES, PCM_SAMPLES_PER_BLOCK>;
+type UdpPipeline =
+    UdpReceiverPipeline<ByteDecoder, JITTER_CAPACITY, MAX_ENCODED_BYTES, PCM_SAMPLES_PER_BLOCK>;
 
 fn context() -> MediaKeyContext {
     context_for(9)
@@ -115,6 +123,31 @@ fn send(pipeline: &mut Pipeline, sealer: &mut MediaSealer, sample_timestamp: u64
         pipeline.decode_next().unwrap(),
         DecodeStep::Decoded { .. }
     ));
+}
+
+fn send_udp_and_decode(
+    pipeline: &mut UdpPipeline,
+    sender: &UdpSocket,
+    destination: SocketAddr,
+    sealer: &mut MediaSealer,
+    sample_timestamp: u64,
+    consumer: &mut RealtimePcmConsumer<PCM_SAMPLES_PER_BLOCK>,
+) {
+    let packet = sealer.seal(0, sample_timestamp, &[7]).unwrap();
+    sender.send_to(&packet.datagram, destination).unwrap();
+    let outcome = loop {
+        match pipeline.poll() {
+            Ok(UdpPollOutcome::Empty) => thread::yield_now(),
+            other => break other,
+        }
+    };
+    assert!(matches!(outcome, Ok(UdpPollOutcome::Processed { .. })));
+    assert!(matches!(
+        pipeline.decode_next().unwrap(),
+        DecodeStep::Decoded { .. }
+    ));
+    let mut output = [f32::NAN; PCM_SAMPLES_PER_BLOCK];
+    let _ = consumer.pop_into(&mut output);
 }
 
 fn target_state(counters: &StreamCounters) -> (u16, u16, u16, u32, u32, u32) {
@@ -409,6 +442,112 @@ fn receives_authenticated_udp_media_into_the_adaptive_controller() {
     // The first packet only establishes the arrival baseline, but the target
     // configuration is already published for the active epoch.
     assert_eq!(target_state(&counters), (2, 4, 3, 0, 0, 0));
+}
+
+#[test]
+fn udp_fresh_session_resets_target_and_source_pin_together() {
+    let counters = Arc::new(StreamCounters::default());
+    let secret = SessionSecret::new([0xA5; 32]);
+    let active_context = context();
+    let mut ticks = (1_u64..=4).map(|frame| frame * 20).collect::<Vec<_>>();
+    let mut next = *ticks.last().unwrap();
+    for _ in 0..12 {
+        next += 100;
+        ticks.push(next);
+    }
+    for _ in 0..3 {
+        next += 20;
+        ticks.push(next);
+    }
+    let (producer, mut consumer) = realtime_pcm_queue::<PCM_SAMPLES_PER_BLOCK>(4).unwrap();
+    let (tick_source, _queue) = tick_source(&ticks);
+    let mut pipeline = UdpPipeline::bind_with_adaptive_target(
+        "127.0.0.1:0".parse().unwrap(),
+        &secret,
+        active_context,
+        ByteDecoder,
+        producer,
+        Arc::clone(&counters),
+        0,
+        AdaptiveTargetConfig {
+            target: JitterTargetConfig::preset(JitterMode::Balanced, 20, JITTER_CAPACITY),
+            arrival_ticks_per_second: 1_000,
+            tick_source,
+        },
+    )
+    .unwrap();
+    let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let mut sealer = MediaSealer::new(&secret, active_context).unwrap();
+    let destination = pipeline.local_addr().unwrap();
+    for frame in 0_u64..16 {
+        send_udp_and_decode(
+            &mut pipeline,
+            &sender,
+            destination,
+            &mut sealer,
+            frame * 960,
+            &mut consumer,
+        );
+    }
+    let populated = target_state(&counters);
+    assert!(
+        populated.3 > 0,
+        "the original UDP session must accumulate target jitter"
+    );
+    assert_eq!(
+        pipeline.pinned_source(),
+        Some(sender.local_addr().unwrap()),
+        "the original session must bind the source endpoint"
+    );
+
+    assert_eq!(
+        pipeline.install_fresh_session(&secret, context(), 0),
+        Err(FreshSessionInstallError::ReusedSessionId),
+        "a reused UDP session must be rejected"
+    );
+    assert_eq!(target_state(&counters), populated);
+    assert_eq!(
+        pipeline.pinned_source(),
+        Some(sender.local_addr().unwrap()),
+        "a rejected replacement must preserve the source pin"
+    );
+
+    let fresh_context = context_for_session(0x0A0B_0C0D_0E0F_0102, 9);
+    pipeline
+        .install_fresh_session(&secret, fresh_context, 0)
+        .unwrap();
+    assert_eq!(
+        target_state(&counters),
+        (0, 0, 0, 0, 0, 0),
+        "a valid UDP fresh session must retire the target epoch"
+    );
+    assert_eq!(
+        pipeline.pinned_source(),
+        None,
+        "a valid UDP fresh session must clear the source pin"
+    );
+
+    let mut fresh_sealer = MediaSealer::new(&secret, fresh_context).unwrap();
+    for frame in 0_u64..3 {
+        send_udp_and_decode(
+            &mut pipeline,
+            &sender,
+            destination,
+            &mut fresh_sealer,
+            frame * 960,
+            &mut consumer,
+        );
+    }
+    assert_eq!(
+        target_state(&counters),
+        (2, 4, 3, 0, 0, 0),
+        "the fresh UDP session must rebuild target state from a new baseline"
+    );
+    assert_eq!(
+        pipeline.pinned_source(),
+        Some(sender.local_addr().unwrap()),
+        "the fresh session must rebind the authenticated source"
+    );
 }
 
 #[test]
