@@ -10,7 +10,7 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use sonimesh_app::{AdaptiveTargetConfig, ReceiverStreamPipeline};
+use sonimesh_app::{AdaptiveTargetConfig, FreshSessionInstallError, ReceiverStreamPipeline};
 use sonimesh_audio::{
     DecodeStep, FrameDecoder, InsertOutcome, JitterMode, JitterTargetConfig, realtime_pcm_queue,
 };
@@ -45,13 +45,11 @@ fn context() -> MediaKeyContext {
 }
 
 fn context_for(stream_id: u32) -> MediaKeyContext {
-    MediaKeyContext::new(
-        0x0102_0304_0506_0708,
-        stream_id,
-        1,
-        MediaDirection::AndroidToDesktop,
-    )
-    .unwrap()
+    context_for_session(0x0102_0304_0506_0708, stream_id)
+}
+
+fn context_for_session(session_id: u64, stream_id: u32) -> MediaKeyContext {
+    MediaKeyContext::new(session_id, stream_id, 1, MediaDirection::AndroidToDesktop).unwrap()
 }
 
 type TickSource = Box<dyn FnMut() -> u64>;
@@ -209,6 +207,63 @@ fn hard_resynchronize_retires_and_republishes_the_target_epoch() {
         target_state(&counters),
         (2, 4, 3, 0, 0, 0),
         "after a reset a fresh epoch republishes the configured water levels"
+    );
+}
+
+#[test]
+fn fresh_session_retires_target_only_after_a_valid_replacement() {
+    let counters = Arc::new(StreamCounters::default());
+    let mut ticks = (1_u64..=4).map(|frame| frame * 20).collect::<Vec<_>>();
+    let mut next = *ticks.last().unwrap();
+    for _ in 0..12 {
+        next += 100;
+        ticks.push(next);
+    }
+    for _ in 0..3 {
+        next += 20;
+        ticks.push(next);
+    }
+    let (mut pipeline, mut sealer, _queue) = adaptive_pipeline(&ticks, Arc::clone(&counters));
+
+    for frame in 0_u64..16 {
+        send(&mut pipeline, &mut sealer, frame * 960);
+    }
+    let populated = target_state(&counters);
+    assert!(
+        populated.3 > 0,
+        "the original session must accumulate visible target jitter"
+    );
+
+    let secret = SessionSecret::new([0xA5; 32]);
+    assert_eq!(
+        pipeline.install_fresh_session(&secret, context(), 0),
+        Err(FreshSessionInstallError::ReusedSessionId),
+        "a replacement must not reuse the active session ID"
+    );
+    assert_eq!(
+        target_state(&counters),
+        populated,
+        "a rejected replacement must preserve the active target epoch"
+    );
+
+    let fresh_context = context_for_session(0x0A0B_0C0D_0E0F_0102, 9);
+    pipeline
+        .install_fresh_session(&secret, fresh_context, 0)
+        .unwrap();
+    assert_eq!(
+        target_state(&counters),
+        (0, 0, 0, 0, 0, 0),
+        "a valid fresh session must retire the replaced target epoch"
+    );
+
+    let mut fresh_sealer = MediaSealer::new(&secret, fresh_context).unwrap();
+    for frame in 0_u64..3 {
+        send(&mut pipeline, &mut fresh_sealer, frame * 960);
+    }
+    assert_eq!(
+        target_state(&counters),
+        (2, 4, 3, 0, 0, 0),
+        "the fresh session must rebuild its target from a new arrival baseline"
     );
 }
 
