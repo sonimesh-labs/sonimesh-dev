@@ -70,6 +70,9 @@ impl ExportStore {
         let mut next_sequence = 0_u64;
         for entry in fs::read_dir(directory).map_err(ExportStoreError::Io)? {
             let entry = entry.map_err(ExportStoreError::Io)?;
+            if !entry.file_type().map_err(ExportStoreError::Io)?.is_file() {
+                continue;
+            }
             let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
                 continue;
             };

@@ -197,6 +197,23 @@ fn opening_ignores_foreign_files_in_the_directory() {
 }
 
 #[test]
+fn opening_ignores_non_regular_entries_with_export_names() {
+    let dir = TempDir::new();
+    std::fs::create_dir(dir.path().join(export_file_name(7)))
+        .expect("create export-shaped directory");
+    std::fs::create_dir(dir.path().join(pending_file_name(8)))
+        .expect("create pending-shaped directory");
+
+    let store = ExportStore::open(dir.path(), ExportRetentionPolicy::bounded(4, 4_096))
+        .expect("open store");
+
+    assert_eq!(store.retained_count(), 0);
+    assert_eq!(store.next_sequence(), 0);
+    assert!(dir.path().join(export_file_name(7)).is_dir());
+    assert!(dir.path().join(pending_file_name(8)).is_dir());
+}
+
+#[test]
 fn opening_rejects_a_non_directory_path() {
     let dir = TempDir::new();
     let file = dir.path().join("not-a-directory");
