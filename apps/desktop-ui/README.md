@@ -22,7 +22,9 @@ Connection loss also arms a bounded 30-second reconnect window whose remaining
 seconds the session panel projects while the session is reconnecting. The
 countdown decays on each snapshot from the armed instant and auto-expires the
 reconnecting session at the deadline, matching the Rust snapshot entry point
-without running a background timer. The
+without running a background timer. A preview clock regression expires the
+reconnecting session and any active invitation fail-closed, so a later clock
+jump cannot revive trusted state. The
 session owner's expiry transition is also simulable from the session panel
 (`Simulate session expiry`): a trusted session (ready, streaming, reconnecting,
 or output unavailable) retires to `idle` while the consumed pairing record stays
