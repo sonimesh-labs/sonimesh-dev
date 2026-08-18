@@ -156,7 +156,9 @@ bounds and epoch reset state alongside their protected-ingress, source-pin,
 and decode invariants. The `receiver_pipeline` target additionally forces a
 fixed-capacity jitter resynchronization on every input and verifies that the
 accepted resync packet publishes a clean target epoch and becomes the
-immediate arrival baseline.
+immediate arrival baseline. The UDP target now drives the same resynchronization
+through the loopback socket and checks the source pin, PCM discontinuity, and
+controller state at that boundary.
 
 The completion bound is explicit: the `jitter_scheduler_property` and
 `mixer_jitter_scheduler_property` walks and the `jitter_scheduler`,
