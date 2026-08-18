@@ -123,8 +123,11 @@ target-gated decision primitive now lives in `sonimesh-audio` as
 `TargetGatedPlayout`: it returns the per-tick `Play`/`Gate` decision, owns
 the bounded counters (consecutive-gated streak capped at the configured
 deadline, total gated ticks, and forced playouts), resets for a fresh
-stream epoch, and is covered by unit tests plus a deterministic seeded
-property walk (`tests/playout_scheduler_property.rs`). Both deterministic
+stream epoch, and is covered by unit tests, a deterministic seeded property
+walk (`tests/playout_scheduler_property.rs`), and a dedicated libFuzzer
+target (`target_gated_playout`) that asserts the streak, cumulative-gate,
+and forced-playout invariants on arbitrary per-tick inputs. Both
+deterministic
 scheduler scenarios (`jitter_scheduler_scenario.rs` and
 `mixer_jitter_scheduler_scenario.rs`) now drive every playout tick through
 that primitive. The product output-callback wiring that consumes the
