@@ -223,8 +223,10 @@ fn pending_file_name(sequence: u64) -> String {
 fn parse_export_file_name(name: &str) -> Option<u64> {
     let sequence = name
         .strip_prefix(EXPORT_FILE_PREFIX)?
-        .strip_suffix(EXPORT_FILE_SUFFIX)?;
-    sequence.parse().ok()
+        .strip_suffix(EXPORT_FILE_SUFFIX)?
+        .parse()
+        .ok()?;
+    (export_file_name(sequence) == name).then_some(sequence)
 }
 
 fn parse_pending_file_name(name: &str) -> Option<u64> {
@@ -340,6 +342,11 @@ mod tests {
     #[test]
     fn foreign_names_do_not_parse_as_exports() {
         assert_eq!(parse_export_file_name("export-abc.json"), None);
+        assert_eq!(parse_export_file_name("export-1.json"), None);
+        assert_eq!(
+            parse_export_file_name("export-00000000000000001.json"),
+            None
+        );
         assert_eq!(parse_export_file_name("notes.txt"), None);
         assert_eq!(
             parse_export_file_name("export-0000000000000001.json.extra"),
@@ -347,6 +354,7 @@ mod tests {
         );
         assert_eq!(parse_export_file_name(""), None);
         assert_eq!(parse_pending_file_name("export-notes.json.pending"), None);
+        assert_eq!(parse_pending_file_name("export-1.json.pending"), None);
         assert_eq!(parse_pending_file_name("notes.txt.pending"), None);
     }
 }

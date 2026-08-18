@@ -63,9 +63,10 @@ is now implemented in `sonimesh-app` (`ExportStore`): one store owns a
 directory and applies the same retention policy to files on disk. Writing
 is atomic (create a pending file exclusively, write and flush it, then rename),
 so an existing pending path cannot be truncated or followed as a symlink;
-filenames derive only from the export sequence, opening the store scans regular
-files only, removes stale pending files, ignores non-regular entries, and
-retention evicts the oldest file first
+filenames derive only from the export sequence and must round-trip through the
+canonical generator, opening the store scans regular files only, removes stale
+pending files, ignores foreign or non-regular entries, and retention evicts the
+oldest file first
 until the count and byte bounds hold. A bundle that cannot fit the byte
 bound is rejected before any file is written. The UI or Tauri command
 that triggers an export remains open.
@@ -95,8 +96,9 @@ endpoint bytes. The on-disk store tests assert atomic writes leave no
 pending file, recovery resumes the sequence from the newest retained
 file, a shrunk policy evicts oldest files on open, stale pending files
 are removed, existing pending paths fail closed without being overwritten, and
-foreign files plus non-regular export-shaped entries in the directory are
-ignored. A Unix-only regression test additionally proves that
+foreign files (including noncanonical numeric export-shaped names) plus
+non-regular export-shaped entries in the directory are ignored. A Unix-only
+regression test additionally proves that
 export-shaped and pending-shaped symlinks are ignored without deleting their
 targets; Windows symlink behavior remains covered by the `file_type().is_file()`
 implementation boundary rather than a privilege-dependent test.

@@ -197,6 +197,42 @@ fn opening_ignores_foreign_files_in_the_directory() {
 }
 
 #[test]
+fn opening_ignores_noncanonical_numeric_export_names() {
+    let dir = TempDir::new();
+    let canonical = dir.path().join(export_file_name(0));
+    let noncanonical = dir.path().join("export-1.json");
+    std::fs::write(&canonical, "owned export").expect("write canonical export");
+    std::fs::write(&noncanonical, "foreign export-shaped file")
+        .expect("write noncanonical export file");
+
+    let mut store = ExportStore::open(dir.path(), ExportRetentionPolicy::bounded(1, 4_096))
+        .expect("open store");
+
+    assert_eq!(store.receipts().len(), 1);
+    assert_eq!(store.next_sequence(), 1);
+    assert_eq!(
+        store.read(0).expect("read canonical export"),
+        "owned export"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&noncanonical).expect("read noncanonical export"),
+        "foreign export-shaped file"
+    );
+
+    let receipt = store.store("next owned export").expect("store export");
+    assert_eq!(receipt.sequence, 1);
+    assert!(
+        !canonical.exists(),
+        "retention evicts only owned canonical files"
+    );
+    assert_eq!(store.read(1).expect("read new export"), "next owned export");
+    assert_eq!(
+        std::fs::read_to_string(&noncanonical).expect("read noncanonical export"),
+        "foreign export-shaped file"
+    );
+}
+
+#[test]
 fn opening_ignores_non_regular_entries_with_export_names() {
     let dir = TempDir::new();
     std::fs::create_dir(dir.path().join(export_file_name(7)))
