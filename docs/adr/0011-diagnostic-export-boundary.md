@@ -62,8 +62,9 @@ a single bundle that cannot fit the byte bound. The on-disk file retention
 is now implemented in `sonimesh-app` (`ExportStore`): one store owns a
 directory and applies the same retention policy to files on disk. Writing
 is atomic (write to a pending file, then rename), filenames derive only
-from the export sequence, opening the store scans the directory and
-removes stale pending files, and retention evicts the oldest file first
+from the export sequence, opening the store scans regular files only,
+removes stale pending files, ignores non-regular entries, and retention evicts
+the oldest file first
 until the count and byte bounds hold. A bundle that cannot fit the byte
 bound is rejected before any file is written. The UI or Tauri command
 that triggers an export remains open.
@@ -92,7 +93,8 @@ exhaustion, and issues a bundle from live bridge state with redacted
 endpoint bytes. The on-disk store tests assert atomic writes leave no
 pending file, recovery resumes the sequence from the newest retained
 file, a shrunk policy evicts oldest files on open, stale pending files
-are removed, and foreign files in the directory are ignored.
+are removed, and foreign files plus non-regular export-shaped entries in the
+directory are ignored.
 
 A seeded property walk and a byte-driven libFuzzer target
 (`export_retention_journal`) drive the retention journal under
