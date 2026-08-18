@@ -94,7 +94,10 @@ endpoint bytes. The on-disk store tests assert atomic writes leave no
 pending file, recovery resumes the sequence from the newest retained
 file, a shrunk policy evicts oldest files on open, stale pending files
 are removed, and foreign files plus non-regular export-shaped entries in the
-directory are ignored.
+directory are ignored. A Unix-only regression test additionally proves that
+export-shaped and pending-shaped symlinks are ignored without deleting their
+targets; Windows symlink behavior remains covered by the `file_type().is_file()`
+implementation boundary rather than a privilege-dependent test.
 
 A seeded property walk and a byte-driven libFuzzer target
 (`export_retention_journal`) drive the retention journal under
