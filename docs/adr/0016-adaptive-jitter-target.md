@@ -116,7 +116,10 @@ proves a rejected reused session ID preserves a populated target epoch, while a
 valid fresh session clears it and rebuilds from a new arrival baseline. Its UDP
 loopback companion additionally proves that valid fresh-session replacement
 clears the adaptive target and source pin together before the first new-session
-packet rebinds the authenticated endpoint. A
+packet rebinds the authenticated endpoint. The same application test forces a
+bounded jitter-buffer resynchronization and proves that its accepted packet is
+immediately recorded as the first arrival baseline of the new adaptive epoch,
+so the first post-resync interval is measured instead of being skipped. A
 deterministic target-gated scheduler simulation (`simulate_jitter_scheduler`)
 now exercises that
 consumption loop in the network simulator: the scheduler waits while fewer
