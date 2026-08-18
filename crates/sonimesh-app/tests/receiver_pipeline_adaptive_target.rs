@@ -41,9 +41,13 @@ type Pipeline =
     ReceiverStreamPipeline<ByteDecoder, JITTER_CAPACITY, MAX_ENCODED_BYTES, PCM_SAMPLES_PER_BLOCK>;
 
 fn context() -> MediaKeyContext {
+    context_for(9)
+}
+
+fn context_for(stream_id: u32) -> MediaKeyContext {
     MediaKeyContext::new(
         0x0102_0304_0506_0708,
-        9,
+        stream_id,
         1,
         MediaDirection::AndroidToDesktop,
     )
@@ -71,8 +75,15 @@ fn adaptive_pipeline(
     ticks: &[u64],
     counters: Arc<StreamCounters>,
 ) -> (Pipeline, MediaSealer, Arc<Mutex<VecDeque<u64>>>) {
+    adaptive_pipeline_for_context(context(), ticks, counters)
+}
+
+fn adaptive_pipeline_for_context(
+    context: MediaKeyContext,
+    ticks: &[u64],
+    counters: Arc<StreamCounters>,
+) -> (Pipeline, MediaSealer, Arc<Mutex<VecDeque<u64>>>) {
     let secret = SessionSecret::new([0xA5; 32]);
-    let context = context();
     let (producer, _consumer) = realtime_pcm_queue::<PCM_SAMPLES_PER_BLOCK>(4).unwrap();
     let (tick_source, queue) = tick_source(ticks);
     let pipeline = Pipeline::new_with_adaptive_target(
@@ -198,6 +209,66 @@ fn hard_resynchronize_retires_and_republishes_the_target_epoch() {
         target_state(&counters),
         (2, 4, 3, 0, 0, 0),
         "after a reset a fresh epoch republishes the configured water levels"
+    );
+}
+
+#[test]
+fn independent_stream_targets_and_resets_do_not_cross_contaminate() {
+    let calm_counters = Arc::new(StreamCounters::default());
+    let jitter_counters = Arc::new(StreamCounters::default());
+
+    let calm_ticks = (1_u64..=36).map(|frame| frame * 20).collect::<Vec<_>>();
+    let mut jitter_ticks = (1_u64..=4).map(|frame| frame * 20).collect::<Vec<_>>();
+    let mut next = *jitter_ticks.last().unwrap();
+    for _ in 0..32 {
+        next += 100;
+        jitter_ticks.push(next);
+    }
+
+    let (mut calm_pipeline, mut calm_sealer, _calm_queue) =
+        adaptive_pipeline_for_context(context_for(9), &calm_ticks, Arc::clone(&calm_counters));
+    let (mut jitter_pipeline, mut jitter_sealer, _jitter_queue) =
+        adaptive_pipeline_for_context(context_for(10), &jitter_ticks, Arc::clone(&jitter_counters));
+
+    for frame in 0_u64..36 {
+        send(&mut calm_pipeline, &mut calm_sealer, frame * 960);
+        send(&mut jitter_pipeline, &mut jitter_sealer, frame * 960);
+    }
+
+    let calm_before_reset = target_state(&calm_counters);
+    let jitter_before_reset = target_state(&jitter_counters);
+    assert_eq!(
+        calm_before_reset,
+        (2, 4, 3, 0, 0, 0),
+        "a calm stream must retain its independent base target"
+    );
+    assert!(
+        jitter_before_reset.3 > 0 && jitter_before_reset.4 >= 1,
+        "the impaired stream must accumulate its own jitter response"
+    );
+
+    calm_pipeline.hard_resynchronize();
+    assert_eq!(
+        target_state(&calm_counters),
+        (0, 0, 0, 0, 0, 0),
+        "resetting one stream must retire only its target epoch"
+    );
+    assert_eq!(
+        target_state(&jitter_counters),
+        jitter_before_reset,
+        "resetting one stream must not clear another stream's target history"
+    );
+
+    jitter_pipeline.hard_resynchronize();
+    assert_eq!(
+        target_state(&jitter_counters),
+        (0, 0, 0, 0, 0, 0),
+        "the second stream can retire its own target epoch independently"
+    );
+    assert_eq!(
+        target_state(&calm_counters),
+        (0, 0, 0, 0, 0, 0),
+        "the first stream remains retired after the second reset"
     );
 }
 
