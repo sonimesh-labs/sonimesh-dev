@@ -108,8 +108,12 @@ pipeline (`ReceiverStreamPipeline` and the UDP receiver) now optionally runs
 `ArrivalJitter` and `AdaptiveJitterTarget` against live authenticated
 packets with a caller-supplied monotonic arrival clock, so the controller is
 fed from a real packet stream without a shared clock and its active target
-state reaches the stream counters. A deterministic target-gated scheduler
-simulation (`simulate_jitter_scheduler`) now exercises that
+state reaches the stream counters. The application integration test
+`receiver_pipeline_adaptive_target.rs` drives two authenticated streams with
+independent calm and impaired arrival histories and resets them one at a time,
+proving target trajectories and epoch retirement remain stream-local. A
+deterministic target-gated scheduler simulation (`simulate_jitter_scheduler`)
+now exercises that
 consumption loop in the network simulator: the scheduler waits while fewer
 than the target frames are buffered, drains without gating once no frames
 are in flight, and forces a playout when the gate deadline expires, so the
