@@ -13,7 +13,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;
-use std::io;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use crate::{ExportReceipt, ExportRetentionPolicy};
@@ -235,7 +235,13 @@ fn parse_pending_file_name(name: &str) -> Option<u64> {
 fn write_bundle_atomically(directory: &Path, sequence: u64, bundle: &str) -> io::Result<()> {
     let pending_path = directory.join(pending_file_name(sequence));
     let final_path = directory.join(export_file_name(sequence));
-    fs::write(&pending_path, bundle.as_bytes())?;
+    let mut pending = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&pending_path)?;
+    pending.write_all(bundle.as_bytes())?;
+    pending.sync_all()?;
+    drop(pending);
     fs::rename(&pending_path, &final_path)?;
     Ok(())
 }

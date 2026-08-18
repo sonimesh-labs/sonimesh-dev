@@ -247,6 +247,34 @@ fn opening_ignores_symlinked_export_entries_without_removing_targets() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn atomic_write_does_not_follow_an_existing_pending_symlink() {
+    use std::os::unix::fs::symlink;
+
+    let dir = TempDir::new();
+    let backing = dir.path().join("pending-target");
+    std::fs::write(&backing, "partial elsewhere").expect("write pending target");
+    let pending = dir.path().join(pending_file_name(0));
+    symlink(&backing, &pending).expect("create pending symlink");
+    let mut store = ExportStore::open(dir.path(), ExportRetentionPolicy::bounded(4, 4_096))
+        .expect("open store");
+
+    let error = store
+        .store("bundle")
+        .expect_err("pending symlink collision must fail closed");
+    assert!(matches!(
+        error,
+        ExportStoreError::Io(ref error) if error.kind() == std::io::ErrorKind::AlreadyExists
+    ));
+    assert_eq!(
+        std::fs::read_to_string(&backing).expect("read pending target"),
+        "partial elsewhere"
+    );
+    assert!(std::fs::symlink_metadata(&pending).is_ok());
+    assert!(!dir.path().join(export_file_name(0)).exists());
+}
+
 #[test]
 fn opening_rejects_a_non_directory_path() {
     let dir = TempDir::new();
@@ -273,6 +301,30 @@ fn sequence_exhaustion_fails_closed_after_recovery() {
         store.store("x"),
         Err(ExportStoreError::SequenceExhausted)
     ));
+}
+
+#[test]
+fn atomic_write_refuses_to_overwrite_an_existing_pending_path() {
+    let dir = TempDir::new();
+    let mut store = ExportStore::open(dir.path(), ExportRetentionPolicy::bounded(4, 4_096))
+        .expect("open store");
+    let pending = dir.path().join(pending_file_name(0));
+    std::fs::write(&pending, "pre-existing partial export").expect("write pending file");
+
+    let error = store
+        .store("bundle")
+        .expect_err("pending collision must fail closed");
+    assert!(matches!(
+        error,
+        ExportStoreError::Io(ref error) if error.kind() == std::io::ErrorKind::AlreadyExists
+    ));
+    assert_eq!(
+        std::fs::read_to_string(&pending).expect("read pending file"),
+        "pre-existing partial export"
+    );
+    assert_eq!(store.next_sequence(), 0);
+    assert_eq!(store.retained_count(), 0);
+    assert!(!dir.path().join(export_file_name(0)).exists());
 }
 
 #[test]
