@@ -87,6 +87,7 @@ struct CounterModel {
     authenticated: u64,
     duplicate: u64,
     rejected: u64,
+    jitter_resync_dropped_frames: u64,
     stream_resets: u64,
 }
 
@@ -221,6 +222,10 @@ impl UdpWalk {
         assert_eq!(
             snapshot.rejected_packets, self.counters.rejected,
             "rejected counter drift after {context}"
+        );
+        assert_eq!(
+            snapshot.jitter_resync_dropped_frames, self.counters.jitter_resync_dropped_frames,
+            "jitter resynchronization drop counter drift after {context}"
         );
         assert_eq!(
             snapshot.stream_resets, self.counters.stream_resets,
@@ -414,6 +419,7 @@ impl UdpWalk {
             last_payload = payload;
         }
 
+        self.counters.jitter_resync_dropped_frames += 4;
         let snapshot = self.pipeline.counters().snapshot();
         assert_eq!(
             (

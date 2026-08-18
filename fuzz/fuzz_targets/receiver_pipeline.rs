@@ -83,6 +83,7 @@ struct CounterModel {
     authenticated: u64,
     duplicate: u64,
     rejected: u64,
+    jitter_resync_dropped_frames: u64,
     stream_resets: u64,
 }
 
@@ -217,6 +218,10 @@ impl PipelineHarness {
             "rejected counter drift"
         );
         assert_eq!(
+            snapshot.jitter_resync_dropped_frames, self.model.jitter_resync_dropped_frames,
+            "jitter resynchronization drop counter drift"
+        );
+        assert_eq!(
             snapshot.stream_resets, self.model.stream_resets,
             "stream reset counter drift"
         );
@@ -340,6 +345,7 @@ impl PipelineHarness {
             last_payload = payload;
         }
 
+        self.model.jitter_resync_dropped_frames += 4;
         let snapshot = self.counters.snapshot();
         assert_eq!(
             (
