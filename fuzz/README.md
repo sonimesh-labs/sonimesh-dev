@@ -217,13 +217,14 @@ The network-scenario targets (`jitter_target`, `jitter_scheduler`, `multi_stream
 - `udp_receiver_pipeline` drives byte-selected deliveries, rotations, fresh
   sessions, tampered ciphertext with a valid-twin probe, duplicates,
   retired-epoch packets, and oversized datagrams over real loopback sockets
-  through the UDP-backed protected receiver composition and compares every
-  poll outcome, pin state, decoded PCM, and diagnostic counter against an
-  independent pin, replay, and counter model, proving the source pin binds
-  only to the first successful protected endpoint, a changed endpoint is
-  rejected before any protected work and never moves the pin, failed
-  processing never binds an unbound source, and only a fresh authenticated
-  session clears the binding.
+  through the UDP-backed protected receiver composition with its opt-in
+  adaptive target controller. It compares every poll outcome, pin state,
+  decoded PCM, diagnostic counter, and bounded target state against independent
+  pin, replay, and controller invariants, proving the source pin binds only to
+  the first successful protected endpoint, a changed endpoint is rejected
+  before any protected work and never moves the pin, failed processing never
+  binds an unbound source, and only a fresh authenticated session clears the
+  binding.
 - `media_session_sender` drives byte-selected sends, oversized-frame
   rejection, valid and fail-closed key-epoch rotation, fresh-session
   installation, and routing migration over real loopback sockets through the

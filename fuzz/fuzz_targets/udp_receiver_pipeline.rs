@@ -25,10 +25,13 @@ use std::sync::Arc;
 use std::thread;
 
 use libfuzzer_sys::fuzz_target;
-use sonimesh_app::{ReceiverPipelineError, UdpPollOutcome, UdpReceiverError, UdpReceiverPipeline};
+use sonimesh_app::{
+    AdaptiveTargetConfig, ReceiverPipelineError, UdpPollOutcome, UdpReceiverError,
+    UdpReceiverPipeline,
+};
 use sonimesh_audio::{
-    DecodeStep, FrameDecoder, InsertOutcome, RealtimePcmConsumer, RealtimePcmPopOutcome,
-    realtime_pcm_queue,
+    DecodeStep, FrameDecoder, InsertOutcome, JitterMode, JitterTargetConfig, RealtimePcmConsumer,
+    RealtimePcmPopOutcome, realtime_pcm_queue,
 };
 use sonimesh_diagnostics::StreamCounters;
 use sonimesh_network::{IngressError, UdpReceiveError};
@@ -132,21 +135,36 @@ struct UdpWalk {
 }
 
 impl UdpWalk {
-    fn new() -> Self {
+    fn new(data: &[u8]) -> Self {
         let secret = SessionSecret::new([0xA5; 32]);
         let session_id = SESSION_IDS[0];
         let epoch = 2_u16;
-        let sealer = MediaSealer::new(&secret, context(session_id, epoch)).unwrap();
+        let context = context(session_id, epoch);
+        let sealer = MediaSealer::new(&secret, context).unwrap();
         let (producer, consumer) = realtime_pcm_queue::<4>(4).unwrap();
         let counters = Arc::new(StreamCounters::default());
-        let pipeline = Pipeline::bind(
+        let tick_bytes = data.to_vec();
+        let mut tick_index = 0_usize;
+        let mut arrival_ticks = 0_u64;
+        let tick_source = Box::new(move || {
+            let delta = u64::from(tick_bytes[tick_index % tick_bytes.len()]).saturating_add(1);
+            tick_index += 1;
+            arrival_ticks = arrival_ticks.saturating_add(delta);
+            arrival_ticks
+        });
+        let pipeline = Pipeline::bind_with_adaptive_target(
             "127.0.0.1:0".parse().unwrap(),
             &secret,
-            context(session_id, epoch),
+            context,
             ByteDecoder,
             producer,
             Arc::clone(&counters),
             0,
+            AdaptiveTargetConfig {
+                target: JitterTargetConfig::preset(JitterMode::Balanced, 20, 4),
+                arrival_ticks_per_second: 1_000,
+                tick_source,
+            },
         )
         .unwrap();
         let sender_a = UdpSocket::bind("127.0.0.1:0").unwrap();
@@ -208,6 +226,37 @@ impl UdpWalk {
             snapshot.stream_resets, self.counters.stream_resets,
             "stream reset counter drift after {context}"
         );
+        if snapshot.target_min_frames == 0 {
+            assert_eq!(
+                (snapshot.target_max_frames, snapshot.target_frames),
+                (0, 0),
+                "a retired target epoch must publish an empty state after {context}"
+            );
+            assert_eq!(
+                (
+                    snapshot.target_smoothed_jitter_ms,
+                    snapshot.target_raised_steps,
+                    snapshot.target_lowered_steps,
+                ),
+                (0, 0, 0),
+                "a retired target epoch must clear its controller counters after {context}"
+            );
+        } else {
+            assert_eq!(
+                (snapshot.target_min_frames, snapshot.target_max_frames),
+                (2, 4),
+                "the balanced target preset must remain bounded after {context}"
+            );
+            assert!(
+                (2..=4).contains(&snapshot.target_frames),
+                "the active target must stay within its water levels after {context}"
+            );
+            assert!(
+                u64::from(snapshot.target_raised_steps) + u64::from(snapshot.target_lowered_steps)
+                    <= self.counters.authenticated,
+                "target step counters must not exceed authenticated observations after {context}"
+            );
+        }
     }
 
     /// Decodes one admitted frame and pops the queued PCM block, asserting the
@@ -488,7 +537,7 @@ fuzz_target!(|data: &[u8]| {
         return;
     }
     let mut offset = 0;
-    let mut harness = UdpWalk::new();
+    let mut harness = UdpWalk::new(data);
 
     // Deterministic edge coverage on every input: oversized rejection, first
     // admission binding the pin, changed-endpoint rejection that never moves
