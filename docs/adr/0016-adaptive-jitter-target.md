@@ -142,9 +142,10 @@ Deterministic property walks (`jitter_scheduler_property.rs`,
 target-gated scheduler and multi-stream adaptive-target scenarios from
 seeded and arbitrary byte inputs and assert the same bounded-target,
 step-count, and completion invariants on every report. The end-to-end
-`receiver_pipeline` fuzz target also enables the opt-in live controller with
-an input-derived arrival clock and checks target bounds and epoch reset state
-alongside its protected-ingress and decode invariants.
+`receiver_pipeline` and `udp_receiver_pipeline` fuzz targets also enable the
+opt-in live controller with input-derived arrival clocks and check target
+bounds and epoch reset state alongside their protected-ingress, source-pin,
+and decode invariants.
 
 The completion bound is explicit: the `jitter_scheduler_property` and
 `mixer_jitter_scheduler_property` walks and the `jitter_scheduler`,
