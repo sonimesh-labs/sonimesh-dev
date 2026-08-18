@@ -20,10 +20,10 @@ use core::convert::Infallible;
 use std::sync::Arc;
 
 use libfuzzer_sys::fuzz_target;
-use sonimesh_app::{ReceiverPipelineError, ReceiverStreamPipeline};
+use sonimesh_app::{AdaptiveTargetConfig, ReceiverPipelineError, ReceiverStreamPipeline};
 use sonimesh_audio::{
-    DecodeStep, FrameDecoder, InsertOutcome, RealtimePcmConsumer, RealtimePcmPopOutcome,
-    realtime_pcm_queue,
+    DecodeStep, FrameDecoder, InsertOutcome, JitterMode, JitterTargetConfig, RealtimePcmConsumer,
+    RealtimePcmPopOutcome, realtime_pcm_queue,
 };
 use sonimesh_diagnostics::StreamCounters;
 use sonimesh_network::IngressError;
@@ -148,22 +148,37 @@ struct PipelineHarness {
 }
 
 impl PipelineHarness {
-    fn new() -> Self {
+    fn new(data: &[u8]) -> Self {
         let secret = SessionSecret::new([0xA5; 32]);
         let epoch = 2_u16;
-        let sealer = MediaSealer::new(&secret, context(epoch)).expect("fixed sealer is valid");
+        let context = context(epoch);
+        let sealer = MediaSealer::new(&secret, context).expect("fixed sealer is valid");
         let (producer, consumer) =
             realtime_pcm_queue::<4>(4).expect("fixed queue capacity is valid");
         let counters = Arc::new(StreamCounters::default());
-        let pipeline = Pipeline::new(
+        let tick_bytes = data.to_vec();
+        let mut tick_index = 0_usize;
+        let mut arrival_ticks = 0_u64;
+        let tick_source = Box::new(move || {
+            let delta = u64::from(tick_bytes[tick_index % tick_bytes.len()]).saturating_add(1);
+            tick_index += 1;
+            arrival_ticks = arrival_ticks.saturating_add(delta);
+            arrival_ticks
+        });
+        let pipeline = Pipeline::new_with_adaptive_target(
             &secret,
-            context(epoch),
+            context,
             ByteDecoder,
             producer,
             Arc::clone(&counters),
             0,
+            AdaptiveTargetConfig {
+                target: JitterTargetConfig::preset(JitterMode::Balanced, 20, 4),
+                arrival_ticks_per_second: 1_000,
+                tick_source,
+            },
         )
-        .expect("fixed pipeline setup is valid");
+        .expect("fixed adaptive pipeline setup is valid");
         Self {
             pipeline,
             sealer,
@@ -205,6 +220,40 @@ impl PipelineHarness {
             snapshot.stream_resets, self.model.stream_resets,
             "stream reset counter drift"
         );
+        if snapshot.target_min_frames == 0 {
+            assert_eq!(
+                (snapshot.target_max_frames, snapshot.target_frames),
+                (0, 0),
+                "a retired target epoch must publish an empty state"
+            );
+            assert_eq!(
+                (
+                    snapshot.target_smoothed_jitter_ms,
+                    snapshot.target_raised_steps
+                ),
+                (0, 0),
+                "a retired target epoch must clear jitter and upward steps"
+            );
+            assert_eq!(
+                snapshot.target_lowered_steps, 0,
+                "a retired target epoch must clear downward steps"
+            );
+        } else {
+            assert_eq!(
+                (snapshot.target_min_frames, snapshot.target_max_frames),
+                (2, 4),
+                "the balanced target preset must remain bounded"
+            );
+            assert!(
+                (2..=4).contains(&snapshot.target_frames),
+                "the active target must stay within its water levels"
+            );
+            assert!(
+                u64::from(snapshot.target_raised_steps) + u64::from(snapshot.target_lowered_steps)
+                    <= self.model.authenticated,
+                "target step counters must not exceed authenticated observations"
+            );
+        }
     }
 
     /// Seals, delivers, and decodes one fresh in-order packet, then updates the
@@ -391,7 +440,7 @@ fuzz_target!(|data: &[u8]| {
     if data.is_empty() {
         return;
     }
-    let mut harness = PipelineHarness::new();
+    let mut harness = PipelineHarness::new(data);
     let mut offset = 0;
     let steps = 1 + data.len() % 128;
     for step in 0..steps {
