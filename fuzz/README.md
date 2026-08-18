@@ -204,10 +204,13 @@ The network-scenario targets (`jitter_target`, `jitter_scheduler`, `multi_stream
 - `receiver_pipeline` drives byte-selected in-order deliveries, duplicates,
   tampered ciphertext with a valid-twin probe, retired-epoch packets, and
   rotations through the protected receiver pipeline with its opt-in adaptive
-  target controller. It compares every outcome, plaintext zeroing, decoded
-  PCM, published counter, and bounded target state against independent replay
-  and counter invariants, proving failed AEAD never advances the replay window
-  and only authenticated in-window packets reach the decoder.
+  target controller. It also forces a fixed-capacity jitter resynchronization
+  on every input and verifies that the resync packet publishes a clean target
+  epoch and becomes the immediate arrival baseline before the next interval is
+  measured. It compares every outcome, plaintext zeroing, decoded PCM,
+  published counter, and bounded target state against independent replay and
+  counter invariants, proving failed AEAD never advances the replay window and
+  only authenticated in-window packets reach the decoder.
 - `target_gated_playout` drives arbitrary gate deadlines and per-tick
   buffered, target, and pending-arrival inputs through the bounded
   target-gated playout primitive (ADR 0016), proving adversarial inputs

@@ -299,6 +299,72 @@ impl PipelineHarness {
         self.admitted_datagrams.push(packet.datagram);
     }
 
+    /// Fills the fixed jitter buffer without decoding, then admits one more
+    /// packet to force a controlled resynchronization. The resync packet must
+    /// establish the new adaptive arrival baseline immediately.
+    fn deliver_resynchronized(&mut self, step: usize) {
+        let mut last_sequence = None;
+        let mut last_payload = 0_u8;
+        for index in 0..5 {
+            let payload = u8::try_from((step + index) % 251).expect("payload stays below 251");
+            let packet = self
+                .sealer
+                .seal(0, u64::from(self.next_expected) * 960, &[payload])
+                .expect("sealing a resync packet cannot fail");
+            let sequence = packet.header.sequence;
+            assert_eq!(
+                sequence, self.next_expected,
+                "resync deliveries stay in order"
+            );
+            assert_eq!(
+                self.replay.accept_authenticated(sequence),
+                ReplayDecision::Accepted
+            );
+            let result = self.pipeline.receive(&packet.datagram, &mut self.plaintext);
+            let expected = if index == 4 {
+                InsertOutcome::Resynchronized { dropped_frames: 4 }
+            } else {
+                InsertOutcome::Inserted
+            };
+            assert_eq!(result.unwrap(), expected, "resync admission outcome");
+            assert!(
+                self.plaintext.iter().all(|byte| *byte == 0),
+                "plaintext must be cleared after resync admission"
+            );
+
+            self.model.authenticated += 1;
+            self.next_expected = sequence.checked_add(1).expect("fuzz sequences stay small");
+            self.admitted_seqs.push(sequence);
+            self.admitted_datagrams.push(packet.datagram);
+            last_sequence = Some(sequence);
+            last_payload = payload;
+        }
+
+        let snapshot = self.counters.snapshot();
+        assert_eq!(
+            (
+                snapshot.target_min_frames,
+                snapshot.target_max_frames,
+                snapshot.target_frames,
+                snapshot.target_smoothed_jitter_ms,
+                snapshot.target_raised_steps,
+                snapshot.target_lowered_steps,
+            ),
+            (2, 4, 3, 0, 0, 0),
+            "the resync packet must publish a clean adaptive target epoch"
+        );
+        self.model.stream_resets += 1;
+        self.queue_epoch_dirty = true;
+        assert_decoded_and_popped(
+            &mut self.pipeline,
+            &mut self.consumer,
+            last_sequence.expect("resync sequence exists"),
+            last_payload,
+            true,
+        );
+        self.queue_epoch_dirty = false;
+    }
+
     /// Delivers an admitted packet again; the replay window must reject it and
     /// the caller-owned plaintext must be cleared.
     fn deliver_duplicate(&mut self, data: &[u8], offset: &mut usize) {
@@ -442,6 +508,12 @@ fuzz_target!(|data: &[u8]| {
     }
     let mut harness = PipelineHarness::new(data);
     let mut offset = 0;
+    // Force one bounded jitter resynchronization on every input so the fuzz
+    // target covers the adaptive epoch reset and immediate baseline contract.
+    harness.deliver_fresh(0);
+    harness.assert_state();
+    harness.deliver_resynchronized(1);
+    harness.assert_state();
     let steps = 1 + data.len() % 128;
     for step in 0..steps {
         let roll = next_byte(data, &mut offset) % 100;
