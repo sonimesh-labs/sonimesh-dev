@@ -65,7 +65,10 @@ than silently weakening the guarantee.
   a packet sealed under the first session is admitted, a fresh reconnection
   session installs through `install_fresh_session`, packets sealed under the
   retired session are then rejected, and the fresh session's packets admit and
-  decode.
+  decode. The adaptive-target pipeline test additionally proves the replacement
+  is fail-closed for target state: a reused active session ID leaves a populated
+  target epoch intact, while a valid fresh session retires it before the first
+  new-session packet establishes a fresh arrival baseline.
 - A UDP loopback integration test drives the same flow through the real socket
   path: the allocator's retained root backs the sealer and the bind, a fresh
   reconnection session installs over the same socket, packets sealed under the
