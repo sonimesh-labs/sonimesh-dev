@@ -21,12 +21,14 @@ const emit = defineEmits<{
 const remainingSeconds = ref<number | null>(null)
 let countdownTimer: number | undefined
 let expiryStatusRefreshRequested = false
+let lastObservedAtMillis: number | null = null
 
 function clearCountdown() {
   if (countdownTimer !== undefined) {
     window.clearInterval(countdownTimer)
     countdownTimer = undefined
   }
+  lastObservedAtMillis = null
 }
 
 function refreshExpiryStatusOnce() {
@@ -37,7 +39,17 @@ function refreshExpiryStatusOnce() {
 }
 
 function countdownReachedDeadline(deadlineMillis: number): boolean {
-  const secondsRemaining = Math.max(0, Math.ceil((deadlineMillis - Date.now()) / 1_000))
+  const nowMillis = Date.now()
+  if (lastObservedAtMillis !== null && nowMillis < lastObservedAtMillis) {
+    // Match the control-domain clock contract: do not extend an invitation
+    // when the local wall clock regresses; refresh authoritative state instead.
+    remainingSeconds.value = 0
+    refreshExpiryStatusOnce()
+    return true
+  }
+  lastObservedAtMillis = nowMillis
+
+  const secondsRemaining = Math.max(0, Math.ceil((deadlineMillis - nowMillis) / 1_000))
   remainingSeconds.value = secondsRemaining
   if (secondsRemaining !== 0) return false
 

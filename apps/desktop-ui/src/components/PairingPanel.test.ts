@@ -162,6 +162,34 @@ describe('PairingPanel', () => {
 
     expect(wrapper.text()).toContain('2s remaining')
   })
+
+  it('refreshes authoritative state when the countdown clock regresses', async () => {
+    let nowMillis = Date.parse('2026-08-05T00:00:00Z')
+    let intervalCallback: (() => void) | undefined
+    vi.spyOn(Date, 'now').mockImplementation(() => nowMillis)
+    vi.spyOn(window, 'setInterval').mockImplementation((callback) => {
+      intervalCallback = callback as () => void
+      return 1
+    })
+
+    const wrapper = mount(PairingPanel, {
+      props: {
+        pairing: activePairing(5),
+        busy: false,
+      },
+    })
+
+    nowMillis += 1_000
+    intervalCallback?.()
+    nowMillis -= 1_500
+    intervalCallback?.()
+    await nextTick()
+
+    expect(wrapper.text()).toContain('0s remaining')
+    expect(wrapper.emitted('refresh')).toHaveLength(1)
+    expect(wrapper.emitted('expire')).toBeUndefined()
+  })
+
   it('offers a preview-only sender-verification simulation while an invitation is active', async () => {
     const wrapper = mount(PairingPanel, {
       props: {
