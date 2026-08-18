@@ -85,6 +85,23 @@ describe('PreviewDesktopBridge', () => {
     expect(expired.pairing).toEqual({ state: 'expired', expiresInSeconds: 0 })
   })
 
+  it('expires an active invitation when the preview clock regresses', async () => {
+    const bridge = fixedTimeBridge()
+    await bridge.revokePairing()
+    await bridge.createPairing()
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    await bridge.snapshot()
+    vi.setSystemTime(new Date('2026-08-11T00:00:00.500Z'))
+
+    const expired = await bridge.snapshot()
+    expect(expired.session).toBe('idle')
+    expect(expired.pairing).toEqual({ state: 'expired', expiresInSeconds: 0 })
+
+    vi.setSystemTime(new Date('2026-08-11T00:01:00Z'))
+    expect((await bridge.snapshot()).pairing.state).toBe('expired')
+  })
+
   it('revoking synthetic trust returns a streaming preview to idle', async () => {
     const bridge = new PreviewDesktopBridge()
     await bridge.startStream()
@@ -136,6 +153,23 @@ describe('PreviewDesktopBridge', () => {
     expect(expired.replies).toHaveLength(2)
     expect(expired.replies[0].kind).toBe('streamStatus')
     expect(expired.replies[0].detail).toBe('control connection lost')
+  })
+
+  it('expires a reconnecting session when the preview clock regresses', async () => {
+    const bridge = fixedTimeBridge()
+    await bridge.startStream()
+    await bridge.simulateConnectionLost()
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    await bridge.snapshot()
+    vi.setSystemTime(new Date('2026-08-11T00:00:00.500Z'))
+
+    const expired = await bridge.snapshot()
+    expect(expired.session).toBe('idle')
+    expect(expired.reconnectRemainingMs).toBeNull()
+
+    vi.setSystemTime(new Date('2026-08-11T00:01:00Z'))
+    expect((await bridge.snapshot()).session).toBe('idle')
   })
 
   it('does not simulate connection loss without a trusted session', async () => {

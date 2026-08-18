@@ -103,8 +103,14 @@ const INITIAL_PREVIEW_SNAPSHOT: DesktopSnapshot = {
 export class PreviewDesktopBridge implements DesktopBridge {
   private pairingExpiresAtMillis: number | null = null
 
-  /** Monotonic instant when the preview armed the bounded reconnect window. */
+  /** Last observed wall-clock instant while the preview invitation was active. */
+  private pairingLastObservedAtMillis: number | null = null
+
+  /** Preview clock instant when the bounded reconnect window was armed. */
   private reconnectArmedAtMillis: number | null = null
+
+  /** Last observed wall-clock instant while the reconnect window was active. */
+  private reconnectLastObservedAtMillis: number | null = null
 
   private nextRequestId = 1
 
@@ -178,7 +184,9 @@ export class PreviewDesktopBridge implements DesktopBridge {
 
   async createPairing(): Promise<DesktopSnapshot> {
     if (['inactive', 'expired', 'revoked'].includes(this.snapshotState.pairing.state)) {
-      this.pairingExpiresAtMillis = Date.now() + PAIRING_INVITATION_LIFETIME_MILLIS
+      const nowMillis = Date.now()
+      this.pairingExpiresAtMillis = nowMillis + PAIRING_INVITATION_LIFETIME_MILLIS
+      this.pairingLastObservedAtMillis = nowMillis
       this.snapshotState.pairing = { state: 'active', expiresInSeconds: PAIRING_INVITATION_LIFETIME_SECONDS }
       this.setSession('pairing')
       this.recordStatus('pairing', 'pairing invitation opened')
@@ -191,6 +199,7 @@ export class PreviewDesktopBridge implements DesktopBridge {
   async expirePairing(): Promise<DesktopSnapshot> {
     if (this.snapshotState.pairing.state === 'active') {
       this.pairingExpiresAtMillis = null
+      this.pairingLastObservedAtMillis = null
       this.snapshotState.pairing = { state: 'expired', expiresInSeconds: 0 }
       this.setSession('idle')
       this.recordStatus('idle', 'pairing invitation expired')
@@ -203,6 +212,7 @@ export class PreviewDesktopBridge implements DesktopBridge {
   async revokePairing(): Promise<DesktopSnapshot> {
     if (this.snapshotState.pairing.state === 'consumed') {
       this.pairingExpiresAtMillis = null
+      this.pairingLastObservedAtMillis = null
       this.snapshotState.pairing = { state: 'revoked', expiresInSeconds: null }
       this.setSession('idle')
       this.recordStatus('idle', 'trusted session revoked')
@@ -218,7 +228,9 @@ export class PreviewDesktopBridge implements DesktopBridge {
       this.snapshotState.pairing.state === 'consumed'
     ) {
       this.setSession('reconnecting')
-      this.reconnectArmedAtMillis = Date.now()
+      const nowMillis = Date.now()
+      this.reconnectArmedAtMillis = nowMillis
+      this.reconnectLastObservedAtMillis = nowMillis
       this.recordStatus('reconnecting', 'control connection lost')
     } else {
       this.recordError('connection loss requires a trusted session')
@@ -244,6 +256,7 @@ export class PreviewDesktopBridge implements DesktopBridge {
       // The session owner retires the trusted session on expiry while the
       // consumed pairing record stays retained for audit; revoke clears it.
       this.pairingExpiresAtMillis = null
+      this.pairingLastObservedAtMillis = null
       this.setSession('idle')
       this.recordStatus('idle', 'trusted session expired')
     } else {
@@ -279,6 +292,7 @@ export class PreviewDesktopBridge implements DesktopBridge {
   async simulatePairingConsumed(): Promise<DesktopSnapshot> {
     if (this.snapshotState.pairing.state === 'active') {
       this.pairingExpiresAtMillis = null
+      this.pairingLastObservedAtMillis = null
       this.snapshotState.pairing = { state: 'consumed', expiresInSeconds: null }
       this.setSession('ready')
       this.recordStatus('ready', 'sender consumed the pairing invitation')
@@ -329,7 +343,9 @@ export class PreviewDesktopBridge implements DesktopBridge {
   async resetPreview(): Promise<DesktopSnapshot> {
     this.snapshotState = structuredClone(INITIAL_PREVIEW_SNAPSHOT)
     this.pairingExpiresAtMillis = null
+    this.pairingLastObservedAtMillis = null
     this.reconnectArmedAtMillis = null
+    this.reconnectLastObservedAtMillis = null
     this.nextRequestId = 1
     this.nextExportSequence = 0
     return this.copy()
@@ -343,6 +359,7 @@ export class PreviewDesktopBridge implements DesktopBridge {
     if (session !== 'reconnecting') {
       this.snapshotState.reconnectRemainingMs = null
       this.reconnectArmedAtMillis = null
+      this.reconnectLastObservedAtMillis = null
     }
   }
 
@@ -374,9 +391,22 @@ export class PreviewDesktopBridge implements DesktopBridge {
       return
     }
 
+    if (
+      this.pairingLastObservedAtMillis !== null &&
+      nowMillis < this.pairingLastObservedAtMillis
+    ) {
+      this.pairingExpiresAtMillis = null
+      this.pairingLastObservedAtMillis = null
+      this.snapshotState.pairing = { state: 'expired', expiresInSeconds: 0 }
+      this.setSession('idle')
+      return
+    }
+    this.pairingLastObservedAtMillis = nowMillis
+
     const remainingMillis = this.pairingExpiresAtMillis - nowMillis
     if (remainingMillis <= 0) {
       this.pairingExpiresAtMillis = null
+      this.pairingLastObservedAtMillis = null
       this.snapshotState.pairing = { state: 'expired', expiresInSeconds: 0 }
       this.setSession('idle')
       return
@@ -393,12 +423,26 @@ export class PreviewDesktopBridge implements DesktopBridge {
       return
     }
 
+    if (
+      this.reconnectLastObservedAtMillis !== null &&
+      nowMillis < this.reconnectLastObservedAtMillis
+    ) {
+      // Match the Rust reconnect-grace owner: a clock regression expires the
+      // session so a later forward jump cannot revive trusted state.
+      this.reconnectArmedAtMillis = null
+      this.reconnectLastObservedAtMillis = null
+      this.setSession('idle')
+      return
+    }
+    this.reconnectLastObservedAtMillis = nowMillis
+
     const remainingMillis = RECONNECT_GRACE_MILLIS - (nowMillis - this.reconnectArmedAtMillis)
     if (remainingMillis <= 0) {
       // The reconnect deadline passed without a reconnect; the control session
       // retires exactly as the Rust snapshot entry point projects. Expiry is a
       // local lifecycle event, so no receiver-generated reply is recorded.
       this.reconnectArmedAtMillis = null
+      this.reconnectLastObservedAtMillis = null
       this.setSession('idle')
       return
     }
