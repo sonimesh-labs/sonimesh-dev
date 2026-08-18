@@ -113,7 +113,10 @@ state reaches the stream counters. The application integration test
 independent calm and impaired arrival histories and resets them one at a time,
 proving target trajectories and epoch retirement remain stream-local. It also
 proves a rejected reused session ID preserves a populated target epoch, while a
-valid fresh session clears it and rebuilds from a new arrival baseline. A
+valid fresh session clears it and rebuilds from a new arrival baseline. Its UDP
+loopback companion additionally proves that valid fresh-session replacement
+clears the adaptive target and source pin together before the first new-session
+packet rebinds the authenticated endpoint. A
 deterministic target-gated scheduler simulation (`simulate_jitter_scheduler`)
 now exercises that
 consumption loop in the network simulator: the scheduler waits while fewer
