@@ -244,6 +244,58 @@ fn hard_resynchronize_retires_and_republishes_the_target_epoch() {
 }
 
 #[test]
+fn jitter_resynchronization_starts_a_new_arrival_baseline_at_the_resync_packet() {
+    let counters = Arc::new(StreamCounters::default());
+    // Leave the first four frames buffered so the fifth frame forces the
+    // bounded jitter buffer to resynchronize. The resynchronizing packet must
+    // become the first arrival baseline of the new adaptive epoch.
+    let (mut pipeline, mut sealer, _queue) =
+        adaptive_pipeline(&[10, 30, 50, 70, 170, 270], Arc::clone(&counters));
+    let mut admit = |sequence: u8, sample_timestamp: u64| {
+        let packet = sealer
+            .seal(sequence, sample_timestamp, &[7])
+            .expect("test packet seals");
+        let mut plaintext = [0_u8; MAX_ENCODED_BYTES];
+        pipeline
+            .receive(&packet.datagram, &mut plaintext)
+            .expect("authenticated packet admits")
+    };
+
+    for sequence in 0..4 {
+        assert_eq!(
+            admit(sequence, u64::from(sequence) * 960),
+            InsertOutcome::Inserted
+        );
+    }
+    assert_eq!(
+        target_state(&counters),
+        (2, 4, 3, 0, 0, 0),
+        "the populated epoch must still report the balanced base"
+    );
+
+    assert_eq!(
+        admit(4, 4 * 960),
+        InsertOutcome::Resynchronized { dropped_frames: 4 }
+    );
+    assert_eq!(
+        target_state(&counters),
+        (2, 4, 3, 0, 0, 0),
+        "the resynchronizing packet must publish a clean new target epoch"
+    );
+
+    // The next packet arrives 100 ms after the resync packet while advancing
+    // only one 20 ms media frame. Observing it against the resync packet proves
+    // that the new baseline was established immediately rather than one packet
+    // late.
+    assert_eq!(admit(5, 5 * 960), InsertOutcome::Inserted);
+    assert_eq!(
+        target_state(&counters),
+        (2, 4, 3, 20, 0, 0),
+        "the first post-resync interval must feed the new jitter estimate"
+    );
+}
+
+#[test]
 fn fresh_session_retires_target_only_after_a_valid_replacement() {
     let counters = Arc::new(StreamCounters::default());
     let mut ticks = (1_u64..=4).map(|frame| frame * 20).collect::<Vec<_>>();

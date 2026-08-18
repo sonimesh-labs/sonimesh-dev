@@ -474,6 +474,7 @@ where
             InsertOutcome::Inserted
                 | InsertOutcome::Reordered
                 | InsertOutcome::Late
+                | InsertOutcome::Resynchronized { .. }
                 | InsertOutcome::Disabled
         ) {
             return;
