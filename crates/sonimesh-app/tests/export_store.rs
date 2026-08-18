@@ -213,6 +213,40 @@ fn opening_ignores_non_regular_entries_with_export_names() {
     assert!(dir.path().join(pending_file_name(8)).is_dir());
 }
 
+#[cfg(unix)]
+#[test]
+fn opening_ignores_symlinked_export_entries_without_removing_targets() {
+    use std::os::unix::fs::symlink;
+
+    let dir = TempDir::new();
+    let backing = dir.path().join("backing");
+    std::fs::create_dir(&backing).expect("create symlink backing directory");
+    let export_target = backing.join("export-target.json");
+    let pending_target = backing.join("pending-target");
+    std::fs::write(&export_target, "retained elsewhere").expect("write export target");
+    std::fs::write(&pending_target, "partial elsewhere").expect("write pending target");
+    let export_link = dir.path().join(export_file_name(7));
+    let pending_link = dir.path().join(pending_file_name(8));
+    symlink(&export_target, &export_link).expect("create export symlink");
+    symlink(&pending_target, &pending_link).expect("create pending symlink");
+
+    let store = ExportStore::open(dir.path(), ExportRetentionPolicy::bounded(4, 4_096))
+        .expect("open store");
+
+    assert_eq!(store.retained_count(), 0);
+    assert_eq!(store.next_sequence(), 0);
+    assert!(std::fs::symlink_metadata(&export_link).is_ok());
+    assert!(std::fs::symlink_metadata(&pending_link).is_ok());
+    assert_eq!(
+        std::fs::read(&export_target).expect("read export target"),
+        b"retained elsewhere"
+    );
+    assert_eq!(
+        std::fs::read(&pending_target).expect("read pending target"),
+        b"partial elsewhere"
+    );
+}
+
 #[test]
 fn opening_rejects_a_non_directory_path() {
     let dir = TempDir::new();
