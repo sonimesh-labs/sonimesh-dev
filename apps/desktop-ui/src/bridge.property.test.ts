@@ -121,7 +121,9 @@ interface ModelState {
   session: SessionState
   pairing: PairingState
   pairingExpiresAtMillis: number | null
+  pairingLastObservedAtMillis: number | null
   reconnectArmedAtMillis: number | null
+  reconnectLastObservedAtMillis: number | null
   selectedOutputId: string | null
   gain: number
   muted: boolean
@@ -134,7 +136,9 @@ function initialModelState(): ModelState {
     session: 'ready',
     pairing: 'consumed',
     pairingExpiresAtMillis: null,
+    pairingLastObservedAtMillis: null,
     reconnectArmedAtMillis: null,
+    reconnectLastObservedAtMillis: null,
     selectedOutputId: 'default',
     gain: 1,
     muted: false,
@@ -186,6 +190,7 @@ class PreviewBridgeModel {
         ) {
           s.session = 'ready'
           s.reconnectArmedAtMillis = null
+          s.reconnectLastObservedAtMillis = null
           s.output.faultReported = false
           s.output.health = 'healthy'
         }
@@ -211,6 +216,7 @@ class PreviewBridgeModel {
       case 'createPairing':
         if (s.pairing === 'inactive' || s.pairing === 'expired' || s.pairing === 'revoked') {
           s.pairingExpiresAtMillis = this.nowMillis + INVITATION_LIFETIME_MILLIS
+          s.pairingLastObservedAtMillis = this.nowMillis
           s.pairing = 'active'
           s.session = 'pairing'
         }
@@ -218,6 +224,7 @@ class PreviewBridgeModel {
       case 'expirePairing':
         if (s.pairing === 'active') {
           s.pairingExpiresAtMillis = null
+          s.pairingLastObservedAtMillis = null
           s.pairing = 'expired'
           s.session = 'idle'
         }
@@ -225,7 +232,9 @@ class PreviewBridgeModel {
       case 'revokePairing':
         if (s.pairing === 'consumed') {
           s.pairingExpiresAtMillis = null
+          s.pairingLastObservedAtMillis = null
           s.reconnectArmedAtMillis = null
+          s.reconnectLastObservedAtMillis = null
           s.pairing = 'revoked'
           s.session = 'idle'
         }
@@ -234,6 +243,7 @@ class PreviewBridgeModel {
         if ((s.session === 'ready' || s.session === 'streaming') && s.pairing === 'consumed') {
           s.session = 'reconnecting'
           s.reconnectArmedAtMillis = this.nowMillis
+          s.reconnectLastObservedAtMillis = this.nowMillis
         }
         return
       case 'simulateReconnected':
@@ -251,7 +261,9 @@ class PreviewBridgeModel {
           s.pairing === 'consumed'
         ) {
           s.pairingExpiresAtMillis = null
+          s.pairingLastObservedAtMillis = null
           s.reconnectArmedAtMillis = null
+          s.reconnectLastObservedAtMillis = null
           s.session = 'idle'
         }
         return
@@ -272,6 +284,7 @@ class PreviewBridgeModel {
       case 'simulatePairingConsumed':
         if (s.pairing === 'active') {
           s.pairingExpiresAtMillis = null
+          s.pairingLastObservedAtMillis = null
           s.pairing = 'consumed'
           s.session = 'ready'
         }
@@ -350,8 +363,20 @@ class PreviewBridgeModel {
     if (s.pairing !== 'active' || s.pairingExpiresAtMillis === null) {
       return
     }
+    if (
+      s.pairingLastObservedAtMillis !== null &&
+      this.nowMillis < s.pairingLastObservedAtMillis
+    ) {
+      s.pairingExpiresAtMillis = null
+      s.pairingLastObservedAtMillis = null
+      s.pairing = 'expired'
+      s.session = 'idle'
+      return
+    }
+    s.pairingLastObservedAtMillis = this.nowMillis
     if (s.pairingExpiresAtMillis - this.nowMillis <= 0) {
       s.pairingExpiresAtMillis = null
+      s.pairingLastObservedAtMillis = null
       s.pairing = 'expired'
       s.session = 'idle'
     }
@@ -362,8 +387,20 @@ class PreviewBridgeModel {
     if (s.session !== 'reconnecting' || s.reconnectArmedAtMillis === null) {
       return
     }
+    if (
+      s.reconnectLastObservedAtMillis !== null &&
+      this.nowMillis < s.reconnectLastObservedAtMillis
+    ) {
+      s.reconnectArmedAtMillis = null
+      s.reconnectLastObservedAtMillis = null
+      s.session = 'idle'
+      this.reconnectAutoExpiries += 1
+      return
+    }
+    s.reconnectLastObservedAtMillis = this.nowMillis
     if (RECONNECT_GRACE_MILLIS - (this.nowMillis - s.reconnectArmedAtMillis) <= 0) {
       s.reconnectArmedAtMillis = null
+      s.reconnectLastObservedAtMillis = null
       s.session = 'idle'
       this.reconnectAutoExpiries += 1
     }
@@ -479,6 +516,7 @@ describe('PreviewDesktopBridge property', () => {
     const observedKinds = new Set<Command['kind']>()
     let observedActiveWithCountdown = false
     let observedAutoExpiry = false
+    let observedClockRegression = false
 
     for (let step = 0; step < 3_000; step++) {
       // Advance the shared clock: mostly small steps so an open invitation can
@@ -486,6 +524,11 @@ describe('PreviewDesktopBridge property', () => {
       const advance =
         Math.floor(random() * 30_000) + (random() < 0.25 ? Math.floor(random() * 300_000) : 0)
       nowMillis += advance
+      const regressed = random() < 0.05 && nowMillis > startMillis + 2_000
+      if (regressed) {
+        nowMillis -= Math.floor(random() * 2_000) + 1
+        observedClockRegression = true
+      }
       vi.setSystemTime(new Date(nowMillis))
       model.setNow(nowMillis)
 
@@ -587,6 +630,7 @@ describe('PreviewDesktopBridge property', () => {
     expect(observedPairings.has('revoked')).toBe(true)
     expect(observedActiveWithCountdown).toBe(true)
     expect(observedAutoExpiry).toBe(true)
+    expect(observedClockRegression).toBe(true)
     // The walk must observe the reconnect window decaying to expiry on its
     // own, mirroring the Rust snapshot entry point, not only via an explicit
     // session-expiry command.
