@@ -65,6 +65,10 @@ function beginCountdown(pairing: PairingStatus) {
     return
   }
 
+  // A refresh can legitimately return another active snapshot when the UI
+  // clock and the authoritative monotonic clock disagree. Re-arm the local
+  // one-shot deadline for that fresh authoritative snapshot.
+  expiryStatusRefreshRequested = false
   const expiresInSeconds = pairing.expiresInSeconds
   remainingSeconds.value = expiresInSeconds
   if (expiresInSeconds === null) return

@@ -44,6 +44,24 @@ describe('PairingPanel', () => {
     expect(wrapper.emitted('refresh')).toHaveLength(1)
   })
 
+  it('rearms the deadline when a refresh still reports an active invitation', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-08-05T00:00:00Z'))
+    const wrapper = mount(PairingPanel, {
+      props: {
+        pairing: activePairing(1),
+        busy: false,
+      },
+    })
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(wrapper.emitted('refresh')).toHaveLength(1)
+
+    await wrapper.setProps({ pairing: activePairing(1) })
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(wrapper.emitted('refresh')).toHaveLength(2)
+  })
+
   it('refreshes immediately for an already-expired active snapshot', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-08-05T00:00:00Z'))
