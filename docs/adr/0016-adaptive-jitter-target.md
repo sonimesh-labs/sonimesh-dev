@@ -153,7 +153,10 @@ step-count, and completion invariants on every report. The end-to-end
 `receiver_pipeline` and `udp_receiver_pipeline` fuzz targets also enable the
 opt-in live controller with input-derived arrival clocks and check target
 bounds and epoch reset state alongside their protected-ingress, source-pin,
-and decode invariants.
+and decode invariants. The `receiver_pipeline` target additionally forces a
+fixed-capacity jitter resynchronization on every input and verifies that the
+accepted resync packet publishes a clean target epoch and becomes the
+immediate arrival baseline.
 
 The completion bound is explicit: the `jitter_scheduler_property` and
 `mixer_jitter_scheduler_property` walks and the `jitter_scheduler`,
