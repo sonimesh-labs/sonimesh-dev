@@ -204,6 +204,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "target_gated_playout"
+path = "fuzz_targets/target_gated_playout.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "mixer_membership_scenario"
 path = "fuzz_targets/mixer_membership_scenario.rs"
 test = false

@@ -208,6 +208,12 @@ The network-scenario targets (`jitter_target`, `jitter_scheduler`, `multi_stream
   independent replay oracle and counter model, proving failed AEAD never
   advances the replay window and only authenticated in-window packets reach
   the decoder.
+- `target_gated_playout` drives arbitrary gate deadlines and per-tick
+  buffered, target, and pending-arrival inputs through the bounded
+  target-gated playout primitive (ADR 0016), proving adversarial inputs
+  cannot panic the scheduler, push the gate streak past the configured
+  deadline, or count a forced playout without a preceding gate wait while
+  rejected deadlines return a clean config error.
 - `udp_receiver_pipeline` drives byte-selected deliveries, rotations, fresh
   sessions, tampered ciphertext with a valid-twin probe, duplicates,
   retired-epoch packets, and oversized datagrams over real loopback sockets
@@ -272,6 +278,7 @@ cargo +nightly-2026-07-18 fuzz run multi_stream -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run multi_stream_jitter_target -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run jitter_scheduler -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run jitter_target -- -max_len=1024
+cargo +nightly-2026-07-18 fuzz run target_gated_playout -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run mixer_membership_scenario -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run protected_media_ingress -- -max_len=1264
 cargo +nightly-2026-07-18 fuzz run pairing_binding -- -max_len=4096
