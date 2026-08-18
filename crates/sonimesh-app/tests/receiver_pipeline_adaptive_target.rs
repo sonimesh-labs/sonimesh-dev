@@ -282,6 +282,11 @@ fn jitter_resynchronization_starts_a_new_arrival_baseline_at_the_resync_packet()
         (2, 4, 3, 0, 0, 0),
         "the resynchronizing packet must publish a clean new target epoch"
     );
+    assert_eq!(
+        counters.snapshot().jitter_resync_dropped_frames,
+        4,
+        "the resynchronization must publish its dropped-frame count"
+    );
 
     // The next packet arrives 100 ms after the resync packet while advancing
     // only one 20 ms media frame. Observing it against the resync packet proves
@@ -553,6 +558,11 @@ fn udp_jitter_resynchronization_starts_a_new_arrival_baseline() {
         target_state(&counters),
         (2, 4, 3, 20, 0, 0),
         "the UDP resync packet must be the immediate arrival baseline"
+    );
+    assert_eq!(
+        counters.snapshot().jitter_resync_dropped_frames,
+        4,
+        "the UDP resynchronization must publish its dropped-frame count"
     );
     assert!(matches!(
         pipeline.decode_next().unwrap(),
