@@ -18,7 +18,7 @@ use sonimesh_app::{
 };
 use sonimesh_audio::{
     DecodeStep, FrameDecoder, InsertOutcome, JitterMode, JitterTargetConfig, RealtimePcmConsumer,
-    realtime_pcm_queue,
+    RealtimePcmPopOutcome, realtime_pcm_queue,
 };
 use sonimesh_diagnostics::{ExportSessionSnapshot, StreamCounters, build_export_bundle};
 use sonimesh_protocol::{MediaDirection, MediaKeyContext, MediaSealer, SessionSecret};
@@ -494,6 +494,75 @@ fn receives_authenticated_udp_media_into_the_adaptive_controller() {
     // The first packet only establishes the arrival baseline, but the target
     // configuration is already published for the active epoch.
     assert_eq!(target_state(&counters), (2, 4, 3, 0, 0, 0));
+}
+
+#[test]
+fn udp_jitter_resynchronization_starts_a_new_arrival_baseline() {
+    let counters = Arc::new(StreamCounters::default());
+    let secret = SessionSecret::new([0xA5; 32]);
+    let context = context();
+    let (producer, mut consumer) = realtime_pcm_queue::<PCM_SAMPLES_PER_BLOCK>(4).unwrap();
+    let (tick_source, _queue) = tick_source(&[10, 30, 50, 70, 170, 270]);
+    let mut pipeline = UdpPipeline::bind_with_adaptive_target(
+        "127.0.0.1:0".parse().unwrap(),
+        &secret,
+        context,
+        ByteDecoder,
+        producer,
+        Arc::clone(&counters),
+        0,
+        AdaptiveTargetConfig {
+            target: JitterTargetConfig::preset(JitterMode::Balanced, 20, JITTER_CAPACITY),
+            arrival_ticks_per_second: 1_000,
+            tick_source,
+        },
+    )
+    .unwrap();
+    let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let source = sender.local_addr().unwrap();
+    let destination = pipeline.local_addr().unwrap();
+    let mut sealer = MediaSealer::new(&secret, context).unwrap();
+
+    for sequence in 0_u64..6 {
+        let packet = sealer
+            .seal(0, sequence * 960, &[7])
+            .expect("test packet seals");
+        sender.send_to(&packet.datagram, destination).unwrap();
+        let outcome = loop {
+            match pipeline.poll() {
+                Ok(UdpPollOutcome::Empty) => thread::yield_now(),
+                other => break other,
+            }
+        };
+        let expected = if sequence == 4 {
+            InsertOutcome::Resynchronized { dropped_frames: 4 }
+        } else {
+            InsertOutcome::Inserted
+        };
+        assert!(matches!(
+            outcome,
+            Ok(UdpPollOutcome::Processed {
+                source: observed,
+                admission,
+            }) if observed == source && admission == expected
+        ));
+    }
+
+    assert_eq!(pipeline.pinned_source(), Some(source));
+    assert_eq!(
+        target_state(&counters),
+        (2, 4, 3, 20, 0, 0),
+        "the UDP resync packet must be the immediate arrival baseline"
+    );
+    assert!(matches!(
+        pipeline.decode_next().unwrap(),
+        DecodeStep::Decoded { sequence: 4, .. }
+    ));
+    let mut output = [f32::NAN; PCM_SAMPLES_PER_BLOCK];
+    assert!(matches!(
+        consumer.pop_into(&mut output),
+        RealtimePcmPopOutcome::Filled { .. }
+    ));
 }
 
 #[test]
