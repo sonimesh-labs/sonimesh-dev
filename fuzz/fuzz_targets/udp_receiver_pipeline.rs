@@ -363,6 +363,80 @@ impl UdpWalk {
         self.admitted_datagrams.push(packet.datagram);
     }
 
+    /// Fills the fixed jitter buffer over the real UDP socket, then admits one
+    /// more packet to force a controlled resynchronization. The resync packet
+    /// must establish the new adaptive arrival baseline immediately while the
+    /// authenticated source pin remains unchanged.
+    fn deliver_resynchronized(&mut self) {
+        self.step += 1;
+        let source = self.source_a;
+        assert_eq!(self.pinned, Some(source), "resync requires a bound source");
+        let mut last_sequence = None;
+        let mut last_payload = 0_u8;
+
+        for index in 0..5 {
+            let payload = u8::try_from((self.step + index) % 251).expect("payload stays below 251");
+            let packet = self
+                .sealer
+                .seal(0, u64::from(self.next_expected) * 960, &[payload])
+                .unwrap();
+            let sequence = packet.header.sequence;
+            assert_eq!(
+                sequence, self.next_expected,
+                "resync deliveries stay in order"
+            );
+            assert_eq!(
+                self.replay.accept_authenticated(sequence),
+                ReplayDecision::Accepted
+            );
+            let result = send_and_poll(&self.sender_a, &mut self.pipeline, &packet.datagram);
+            let expected = if index == 4 {
+                InsertOutcome::Resynchronized { dropped_frames: 4 }
+            } else {
+                InsertOutcome::Inserted
+            };
+            assert!(
+                matches!(
+                    result,
+                    Ok(UdpPollOutcome::Processed {
+                        source: observed,
+                        admission,
+                    }) if observed == source && admission == expected
+                ),
+                "resync packet must be admitted from the pinned source"
+            );
+
+            self.counters.authenticated += 1;
+            self.next_expected = sequence.checked_add(1).expect("test sequences stay small");
+            self.admitted_seqs.push(sequence);
+            self.admitted_datagrams.push(packet.datagram);
+            last_sequence = Some(sequence);
+            last_payload = payload;
+        }
+
+        let snapshot = self.pipeline.counters().snapshot();
+        assert_eq!(
+            (
+                snapshot.target_min_frames,
+                snapshot.target_max_frames,
+                snapshot.target_frames,
+                snapshot.target_smoothed_jitter_ms,
+                snapshot.target_raised_steps,
+                snapshot.target_lowered_steps,
+            ),
+            (2, 4, 3, 0, 0, 0),
+            "the UDP resync packet must publish a clean adaptive target epoch"
+        );
+        self.counters.stream_resets += 1;
+        self.queue_epoch_dirty = true;
+        self.assert_decoded_and_popped(
+            last_sequence.expect("resync sequence exists"),
+            last_payload,
+            true,
+        );
+        self.queue_epoch_dirty = false;
+    }
+
     /// Rotates to a strictly newer epoch; the pin survives rotation.
     fn rotate(&mut self) {
         self.step += 1;
@@ -550,6 +624,8 @@ fuzz_target!(|data: &[u8]| {
     harness.assert_state("edge: oversized");
     harness.deliver_fresh(false);
     harness.assert_state("edge: first admission");
+    harness.deliver_resynchronized();
+    harness.assert_state("edge: UDP resynchronization");
     harness.deliver_fresh(true);
     harness.assert_state("edge: changed endpoint");
     harness.deliver_duplicate(0);

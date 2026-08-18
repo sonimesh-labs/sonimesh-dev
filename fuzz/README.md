@@ -221,7 +221,10 @@ The network-scenario targets (`jitter_target`, `jitter_scheduler`, `multi_stream
   sessions, tampered ciphertext with a valid-twin probe, duplicates,
   retired-epoch packets, and oversized datagrams over real loopback sockets
   through the UDP-backed protected receiver composition with its opt-in
-  adaptive target controller. It compares every poll outcome, pin state,
+  adaptive target controller. It also forces a fixed-capacity resynchronization
+  over the pinned UDP endpoint and verifies that the resync packet publishes a
+  clean target epoch, establishes the immediate arrival baseline, and produces
+  the expected PCM discontinuity. It compares every poll outcome, pin state,
   decoded PCM, diagnostic counter, and bounded target state against independent
   pin, replay, and controller invariants, proving the source pin binds only to
   the first successful protected endpoint, a changed endpoint is rejected
