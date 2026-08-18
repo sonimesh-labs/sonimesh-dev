@@ -118,15 +118,18 @@ where
         Ok(())
     }
 
-    /// Stops the backend and retires the membership handle.
+    /// Stops the backend and retires the membership handle without
+    /// reporting a platform fault.
     ///
-    /// Lifecycle completion remains owned by the caller.
+    /// Lifecycle completion remains owned by the caller. A deliberate stop is
+    /// distinct from [`Self::monitor`], which records a non-healthy backend
+    /// fault for the next control snapshot.
     pub fn stop(&mut self) {
         self.output.stop();
         self.membership = None;
         self.output_format = None;
         self.stream_active = false;
-        self.fault_reported = true;
+        self.fault_reported = false;
     }
 
     /// Returns the membership handle sharing the current mixer source.
@@ -443,7 +446,7 @@ mod tests {
     }
 
     #[test]
-    fn stop_retires_the_handle_and_marks_a_fault() {
+    fn stop_retires_the_handle_without_reporting_a_fault() {
         let mut controller = controller(FakeOutput::default());
         controller.start(selection(None)).unwrap();
 
@@ -453,7 +456,7 @@ mod tests {
         let snapshot = controller.snapshot();
         assert!(snapshot.selection_retained());
         assert!(!snapshot.stream_active());
-        assert!(snapshot.fault_reported());
+        assert!(!snapshot.fault_reported());
     }
 
     #[test]

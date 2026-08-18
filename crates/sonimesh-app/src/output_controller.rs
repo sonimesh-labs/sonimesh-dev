@@ -137,14 +137,18 @@ where
         Ok(())
     }
 
-    /// Stops the backend; lifecycle completion remains owned by the caller.
+    /// Stops the backend without reporting a platform fault.
+    ///
+    /// Lifecycle completion remains owned by the caller. A deliberate stop is
+    /// distinct from [`Self::monitor`], which records a non-healthy backend
+    /// fault for the next control snapshot.
     pub fn stop(&mut self) {
         self.output.stop();
         if self.stream_active {
             self.source_factory.output_stopped();
         }
         self.stream_active = false;
-        self.fault_reported = true;
+        self.fault_reported = false;
     }
 
     /// Returns a redacted low-rate output lifecycle snapshot.
@@ -562,7 +566,7 @@ mod tests {
     }
 
     #[test]
-    fn stop_retires_the_stream_and_marks_a_fault() {
+    fn stop_retires_the_stream_without_reporting_a_fault() {
         let factory = FakeSourceFactory::default();
         let counters = factory.counters.clone();
         let mut controller = OutputController::new(FakeOutput::default(), factory);
@@ -574,7 +578,7 @@ mod tests {
         let snapshot = controller.snapshot();
         assert!(snapshot.selection_retained());
         assert!(!snapshot.stream_active());
-        assert!(snapshot.fault_reported());
+        assert!(!snapshot.fault_reported());
     }
 
     #[test]

@@ -238,7 +238,7 @@ impl OutputModel {
                 .expect("active stream implies a matching output_started call");
         }
         self.stream_active = false;
-        self.fault_reported = true;
+        self.fault_reported = false;
     }
 }
 
