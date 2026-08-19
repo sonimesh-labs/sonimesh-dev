@@ -105,7 +105,7 @@ describe('OutputPanel', () => {
     expect(wrapper.get('.mute-toggle').text()).toContain('Unmute')
   })
 
-  it('shows a healthy idle output with no fault', () => {
+  it('shows a neutral idle output with no fault', () => {
     const wrapper = mount(OutputPanel, {
       props: {
         devices: [],
@@ -119,9 +119,50 @@ describe('OutputPanel', () => {
     })
 
     const status = wrapper.get('.output-status')
-    expect(status.attributes('aria-label')).toBe('Output health')
-    expect(status.text()).toContain('Stream idle · Healthy')
+    expect(status.attributes('aria-label')).toBe('Output status')
+    expect(status.classes()).toContain('health-idle')
+    expect(status.text()).toContain('Stream idle · No active output')
+    expect(status.text()).toContain('No output stream is currently running.')
     expect(status.text()).not.toContain('stream fault was reported')
+  })
+
+  it('does not present stale health after an explicit stop as a fault', () => {
+    const wrapper = mount(OutputPanel, {
+      props: {
+        devices: [],
+        selectedId: null,
+        output: outputSnapshot({ health: 'streamError' }),
+        gain: 1,
+        muted: false,
+        busy: false,
+        preview: true,
+      },
+    })
+
+    const status = wrapper.get('.output-status')
+    expect(status.classes()).toContain('health-idle')
+    expect(status.text()).toContain('Stream idle · No active output')
+    expect(status.text()).not.toContain('Stream error')
+    expect(status.text()).not.toContain('asynchronous stream fault')
+  })
+
+  it('fails closed when a reported fault is paired with healthy health', () => {
+    const wrapper = mount(OutputPanel, {
+      props: {
+        devices: [],
+        selectedId: null,
+        output: outputSnapshot({ faultReported: true }),
+        gain: 1,
+        muted: false,
+        busy: false,
+        preview: true,
+      },
+    })
+
+    const status = wrapper.get('.output-status')
+    expect(status.classes()).toContain('health-streamError')
+    expect(status.text()).toContain('Stream idle · Stream error')
+    expect(status.text()).toContain('A stream fault was reported; reselect or reconnect the output.')
   })
 
   it('shows an active stream when the controller owns the output', () => {
@@ -164,7 +205,7 @@ describe('OutputPanel', () => {
       props: {
         devices: [],
         selectedId: null,
-        output: outputSnapshot({ health: 'callbackCapacityExceeded' }),
+        output: outputSnapshot({ streamActive: true, health: 'callbackCapacityExceeded' }),
         gain: 1,
         muted: false,
         busy: false,

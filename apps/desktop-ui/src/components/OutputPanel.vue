@@ -34,6 +34,35 @@ const healthDetails: Record<OutputHealth, string> = {
   callbackCapacityExceeded: 'A callback exceeded the preallocated safe output bound.',
   streamError: 'The backend reported an asynchronous stream fault.',
 }
+
+type DisplayStatus = {
+  kind: OutputHealth | 'idle'
+  line: string
+  detail: string
+}
+
+const displayStatus = computed<DisplayStatus>(() => {
+  if (!props.output.streamActive && !props.output.faultReported) {
+    return {
+      kind: 'idle',
+      line: 'Stream idle · No active output',
+      detail: 'No output stream is currently running.',
+    }
+  }
+
+  // A reported fault must never receive a healthy presentation, even if an
+  // adapter produces an inconsistent low-rate snapshot.
+  const health = props.output.faultReported && props.output.health === 'healthy'
+    ? 'streamError'
+    : props.output.health
+  const lifecycle = props.output.streamActive ? 'Stream active' : 'Stream idle'
+
+  return {
+    kind: health,
+    line: `${lifecycle} · ${healthLabels[health]}`,
+    detail: healthDetails[health],
+  }
+})
 </script>
 
 <template>
@@ -55,15 +84,15 @@ const healthDetails: Record<OutputHealth, string> = {
       </div>
     </div>
 
-    <div class="output-status" :class="`health-${output.health}`" aria-label="Output health">
+    <div class="output-status" :class="`health-${displayStatus.kind}`" aria-label="Output status">
       <span class="output-status-icon" aria-hidden="true">
-        <CircleAlert v-if="output.health === 'streamError'" :size="16" />
-        <Activity v-else-if="output.health === 'callbackCapacityExceeded'" :size="16" />
+        <CircleAlert v-if="displayStatus.kind === 'streamError'" :size="16" />
+        <Activity v-else-if="displayStatus.kind === 'callbackCapacityExceeded'" :size="16" />
         <Check v-else :size="16" />
       </span>
       <div>
-        <p class="output-status-line">{{ output.streamActive ? 'Stream active' : 'Stream idle' }} · {{ healthLabels[output.health] }}</p>
-        <p class="output-status-detail">{{ healthDetails[output.health] }}</p>
+        <p class="output-status-line">{{ displayStatus.line }}</p>
+        <p class="output-status-detail">{{ displayStatus.detail }}</p>
         <p v-if="output.faultReported" class="output-status-fault">A stream fault was reported; reselect or reconnect the output.</p>
       </div>
     </div>
