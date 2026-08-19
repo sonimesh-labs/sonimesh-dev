@@ -429,6 +429,17 @@ impl ControlStreamCoordinator {
         self.negotiation
     }
 
+    /// Returns whether `session` is the currently installed authenticated
+    /// control transport.
+    ///
+    /// This is intentionally a non-mutating gate for application-domain
+    /// composition code that must authorize work without fabricating a
+    /// control envelope. A retired or superseded token is never accepted.
+    #[must_use]
+    pub fn has_authenticated_control_session(&self, session: ControlSessionToken) -> bool {
+        self.control_session == Some(session)
+    }
+
     /// Validates and prepares an action from an authenticated control envelope.
     ///
     /// # Errors

@@ -46,7 +46,13 @@ lifetime.
   it was derived from.
 - The allocator performs no TLS, QR, pairing-record consumption, or network
   I/O. The authenticated control-plane transport that selects the media
-  identity and the initial root provisioning remain external gates.
+  identity and the initial root provisioning remain external gates. When both
+  application owners are available, `supply_for_authenticated_control_session`
+  checks the coordinator's currently installed opaque transport token before
+  validating or recording a media identity. A stale token therefore cannot
+  consume one of the bounded freshness slots; the lower-level `supply`
+  primitive remains available for an already-authenticated external transport
+  adapter.
 
 ## Security implications
 
@@ -80,6 +86,8 @@ than silently weakening the guarantee.
   state boundary on the same socket: a reused session ID preserves both the
   populated target state and source pin, while a valid fresh session clears
   both before its first authenticated packet re-establishes them.
+- Unit coverage verifies that the coordinator-gated allocator rejects a retired
+  control token before consuming no-reuse capacity.
 - A control-domain integration test drives the same reconnection through `ControlStreamCoordinator`: connection loss arms a bounded reconnect window while the live UDP path keeps admitting packets, the reconnected transport installs a fresh token and repeats hello negotiation, the allocator supplies a fresh context for the re-admitted stream, `install_fresh_session` keeps the socket, packets sealed under the retired session are rejected, and the fresh session's packets rebind and decode; the no-reuse record then rejects both issued contexts.
 - A seeded property walk drives randomized identity/direction supply scripts
   against an independent append-only set model, asserting the exact outcome

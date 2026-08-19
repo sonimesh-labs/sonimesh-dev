@@ -10,7 +10,10 @@
 //! within this pairing lifetime; callers pair the context with the root
 //! borrow from [`root`] to install the session. It performs no TLS, QR,
 //! pairing-record consumption, or network I/O; the authenticated transport
-//! that selects the media identity remains external (ADR 0017).
+//! that selects the media identity remains external (ADR 0017). Callers that
+//! also own the coordinator can use
+//! [`MediaSessionAllocator::supply_for_authenticated_control_session`] to
+//! reject stale transport tokens before consuming freshness capacity.
 //!
 //! [`supply`]: MediaSessionAllocator::supply
 //! [`root`]: IssuedMediaSession::root
@@ -19,7 +22,7 @@ use core::fmt;
 
 use sonimesh_protocol::{MediaDirection, MediaKeyContext, SessionSecret};
 
-use crate::MediaStreamIdentity;
+use crate::{ControlSessionToken, ControlStreamCoordinator, MediaStreamIdentity};
 
 /// Fixed upper bound on the retained no-reuse record of issued key contexts.
 ///
@@ -31,6 +34,8 @@ pub const MAX_RETAINED_MEDIA_IDENTITIES: usize = 16;
 /// Failure while issuing a fresh media session from the pairing media root.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MediaSessionAllocatorError {
+    /// The supplied control transport token is no longer active.
+    ControlSessionNotActive,
     /// The identity is not a valid media key context (zero session or stream ID).
     InvalidIdentity,
     /// The full key context was already issued within this pairing lifetime.
@@ -42,6 +47,9 @@ pub enum MediaSessionAllocatorError {
 impl fmt::Display for MediaSessionAllocatorError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::ControlSessionNotActive => {
+                formatter.write_str("authenticated control session is no longer active")
+            }
             Self::InvalidIdentity => {
                 formatter.write_str("media identity has a zero session or stream identifier")
             }
@@ -167,6 +175,34 @@ impl MediaSessionAllocator {
             root: &self.root,
         })
     }
+
+    /// Issues a fresh media context only for the currently installed control
+    /// transport.
+    ///
+    /// This is the composition entry point for callers that have both the
+    /// coordinator and the pairing-root allocator. It checks the opaque
+    /// transport token before touching the allocator's no-reuse record, so a
+    /// delayed command from a retired connection cannot consume one of the
+    /// bounded fresh-session slots. Existing grants are not revoked by this
+    /// check; the pairing owner must still drop the allocator when the trust
+    /// record expires or is revoked.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MediaSessionAllocatorError::ControlSessionNotActive`] before
+    /// identity validation or freshness accounting when `session` is stale.
+    pub fn supply_for_authenticated_control_session(
+        &mut self,
+        coordinator: &ControlStreamCoordinator,
+        session: ControlSessionToken,
+        identity: MediaStreamIdentity,
+        direction: MediaDirection,
+    ) -> Result<IssuedMediaSession<'_>, MediaSessionAllocatorError> {
+        if !coordinator.has_authenticated_control_session(session) {
+            return Err(MediaSessionAllocatorError::ControlSessionNotActive);
+        }
+        self.supply(identity, direction)
+    }
 }
 
 impl fmt::Debug for MediaSessionAllocator {
@@ -184,9 +220,34 @@ mod tests {
     use sonimesh_protocol::{MediaDirection, SessionSecret};
 
     use super::{MAX_RETAINED_MEDIA_IDENTITIES, MediaSessionAllocator, MediaSessionAllocatorError};
-    use crate::MediaStreamIdentity;
+    use crate::{
+        ControlSessionToken, ControlStreamCoordinator, MediaStreamIdentity, PairingAttemptOutcome,
+        PairingId, PairingInvitationController, PairingProofVerification, PairingSource,
+        SessionState,
+    };
 
     const DIRECTION: MediaDirection = MediaDirection::AndroidToDesktop;
+
+    fn authenticated_coordinator() -> (ControlStreamCoordinator, ControlSessionToken) {
+        let mut pairing = PairingInvitationController::<1>::new();
+        let mut state = SessionState::IDLE;
+        pairing
+            .begin(&mut state, PairingId::new([1; 16]), 100, 50, 1)
+            .expect("pairing invitation begins");
+        assert_eq!(
+            pairing.verify_proof(&mut state, 101, PairingSource::new([2; 16]), || {
+                PairingProofVerification::Verified
+            }),
+            Ok(PairingAttemptOutcome::Paired)
+        );
+
+        let mut coordinator =
+            ControlStreamCoordinator::new(state, &[]).expect("bounded coordinator policy");
+        let token = coordinator
+            .install_authenticated_control_session()
+            .expect("authenticated transport token");
+        (coordinator, token)
+    }
 
     const fn identity(session_id: u64, stream_id: u32, key_epoch: u16) -> MediaStreamIdentity {
         MediaStreamIdentity {
@@ -194,6 +255,38 @@ mod tests {
             stream_id,
             key_epoch,
         }
+    }
+
+    #[test]
+    fn authenticated_supply_rejects_a_retired_transport_before_consuming_capacity() {
+        let (mut coordinator, token) = authenticated_coordinator();
+        let mut allocator = MediaSessionAllocator::new(SessionSecret::new([0xA5; 32]));
+
+        {
+            let grant = allocator
+                .supply_for_authenticated_control_session(
+                    &coordinator,
+                    token,
+                    identity(7, 1, 0),
+                    DIRECTION,
+                )
+                .expect("active transport may issue a fresh session");
+            assert_eq!(grant.context().session_id, 7);
+        }
+        assert_eq!(allocator.issued_count(), 1);
+
+        coordinator.expire_control_session();
+        let error = allocator
+            .supply_for_authenticated_control_session(
+                &coordinator,
+                token,
+                identity(8, 1, 0),
+                DIRECTION,
+            )
+            .expect_err("retired transport must not issue a fresh session");
+
+        assert_eq!(error, MediaSessionAllocatorError::ControlSessionNotActive);
+        assert_eq!(allocator.issued_count(), 1);
     }
 
     #[test]
