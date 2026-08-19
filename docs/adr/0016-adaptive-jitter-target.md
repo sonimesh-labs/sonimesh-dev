@@ -55,10 +55,13 @@ arrival jitter and the encoded-frame water level.
 The controller exposes minimum/target/maximum water levels in frames and
 milliseconds for diagnostics. It returns a small `JitterTargetStep` decision
 (`Raised`, `Lowered`, `Held`) so a future scheduler or diagnostics can observe
-each update without reading controller internals. The target-gated scheduler
-publishes its gated-tick and forced-playout counters as one versioned pair, so
-low-rate snapshots cannot combine values from different scheduler epochs;
-the pair is still owned by the non-realtime scheduling domain.
+each update without reading controller internals. Adaptive water levels,
+controller observations, and the target-gated scheduler's gated-tick and
+forced-playout counters share one versioned telemetry publication, so low-rate
+snapshots cannot combine a newly cleared target epoch with retained scheduler
+counters. Explicit scheduler disable deliberately clears only the scheduler
+counters while retaining the active target state; all of this remains owned by
+the non-realtime scheduling domain.
 
 ## Alternatives considered
 

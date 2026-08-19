@@ -1,20 +1,109 @@
 use std::sync::atomic::{AtomicI32, AtomicU32, AtomicU64, Ordering};
 
-/// A coherent, lock-free publication of the two target-gated scheduler counters.
+/// One completed adaptive-target telemetry state.
 ///
-/// The sequence is even while the published pair is readable and odd while a
-/// writer is replacing it. Writers briefly serialize through the sequence CAS;
-/// this is only used by the non-realtime scheduler domain, never by an output
-/// callback. Readers retry until they observe one complete pair.
+/// Target water levels, controller observations, and scheduler counters are
+/// read from one stream-local, versioned telemetry state. Keeping the fields
+/// together lets a low-rate reader distinguish an intentional scheduler-only
+/// update (such as explicit disable) from a torn reset.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct TargetTelemetrySnapshot {
+    water_levels: u64,
+    smoothed_jitter_ms: u32,
+    raised_steps: u32,
+    lowered_steps: u32,
+    gated_ticks: u64,
+    forced_playouts: u64,
+}
+
+/// A coherent, lock-free publication of adaptive-target telemetry.
+///
+/// The sequence is even while the state is readable and odd while a writer is
+/// replacing it. Writers briefly serialize through the sequence CAS; target
+/// control and playout scheduling run outside the output callback. Readers
+/// retry until they observe one complete state, so a snapshot cannot combine
+/// target values cleared by a reset with scheduler counters retained from before it.
 #[derive(Debug, Default)]
-struct TargetGatedPlayoutState {
+struct TargetTelemetryState {
     sequence: AtomicU64,
+    water_levels: AtomicU64,
+    smoothed_jitter_ms: AtomicU32,
+    raised_steps: AtomicU32,
+    lowered_steps: AtomicU32,
     gated_ticks: AtomicU64,
     forced_playouts: AtomicU64,
 }
 
-impl TargetGatedPlayoutState {
-    fn publish(&self, gated_ticks: u64, forced_playouts: u64) {
+impl TargetTelemetryState {
+    fn publish_target_state(
+        &self,
+        min_frames: u16,
+        max_frames: u16,
+        target_frames: u16,
+        smoothed_jitter_ms: u32,
+        raised_steps: u32,
+        lowered_steps: u32,
+    ) {
+        let sequence = self.claim_writer();
+        self.water_levels.store(
+            pack_target_water_levels(min_frames, max_frames, target_frames),
+            Ordering::Relaxed,
+        );
+        self.smoothed_jitter_ms
+            .store(smoothed_jitter_ms, Ordering::Relaxed);
+        self.raised_steps.store(raised_steps, Ordering::Relaxed);
+        self.lowered_steps.store(lowered_steps, Ordering::Relaxed);
+        self.release_writer(sequence);
+    }
+
+    fn publish_gated_playout_state(&self, gated_ticks: u64, forced_playouts: u64) {
+        let sequence = self.claim_writer();
+        self.gated_ticks.store(gated_ticks, Ordering::Relaxed);
+        self.forced_playouts
+            .store(forced_playouts, Ordering::Relaxed);
+        self.release_writer(sequence);
+    }
+
+    fn reset_all(&self) {
+        let sequence = self.claim_writer();
+        self.water_levels.store(0, Ordering::Relaxed);
+        self.smoothed_jitter_ms.store(0, Ordering::Relaxed);
+        self.raised_steps.store(0, Ordering::Relaxed);
+        self.lowered_steps.store(0, Ordering::Relaxed);
+        self.gated_ticks.store(0, Ordering::Relaxed);
+        self.forced_playouts.store(0, Ordering::Relaxed);
+        self.release_writer(sequence);
+    }
+
+    fn reset_gated_playout_state(&self) {
+        self.publish_gated_playout_state(0, 0);
+    }
+
+    fn snapshot(&self) -> TargetTelemetrySnapshot {
+        loop {
+            let before = self.sequence.load(Ordering::Acquire);
+            if before & 1 != 0 {
+                std::hint::spin_loop();
+                continue;
+            }
+
+            let snapshot = TargetTelemetrySnapshot {
+                water_levels: self.water_levels.load(Ordering::Relaxed),
+                smoothed_jitter_ms: self.smoothed_jitter_ms.load(Ordering::Relaxed),
+                raised_steps: self.raised_steps.load(Ordering::Relaxed),
+                lowered_steps: self.lowered_steps.load(Ordering::Relaxed),
+                gated_ticks: self.gated_ticks.load(Ordering::Relaxed),
+                forced_playouts: self.forced_playouts.load(Ordering::Relaxed),
+            };
+            let after = self.sequence.load(Ordering::Acquire);
+            if before == after {
+                return snapshot;
+            }
+            std::hint::spin_loop();
+        }
+    }
+
+    fn claim_writer(&self) -> u64 {
         let mut sequence = self.sequence.load(Ordering::Acquire);
         loop {
             if sequence & 1 != 0 {
@@ -30,34 +119,15 @@ impl TargetGatedPlayoutState {
                 Ordering::Acquire,
                 Ordering::Acquire,
             ) {
-                Ok(_) => break,
+                Ok(_) => return sequence,
                 Err(observed) => sequence = observed,
             }
         }
-
-        self.gated_ticks.store(gated_ticks, Ordering::Relaxed);
-        self.forced_playouts
-            .store(forced_playouts, Ordering::Relaxed);
-        self.sequence
-            .store(sequence.wrapping_add(2), Ordering::Release);
     }
 
-    fn snapshot(&self) -> (u64, u64) {
-        loop {
-            let before = self.sequence.load(Ordering::Acquire);
-            if before & 1 != 0 {
-                std::hint::spin_loop();
-                continue;
-            }
-
-            let gated_ticks = self.gated_ticks.load(Ordering::Relaxed);
-            let forced_playouts = self.forced_playouts.load(Ordering::Relaxed);
-            let after = self.sequence.load(Ordering::Acquire);
-            if before == after {
-                return (gated_ticks, forced_playouts);
-            }
-            std::hint::spin_loop();
-        }
+    fn release_writer(&self, sequence: u64) {
+        self.sequence
+            .store(sequence.wrapping_add(2), Ordering::Release);
     }
 }
 
@@ -78,11 +148,7 @@ pub struct StreamCounters {
     pcm_discontinuities: AtomicU64,
     queued_pcm_state: AtomicU32,
     jitter_state: AtomicU32,
-    target_water_levels: AtomicU64,
-    target_smoothed_jitter_ms: AtomicU32,
-    target_raised_steps: AtomicU32,
-    target_lowered_steps: AtomicU32,
-    target_gated_playout: TargetGatedPlayoutState,
+    target_telemetry: TargetTelemetryState,
     stream_resets: AtomicU64,
     nominal_sample_rates: AtomicU64,
     drift_adjustment_ppm: AtomicI32,
@@ -190,14 +256,12 @@ impl StreamCounters {
         self.jitter_state.store(0, Ordering::Relaxed);
     }
 
-    /// Publishes the bounded adaptive-target water levels and step counts.
+    /// Publishes the bounded adaptive-target water levels and controller state.
     ///
     /// The minimum and maximum are fixed by the controller configuration and
-    /// the target moves within them. The three water levels are stored as one
-    /// atomic set, so a concurrent snapshot always reads a coherent triple
-    /// (`min <= target <= max`). The smoothed jitter and the raised/lowered
-    /// step counters are cumulative telemetry and may briefly span an epoch
-    /// transition in a snapshot.
+    /// the target moves within them. All adaptive-target fields share the
+    /// versioned telemetry state with target-gated scheduler counters, so a
+    /// snapshot reads one complete publication rather than a mixture of fields.
     pub fn publish_target_state(
         &self,
         min_frames: u16,
@@ -207,28 +271,26 @@ impl StreamCounters {
         raised_steps: u32,
         lowered_steps: u32,
     ) {
-        self.target_water_levels.store(
-            pack_target_water_levels(min_frames, max_frames, target_frames),
-            Ordering::Relaxed,
+        self.target_telemetry.publish_target_state(
+            min_frames,
+            max_frames,
+            target_frames,
+            smoothed_jitter_ms,
+            raised_steps,
+            lowered_steps,
         );
-        self.target_smoothed_jitter_ms
-            .store(smoothed_jitter_ms, Ordering::Relaxed);
-        self.target_raised_steps
-            .store(raised_steps, Ordering::Relaxed);
-        self.target_lowered_steps
-            .store(lowered_steps, Ordering::Relaxed);
     }
 
     /// Publishes the target-gated playout counters for the active epoch.
     ///
     /// Both values are owned by the non-realtime scheduling domain. They reset
     /// with the adaptive target epoch and are never written from an output
-    /// callback. The pair is published as one versioned state, so a snapshot
-    /// cannot combine the gated count from one epoch with the forced count from
-    /// another epoch.
+    /// callback. The pair shares one versioned state with the adaptive-target
+    /// fields, so a snapshot cannot combine scheduler values retained from
+    /// before a reset with target values cleared by that reset.
     pub fn publish_target_gated_playout_state(&self, gated_ticks: u64, forced_playouts: u64) {
-        self.target_gated_playout
-            .publish(gated_ticks, forced_playouts);
+        self.target_telemetry
+            .publish_gated_playout_state(gated_ticks, forced_playouts);
     }
 
     /// Starts a fresh target-gated playout diagnostic epoch.
@@ -237,17 +299,17 @@ impl StreamCounters {
     /// decision. This is separate so disabling scheduling does not retire the
     /// adaptive target water level.
     pub fn reset_target_gated_playout_state(&self) {
-        self.publish_target_gated_playout_state(0, 0);
+        self.target_telemetry.reset_gated_playout_state();
     }
 
     /// Starts a fresh adaptive-target epoch after a stream-local retirement.
     ///
-    /// Every published value becomes zero until the pipeline republishes the
-    /// controller state on the next observation. Any target-gated scheduler
-    /// telemetry is retired with the same stream epoch.
+    /// Every target and scheduler field becomes zero in one publication until
+    /// the pipeline republishes controller or scheduler state on the next
+    /// observation. This prevents a low-rate snapshot from combining an
+    /// emptied adaptive target with retired scheduler counters.
     pub fn reset_target_state(&self) {
-        self.publish_target_state(0, 0, 0, 0, 0, 0);
-        self.reset_target_gated_playout_state();
+        self.target_telemetry.reset_all();
     }
 
     /// Records a stream-local reset.
@@ -287,9 +349,9 @@ impl StreamCounters {
             unpack_sample_rates(self.nominal_sample_rates.load(Ordering::Relaxed));
         let (jitter_frames, jitter_high_water_frames) =
             unpack_jitter_state(self.jitter_state.load(Ordering::Relaxed));
+        let target_telemetry = self.target_telemetry.snapshot();
         let (target_min_frames, target_max_frames, target_frames) =
-            unpack_target_water_levels(self.target_water_levels.load(Ordering::Relaxed));
-        let (target_gated_ticks, target_forced_playouts) = self.target_gated_playout.snapshot();
+            unpack_target_water_levels(target_telemetry.water_levels);
 
         StreamMetricsSnapshot {
             authenticated_packets: self.authenticated_packets.load(Ordering::Relaxed),
@@ -311,11 +373,11 @@ impl StreamCounters {
             target_min_frames,
             target_max_frames,
             target_frames,
-            target_smoothed_jitter_ms: self.target_smoothed_jitter_ms.load(Ordering::Relaxed),
-            target_raised_steps: self.target_raised_steps.load(Ordering::Relaxed),
-            target_lowered_steps: self.target_lowered_steps.load(Ordering::Relaxed),
-            target_gated_ticks,
-            target_forced_playouts,
+            target_smoothed_jitter_ms: target_telemetry.smoothed_jitter_ms,
+            target_raised_steps: target_telemetry.raised_steps,
+            target_lowered_steps: target_telemetry.lowered_steps,
+            target_gated_ticks: target_telemetry.gated_ticks,
+            target_forced_playouts: target_telemetry.forced_playouts,
             stream_resets: self.stream_resets.load(Ordering::Relaxed),
             nominal_input_sample_rate_hz,
             nominal_output_sample_rate_hz,
@@ -833,6 +895,74 @@ mod tests {
         }
 
         writer.join().expect("scheduler metric writer must finish");
+    }
+
+    #[test]
+    fn concurrent_target_epoch_reset_never_mixes_adaptive_and_scheduler_telemetry() {
+        let counters = std::sync::Arc::new(StreamCounters::default());
+        let writer = std::sync::Arc::clone(&counters);
+        let populated_target = (5_u16, 7_u16, 6_u16, 123_u32, 4_u32, 2_u32);
+        let populated_scheduler = (u64::MAX, 9_u64);
+
+        let writer = std::thread::spawn(move || {
+            for _ in 0..100_000 {
+                writer.publish_target_state(
+                    populated_target.0,
+                    populated_target.1,
+                    populated_target.2,
+                    populated_target.3,
+                    populated_target.4,
+                    populated_target.5,
+                );
+                writer.publish_target_gated_playout_state(
+                    populated_scheduler.0,
+                    populated_scheduler.1,
+                );
+                writer.reset_target_state();
+            }
+        });
+
+        let target_only = (
+            populated_target.0,
+            populated_target.1,
+            populated_target.2,
+            populated_target.3,
+            populated_target.4,
+            populated_target.5,
+            0_u64,
+            0_u64,
+        );
+        let populated = (
+            populated_target.0,
+            populated_target.1,
+            populated_target.2,
+            populated_target.3,
+            populated_target.4,
+            populated_target.5,
+            populated_scheduler.0,
+            populated_scheduler.1,
+        );
+        let cleared = (0_u16, 0_u16, 0_u16, 0_u32, 0_u32, 0_u32, 0_u64, 0_u64);
+
+        for _ in 0..100_000 {
+            let snapshot = counters.snapshot();
+            let observed = (
+                snapshot.target_min_frames,
+                snapshot.target_max_frames,
+                snapshot.target_frames,
+                snapshot.target_smoothed_jitter_ms,
+                snapshot.target_raised_steps,
+                snapshot.target_lowered_steps,
+                snapshot.target_gated_ticks,
+                snapshot.target_forced_playouts,
+            );
+            assert!(
+                [cleared, target_only, populated].contains(&observed),
+                "target epoch reset must not tear target and scheduler telemetry: {observed:?}"
+            );
+        }
+
+        writer.join().expect("target telemetry writer must finish");
     }
 
     #[test]

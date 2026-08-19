@@ -627,13 +627,13 @@ target-state block — target/min/max jitter water levels, smoothed jitter
 in milliseconds, and raised/lowered step counts — published by the
 adaptive controller ([ADR 0016](./adr/0016-adaptive-jitter-target.md))
 once the receiver pipeline feeds it from live authenticated packets
-(section 11). The three water levels are stored as one atomic set, so a
-snapshot always reads a coherent `min <= target <= max` triple; the
-smoothed jitter and step counters are cumulative telemetry and may briefly
-span an epoch transition. An enabled target-gated scheduler also publishes
-its gated-tick and forced-playout counters for the active stream epoch as one
-coherent versioned pair; fresh session/reset and explicit disable paths clear
-those scheduler counters. The
+(section 11). The target water levels, smoothed jitter, raised/lowered
+step counters, and target-gated scheduler counters share one versioned
+telemetry publication, so a snapshot reads one completed target state with a
+coherent `min <= target <= max` triple. Fresh session/reset clears the whole
+target telemetry state atomically; explicit scheduler disable clears only its
+gated-tick and forced-playout counters while retaining the active controller
+water levels. The
 product output-callback wiring that consumes
 the bounded `TargetGatedPlayout` decision primitive remains Phase 2 work;
 the primitive itself (decision, counters, and reset) now lives in
