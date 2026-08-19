@@ -422,6 +422,17 @@ completion stays within the explicit hard deadline
 (`frames * (max_gate_ticks + 2) * frame_duration_ms` plus the
 worst-case one-way network delay).
 
+The application boundary is covered separately by
+`receiver_pipeline_adaptive_target.rs`: `ReceiverStreamPipeline` and its UDP
+wrapper opt in to the same bounded decision through
+`decode_next_with_arrivals_pending`, publish gated-tick and forced-playout
+telemetry into the per-stream diagnostics snapshot/export, and clear that
+scheduler epoch on fresh-session, jitter-resynchronization, or explicit
+disable paths. These tests prove protected packet admission, caller-owned
+arrival-pending semantics, deadline forcing, and stream-local reset behavior;
+they remain software scheduling evidence and do not qualify output-callback
+integration, physical latency, or hardware jitter.
+
 A deterministic fixed-slot mixer-membership scenario
 (`mixer_membership_scenario.rs`) now drives the real `CommandDrivenMixer`
 boundary from a multi-stream shared-link run: every stream's playout is
