@@ -475,9 +475,10 @@ evidence. A deterministic target-gated scheduler simulation now makes
 the adaptive target the playout decision: the scheduler waits while fewer
 than the target encoded frames are buffered, drains without gating once no
 frames are in flight, and forces a playout when the gate deadline expires,
-so a mid-stream stall stays bounded and the run always completes. A
-product playout scheduler consuming that target remains future Phase 2
-work.
+so a mid-stream stall stays bounded and the run always completes. The receiver
+pipeline now exposes this decision through an explicit opt-in scheduling
+boundary; production output-callback adoption and hardware timing remain
+future Phase 2 work.
 
 For the receiver, a bounded relative arrival-jitter estimator in
 `sonimesh-audio` converts inter-arrival times into sender-sample units and
@@ -492,8 +493,11 @@ per-stream diagnostics. The bounded target-gated playout decision lives in
 `sonimesh-audio` as `TargetGatedPlayout` (wait while below the target with
 arrivals pending, drain when no frames are in flight, force a playout at
 the gate deadline), and both deterministic scheduler scenarios drive their
-ticks through it. The product output-callback wiring that consumes that
-scheduler remains Phase 2 work.
+ticks through it. `ReceiverStreamPipeline` and its UDP wrapper expose an
+opt-in `enable_target_gated_playout` plus
+`decode_next_with_arrivals_pending` boundary; the caller owns the pending
+arrival signal and the ordinary decode method remains an immediate drain path.
+Production output-callback adoption and hardware timing remain Phase 2 work.
 
 Recovery policy:
 

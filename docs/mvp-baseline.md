@@ -213,8 +213,11 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   bounded target-gated playout decision primitive (`TargetGatedPlayout` in
   `sonimesh-audio`) now implements the scheduler's per-tick decision and its
   bounded gate/counter state, and both deterministic jitter-scheduler
-  scenarios drive every playout tick through it; the product output-callback
-  wiring that consumes the scheduler remains Phase 2 work.
+  scenarios drive every playout tick through it. `ReceiverStreamPipeline` and
+  its UDP wrapper expose an opt-in `enable_target_gated_playout` plus
+  `decode_next_with_arrivals_pending` boundary; the caller owns the pending
+  arrival signal and the ordinary decode method remains an immediate drain path.
+  Production output-callback wiring and hardware timing remain Phase 2 work.
 - an independent LibFuzzer workspace for bounded control decoding, media packet
   parsing, protected ingress, and the bounded diagnostic export journal. The
   ingress target covers arbitrary bytes, valid authenticated arbitrary
