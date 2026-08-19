@@ -201,6 +201,44 @@ fn target_gated_decode_waits_for_pending_arrivals_until_the_deadline() {
 }
 
 #[test]
+fn fresh_session_resets_target_gated_playout_streak() {
+    let counters = Arc::new(StreamCounters::default());
+    let (mut pipeline, mut sealer, _queue) = adaptive_pipeline(&[20, 40], Arc::clone(&counters));
+    pipeline
+        .enable_target_gated_playout(TargetGatedPlayoutConfig { max_gate_ticks: 2 })
+        .unwrap();
+
+    admit_without_decode(&mut pipeline, &mut sealer, 0);
+    assert_eq!(
+        pipeline.decode_next_with_arrivals_pending(true).unwrap(),
+        DecodeStep::NotReady
+    );
+
+    let secret = SessionSecret::new([0xA5; 32]);
+    let fresh_context = context_for_session(0x0A0B_0C0D_0E0F_0102, 9);
+    pipeline
+        .install_fresh_session(&secret, fresh_context, 0)
+        .unwrap();
+    let mut fresh_sealer = MediaSealer::new(&secret, fresh_context).unwrap();
+    admit_without_decode(&mut pipeline, &mut fresh_sealer, 0);
+
+    assert_eq!(
+        pipeline.decode_next_with_arrivals_pending(true).unwrap(),
+        DecodeStep::NotReady,
+        "the fresh epoch must start with a new gate streak"
+    );
+    assert_eq!(
+        pipeline.decode_next_with_arrivals_pending(true).unwrap(),
+        DecodeStep::NotReady,
+        "the reset scheduler must still permit the full gate deadline"
+    );
+    assert!(matches!(
+        pipeline.decode_next_with_arrivals_pending(true).unwrap(),
+        DecodeStep::Decoded { sequence: 0, .. }
+    ));
+}
+
+#[test]
 fn ordinary_decode_is_an_immediate_drain_when_target_gating_is_enabled() {
     let counters = Arc::new(StreamCounters::default());
     let ticks = vec![20_u64];
