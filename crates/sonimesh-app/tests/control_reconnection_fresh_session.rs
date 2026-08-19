@@ -154,8 +154,8 @@ fn control_reconnection_supplies_a_fresh_session_while_udp_stays_reachable() {
     // First authenticated control session and media stream.
     let (mut coordinator, token) = ready_coordinator();
     let first_grant = allocator
-        .supply(identity(7, 9, 0), DIRECTION)
-        .expect("first identity is fresh");
+        .supply_for_authenticated_control_session(&coordinator, token, identity(7, 9, 0), DIRECTION)
+        .expect("active transport may issue the first identity");
     let first_context = first_grant.context();
     let first = negotiate_and_start(&mut coordinator, token, &start(7, 9, 0, 10));
     assert_eq!(first.identity, identity(7, 9, 0));
@@ -232,12 +232,30 @@ fn control_reconnection_supplies_a_fresh_session_while_udp_stays_reachable() {
     assert_eq!(coordinator.state().phase(), SessionPhase::Ready);
     assert_eq!(coordinator.active(), None);
 
+    // The retired transport cannot reserve a fresh context after reconnect;
+    // this must fail before it changes the allocator's no-reuse record.
+    assert!(matches!(
+        allocator.supply_for_authenticated_control_session(
+            &coordinator,
+            token,
+            identity(8, 9, 0),
+            DIRECTION,
+        ),
+        Err(MediaSessionAllocatorError::ControlSessionNotActive)
+    ));
+    assert_eq!(allocator.issued_count(), 1);
+
     let fresh_token = coordinator
         .install_authenticated_control_session()
         .expect("fresh transport token");
     let fresh_grant = allocator
-        .supply(identity(8, 9, 0), DIRECTION)
-        .expect("reconnection identity is fresh");
+        .supply_for_authenticated_control_session(
+            &coordinator,
+            fresh_token,
+            identity(8, 9, 0),
+            DIRECTION,
+        )
+        .expect("active reconnected transport may issue a fresh identity");
     let fresh_context = fresh_grant.context();
     let fresh = negotiate_and_start(&mut coordinator, fresh_token, &start(8, 9, 0, 20));
     assert_eq!(fresh.identity, identity(8, 9, 0));

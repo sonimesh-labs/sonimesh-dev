@@ -88,7 +88,7 @@ than silently weakening the guarantee.
   both before its first authenticated packet re-establishes them.
 - Unit coverage verifies that the coordinator-gated allocator rejects a retired
   control token before consuming no-reuse capacity.
-- A control-domain integration test drives the same reconnection through `ControlStreamCoordinator`: connection loss arms a bounded reconnect window while the live UDP path keeps admitting packets, the reconnected transport installs a fresh token and repeats hello negotiation, the allocator supplies a fresh context for the re-admitted stream, `install_fresh_session` keeps the socket, packets sealed under the retired session are rejected, and the fresh session's packets rebind and decode; the no-reuse record then rejects both issued contexts.
+- A control-domain integration test drives the same reconnection through `ControlStreamCoordinator`: connection loss arms a bounded reconnect window while the live UDP path keeps admitting packets, the reconnected transport installs a fresh token and repeats hello negotiation, the retired token fails before it can reserve the reconnection identity, the fresh token supplies a new context for the re-admitted stream, `install_fresh_session` keeps the socket, packets sealed under the retired session are rejected, and the fresh session's packets rebind and decode; the no-reuse record then rejects both issued contexts.
 - A seeded property walk drives randomized identity/direction supply scripts
   against an independent append-only set model, asserting the exact outcome
   after every step: no re-issue, no record growth past the bound, no recording

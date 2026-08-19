@@ -10,12 +10,15 @@
 //! independent append-only set model, proving the allocator cannot panic,
 //! cannot re-issue a context within a pairing lifetime, cannot exceed the
 //! bound, cannot record a failed supply, and always keeps its count and
-//! `contains` view in lock-step with the model.
+//! `contains` view in lock-step with the model. Every input also checks that
+//! an active control token can issue a grant while a retired token cannot
+//! reserve a fresh identity or consume capacity.
 
 use libfuzzer_sys::fuzz_target;
 use sonimesh_app::{
-    MAX_RETAINED_MEDIA_IDENTITIES, MediaSessionAllocator, MediaSessionAllocatorError,
-    MediaStreamIdentity,
+    ControlSessionToken, ControlStreamCoordinator, MAX_RETAINED_MEDIA_IDENTITIES,
+    MediaSessionAllocator, MediaSessionAllocatorError, MediaStreamIdentity, PairingAttemptOutcome,
+    PairingId, PairingInvitationController, PairingProofVerification, PairingSource, SessionState,
 };
 use sonimesh_protocol::{MediaDirection, MediaKeyContext, SessionSecret};
 
@@ -55,6 +58,51 @@ const fn identity(session_id: u64, stream_id: u32, key_epoch: u16) -> MediaStrea
         stream_id,
         key_epoch,
     }
+}
+
+fn authenticated_coordinator() -> (ControlStreamCoordinator, ControlSessionToken) {
+    let mut pairing = PairingInvitationController::<1>::new();
+    let mut state = SessionState::IDLE;
+    pairing
+        .begin(&mut state, PairingId::new([1; 16]), 100, 50, 1)
+        .expect("pairing invitation begins");
+    assert_eq!(
+        pairing.verify_proof(&mut state, 101, PairingSource::new([2; 16]), || {
+            PairingProofVerification::Verified
+        }),
+        Ok(PairingAttemptOutcome::Paired)
+    );
+
+    let mut coordinator =
+        ControlStreamCoordinator::new(state, &[]).expect("bounded coordinator policy");
+    let token = coordinator
+        .install_authenticated_control_session()
+        .expect("authenticated transport token");
+    (coordinator, token)
+}
+
+fn assert_control_session_gate() {
+    let (mut coordinator, token) = authenticated_coordinator();
+    let mut allocator = MediaSessionAllocator::new(SessionSecret::new([0x5A; 32]));
+
+    let context = allocator
+        .supply_for_authenticated_control_session(&coordinator, token, identity(7, 1, 0), DIRECTION)
+        .expect("active transport may issue a fresh identity")
+        .context();
+    assert_eq!(context.session_id, 7);
+    assert_eq!(allocator.issued_count(), 1);
+
+    coordinator.expire_control_session();
+    assert!(matches!(
+        allocator.supply_for_authenticated_control_session(
+            &coordinator,
+            token,
+            identity(8, 1, 0),
+            DIRECTION,
+        ),
+        Err(MediaSessionAllocatorError::ControlSessionNotActive)
+    ));
+    assert_eq!(allocator.issued_count(), 1);
 }
 
 /// Allocator plus an independent append-only set model of the same record.
@@ -105,6 +153,7 @@ impl AllocatorModel {
 }
 
 fuzz_target!(|data: &[u8]| {
+    assert_control_session_gate();
     if data.is_empty() {
         return;
     }

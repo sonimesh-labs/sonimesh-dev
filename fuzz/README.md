@@ -257,6 +257,9 @@ The network-scenario targets (`jitter_target`, `jitter_scheduler`, `multi_stream
   scripts through the ADR 0017 no-reuse record, comparing every outcome
   against an independent append-only set model so replay, capacity, and
   zero-identifier handling cannot drift from the pairing-lifetime contract.
+  Every input also verifies that a live authenticated control token can issue
+  a grant while a retired token cannot reserve an identity or consume the
+  bounded record.
 
 ## Run a target
 
