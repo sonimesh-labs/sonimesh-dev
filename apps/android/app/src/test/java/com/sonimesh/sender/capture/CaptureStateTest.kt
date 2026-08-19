@@ -3,6 +3,7 @@ package com.sonimesh.sender.capture
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -306,5 +307,31 @@ class CaptureStateTest {
         } catch (_: IllegalArgumentException) {
             // Expected: a zero interval would allow per-read UI publication.
         }
+    }
+
+    @Test
+    fun failed_status_rejects_details_over_the_fixed_byte_bound() {
+        assertThrows(IllegalArgumentException::class.java) {
+            CaptureStatus.Failed("x".repeat(MAX_CAPTURE_ERROR_DETAIL_BYTES + 1))
+        }
+    }
+
+    @Test
+    fun failure_detail_is_truncated_without_splitting_utf8_code_points() {
+        val message = "音".repeat(MAX_CAPTURE_ERROR_DETAIL_BYTES)
+
+        val bounded = boundedCaptureErrorDetail(message)
+
+        assertTrue(bounded.toByteArray(Charsets.UTF_8).size <= MAX_CAPTURE_ERROR_DETAIL_BYTES)
+        assertTrue(bounded.endsWith("…"))
+        val expectedPrefixBytes = (MAX_CAPTURE_ERROR_DETAIL_BYTES - "…".toByteArray(Charsets.UTF_8).size) / 3 * 3
+        assertEquals(expectedPrefixBytes, bounded.removeSuffix("…").toByteArray(Charsets.UTF_8).size)
+    }
+
+    @Test
+    fun short_failure_detail_is_preserved() {
+        val message = "capture failed"
+
+        assertEquals(message, boundedCaptureErrorDetail(message))
     }
 }

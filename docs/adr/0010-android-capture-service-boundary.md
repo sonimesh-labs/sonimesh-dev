@@ -37,7 +37,8 @@ UI. The activity owns only user interaction and the platform consent launch:
   begun, reject it and replace the matching consent-wait state with an
   actionable retry failure rather than silently consuming the result;
 - emit no PCM, encoded frames, keys, or high-rate metering events to Compose;
-  evidence summaries are capped at two state publications per second.
+  evidence summaries are capped at two state publications per second, and
+  user-facing failure detail is capped at 512 UTF-8 bytes.
 
 The foreground service is the sole lifecycle owner once a capture request has
 been accepted. It owns:

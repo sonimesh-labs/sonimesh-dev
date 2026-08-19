@@ -139,7 +139,7 @@ object CaptureStateStore {
     }
 
     fun publishFailure(message: String) {
-        publish(CaptureStatus.Failed(message))
+        publish(CaptureStatus.Failed(boundedCaptureErrorDetail(message)))
     }
 
     /** Publishes the latest bounded evidence only while capture remains active. */
@@ -159,4 +159,28 @@ object CaptureStateStore {
             evidence = evidence.snapshot(nowMillis()),
         )
     }
+}
+
+/** Keeps user-facing capture failures within the fixed diagnostic/state bound. */
+internal fun boundedCaptureErrorDetail(message: String): String {
+    val suffix = "…"
+    val suffixBytes = suffix.toByteArray(Charsets.UTF_8).size
+    val messageBytes = message.toByteArray(Charsets.UTF_8).size
+    if (messageBytes <= MAX_CAPTURE_ERROR_DETAIL_BYTES) {
+        return message
+    }
+
+    val prefixLimit = MAX_CAPTURE_ERROR_DETAIL_BYTES - suffixBytes
+    var prefixBytes = 0
+    var index = 0
+    while (index < message.length) {
+        val codePoint = message.codePointAt(index)
+        val codePointBytes = String(Character.toChars(codePoint)).toByteArray(Charsets.UTF_8).size
+        if (prefixBytes + codePointBytes > prefixLimit) {
+            break
+        }
+        prefixBytes += codePointBytes
+        index += Character.charCount(codePoint)
+    }
+    return message.substring(0, index) + suffix
 }

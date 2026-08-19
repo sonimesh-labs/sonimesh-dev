@@ -26,6 +26,10 @@ The first implementation must keep these module boundaries:
 - platform evidence: actual device format, buffer size, lifecycle, power, and
   silence observations recorded without claiming a source-specific cause.
 
+Capture failure detail is bounded to 512 UTF-8 bytes before it enters the UI
+state, so platform exception text cannot create an unbounded user-facing
+message.
+
 The prototype deliberately keeps the consent `Intent` in memory and routes both
 the notification stop action and `MediaProjection.Callback.onStop()` through
 one idempotent teardown path. Its atomic reader gate refuses launch after

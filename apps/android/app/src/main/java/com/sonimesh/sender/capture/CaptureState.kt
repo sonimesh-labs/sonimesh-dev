@@ -5,6 +5,7 @@ const val MIN_CAPTURE_SAMPLE_RATE_HZ = 8_000
 const val MAX_CAPTURE_SAMPLE_RATE_HZ = 192_000
 const val MAX_CAPTURE_CHANNELS = 8
 const val MAX_CAPTURE_BUFFER_BYTES = 64 * 1024
+const val MAX_CAPTURE_ERROR_DETAIL_BYTES = 512
 
 data class CaptureFormat(
     val sampleRateHz: Int,
@@ -73,7 +74,13 @@ sealed interface CaptureStatus {
     data class Capturing(val format: CaptureFormat) : CaptureStatus
     data class NoCapturableAudio(val format: CaptureFormat) : CaptureStatus
     data class Stopped(val reason: CaptureStopReason) : CaptureStatus
-    data class Failed(val message: String) : CaptureStatus
+    data class Failed(val message: String) : CaptureStatus {
+        init {
+            require(message.toByteArray(Charsets.UTF_8).size <= MAX_CAPTURE_ERROR_DETAIL_BYTES) {
+                "capture error detail exceeds the byte bound"
+            }
+        }
+    }
 }
 
 data class CaptureUiState(
