@@ -183,8 +183,11 @@ callback drains commands.
 A platform fault observed by `monitor` retires the membership boundary and
 moves the lifecycle to `OutputUnavailable`; `recover_output` recreates the
 mixer source and returns every persisted stream identity, and `recover_stream`
-re-admits each one against the fresh empty slot table. The output stops and
-the lifecycle returns to `Ready` when the last stream stops. The bridge is
+re-admits each one against the fresh empty slot table. A direct `OutputRestored`
+acknowledgement is rejected at the bridge boundary, because it could otherwise
+advance the coordinator before a fresh source and those re-admissions exist.
+The output stops and the lifecycle returns to `Ready` when the last stream
+stops. The bridge is
 control-domain code and is not part of the realtime scheduling path: the
 caller still advances adapter pumps and renders through the owned mixer
 session. The UI/Tauri command layer is not yet wired to the bridge. The bridge
@@ -262,7 +265,8 @@ Evidence produced so far:
   rotation preserves slot, gain, and rendering while a format change is
   rejected, output-start and admission failures roll back without
   partial changes, output fault and recovery re-admit persisted streams,
-  and connection loss with reconnect or control expiry stops the mixer;
+  direct output restoration is rejected until bridge recovery recreates its
+  source, and connection loss with reconnect or control expiry stops the mixer;
 - app-side bridge honesty tests proving a lifecycle fault is never
   misrepresented: a platform fault that crosses reconnect grace retires
   the output and the snapshot reports it down; reconnect-grace deadline

@@ -275,18 +275,23 @@ where
 
     /// Applies a platform acknowledgement that is not a stream lifecycle commit.
     ///
-    /// Reconnect and output events that invalidate stream state also retire the
-    /// mixer: reconnection carries fresh session material, and a directly
-    /// acknowledged output restoration without [`Self::recover_output`] must not
-    /// leave stale producers behind.
+    /// Reconnect and output-loss events that invalidate stream state also retire
+    /// the mixer. Output restoration must instead use [`Self::recover_output`],
+    /// which recreates a fresh source and preserves the coordinator/mixer
+    /// stream-membership transaction.
     ///
     /// # Errors
     ///
-    /// Returns [`ControlStreamError`] when the current state rejects the event.
+    /// Returns [`ControlStreamError`] when the current state rejects the event
+    /// or when a caller attempts to bypass [`Self::recover_output`] for output
+    /// restoration.
     pub fn acknowledge_platform_event(
         &mut self,
         event: SessionEvent,
     ) -> Result<(), ControlStreamError> {
+        if event == SessionEvent::OutputRestored {
+            return Err(ControlStreamError::UnsupportedLifecycleEvent(event));
+        }
         self.coordinator.acknowledge_platform_event(event)?;
         match event {
             SessionEvent::OutputLost => {
@@ -298,9 +303,12 @@ where
                 self.mixer.retire_output_preserving_streams();
                 self.output_active = false;
             }
-            SessionEvent::OutputRestored | SessionEvent::Reconnected => {
+            SessionEvent::Reconnected => {
                 self.mixer.stop();
                 self.output_active = false;
+            }
+            SessionEvent::OutputRestored => {
+                return Err(ControlStreamError::UnsupportedLifecycleEvent(event));
             }
             SessionEvent::ConnectionLost
             | SessionEvent::StartPairing
@@ -1312,7 +1320,7 @@ mod tests {
     }
 
     #[test]
-    fn directly_acknowledged_output_restoration_stops_stale_producers() {
+    fn direct_output_restoration_is_rejected_until_bridge_recovery_runs() {
         let mut bridge = bridge(FakeOutput::default());
         let session = bridge.install_authenticated_control_session().unwrap();
         bridge.accept(session, &hello_envelope()).unwrap();
@@ -1324,13 +1332,19 @@ mod tests {
             .unwrap();
         assert_eq!(bridge.state().phase(), SessionPhase::OutputUnavailable);
 
-        bridge
-            .acknowledge_platform_event(SessionEvent::OutputRestored)
-            .unwrap();
-        assert_eq!(bridge.state().phase(), SessionPhase::Streaming);
+        assert!(matches!(
+            bridge.acknowledge_platform_event(SessionEvent::OutputRestored),
+            Err(ControlStreamError::UnsupportedLifecycleEvent(
+                SessionEvent::OutputRestored
+            ))
+        ));
+        assert_eq!(bridge.state().phase(), SessionPhase::OutputUnavailable);
         assert!(!bridge.output_active());
-        assert_eq!(bridge.mixer().stream_count(), 0);
-        assert!(bridge.mixer().output().stopped);
+        assert_eq!(bridge.mixer().stream_count(), 1);
+
+        assert_eq!(bridge.recover_output().unwrap(), vec![identity(1)]);
+        assert_eq!(bridge.state().phase(), SessionPhase::Streaming);
+        assert!(bridge.output_active());
     }
 
     #[test]

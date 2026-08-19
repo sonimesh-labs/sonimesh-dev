@@ -593,8 +593,11 @@ platform output with the first stream, admits and removes per-stream
 pipelines, commits the coordinator's tokenized completions, and rolls back
 partial start, rotation, or stop work so membership and lifecycle stay in
 sync; a platform fault retires the membership boundary, and recovery recreates
-the source and re-admits every persisted stream. Reconnect-grace observation
-through the bridge, including low-rate desktop snapshot polling, stops the
+the source and re-admits every persisted stream. The bridge rejects a direct
+`OutputRestored` acknowledgement: only its recovery composition may transition
+the lifecycle after a fresh source exists, avoiding a streaming control state
+with retired mixer records. Reconnect-grace observation through the bridge,
+including low-rate desktop snapshot polling, stops the
 output and retires all stream records when expiry or a clock regression
 terminates the control session, so the projected output cannot remain live
 under an idle lifecycle. The bridge is control-domain code and is not part of
