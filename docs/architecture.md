@@ -2,7 +2,7 @@
 
 > Status: architecture draft for feasibility validation
 > Version: 1.0.0
-> Updated: 2026-08-17
+> Updated: 2026-08-19
 
 This document describes the intended product boundary and engineering constraints
 for SoniMesh. It deliberately separates verified platform facts, implementation
@@ -30,7 +30,14 @@ session, so the future control-surface command layer can consume a
 synchronized view from one object. The projection excludes pairing IDs,
 proofs, addresses, session material, PCM,
 encoded media, realtime callbacks, platform output handles, and device-selection
-metadata.
+metadata. Within its redacted output value, `stream_active` and
+`fault_reported` describe lifecycle state: an explicit stop clears both, while a
+backend health fault retires the stream and sets `fault_reported` until a
+successful start or recovery. `health` is the latest low-rate backend health
+observation and may remain non-healthy after an explicit stop; a control-surface
+consumer must therefore present a fault only when the lifecycle is active or
+`fault_reported` is set, rather than treating a stale health value alone as a
+current fault.
 
 The system has two planes:
 

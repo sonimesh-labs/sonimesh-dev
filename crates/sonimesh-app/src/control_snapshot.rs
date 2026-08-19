@@ -19,6 +19,11 @@ pub struct DesktopControlSnapshot {
 }
 
 /// Redacted output lifecycle suitable for low-rate UI state.
+///
+/// Consumers should use [`Self::stream_active`] and [`Self::fault_reported`]
+/// as the lifecycle signals. [`Self::health`] is the latest low-rate backend
+/// observation and may remain non-healthy after an explicit stop, which clears
+/// the reported-fault flag; a stale health value alone is not a current fault.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct OutputSnapshot {
     selection_retained: bool,
