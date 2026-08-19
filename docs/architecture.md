@@ -593,9 +593,13 @@ platform output with the first stream, admits and removes per-stream
 pipelines, commits the coordinator's tokenized completions, and rolls back
 partial start, rotation, or stop work so membership and lifecycle stay in
 sync; a platform fault retires the membership boundary, and recovery recreates
-the source and re-admits every persisted stream. The bridge is control-domain
-code and is not part of the realtime scheduling path. The 24-hour soak and
-hardware callback timing remain open.
+the source and re-admits every persisted stream. Reconnect-grace observation
+through the bridge, including low-rate desktop snapshot polling, stops the
+output and retires all stream records when expiry or a clock regression
+terminates the control session, so the projected output cannot remain live
+under an idle lifecycle. The bridge is control-domain code and is not part of
+the realtime scheduling path. The 24-hour soak and hardware callback timing
+remain open.
 
 Any lookahead, attack, release, or safety limiter delay must be included in the
 reported playout budget. Disconnect, mute, reconnect, and device switching use

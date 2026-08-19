@@ -193,10 +193,11 @@ adapter — lifecycle phase, output lifecycle, output-active flag, active stream
 count, and pending membership commands — and implements `OutputSnapshotSource`
 so existing UI projection code can read its output lifecycle. The bridge
 also exposes `desktop_snapshot_at` as the control-surface snapshot entry
-point: it observes the pairing owner's monotonic clock and reads the output
-lifecycle from the bridge's own mixer session before returning the redacted
-`DesktopControlSnapshot`, so a future Tauri command can consume a synchronized
-view.
+point: it first observes reconnect grace through the bridge so deadline expiry
+or a clock regression retires the mixer before it reads the output lifecycle,
+then observes the pairing owner's monotonic clock and returns a redacted
+`DesktopControlSnapshot`. A future Tauri command therefore consumes a
+synchronized view that cannot report live output under an idle control session.
 
 Evidence produced so far:
 
@@ -264,11 +265,12 @@ Evidence produced so far:
   and connection loss with reconnect or control expiry stops the mixer;
 - app-side bridge honesty tests proving a lifecycle fault is never
   misrepresented: a platform fault that crosses reconnect grace retires
-  the output and the snapshot reports it down, a reconnect-grace clock
-  regression force-expires the mixer together with the session so the
-  snapshot never claims a live stream or an active output under an idle
-  lifecycle, and a recovery that crosses a retired lifecycle fails closed
-  with both domains agreeing the output is down;
+  the output and the snapshot reports it down; reconnect-grace deadline
+  expiry through snapshot polling and a clock regression both force-expire
+  the mixer together with the session, so the snapshot never claims a live
+  stream or an active output under an idle lifecycle; and a recovery that
+  crosses a retired lifecycle fails closed with both domains agreeing the
+  output is down;
 - a deterministic bridge property walk (`control_to_mixer_property.rs`)
   driving six seeds by 1,500 authenticated start, rotation, stop,
   output-fault recovery, reconnect-grace, and session-expiry steps and

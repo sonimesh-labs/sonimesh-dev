@@ -1809,7 +1809,20 @@ fn snapshot_polling_alone_retires_the_reconnect_window() {
     assert_eq!(expired.session(), SessionPhase::Idle);
     assert_eq!(expired.pairing(), PairingSnapshotState::Consumed);
     assert_eq!(expired.reconnect_remaining_ms(), None);
+    assert!(
+        !expired.output().stream_active(),
+        "the projected output must reflect snapshot-driven retirement"
+    );
     assert_eq!(bridge.state().phase(), SessionPhase::Idle);
+    assert!(
+        !bridge.output_active(),
+        "snapshot-driven reconnect expiry must stop the stale output"
+    );
+    assert_eq!(bridge.mixer().stream_count(), 0);
+    assert!(
+        !bridge.mixer().snapshot().stream_active(),
+        "snapshot-driven reconnect expiry must retire realtime membership"
+    );
     assert_eq!(
         bridge.coordinator().reconnect_grace_state(),
         sonimesh_app::ReconnectGraceState::Idle

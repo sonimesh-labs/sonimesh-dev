@@ -195,11 +195,13 @@ where
     /// Projects the redacted desktop control snapshot from this bridge.
     ///
     /// This is the control-surface entry point for the composition path: the
-    /// pairing owner applies its monotonic clock before projecting, and the
-    /// output lifecycle is read from this bridge's own mixer session, so a
-    /// caller cannot present an active invitation or fabricated output state.
-    /// The returned value excludes pairing identifiers, proofs, addresses,
-    /// session material, and audio frames.
+    /// bridge observes reconnect grace before reading its mixer state, so a
+    /// snapshot-driven expiry or clock regression stops the output and retires
+    /// stale stream records before projection. The pairing owner then applies
+    /// its monotonic clock, and the output lifecycle is read from this bridge's
+    /// own mixer session, so a caller cannot present an active invitation or
+    /// fabricated output state. The returned value excludes pairing
+    /// identifiers, proofs, addresses, session material, and audio frames.
     ///
     /// # Errors
     ///
@@ -210,6 +212,13 @@ where
         pairing: &mut PairingInvitationController<MAX_SOURCES>,
         now_ms: u64,
     ) -> Result<DesktopControlSnapshot, PairingInvitationError> {
+        // The coordinator snapshot path also observes reconnect grace, but the
+        // bridge owns the companion mixer lifetime. Observe through the bridge
+        // first so an expiry or clock regression retires the output before its
+        // low-rate state is read for this projection. If this observation
+        // retires the session, the coordinator's later same-timestamp
+        // observation is idle and cannot revive it.
+        let _ = self.observe_reconnect_grace(now_ms);
         let output = self.mixer.snapshot();
         self.coordinator
             .snapshot_at(pairing, now_ms, &OwnedSnapshot(output))
