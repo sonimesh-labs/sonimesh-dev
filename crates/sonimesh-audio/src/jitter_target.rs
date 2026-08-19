@@ -351,7 +351,10 @@ impl AdaptiveJitterTarget {
 
     fn update_smoothed_jitter(&mut self, arrival_jitter_ms: u32) {
         let delta = self.smoothed_jitter_ms.abs_diff(arrival_jitter_ms);
-        let step = delta / EMA_DIVISOR;
+        // Integer EMA arithmetic must still make progress for a non-zero
+        // residual; otherwise a residual below the divisor would remain stuck
+        // forever and the estimate could never converge to the observation.
+        let step = (delta / EMA_DIVISOR).max(u32::from(delta != 0));
         if arrival_jitter_ms > self.smoothed_jitter_ms {
             self.smoothed_jitter_ms += step;
         } else {
@@ -619,6 +622,23 @@ mod tests {
         }
         // After the debounce window the estimate has approached 80 ms.
         assert!(controller.smoothed_jitter_ms() >= 70);
+    }
+
+    #[test]
+    fn smoothed_jitter_moves_for_sub_divisor_residuals() {
+        let mut controller = AdaptiveJitterTarget::new(CONFIG).unwrap();
+
+        // A 1 ms observation is smaller than the EMA divisor. It must still
+        // move the estimate away from zero rather than becoming permanently
+        // invisible to the controller.
+        let _ = controller.observe(1, 8);
+        assert_eq!(controller.smoothed_jitter_ms(), 1);
+
+        // The same guarantee applies while converging downward.
+        let _ = controller.observe(100, 8);
+        assert_eq!(controller.smoothed_jitter_ms(), 25);
+        let _ = controller.observe(24, 8);
+        assert_eq!(controller.smoothed_jitter_ms(), 24);
     }
 
     #[test]
