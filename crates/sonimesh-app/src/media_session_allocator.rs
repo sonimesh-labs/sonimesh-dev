@@ -25,8 +25,9 @@ use core::fmt;
 use sonimesh_protocol::{MediaDirection, MediaKeyContext, SessionSecret};
 
 use crate::{
-    ControlSessionToken, ControlStreamCoordinator, MediaStreamIdentity,
-    PairingInvitationController, PairingInvitationError, PairingRecordState,
+    ControlSessionToken, ControlStreamCoordinator, ControlStreamError, MediaStreamIdentity,
+    PairingInvitationController, PairingInvitationError, PairingRecordState, ReconnectGraceError,
+    ReconnectGraceObservation,
 };
 
 /// Fixed upper bound on the retained no-reuse record of issued key contexts.
@@ -180,6 +181,38 @@ impl MediaSessionAllocator {
         Ok(state)
     }
 
+    /// Observes the bounded reconnect window and retires this pairing root when it ends.
+    ///
+    /// The coordinator owns control-session expiry. This composition preserves
+    /// that owner while ensuring a pairing root cannot outlive a reconnect
+    /// window that expired or whose monotonic clock regressed. In-grace and idle
+    /// observations leave the allocator intact; only the coordinator's
+    /// fail-closed terminal outcomes revoke the root and clear the no-reuse
+    /// record.
+    ///
+    /// # Errors
+    ///
+    /// Returns the coordinator's reconnect-grace error after revoking the root
+    /// when the error represents a clock regression. Other results leave the
+    /// allocator unchanged.
+    pub fn observe_reconnect_grace_and_revoke(
+        &mut self,
+        coordinator: &mut ControlStreamCoordinator,
+        now_ms: u64,
+    ) -> Result<ReconnectGraceObservation, ControlStreamError> {
+        let observation = coordinator.observe_reconnect_grace(now_ms);
+        if matches!(
+            observation,
+            Ok(ReconnectGraceObservation::Expired)
+                | Err(ControlStreamError::ReconnectGrace(
+                    ReconnectGraceError::TimeRegressed
+                ))
+        ) {
+            self.revoke();
+        }
+        observation
+    }
+
     /// Returns whether `context` was already issued in this pairing lifetime.
     #[must_use]
     pub fn contains(&self, context: MediaKeyContext) -> bool {
@@ -282,9 +315,10 @@ mod tests {
 
     use super::{MAX_RETAINED_MEDIA_IDENTITIES, MediaSessionAllocator, MediaSessionAllocatorError};
     use crate::{
-        ControlSessionToken, ControlStreamCoordinator, MediaStreamIdentity, PairingAttemptOutcome,
-        PairingId, PairingInvitationController, PairingInvitationError, PairingProofVerification,
-        PairingRecordState, PairingSource, SessionState,
+        ControlSessionToken, ControlStreamCoordinator, ControlStreamError, MediaStreamIdentity,
+        PairingAttemptOutcome, PairingId, PairingInvitationController, PairingInvitationError,
+        PairingProofVerification, PairingRecordState, PairingSource, ReconnectGraceError,
+        ReconnectGraceObservation, SessionEvent, SessionState,
     };
 
     const DIRECTION: MediaDirection = MediaDirection::AndroidToDesktop;
@@ -394,6 +428,88 @@ mod tests {
         assert!(!allocator.is_revoked());
         assert_eq!(allocator.issued_count(), 1);
         assert!(allocator.contains(context));
+    }
+
+    #[test]
+    fn reconnect_grace_expiry_retires_the_media_root_with_the_control_session() {
+        let (mut coordinator, token, _) = authenticated_pairing_owner();
+        let mut allocator = MediaSessionAllocator::new(SessionSecret::new([0xA5; 32]));
+        let context = allocator
+            .supply_for_authenticated_control_session(
+                &coordinator,
+                token,
+                identity(7, 1, 0),
+                DIRECTION,
+            )
+            .expect("active transport may issue a fresh identity")
+            .context();
+
+        assert!(matches!(
+            allocator.observe_reconnect_grace_and_revoke(&mut coordinator, 99),
+            Ok(ReconnectGraceObservation::Idle)
+        ));
+        assert!(!allocator.is_revoked());
+        assert!(allocator.contains(context));
+
+        coordinator
+            .acknowledge_platform_event(SessionEvent::ConnectionLost)
+            .expect("ready control session enters reconnecting");
+        coordinator
+            .begin_reconnect_grace(100, 50)
+            .expect("reconnect grace starts");
+
+        assert!(matches!(
+            allocator.observe_reconnect_grace_and_revoke(&mut coordinator, 149),
+            Ok(ReconnectGraceObservation::InGrace { remaining_ms: 1 })
+        ));
+        assert!(!allocator.is_revoked());
+        assert!(allocator.contains(context));
+
+        assert!(matches!(
+            allocator.observe_reconnect_grace_and_revoke(&mut coordinator, 150),
+            Ok(ReconnectGraceObservation::Expired)
+        ));
+        assert_eq!(coordinator.state(), SessionState::IDLE);
+        assert!(!coordinator.has_authenticated_control_session(token));
+        assert!(allocator.is_revoked());
+        assert_eq!(allocator.issued_count(), 0);
+        assert!(!allocator.contains(context));
+        assert!(matches!(
+            allocator.supply(identity(8, 1, 0), DIRECTION),
+            Err(MediaSessionAllocatorError::Revoked)
+        ));
+    }
+
+    #[test]
+    fn reconnect_grace_clock_regression_revokes_the_media_root_before_returning_the_error() {
+        let (mut coordinator, _token, _) = authenticated_pairing_owner();
+        let mut allocator = MediaSessionAllocator::new(SessionSecret::new([0xA5; 32]));
+        let context = allocator
+            .supply(identity(7, 1, 0), DIRECTION)
+            .expect("fresh identity")
+            .context();
+
+        coordinator
+            .acknowledge_platform_event(SessionEvent::ConnectionLost)
+            .expect("ready control session enters reconnecting");
+        coordinator
+            .begin_reconnect_grace(100, 50)
+            .expect("reconnect grace starts");
+        assert!(matches!(
+            allocator.observe_reconnect_grace_and_revoke(&mut coordinator, 120),
+            Ok(ReconnectGraceObservation::InGrace { remaining_ms: 30 })
+        ));
+
+        assert!(matches!(
+            allocator.observe_reconnect_grace_and_revoke(&mut coordinator, 119),
+            Err(ControlStreamError::ReconnectGrace(
+                ReconnectGraceError::TimeRegressed
+            ))
+        ));
+        assert_eq!(coordinator.state(), SessionState::IDLE);
+        assert!(allocator.is_revoked());
+        assert_eq!(allocator.issued_count(), 0);
+        assert!(!allocator.contains(context));
     }
 
     #[test]

@@ -58,7 +58,10 @@ lifetime.
   adapter. The `revoke_for_pairing` composition method is the preferred app
   boundary when the pairing controller is available: it only drops the root
   after the pairing and control owners have completed their terminal
-  revocation transition.
+  revocation transition. The reconnect-grace composition delegates the clock
+  observation to `ControlStreamCoordinator` and revokes the root only after
+  that owner reports an expired window or a fail-closed clock regression; an
+  in-grace or idle observation retains the allocator.
 
 ## Security implications
 
@@ -66,8 +69,10 @@ Rejecting any previously issued key context within a pairing lifetime means a
 stale or replayed reconnection cannot re-install a retired session. Explicit
 allocator revocation additionally drops the root and clears cached contexts,
 so packets sealed under a retired context cannot be re-admitted after a fresh
-session
-replaces it. The secret is zeroized on drop, its `Debug` output is redacted,
+session replaces it. Reconnect-grace expiry and clock regression use the same
+terminal retirement path, preventing a stale pairing root from issuing fresh
+contexts after the control session has failed closed. The secret is zeroized on
+drop, its `Debug` output is redacted,
 and the allocator fails closed when the bounded no-reuse record is full rather
 than silently weakening the guarantee.
 
@@ -98,9 +103,11 @@ than silently weakening the guarantee.
   boundary, clears cached contexts, and rejects later supply attempts; the
   pairing-composition path also proves that control and pairing revocation
   complete before the media root is dropped, and a failed pairing transition
-  leaves the root and no-reuse record intact. It also verifies that the
-  coordinator-gated allocator rejects a retired control token before consuming
-  no-reuse capacity.
+  leaves the root and no-reuse record intact. Reconnect-grace unit coverage
+  proves that both deadline expiry and a clock regression retire the control
+  session and the media root together, while an in-grace observation retains
+  it. It also verifies that the coordinator-gated allocator rejects a retired
+  control token before consuming no-reuse capacity.
 - A control-domain integration test drives the same reconnection through `ControlStreamCoordinator`: connection loss arms a bounded reconnect window while the live UDP path keeps admitting packets, the reconnected transport installs a fresh token and repeats hello negotiation, the retired token fails before it can reserve the reconnection identity, the fresh token supplies a new context for the re-admitted stream, `install_fresh_session` keeps the socket, packets sealed under the retired session are rejected, and the fresh session's packets rebind and decode; the no-reuse record then rejects both issued contexts.
 - A seeded property walk drives randomized identity/direction supply scripts
   against an independent append-only set model, asserting the exact outcome
