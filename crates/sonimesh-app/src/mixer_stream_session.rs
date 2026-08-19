@@ -466,6 +466,13 @@ where
         self.records = [const { None }; SLOTS];
     }
 
+    /// Stops the output and retires its realtime membership boundary while
+    /// preserving stream records for a later output recovery.
+    pub fn retire_output_preserving_streams(&mut self) {
+        self.output.stop();
+        self.membership = None;
+    }
+
     /// Returns the clone of one stream's gain and mute handle.
     ///
     /// # Errors

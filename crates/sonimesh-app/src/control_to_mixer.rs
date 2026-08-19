@@ -281,6 +281,12 @@ where
         self.coordinator.acknowledge_platform_event(event)?;
         match event {
             SessionEvent::OutputLost => {
+                // Retire the realtime membership boundary for direct platform
+                // notifications as well as the monitor() path. The coordinator
+                // now reports the output as unavailable, so leaving the mixer
+                // active would expose stale producers and contradict the
+                // control-domain lifecycle.
+                self.mixer.retire_output_preserving_streams();
                 self.output_active = false;
             }
             SessionEvent::OutputRestored | SessionEvent::Reconnected => {

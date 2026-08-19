@@ -529,6 +529,42 @@ fn admission_failure_after_output_start_rolls_back_the_output() {
 }
 
 #[test]
+fn direct_output_lost_event_retires_the_mixer_membership_boundary() {
+    let counters = Arc::new(StreamCounters::default());
+    let mut bridge = bridge();
+    let token = authenticated(&mut bridge);
+    let mut pipeline = pipeline_for(1, 1, Arc::clone(&counters));
+
+    let request = start_one(&mut bridge, token, 1, 1, None, &mut pipeline);
+    assert!(bridge.output_active());
+    assert!(bridge.mixer().snapshot().stream_active());
+
+    bridge
+        .acknowledge_platform_event(SessionEvent::OutputLost)
+        .unwrap();
+
+    assert_eq!(bridge.state().phase(), SessionPhase::OutputUnavailable);
+    assert!(!bridge.output_active());
+    assert_eq!(
+        bridge.mixer().stream_count(),
+        1,
+        "stream records persist for recovery"
+    );
+    assert!(
+        !bridge.mixer().snapshot().stream_active(),
+        "a direct output-loss event must retire the realtime membership boundary"
+    );
+    assert_eq!(bridge.mixer().output().stop_calls, 1);
+
+    assert_eq!(bridge.recover_output().unwrap(), vec![request.identity]);
+    bridge
+        .recover_stream::<_, BLOCK>(request.identity, &mut pipeline)
+        .unwrap();
+    assert!(bridge.output_active());
+    assert_eq!(bridge.mixer().stream_count(), 1);
+}
+
+#[test]
 fn output_fault_and_recovery_readmit_persisted_streams() {
     let counters = Arc::new(StreamCounters::default());
     let mut bridge = bridge();
