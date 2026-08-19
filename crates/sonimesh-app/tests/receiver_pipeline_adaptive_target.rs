@@ -172,6 +172,20 @@ fn target_state(counters: &StreamCounters) -> (u16, u16, u16, u32, u32, u32) {
 }
 
 #[test]
+fn target_gated_playout_requires_an_adaptive_target() {
+    let secret = SessionSecret::new([0xA5; 32]);
+    let counters = Arc::new(StreamCounters::default());
+    let (producer, _consumer) = realtime_pcm_queue::<PCM_SAMPLES_PER_BLOCK>(4).unwrap();
+    let mut pipeline =
+        Pipeline::new(&secret, context(), ByteDecoder, producer, counters, 0).unwrap();
+
+    assert_eq!(
+        pipeline.enable_target_gated_playout(TargetGatedPlayoutConfig { max_gate_ticks: 2 }),
+        Err(TargetGatedPlayoutSetupError::MissingAdaptiveTarget)
+    );
+}
+
+#[test]
 fn target_gated_decode_waits_for_pending_arrivals_until_the_deadline() {
     let counters = Arc::new(StreamCounters::default());
     let ticks = vec![20_u64];
@@ -194,6 +208,22 @@ fn target_gated_decode_waits_for_pending_arrivals_until_the_deadline() {
         pipeline.decode_next_with_arrivals_pending(true).unwrap(),
         DecodeStep::NotReady
     );
+    assert!(matches!(
+        pipeline.decode_next_with_arrivals_pending(true).unwrap(),
+        DecodeStep::Decoded { sequence: 0, .. }
+    ));
+}
+
+#[test]
+fn disabling_target_gated_playout_restores_immediate_decode() {
+    let counters = Arc::new(StreamCounters::default());
+    let (mut pipeline, mut sealer, _queue) = adaptive_pipeline(&[20], counters);
+    pipeline
+        .enable_target_gated_playout(TargetGatedPlayoutConfig { max_gate_ticks: 2 })
+        .unwrap();
+    pipeline.disable_target_gated_playout();
+
+    admit_without_decode(&mut pipeline, &mut sealer, 0);
     assert!(matches!(
         pipeline.decode_next_with_arrivals_pending(true).unwrap(),
         DecodeStep::Decoded { sequence: 0, .. }
