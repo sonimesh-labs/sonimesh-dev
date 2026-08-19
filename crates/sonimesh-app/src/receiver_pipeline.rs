@@ -330,6 +330,7 @@ where
             .ok_or(TargetGatedPlayoutSetupError::MissingAdaptiveTarget)?;
         adaptive.playout =
             Some(TargetGatedPlayout::new(config).map_err(TargetGatedPlayoutSetupError::Scheduler)?);
+        self.counters.reset_target_gated_playout_state();
         Ok(())
     }
 
@@ -337,6 +338,7 @@ where
     pub fn disable_target_gated_playout(&mut self) {
         if let Some(adaptive) = &mut self.adaptive_target {
             adaptive.playout = None;
+            self.counters.reset_target_gated_playout_state();
         }
     }
 
@@ -612,7 +614,12 @@ where
         let buffered_frames = self.decode.jitter_len();
         let target_frames = self.adaptive_target.as_ref()?.target.target_frames();
         let scheduler = self.adaptive_target.as_mut()?.playout.as_mut()?;
-        Some(scheduler.decide(buffered_frames, target_frames, arrivals_pending))
+        let decision = scheduler.decide(buffered_frames, target_frames, arrivals_pending);
+        self.counters.publish_target_gated_playout_state(
+            scheduler.gated_ticks(),
+            scheduler.forced_playouts(),
+        );
+        Some(decision)
     }
 
     fn record_jitter_outcome(&self, outcome: InsertOutcome) {

@@ -1,9 +1,10 @@
 //! Deterministic property coverage for the stream diagnostics counters.
 //!
-//! `StreamCounters` publishes three distinct state machines: fourteen
-//! cumulative saturating counters, two packed (occupancy, high-water) epoch
-//! pairs — the PCM queue and the jitter buffer — and a six-field adaptive
-//! target-state epoch. This test drives a real counter instance under seeded
+//! `StreamCounters` publishes four distinct state machines: fourteen
+//! cumulative saturating counters, two target-gated scheduler epoch counters,
+//! two packed (occupancy, high-water) epoch pairs — the PCM queue and the
+//! jitter buffer — and a six-field adaptive target-state epoch. This test
+//! drives a real counter instance under seeded
 //! operation walks against independent models — a plain saturating `u64`
 //! struct for the cumulative counters, separate `(occupancy, high_water)`
 //! pairs for the epochs, and a `(min, max, target, smoothed, raised, lowered)`
@@ -491,5 +492,60 @@ fn target_epoch_matches_an_independent_model() {
     assert!(
         observed_reset_after_activity,
         "the walk must reset a populated target epoch"
+    );
+}
+
+/// Drives the target-gated playout telemetry epoch independently from the
+/// adaptive water-level epoch. Both counters are exported as decimal values,
+/// and an explicit scheduler reset must retire them without touching the
+/// adaptive target state.
+#[test]
+fn target_gated_playout_epoch_matches_an_independent_model() {
+    const STEPS: usize = 20_000;
+    let mut rng = XorShift64(0xD1A6_0000_2026_0018);
+    let counters = StreamCounters::default();
+    let mut model = (0_u64, 0_u64);
+    let mut observed_activity = false;
+    let mut observed_reset_after_activity = false;
+
+    for _ in 0..STEPS {
+        if rng.next_usize(10) == 0 {
+            counters.reset_target_gated_playout_state();
+            if model != (0, 0) {
+                observed_reset_after_activity = true;
+            }
+            model = (0, 0);
+        } else {
+            let gated_ticks = match rng.next_usize(4) {
+                0 => 0,
+                1 => u64::from(rng.next_u32() % 16),
+                2 => u64::from(rng.next_u32()),
+                _ => u64::MAX,
+            };
+            let forced_playouts = match rng.next_usize(4) {
+                0 => 0,
+                1 => u64::from(rng.next_u32() % 16),
+                2 => u64::from(rng.next_u32()),
+                _ => u64::MAX,
+            };
+            counters.publish_target_gated_playout_state(gated_ticks, forced_playouts);
+            model = (gated_ticks, forced_playouts);
+            observed_activity |= model != (0, 0);
+        }
+
+        let snapshot = counters.snapshot();
+        assert_eq!(
+            (snapshot.target_gated_ticks, snapshot.target_forced_playouts),
+            model
+        );
+    }
+
+    assert!(
+        observed_activity,
+        "the walk must publish scheduler telemetry"
+    );
+    assert!(
+        observed_reset_after_activity,
+        "the walk must retire a populated scheduler epoch"
     );
 }

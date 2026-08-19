@@ -208,22 +208,43 @@ fn target_gated_decode_waits_for_pending_arrivals_until_the_deadline() {
         pipeline.decode_next_with_arrivals_pending(true).unwrap(),
         DecodeStep::NotReady
     );
+    let snapshot = counters.snapshot();
+    assert_eq!(
+        (snapshot.target_gated_ticks, snapshot.target_forced_playouts),
+        (2, 0)
+    );
     assert!(matches!(
         pipeline.decode_next_with_arrivals_pending(true).unwrap(),
         DecodeStep::Decoded { sequence: 0, .. }
     ));
+    let snapshot = counters.snapshot();
+    assert_eq!(
+        (snapshot.target_gated_ticks, snapshot.target_forced_playouts),
+        (2, 1)
+    );
 }
 
 #[test]
 fn disabling_target_gated_playout_restores_immediate_decode() {
     let counters = Arc::new(StreamCounters::default());
-    let (mut pipeline, mut sealer, _queue) = adaptive_pipeline(&[20], counters);
+    let (mut pipeline, mut sealer, _queue) = adaptive_pipeline(&[20], Arc::clone(&counters));
     pipeline
         .enable_target_gated_playout(TargetGatedPlayoutConfig { max_gate_ticks: 2 })
         .unwrap();
-    pipeline.disable_target_gated_playout();
 
     admit_without_decode(&mut pipeline, &mut sealer, 0);
+    assert_eq!(
+        pipeline.decode_next_with_arrivals_pending(true).unwrap(),
+        DecodeStep::NotReady
+    );
+    assert_eq!(counters.snapshot().target_gated_ticks, 1);
+
+    pipeline.disable_target_gated_playout();
+    let snapshot = counters.snapshot();
+    assert_eq!(
+        (snapshot.target_gated_ticks, snapshot.target_forced_playouts),
+        (0, 0)
+    );
     assert!(matches!(
         pipeline.decode_next_with_arrivals_pending(true).unwrap(),
         DecodeStep::Decoded { sequence: 0, .. }
@@ -243,12 +264,19 @@ fn fresh_session_resets_target_gated_playout_streak() {
         pipeline.decode_next_with_arrivals_pending(true).unwrap(),
         DecodeStep::NotReady
     );
+    assert_eq!(counters.snapshot().target_gated_ticks, 1);
 
     let secret = SessionSecret::new([0xA5; 32]);
     let fresh_context = context_for_session(0x0A0B_0C0D_0E0F_0102, 9);
     pipeline
         .install_fresh_session(&secret, fresh_context, 0)
         .unwrap();
+    let snapshot = counters.snapshot();
+    assert_eq!(
+        (snapshot.target_gated_ticks, snapshot.target_forced_playouts),
+        (0, 0),
+        "the fresh epoch must retire scheduler telemetry"
+    );
     let mut fresh_sealer = MediaSealer::new(&secret, fresh_context).unwrap();
     admit_without_decode(&mut pipeline, &mut fresh_sealer, 0);
 

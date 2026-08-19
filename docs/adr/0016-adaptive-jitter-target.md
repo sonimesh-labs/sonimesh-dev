@@ -99,12 +99,13 @@ bandwidth serialization are observed against per-stream adaptive jitter
 control. The per-stream encoded-frame water level the controller observes
 is also published as a diagnostics metric: each stream snapshot carries
 the current jitter occupancy and its epoch high-water mark as one coherent
-(frames, high-water) pair, while the playout scheduler that consumes the
-adaptive target remains future Phase 2 work. The diagnostics contract for
+(frames, high-water) pair, while production output-callback adoption of the
+playout scheduler remains future Phase 2 work. The diagnostics contract for
 that controller is already in place: each stream snapshot and export
 bundle carries the active target state (target/min/max frames, smoothed
-jitter in milliseconds, raised/lowered step counts), so a future
-controller only has to publish through the stream counters. The receiver
+jitter in milliseconds, raised/lowered step counts) plus target-gated ticks and
+forced playouts for the active scheduler epoch, so the receiver boundary can
+publish scheduling evidence through the stream counters. The receiver
 pipeline (`ReceiverStreamPipeline` and the UDP receiver) now optionally runs
 `ArrivalJitter` and `AdaptiveJitterTarget` against live authenticated
 packets with a caller-supplied monotonic arrival clock, so the controller is

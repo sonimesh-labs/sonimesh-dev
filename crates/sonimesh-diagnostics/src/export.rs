@@ -393,6 +393,14 @@ fn write_stream_object(out: &mut String, snapshot: &StreamMetricsSnapshot) {
             ExportCounterValue::Number(i64::from(snapshot.target_lowered_steps)),
         ),
         (
+            "target_gated_ticks",
+            ExportCounterValue::Decimal(snapshot.target_gated_ticks),
+        ),
+        (
+            "target_forced_playouts",
+            ExportCounterValue::Decimal(snapshot.target_forced_playouts),
+        ),
+        (
             "plc_frames",
             ExportCounterValue::Decimal(snapshot.plc_frames),
         ),
@@ -524,6 +532,8 @@ mod tests {
             target_smoothed_jitter_ms: 35,
             target_raised_steps: 3,
             target_lowered_steps: 1,
+            target_gated_ticks: 6,
+            target_forced_playouts: 2,
             drift_adjustment_ppm: -125,
             ..StreamMetricsSnapshot::default()
         }
@@ -548,7 +558,7 @@ mod tests {
         let stream = sample_stream();
         let streams = [stream];
         let snapshot = full_snapshot(&streams);
-        let expected = "{\"format_version\":1,\"software_version\":\"0.1.0\",\"endpoint\":\"[ipv4-address-redacted]:49321\",\"platform_format\":{\"sample_rate_hz\":48000,\"channels\":2},\"buffer_policy\":\"balanced\",\"session_phase\":\"streaming\",\"streams\":[{\"authenticated_packets\":\"12\",\"duplicate_packets\":\"0\",\"rejected_packets\":\"0\",\"late_packets\":\"0\",\"reordered_packets\":\"0\",\"jitter_resync_dropped_frames\":\"0\",\"jitter_frames\":3,\"jitter_high_water_frames\":5,\"target_min_frames\":2,\"target_max_frames\":8,\"target_frames\":4,\"target_smoothed_jitter_ms\":35,\"target_raised_steps\":3,\"target_lowered_steps\":1,\"plc_frames\":\"0\",\"decode_errors\":\"0\",\"pcm_underflows\":\"3\",\"pcm_refill_limit_hits\":\"1\",\"pcm_overflows\":\"0\",\"pcm_discontinuities\":\"0\",\"queued_pcm_blocks\":7,\"queued_pcm_high_water_blocks\":9,\"stream_resets\":\"0\",\"nominal_input_sample_rate_hz\":0,\"nominal_output_sample_rate_hz\":0,\"drift_adjustment_ppm\":-125,\"drift_hard_resyncs\":\"0\"}]}";
+        let expected = "{\"format_version\":1,\"software_version\":\"0.1.0\",\"endpoint\":\"[ipv4-address-redacted]:49321\",\"platform_format\":{\"sample_rate_hz\":48000,\"channels\":2},\"buffer_policy\":\"balanced\",\"session_phase\":\"streaming\",\"streams\":[{\"authenticated_packets\":\"12\",\"duplicate_packets\":\"0\",\"rejected_packets\":\"0\",\"late_packets\":\"0\",\"reordered_packets\":\"0\",\"jitter_resync_dropped_frames\":\"0\",\"jitter_frames\":3,\"jitter_high_water_frames\":5,\"target_min_frames\":2,\"target_max_frames\":8,\"target_frames\":4,\"target_smoothed_jitter_ms\":35,\"target_raised_steps\":3,\"target_lowered_steps\":1,\"target_gated_ticks\":\"6\",\"target_forced_playouts\":\"2\",\"plc_frames\":\"0\",\"decode_errors\":\"0\",\"pcm_underflows\":\"3\",\"pcm_refill_limit_hits\":\"1\",\"pcm_overflows\":\"0\",\"pcm_discontinuities\":\"0\",\"queued_pcm_blocks\":7,\"queued_pcm_high_water_blocks\":9,\"stream_resets\":\"0\",\"nominal_input_sample_rate_hz\":0,\"nominal_output_sample_rate_hz\":0,\"drift_adjustment_ppm\":-125,\"drift_hard_resyncs\":\"0\"}]}";
         let first = build_export_bundle(&snapshot).unwrap();
         let second = build_export_bundle(&snapshot).unwrap();
         assert_eq!(first, expected);
@@ -580,10 +590,14 @@ mod tests {
         assert!(bundle.contains("\"target_max_frames\":0"));
         assert!(bundle.contains("\"target_frames\":0"));
         assert!(bundle.contains("\"target_smoothed_jitter_ms\":0"));
+        assert!(bundle.contains("\"target_gated_ticks\":\"0\""));
+        assert!(bundle.contains("\"target_forced_playouts\":\"0\""));
         assert!(!bundle.contains("\"queued_pcm_blocks\":\""));
         assert!(!bundle.contains("\"jitter_frames\":\""));
         assert!(!bundle.contains("\"target_frames\":\""));
         assert!(!bundle.contains("\"target_smoothed_jitter_ms\":\""));
+        assert!(!bundle.contains("\"target_gated_ticks\":0"));
+        assert!(!bundle.contains("\"target_forced_playouts\":0"));
     }
 
     #[test]
@@ -775,6 +789,8 @@ mod tests {
             target_smoothed_jitter_ms: u32::MAX,
             target_raised_steps: u32::MAX,
             target_lowered_steps: u32::MAX,
+            target_gated_ticks: u64::MAX,
+            target_forced_playouts: u64::MAX,
             stream_resets: u64::MAX,
             nominal_input_sample_rate_hz: 192_000,
             nominal_output_sample_rate_hz: 8_000,

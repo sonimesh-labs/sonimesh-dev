@@ -217,8 +217,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   its UDP wrapper expose an opt-in `enable_target_gated_playout` plus
   `decode_next_with_arrivals_pending` boundary; the caller owns the pending
   arrival signal and the ordinary decode method remains an immediate drain path.
-  Fresh-session installation resets an enabled scheduler's bounded gate streak,
-  while explicit disable immediately restores that drain behavior. Production
+  Fresh-session installation resets an enabled scheduler's bounded gate streak
+  and exported scheduler counters, while explicit disable clears those counters
+  and immediately restores that drain behavior. Production
   output-callback wiring and hardware timing remain Phase 2 work.
 - an independent LibFuzzer workspace for bounded control decoding, media packet
   parsing, protected ingress, and the bounded diagnostic export journal. The

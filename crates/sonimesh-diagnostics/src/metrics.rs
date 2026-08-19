@@ -21,6 +21,8 @@ pub struct StreamCounters {
     target_smoothed_jitter_ms: AtomicU32,
     target_raised_steps: AtomicU32,
     target_lowered_steps: AtomicU32,
+    target_gated_ticks: AtomicU64,
+    target_forced_playouts: AtomicU64,
     stream_resets: AtomicU64,
     nominal_sample_rates: AtomicU64,
     drift_adjustment_ppm: AtomicI32,
@@ -157,12 +159,36 @@ impl StreamCounters {
             .store(lowered_steps, Ordering::Relaxed);
     }
 
+    /// Publishes the target-gated playout counters for the active epoch.
+    ///
+    /// Both values are owned by the non-realtime scheduling domain. They reset
+    /// with the adaptive target epoch and are never written from an output
+    /// callback. As with the other independent telemetry fields, a snapshot
+    /// crossing an epoch transition may briefly combine old and new values.
+    pub fn publish_target_gated_playout_state(&self, gated_ticks: u64, forced_playouts: u64) {
+        self.target_gated_ticks
+            .store(gated_ticks, Ordering::Relaxed);
+        self.target_forced_playouts
+            .store(forced_playouts, Ordering::Relaxed);
+    }
+
+    /// Starts a fresh target-gated playout diagnostic epoch.
+    ///
+    /// Both counters become zero until an enabled scheduler publishes its next
+    /// decision. This is separate so disabling scheduling does not retire the
+    /// adaptive target water level.
+    pub fn reset_target_gated_playout_state(&self) {
+        self.publish_target_gated_playout_state(0, 0);
+    }
+
     /// Starts a fresh adaptive-target epoch after a stream-local retirement.
     ///
     /// Every published value becomes zero until the pipeline republishes the
-    /// controller state on the next observation.
+    /// controller state on the next observation. Any target-gated scheduler
+    /// telemetry is retired with the same stream epoch.
     pub fn reset_target_state(&self) {
         self.publish_target_state(0, 0, 0, 0, 0, 0);
+        self.reset_target_gated_playout_state();
     }
 
     /// Records a stream-local reset.
@@ -228,6 +254,8 @@ impl StreamCounters {
             target_smoothed_jitter_ms: self.target_smoothed_jitter_ms.load(Ordering::Relaxed),
             target_raised_steps: self.target_raised_steps.load(Ordering::Relaxed),
             target_lowered_steps: self.target_lowered_steps.load(Ordering::Relaxed),
+            target_gated_ticks: self.target_gated_ticks.load(Ordering::Relaxed),
+            target_forced_playouts: self.target_forced_playouts.load(Ordering::Relaxed),
             stream_resets: self.stream_resets.load(Ordering::Relaxed),
             nominal_input_sample_rate_hz,
             nominal_output_sample_rate_hz,
@@ -284,6 +312,10 @@ pub struct StreamMetricsSnapshot {
     pub target_raised_steps: u32,
     /// Target-lowering steps taken in the active epoch.
     pub target_lowered_steps: u32,
+    /// Target-gated decode ticks in the active epoch.
+    pub target_gated_ticks: u64,
+    /// Below-target plays forced by an expired gate deadline in the active epoch.
+    pub target_forced_playouts: u64,
     /// Stream-local resets.
     pub stream_resets: u64,
     /// Validated nominal input sample rate, or zero before publication.
@@ -641,6 +673,12 @@ mod tests {
             ),
             (2, 8, 4, 35, 3, 1)
         );
+        counters.publish_target_gated_playout_state(7, 2);
+        let snapshot = counters.snapshot();
+        assert_eq!(
+            (snapshot.target_gated_ticks, snapshot.target_forced_playouts),
+            (7, 2)
+        );
 
         counters.reset_target_state();
         let snapshot = counters.snapshot();
@@ -652,8 +690,10 @@ mod tests {
                 snapshot.target_smoothed_jitter_ms,
                 snapshot.target_raised_steps,
                 snapshot.target_lowered_steps,
+                snapshot.target_gated_ticks,
+                snapshot.target_forced_playouts,
             ),
-            (0, 0, 0, 0, 0, 0)
+            (0, 0, 0, 0, 0, 0, 0, 0)
         );
     }
 
