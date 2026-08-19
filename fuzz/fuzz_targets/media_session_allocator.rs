@@ -18,7 +18,8 @@ use libfuzzer_sys::fuzz_target;
 use sonimesh_app::{
     ControlSessionToken, ControlStreamCoordinator, MAX_RETAINED_MEDIA_IDENTITIES,
     MediaSessionAllocator, MediaSessionAllocatorError, MediaStreamIdentity, PairingAttemptOutcome,
-    PairingId, PairingInvitationController, PairingProofVerification, PairingSource, SessionState,
+    PairingId, PairingInvitationController, PairingProofVerification, PairingRecordState,
+    PairingSource, SessionState,
 };
 use sonimesh_protocol::{MediaDirection, MediaKeyContext, SessionSecret};
 
@@ -124,6 +125,46 @@ fn assert_allocator_revocation() {
     ));
 }
 
+fn assert_pairing_revocation_composition() {
+    let mut pairing = PairingInvitationController::<1>::new();
+    let mut state = SessionState::IDLE;
+    pairing
+        .begin(&mut state, PairingId::new([3; 16]), 100, 50, 1)
+        .expect("pairing invitation begins");
+    assert_eq!(
+        pairing.verify_proof(&mut state, 101, PairingSource::new([4; 16]), || {
+            PairingProofVerification::Verified
+        }),
+        Ok(PairingAttemptOutcome::Paired)
+    );
+
+    let mut coordinator =
+        ControlStreamCoordinator::new(state, &[]).expect("bounded coordinator policy");
+    let token = coordinator
+        .install_authenticated_control_session()
+        .expect("authenticated transport token");
+    let mut allocator = MediaSessionAllocator::new(SessionSecret::new([0xD4; 32]));
+    let context = allocator
+        .supply_for_authenticated_control_session(
+            &coordinator,
+            token,
+            identity(11, 1, 0),
+            DIRECTION,
+        )
+        .expect("active transport may issue a fresh identity")
+        .context();
+
+    assert_eq!(
+        allocator.revoke_for_pairing(&mut coordinator, &mut pairing),
+        Ok(PairingRecordState::Revoked)
+    );
+    assert!(allocator.is_revoked());
+    assert_eq!(allocator.issued_count(), 0);
+    assert!(!allocator.contains(context));
+    assert_eq!(coordinator.state(), SessionState::IDLE);
+    assert!(!coordinator.has_authenticated_control_session(token));
+}
+
 /// Allocator plus an independent append-only set model of the same record.
 struct AllocatorModel {
     allocator: MediaSessionAllocator,
@@ -174,6 +215,7 @@ impl AllocatorModel {
 fuzz_target!(|data: &[u8]| {
     assert_control_session_gate();
     assert_allocator_revocation();
+    assert_pairing_revocation_composition();
     if data.is_empty() {
         return;
     }

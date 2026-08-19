@@ -260,7 +260,9 @@ The network-scenario targets (`jitter_target`, `jitter_scheduler`, `multi_stream
   Every input also verifies that a live authenticated control token can issue
   a grant while a retired token cannot reserve an identity or consume the
   bounded record, and that explicit allocator revocation clears retained
-  contexts and rejects later supply.
+  contexts and rejects later supply. The pairing/control composition is also
+  exercised so a failed terminal pairing transition cannot clear the media
+  root, while a successful one retires both domains.
 
 ## Run a target
 

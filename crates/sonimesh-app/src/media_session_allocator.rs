@@ -24,7 +24,10 @@ use core::fmt;
 
 use sonimesh_protocol::{MediaDirection, MediaKeyContext, SessionSecret};
 
-use crate::{ControlSessionToken, ControlStreamCoordinator, MediaStreamIdentity};
+use crate::{
+    ControlSessionToken, ControlStreamCoordinator, MediaStreamIdentity,
+    PairingInvitationController, PairingInvitationError, PairingRecordState,
+};
 
 /// Fixed upper bound on the retained no-reuse record of issued key contexts.
 ///
@@ -153,6 +156,30 @@ impl MediaSessionAllocator {
         self.issued_len = 0;
     }
 
+    /// Revokes a pairing record, its control session, and this allocator's root
+    /// as one control-domain operation.
+    ///
+    /// This composes the pairing owner's terminal revocation transition with
+    /// media-root retirement so callers cannot leave a trusted pairing record
+    /// revoked while its allocator continues to issue sessions. The coordinator
+    /// retires its control token, negotiated capabilities, active streams, and
+    /// pending work before this method drops the root and clears its cached
+    /// contexts.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PairingInvitationError`] without revoking this allocator when
+    /// the pairing owner cannot perform the revocation transition.
+    pub fn revoke_for_pairing<const MAX_SOURCES: usize>(
+        &mut self,
+        coordinator: &mut ControlStreamCoordinator,
+        pairing: &mut PairingInvitationController<MAX_SOURCES>,
+    ) -> Result<PairingRecordState, PairingInvitationError> {
+        let state = coordinator.revoke_pairing(pairing)?;
+        self.revoke();
+        Ok(state)
+    }
+
     /// Returns whether `context` was already issued in this pairing lifetime.
     #[must_use]
     pub fn contains(&self, context: MediaKeyContext) -> bool {
@@ -256,13 +283,17 @@ mod tests {
     use super::{MAX_RETAINED_MEDIA_IDENTITIES, MediaSessionAllocator, MediaSessionAllocatorError};
     use crate::{
         ControlSessionToken, ControlStreamCoordinator, MediaStreamIdentity, PairingAttemptOutcome,
-        PairingId, PairingInvitationController, PairingProofVerification, PairingSource,
-        SessionState,
+        PairingId, PairingInvitationController, PairingInvitationError, PairingProofVerification,
+        PairingRecordState, PairingSource, SessionState,
     };
 
     const DIRECTION: MediaDirection = MediaDirection::AndroidToDesktop;
 
-    fn authenticated_coordinator() -> (ControlStreamCoordinator, ControlSessionToken) {
+    fn authenticated_pairing_owner() -> (
+        ControlStreamCoordinator,
+        ControlSessionToken,
+        PairingInvitationController<1>,
+    ) {
         let mut pairing = PairingInvitationController::<1>::new();
         let mut state = SessionState::IDLE;
         pairing
@@ -280,7 +311,7 @@ mod tests {
         let token = coordinator
             .install_authenticated_control_session()
             .expect("authenticated transport token");
-        (coordinator, token)
+        (coordinator, token, pairing)
     }
 
     const fn identity(session_id: u64, stream_id: u32, key_epoch: u16) -> MediaStreamIdentity {
@@ -315,8 +346,59 @@ mod tests {
     }
 
     #[test]
+    fn pairing_revocation_retires_control_and_media_root_together() {
+        let (mut coordinator, token, mut pairing) = authenticated_pairing_owner();
+        let mut allocator = MediaSessionAllocator::new(SessionSecret::new([0xA5; 32]));
+        let context = allocator
+            .supply_for_authenticated_control_session(
+                &coordinator,
+                token,
+                identity(7, 1, 0),
+                DIRECTION,
+            )
+            .expect("active transport may issue a fresh identity")
+            .context();
+
+        assert_eq!(
+            allocator.revoke_for_pairing(&mut coordinator, &mut pairing),
+            Ok(PairingRecordState::Revoked)
+        );
+
+        assert!(allocator.is_revoked());
+        assert_eq!(allocator.issued_count(), 0);
+        assert!(!allocator.contains(context));
+        assert_eq!(coordinator.state(), SessionState::IDLE);
+        assert!(!coordinator.has_authenticated_control_session(token));
+        assert_eq!(pairing.state(), Some(PairingRecordState::Revoked));
+        assert!(matches!(
+            allocator.supply(identity(8, 1, 0), DIRECTION),
+            Err(MediaSessionAllocatorError::Revoked)
+        ));
+    }
+
+    #[test]
+    fn failed_pairing_revocation_preserves_the_media_root() {
+        let mut coordinator = ControlStreamCoordinator::new(SessionState::IDLE, &[])
+            .expect("bounded coordinator policy");
+        let mut pairing = PairingInvitationController::<1>::new();
+        let mut allocator = MediaSessionAllocator::new(SessionSecret::new([0xA5; 32]));
+        let context = allocator
+            .supply(identity(7, 1, 0), DIRECTION)
+            .expect("fresh identity")
+            .context();
+
+        assert_eq!(
+            allocator.revoke_for_pairing(&mut coordinator, &mut pairing),
+            Err(PairingInvitationError::MissingInvitation)
+        );
+        assert!(!allocator.is_revoked());
+        assert_eq!(allocator.issued_count(), 1);
+        assert!(allocator.contains(context));
+    }
+
+    #[test]
     fn authenticated_supply_rejects_a_retired_transport_before_consuming_capacity() {
-        let (mut coordinator, token) = authenticated_coordinator();
+        let (mut coordinator, token, _) = authenticated_pairing_owner();
         let mut allocator = MediaSessionAllocator::new(SessionSecret::new([0xA5; 32]));
 
         {

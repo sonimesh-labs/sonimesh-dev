@@ -342,7 +342,8 @@ authenticated session clears the binding.
 The media-session allocator ([ADR 0017](./adr/0017-control-reconnect-fresh-media-session.md))
 pins the authenticated-reconnection supply boundary: a fresh session issues for
 an authenticated identity, the full key context is never re-issued within a
-pairing lifetime, explicit revocation drops the pairing root and clears cached
+pairing lifetime, the pairing/control composition path drops the pairing root
+only after terminal revocation succeeds, explicit revocation clears cached
 contexts, the bounded no-reuse record fails closed when full, and an integration
 test wires the allocator into the receiver pipeline so packets
 sealed under a retired session are rejected after a fresh session installs,

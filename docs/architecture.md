@@ -389,8 +389,10 @@ reconnection supplies the fresh media session through a bounded
 `MediaSessionAllocator` ([ADR 0017](./adr/0017-control-reconnect-fresh-media-session.md)),
 which owns the one-time pairing media root and never re-issues a key context
 within a pairing lifetime; the authenticated transport that selects the media
-identity remains a separate gate. Both start and stop
-commands fail closed until that negotiation succeeds. Prepared stream actions
+identity remains a separate gate. The pairing/control owner must use the
+allocator's terminal revocation composition to drop the media root after trust
+revocation; a failed pairing transition must not clear the root. Both start and
+stop commands fail closed until that negotiation succeeds. Prepared stream actions
 carry a separate process-unique operation token so a completion routed from
 another coordinator cannot match identical pending work. A retry is a no-op only
 when the command kind and complete validated payload match; the receiver rejects
