@@ -342,16 +342,18 @@ authenticated session clears the binding.
 The media-session allocator ([ADR 0017](./adr/0017-control-reconnect-fresh-media-session.md))
 pins the authenticated-reconnection supply boundary: a fresh session issues for
 an authenticated identity, the full key context is never re-issued within a
-pairing lifetime, the bounded no-reuse record fails closed when full, and an
-integration test wires the allocator into the receiver pipeline so packets
+pairing lifetime, explicit revocation drops the pairing root and clears cached
+contexts, the bounded no-reuse record fails closed when full, and an integration
+test wires the allocator into the receiver pipeline so packets
 sealed under a retired session are rejected after a fresh session installs,
 and a loopback test repeats the same rejection over a real UDP socket with
 the allocator supplying root-bound grants for the pairing root and both
 contexts. A control-domain integration test drives the whole reconnection
 through `ControlStreamCoordinator`: control-channel loss arms the bounded reconnect
 window while the live UDP path keeps admitting packets, the reconnected
-transport installs a fresh token and repeats hello negotiation, the allocator
-supplies a fresh context for the re-admitted stream, and the receiver installs
+transport installs a fresh token and repeats hello negotiation, the retired token
+is rejected before allocation, the fresh token supplies a fresh context for the
+re-admitted stream, and the receiver installs
 it over the same socket so packets sealed under the retired session are
 rejected while the fresh session's packets rebind and decode.
 

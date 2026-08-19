@@ -43,7 +43,10 @@ lifetime.
   capacity error and the operator must establish a fresh pairing root.
 - A fresh pairing root replaces the whole allocator: drop the old instance and
   construct a new one, which resets the no-reuse record together with the root
-  it was derived from.
+  it was derived from. A revocation owner may instead call `revoke` on the
+  retained allocator; that drops the root immediately, clears cached contexts,
+  and makes every later supply fail closed. Live grants borrow the allocator,
+  so revocation cannot race an outstanding grant at the Rust API boundary.
 - The allocator performs no TLS, QR, pairing-record consumption, or network
   I/O. The authenticated control-plane transport that selects the media
   identity and the initial root provisioning remain external gates. When both
@@ -57,8 +60,10 @@ lifetime.
 ## Security implications
 
 Rejecting any previously issued key context within a pairing lifetime means a
-stale or replayed reconnection cannot re-install a retired session, so packets
-sealed under a retired context cannot be re-admitted after a fresh session
+stale or replayed reconnection cannot re-install a retired session. Explicit
+allocator revocation additionally drops the root and clears cached contexts,
+so packets sealed under a retired context cannot be re-admitted after a fresh
+session
 replaces it. The secret is zeroized on drop, its `Debug` output is redacted,
 and the allocator fails closed when the bounded no-reuse record is full rather
 than silently weakening the guarantee.
@@ -86,8 +91,10 @@ than silently weakening the guarantee.
   state boundary on the same socket: a reused session ID preserves both the
   populated target state and source pin, while a valid fresh session clears
   both before its first authenticated packet re-establishes them.
-- Unit coverage verifies that the coordinator-gated allocator rejects a retired
-  control token before consuming no-reuse capacity.
+- Unit coverage verifies that explicit allocator revocation drops the root
+  boundary, clears cached contexts, and rejects later supply attempts; it also
+  verifies that the coordinator-gated allocator rejects a retired control token
+  before consuming no-reuse capacity.
 - A control-domain integration test drives the same reconnection through `ControlStreamCoordinator`: connection loss arms a bounded reconnect window while the live UDP path keeps admitting packets, the reconnected transport installs a fresh token and repeats hello negotiation, the retired token fails before it can reserve the reconnection identity, the fresh token supplies a new context for the re-admitted stream, `install_fresh_session` keeps the socket, packets sealed under the retired session are rejected, and the fresh session's packets rebind and decode; the no-reuse record then rejects both issued contexts.
 - A seeded property walk drives randomized identity/direction supply scripts
   against an independent append-only set model, asserting the exact outcome

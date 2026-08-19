@@ -105,6 +105,25 @@ fn assert_control_session_gate() {
     assert_eq!(allocator.issued_count(), 1);
 }
 
+fn assert_allocator_revocation() {
+    let mut allocator = MediaSessionAllocator::new(SessionSecret::new([0xC3; 32]));
+    let context = allocator
+        .supply(identity(9, 1, 0), DIRECTION)
+        .expect("fresh identity")
+        .context();
+    assert!(allocator.contains(context));
+
+    allocator.revoke();
+
+    assert!(allocator.is_revoked());
+    assert_eq!(allocator.issued_count(), 0);
+    assert!(!allocator.contains(context));
+    assert!(matches!(
+        allocator.supply(identity(10, 1, 0), DIRECTION),
+        Err(MediaSessionAllocatorError::Revoked)
+    ));
+}
+
 /// Allocator plus an independent append-only set model of the same record.
 struct AllocatorModel {
     allocator: MediaSessionAllocator,
@@ -154,6 +173,7 @@ impl AllocatorModel {
 
 fuzz_target!(|data: &[u8]| {
     assert_control_session_gate();
+    assert_allocator_revocation();
     if data.is_empty() {
         return;
     }

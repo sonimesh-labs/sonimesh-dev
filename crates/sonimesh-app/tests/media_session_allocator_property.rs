@@ -161,6 +161,9 @@ fn run_walk(config: &WalkConfig, counters: &mut WalkCounters) {
             Err(MediaSessionAllocatorError::InvalidIdentity) => counters.invalid += 1,
             Err(MediaSessionAllocatorError::IdentityReused) => counters.reused += 1,
             Err(MediaSessionAllocatorError::IdentityCapacityExceeded) => counters.capacity += 1,
+            Err(MediaSessionAllocatorError::Revoked) => {
+                panic!("the property walk never revokes its allocator")
+            }
             Err(MediaSessionAllocatorError::ControlSessionNotActive) => {
                 panic!("plain allocator supply cannot return a control-session error")
             }

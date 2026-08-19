@@ -8,8 +8,10 @@
 //! fresh key context only for a media identity that the authenticated control
 //! plane has supplied and whose full key context has never been issued before
 //! within this pairing lifetime; callers pair the context with the root
-//! borrow from [`root`] to install the session. It performs no TLS, QR,
-//! pairing-record consumption, or network I/O; the authenticated transport
+//! borrow from [`root`] to install the session. The owner can explicitly
+//! revoke the allocator to drop the root and clear its cached contexts. It
+//! performs no TLS, QR, pairing-record consumption, or network I/O; the
+//! authenticated transport
 //! that selects the media identity remains external (ADR 0017). Callers that
 //! also own the coordinator can use
 //! [`MediaSessionAllocator::supply_for_authenticated_control_session`] to
@@ -34,6 +36,8 @@ pub const MAX_RETAINED_MEDIA_IDENTITIES: usize = 16;
 /// Failure while issuing a fresh media session from the pairing media root.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MediaSessionAllocatorError {
+    /// The allocator was explicitly revoked and its pairing root was dropped.
+    Revoked,
     /// The supplied control transport token is no longer active.
     ControlSessionNotActive,
     /// The identity is not a valid media key context (zero session or stream ID).
@@ -47,6 +51,7 @@ pub enum MediaSessionAllocatorError {
 impl fmt::Display for MediaSessionAllocatorError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Revoked => formatter.write_str("media session allocator has been revoked"),
             Self::ControlSessionNotActive => {
                 formatter.write_str("authenticated control session is no longer active")
             }
@@ -107,7 +112,7 @@ impl fmt::Debug for IssuedMediaSession<'_> {
 /// construct a new one), which also resets the no-reuse record; the record must
 /// never silently outlive the root it was derived from.
 pub struct MediaSessionAllocator {
-    root: SessionSecret,
+    root: Option<SessionSecret>,
     issued: [Option<MediaKeyContext>; MAX_RETAINED_MEDIA_IDENTITIES],
     issued_len: usize,
 }
@@ -117,7 +122,7 @@ impl MediaSessionAllocator {
     #[must_use]
     pub const fn new(root: SessionSecret) -> Self {
         Self {
-            root,
+            root: Some(root),
             issued: [const { None }; MAX_RETAINED_MEDIA_IDENTITIES],
             issued_len: 0,
         }
@@ -127,6 +132,25 @@ impl MediaSessionAllocator {
     #[must_use]
     pub const fn issued_count(&self) -> usize {
         self.issued_len
+    }
+
+    /// Returns whether this pairing-root allocator has been revoked.
+    #[must_use]
+    pub const fn is_revoked(&self) -> bool {
+        self.root.is_none()
+    }
+
+    /// Revokes the pairing root and clears the retained no-reuse record.
+    ///
+    /// The root is taken and dropped immediately, which invokes
+    /// [`SessionSecret`]'s zeroization. Any live [`IssuedMediaSession`] grant
+    /// prevents this mutable operation at compile time; callers must retire
+    /// active media grants before revocation. The allocator cannot be reused
+    /// after this call and every later supply attempt fails closed.
+    pub fn revoke(&mut self) {
+        let _ = self.root.take();
+        self.issued = [const { None }; MAX_RETAINED_MEDIA_IDENTITIES];
+        self.issued_len = 0;
     }
 
     /// Returns whether `context` was already issued in this pairing lifetime.
@@ -149,8 +173,10 @@ impl MediaSessionAllocator {
     ///
     /// # Errors
     ///
-    /// Returns [`MediaSessionAllocatorError::InvalidIdentity`] for a zero
-    /// session or stream identifier, [`MediaSessionAllocatorError::IdentityReused`]
+    /// Returns [`MediaSessionAllocatorError::Revoked`] when this allocator was
+    /// explicitly revoked, [`MediaSessionAllocatorError::InvalidIdentity`] for
+    /// a zero session or stream identifier, or
+    /// [`MediaSessionAllocatorError::IdentityReused`]
     /// when the full key context was already issued, or
     /// [`MediaSessionAllocatorError::IdentityCapacityExceeded`] when the
     /// bounded no-reuse record is full.
@@ -159,6 +185,10 @@ impl MediaSessionAllocator {
         identity: MediaStreamIdentity,
         direction: MediaDirection,
     ) -> Result<IssuedMediaSession<'_>, MediaSessionAllocatorError> {
+        let root = self
+            .root
+            .as_ref()
+            .ok_or(MediaSessionAllocatorError::Revoked)?;
         let context = identity
             .media_key_context(direction)
             .map_err(|_| MediaSessionAllocatorError::InvalidIdentity)?;
@@ -170,10 +200,7 @@ impl MediaSessionAllocator {
         }
         self.issued[self.issued_len] = Some(context);
         self.issued_len += 1;
-        Ok(IssuedMediaSession {
-            context,
-            root: &self.root,
-        })
+        Ok(IssuedMediaSession { context, root })
     }
 
     /// Issues a fresh media context only for the currently installed control
@@ -209,7 +236,14 @@ impl fmt::Debug for MediaSessionAllocator {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("MediaSessionAllocator")
-            .field("root", &"[REDACTED]")
+            .field(
+                "root",
+                &if self.is_revoked() {
+                    "[REVOKED]"
+                } else {
+                    "[REDACTED]"
+                },
+            )
             .field("issued_len", &self.issued_len)
             .finish_non_exhaustive()
     }
@@ -255,6 +289,29 @@ mod tests {
             stream_id,
             key_epoch,
         }
+    }
+
+    #[test]
+    fn revocation_zeroizes_the_root_boundary_and_clears_freshness_state() {
+        let mut allocator = MediaSessionAllocator::new(SessionSecret::new([0xA5; 32]));
+        let context = allocator
+            .supply(identity(7, 1, 0), DIRECTION)
+            .expect("fresh identity")
+            .context();
+        assert!(allocator.contains(context));
+
+        allocator.revoke();
+
+        assert!(allocator.is_revoked());
+        assert_eq!(allocator.issued_count(), 0);
+        assert!(!allocator.contains(context));
+        assert!(matches!(
+            allocator.supply(identity(8, 1, 0), DIRECTION),
+            Err(MediaSessionAllocatorError::Revoked)
+        ));
+        let debug = format!("{allocator:?}");
+        assert!(debug.contains("[REVOKED]"));
+        assert!(!debug.contains("A5"));
     }
 
     #[test]

@@ -259,7 +259,8 @@ The network-scenario targets (`jitter_target`, `jitter_scheduler`, `multi_stream
   zero-identifier handling cannot drift from the pairing-lifetime contract.
   Every input also verifies that a live authenticated control token can issue
   a grant while a retired token cannot reserve an identity or consume the
-  bounded record.
+  bounded record, and that explicit allocator revocation clears retained
+  contexts and rejects later supply.
 
 ## Run a target
 
