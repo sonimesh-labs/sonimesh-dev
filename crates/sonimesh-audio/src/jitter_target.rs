@@ -363,9 +363,17 @@ impl AdaptiveJitterTarget {
     }
 }
 
-/// Rounding division for bounded positive integers.
+/// Rounding division for bounded positive integers without an intermediate
+/// addition that could overflow at the `u32` limit.
 const fn round_div(numerator: u32, divisor: u32) -> u32 {
-    (numerator + divisor / 2) / divisor
+    let quotient = numerator / divisor;
+    let remainder = numerator % divisor;
+    let round_up_threshold = divisor - divisor / 2;
+    if remainder >= round_up_threshold {
+        quotient + 1
+    } else {
+        quotient
+    }
 }
 
 /// Converts a bounded frame count to milliseconds without overflow.
@@ -484,6 +492,29 @@ mod tests {
             AdaptiveJitterTarget::new(config),
             Err(JitterTargetConfigError::TargetExceedsCapacity)
         ));
+    }
+
+    #[test]
+    fn rejects_extreme_millisecond_values_without_overflowing() {
+        let config = JitterTargetConfig {
+            min_ms: 1,
+            base_ms: u32::MAX,
+            max_ms: u32::MAX,
+            frame_duration_ms: 2,
+            buffer_capacity_frames: usize::MAX,
+            ..CONFIG
+        };
+
+        assert!(matches!(
+            AdaptiveJitterTarget::new(config),
+            Err(JitterTargetConfigError::TargetExceedsHardBound)
+        ));
+    }
+
+    #[test]
+    fn round_div_handles_u32_extremes() {
+        assert_eq!(round_div(u32::MAX, 1), u32::MAX);
+        assert_eq!(round_div(u32::MAX, 2), 2_147_483_648);
     }
 
     #[test]
