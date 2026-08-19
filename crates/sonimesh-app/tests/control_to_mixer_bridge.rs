@@ -1181,6 +1181,34 @@ fn export_snapshot_after_start_includes_format_and_metrics() {
 }
 
 #[test]
+fn export_snapshot_preserves_target_gated_scheduler_metrics() {
+    let counters = Arc::new(StreamCounters::default());
+    let mut bridge = bridge();
+    let token = authenticated(&mut bridge);
+    let mut pipeline = pipeline_for(1, 1, Arc::clone(&counters));
+
+    start_one(
+        &mut bridge,
+        token,
+        1,
+        1,
+        Some(Arc::clone(&counters)),
+        &mut pipeline,
+    );
+    counters.publish_target_gated_playout_state(u64::MAX, 7);
+
+    let mut metrics = Vec::new();
+    let snapshot = bridge.export_snapshot("0.1.0", None, None, &mut metrics);
+    assert_eq!(snapshot.streams.len(), 1);
+    assert_eq!(snapshot.streams[0].target_gated_ticks, u64::MAX);
+    assert_eq!(snapshot.streams[0].target_forced_playouts, 7);
+
+    let bundle = sonimesh_diagnostics::build_export_bundle(&snapshot).unwrap();
+    assert!(bundle.contains("\"target_gated_ticks\":\"18446744073709551615\""));
+    assert!(bundle.contains("\"target_forced_playouts\":\"7\""));
+}
+
+#[test]
 fn export_stream_metrics_follow_slot_order() {
     let counters_a = Arc::new(StreamCounters::default());
     let counters_b = Arc::new(StreamCounters::default());

@@ -631,8 +631,9 @@ once the receiver pipeline feeds it from live authenticated packets
 snapshot always reads a coherent `min <= target <= max` triple; the
 smoothed jitter and step counters are cumulative telemetry and may briefly
 span an epoch transition. An enabled target-gated scheduler also publishes
-its gated-tick and forced-playout counters for the active stream epoch; fresh
-session/reset and explicit disable paths clear those scheduler counters. The
+its gated-tick and forced-playout counters for the active stream epoch as one
+coherent versioned pair; fresh session/reset and explicit disable paths clear
+those scheduler counters. The
 product output-callback wiring that consumes
 the bounded `TargetGatedPlayout` decision primitive remains Phase 2 work;
 the primitive itself (decision, counters, and reset) now lives in

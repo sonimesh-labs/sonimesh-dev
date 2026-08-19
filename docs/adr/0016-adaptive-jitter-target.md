@@ -55,7 +55,10 @@ arrival jitter and the encoded-frame water level.
 The controller exposes minimum/target/maximum water levels in frames and
 milliseconds for diagnostics. It returns a small `JitterTargetStep` decision
 (`Raised`, `Lowered`, `Held`) so a future scheduler or diagnostics can observe
-each update without reading controller internals.
+each update without reading controller internals. The target-gated scheduler
+publishes its gated-tick and forced-playout counters as one versioned pair, so
+low-rate snapshots cannot combine values from different scheduler epochs;
+the pair is still owned by the non-realtime scheduling domain.
 
 ## Alternatives considered
 

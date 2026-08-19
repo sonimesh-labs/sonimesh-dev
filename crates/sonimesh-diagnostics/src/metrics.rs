@@ -1,5 +1,66 @@
 use std::sync::atomic::{AtomicI32, AtomicU32, AtomicU64, Ordering};
 
+/// A coherent, lock-free publication of the two target-gated scheduler counters.
+///
+/// The sequence is even while the published pair is readable and odd while a
+/// writer is replacing it. Writers briefly serialize through the sequence CAS;
+/// this is only used by the non-realtime scheduler domain, never by an output
+/// callback. Readers retry until they observe one complete pair.
+#[derive(Debug, Default)]
+struct TargetGatedPlayoutState {
+    sequence: AtomicU64,
+    gated_ticks: AtomicU64,
+    forced_playouts: AtomicU64,
+}
+
+impl TargetGatedPlayoutState {
+    fn publish(&self, gated_ticks: u64, forced_playouts: u64) {
+        let mut sequence = self.sequence.load(Ordering::Acquire);
+        loop {
+            if sequence & 1 != 0 {
+                std::hint::spin_loop();
+                sequence = self.sequence.load(Ordering::Acquire);
+                continue;
+            }
+
+            let writing = sequence.wrapping_add(1);
+            match self.sequence.compare_exchange_weak(
+                sequence,
+                writing,
+                Ordering::Acquire,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => break,
+                Err(observed) => sequence = observed,
+            }
+        }
+
+        self.gated_ticks.store(gated_ticks, Ordering::Relaxed);
+        self.forced_playouts
+            .store(forced_playouts, Ordering::Relaxed);
+        self.sequence
+            .store(sequence.wrapping_add(2), Ordering::Release);
+    }
+
+    fn snapshot(&self) -> (u64, u64) {
+        loop {
+            let before = self.sequence.load(Ordering::Acquire);
+            if before & 1 != 0 {
+                std::hint::spin_loop();
+                continue;
+            }
+
+            let gated_ticks = self.gated_ticks.load(Ordering::Relaxed);
+            let forced_playouts = self.forced_playouts.load(Ordering::Relaxed);
+            let after = self.sequence.load(Ordering::Acquire);
+            if before == after {
+                return (gated_ticks, forced_playouts);
+            }
+            std::hint::spin_loop();
+        }
+    }
+}
+
 /// Lock-free counters writable from realtime or network domains.
 #[derive(Debug, Default)]
 pub struct StreamCounters {
@@ -21,8 +82,7 @@ pub struct StreamCounters {
     target_smoothed_jitter_ms: AtomicU32,
     target_raised_steps: AtomicU32,
     target_lowered_steps: AtomicU32,
-    target_gated_ticks: AtomicU64,
-    target_forced_playouts: AtomicU64,
+    target_gated_playout: TargetGatedPlayoutState,
     stream_resets: AtomicU64,
     nominal_sample_rates: AtomicU64,
     drift_adjustment_ppm: AtomicI32,
@@ -163,13 +223,12 @@ impl StreamCounters {
     ///
     /// Both values are owned by the non-realtime scheduling domain. They reset
     /// with the adaptive target epoch and are never written from an output
-    /// callback. As with the other independent telemetry fields, a snapshot
-    /// crossing an epoch transition may briefly combine old and new values.
+    /// callback. The pair is published as one versioned state, so a snapshot
+    /// cannot combine the gated count from one epoch with the forced count from
+    /// another epoch.
     pub fn publish_target_gated_playout_state(&self, gated_ticks: u64, forced_playouts: u64) {
-        self.target_gated_ticks
-            .store(gated_ticks, Ordering::Relaxed);
-        self.target_forced_playouts
-            .store(forced_playouts, Ordering::Relaxed);
+        self.target_gated_playout
+            .publish(gated_ticks, forced_playouts);
     }
 
     /// Starts a fresh target-gated playout diagnostic epoch.
@@ -230,6 +289,7 @@ impl StreamCounters {
             unpack_jitter_state(self.jitter_state.load(Ordering::Relaxed));
         let (target_min_frames, target_max_frames, target_frames) =
             unpack_target_water_levels(self.target_water_levels.load(Ordering::Relaxed));
+        let (target_gated_ticks, target_forced_playouts) = self.target_gated_playout.snapshot();
 
         StreamMetricsSnapshot {
             authenticated_packets: self.authenticated_packets.load(Ordering::Relaxed),
@@ -254,8 +314,8 @@ impl StreamCounters {
             target_smoothed_jitter_ms: self.target_smoothed_jitter_ms.load(Ordering::Relaxed),
             target_raised_steps: self.target_raised_steps.load(Ordering::Relaxed),
             target_lowered_steps: self.target_lowered_steps.load(Ordering::Relaxed),
-            target_gated_ticks: self.target_gated_ticks.load(Ordering::Relaxed),
-            target_forced_playouts: self.target_forced_playouts.load(Ordering::Relaxed),
+            target_gated_ticks,
+            target_forced_playouts,
             stream_resets: self.stream_resets.load(Ordering::Relaxed),
             nominal_input_sample_rate_hz,
             nominal_output_sample_rate_hz,
@@ -749,6 +809,30 @@ mod tests {
             );
         }
         writer.join().expect("target metric writer must finish");
+    }
+
+    #[test]
+    fn concurrent_target_gated_counters_are_read_as_one_coherent_pair() {
+        let counters = std::sync::Arc::new(StreamCounters::default());
+        let writer = std::sync::Arc::clone(&counters);
+        let epochs = [(0_u64, 0_u64), (0, u64::MAX), (1, 0), (u64::MAX, 1)];
+
+        let writer = std::thread::spawn(move || {
+            for index in 0..100_000 {
+                let (gated_ticks, forced_playouts) = epochs[index % epochs.len()];
+                writer.publish_target_gated_playout_state(gated_ticks, forced_playouts);
+            }
+        });
+
+        for _ in 0..100_000 {
+            let snapshot = counters.snapshot();
+            assert!(
+                epochs.contains(&(snapshot.target_gated_ticks, snapshot.target_forced_playouts,)),
+                "scheduler counters must be read as one coherent epoch"
+            );
+        }
+
+        writer.join().expect("scheduler metric writer must finish");
     }
 
     #[test]
