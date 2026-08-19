@@ -625,6 +625,60 @@ fn receives_authenticated_udp_media_into_the_adaptive_controller() {
 }
 
 #[test]
+fn udp_wrapper_forwards_target_gated_playout_decisions() {
+    let counters = Arc::new(StreamCounters::default());
+    let secret = SessionSecret::new([0xA5; 32]);
+    let active_context = context();
+    let (producer, _consumer) = realtime_pcm_queue::<PCM_SAMPLES_PER_BLOCK>(4).unwrap();
+    let (tick_source, _queue) = tick_source(&[20]);
+    let mut pipeline = UdpPipeline::bind_with_adaptive_target(
+        "127.0.0.1:0".parse().unwrap(),
+        &secret,
+        active_context,
+        ByteDecoder,
+        producer,
+        counters,
+        0,
+        AdaptiveTargetConfig {
+            target: JitterTargetConfig::preset(JitterMode::Balanced, 20, JITTER_CAPACITY),
+            arrival_ticks_per_second: 1_000,
+            tick_source,
+        },
+    )
+    .unwrap();
+    pipeline
+        .enable_target_gated_playout(TargetGatedPlayoutConfig { max_gate_ticks: 2 })
+        .unwrap();
+
+    let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let mut sealer = MediaSealer::new(&secret, active_context).unwrap();
+    let packet = sealer.seal(0, 0, &[7]).unwrap();
+    sender
+        .send_to(&packet.datagram, pipeline.local_addr().unwrap())
+        .unwrap();
+    let outcome = loop {
+        match pipeline.poll() {
+            Ok(UdpPollOutcome::Empty) => thread::yield_now(),
+            other => break other,
+        }
+    };
+    assert!(matches!(outcome, Ok(UdpPollOutcome::Processed { .. })));
+
+    assert_eq!(
+        pipeline.decode_next_with_arrivals_pending(true).unwrap(),
+        DecodeStep::NotReady
+    );
+    assert_eq!(
+        pipeline.decode_next_with_arrivals_pending(true).unwrap(),
+        DecodeStep::NotReady
+    );
+    assert!(matches!(
+        pipeline.decode_next_with_arrivals_pending(true).unwrap(),
+        DecodeStep::Decoded { sequence: 0, .. }
+    ));
+}
+
+#[test]
 fn udp_jitter_resynchronization_starts_a_new_arrival_baseline() {
     let counters = Arc::new(StreamCounters::default());
     let secret = SessionSecret::new([0xA5; 32]);
