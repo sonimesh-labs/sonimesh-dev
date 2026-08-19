@@ -4,7 +4,8 @@ use std::sync::Arc;
 use sonimesh_audio::{
     AdaptiveJitterTarget, ArrivalJitter, ArrivalJitterConfigError, DecodeStep, DecodeWorkerError,
     FrameDecoder, InsertOutcome, JitterMode, JitterTargetConfig, JitterTargetConfigError,
-    OPUS_SAMPLE_RATE_HZ, RealtimePcmProducer, RealtimePcmPushOutcome, StreamDecodeWorker,
+    OPUS_SAMPLE_RATE_HZ, PlayoutDecision, PlayoutSchedulerConfigError, RealtimePcmProducer,
+    RealtimePcmPushOutcome, StreamDecodeWorker, TargetGatedPlayout, TargetGatedPlayoutConfig,
 };
 use sonimesh_diagnostics::StreamCounters;
 use sonimesh_network::{
@@ -40,6 +41,7 @@ struct AdaptiveTargetController {
     arrival: ArrivalJitter,
     target: AdaptiveJitterTarget,
     tick_source: Box<dyn FnMut() -> u64>,
+    playout: Option<TargetGatedPlayout>,
 }
 
 /// Configuration for the opt-in adaptive-target controller of one stream.
@@ -154,6 +156,37 @@ impl std::error::Error for AdaptiveTargetSetupError {
     }
 }
 
+/// Failure while enabling the opt-in target-gated playout boundary.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TargetGatedPlayoutSetupError {
+    /// Target gating requires the adaptive target controller to be enabled.
+    MissingAdaptiveTarget,
+    /// The gate deadline exceeded the scheduler's fixed bound.
+    Scheduler(PlayoutSchedulerConfigError),
+}
+
+impl fmt::Display for TargetGatedPlayoutSetupError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MissingAdaptiveTarget => {
+                formatter.write_str("target-gated playout requires an adaptive target")
+            }
+            Self::Scheduler(error) => {
+                write!(formatter, "target-gated playout setup failed: {error}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for TargetGatedPlayoutSetupError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::MissingAdaptiveTarget => None,
+            Self::Scheduler(error) => Some(error),
+        }
+    }
+}
+
 impl<DecoderError: fmt::Display> fmt::Display for ReceiverPipelineError<DecoderError> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -251,6 +284,7 @@ where
             arrival,
             target,
             tick_source: adaptive.tick_source,
+            playout: None,
         });
         Ok(pipeline)
     }
@@ -271,6 +305,39 @@ where
     #[must_use]
     pub fn counters(&self) -> &StreamCounters {
         &self.counters
+    }
+
+    /// Enables the opt-in target-gated playout boundary for this stream.
+    ///
+    /// The adaptive target must already be enabled. Once enabled, callers that
+    /// know whether more authenticated packets may still arrive should use
+    /// [`Self::decode_next_with_arrivals_pending`] for every scheduling tick.
+    /// The ordinary [`Self::decode_next`] path remains a drain path and treats
+    /// arrivals as not pending.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TargetGatedPlayoutSetupError::MissingAdaptiveTarget`] when the
+    /// pipeline was not built with an adaptive target, or forwards the fixed
+    /// scheduler-bound validation error.
+    pub fn enable_target_gated_playout(
+        &mut self,
+        config: TargetGatedPlayoutConfig,
+    ) -> Result<(), TargetGatedPlayoutSetupError> {
+        let adaptive = self
+            .adaptive_target
+            .as_mut()
+            .ok_or(TargetGatedPlayoutSetupError::MissingAdaptiveTarget)?;
+        adaptive.playout =
+            Some(TargetGatedPlayout::new(config).map_err(TargetGatedPlayoutSetupError::Scheduler)?);
+        Ok(())
+    }
+
+    /// Disables target-gated playout and returns to immediate decode decisions.
+    pub fn disable_target_gated_playout(&mut self) {
+        if let Some(adaptive) = &mut self.adaptive_target {
+            adaptive.playout = None;
+        }
     }
 
     /// Authenticates and inserts one datagram into this stream's bounded jitter state.
@@ -332,6 +399,32 @@ where
     /// Returns a bounded decoder failure after retiring only this stream's
     /// decoder, jitter, and PCM state without invoking platform output work.
     pub fn decode_next(&mut self) -> Result<DecodeStep, DecodeWorkerError<D::Error>> {
+        self.decode_next_with_arrivals_pending(false)
+    }
+
+    /// Runs one target-gated decode or PLC decision outside the output callback.
+    ///
+    /// When target gating is enabled, a below-target stream waits only while
+    /// `arrivals_pending` is true and the fixed gate deadline has not expired.
+    /// Passing `false` explicitly drains immediately, which is also the
+    /// behavior of [`Self::decode_next`]. Without an enabled target-gated
+    /// controller this method is equivalent to [`Self::decode_next`].
+    ///
+    /// # Errors
+    ///
+    /// Returns the same bounded decoder failure as [`Self::decode_next`].
+    pub fn decode_next_with_arrivals_pending(
+        &mut self,
+        arrivals_pending: bool,
+    ) -> Result<DecodeStep, DecodeWorkerError<D::Error>> {
+        if matches!(
+            self.target_gated_decision(arrivals_pending),
+            Some(PlayoutDecision::Gate)
+        ) {
+            self.publish_jitter_frames();
+            return Ok(DecodeStep::NotReady);
+        }
+
         let step = match self.decode.decode_next() {
             Ok(step) => step,
             Err(error) => {
@@ -508,8 +601,18 @@ where
         if let Some(adaptive) = &mut self.adaptive_target {
             adaptive.arrival.reset();
             adaptive.target.reset();
+            if let Some(playout) = &mut adaptive.playout {
+                playout.reset();
+            }
         }
         self.counters.reset_target_state();
+    }
+
+    fn target_gated_decision(&mut self, arrivals_pending: bool) -> Option<PlayoutDecision> {
+        let buffered_frames = self.decode.jitter_len();
+        let target_frames = self.adaptive_target.as_ref()?.target.target_frames();
+        let scheduler = self.adaptive_target.as_mut()?.playout.as_mut()?;
+        Some(scheduler.decide(buffered_frames, target_frames, arrivals_pending))
     }
 
     fn record_jitter_outcome(&self, outcome: InsertOutcome) {

@@ -3,6 +3,7 @@ use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use sonimesh_audio::TargetGatedPlayoutConfig;
 use sonimesh_audio::{
     DecodeStep, DecodeWorkerError, FrameDecoder, InsertOutcome, RealtimePcmProducer,
 };
@@ -15,7 +16,7 @@ use sonimesh_protocol::{MAX_MEDIA_PLAINTEXT_LEN, MediaKeyContext, SessionSecret}
 
 use crate::{
     AdaptiveTargetConfig, AdaptiveTargetSetupError, FreshSessionInstallError,
-    ReceiverPipelineError, ReceiverStreamPipeline,
+    ReceiverPipelineError, ReceiverStreamPipeline, TargetGatedPlayoutSetupError,
 };
 
 /// Error while constructing a UDP-backed receiver pipeline.
@@ -309,6 +310,40 @@ where
     /// Returns the stream-local decoder error.
     pub fn decode_next(&mut self) -> Result<DecodeStep, DecodeWorkerError<D::Error>> {
         self.pipeline.decode_next()
+    }
+
+    /// Enables target-gated playout on the adaptive stream pipeline.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`TargetGatedPlayoutSetupError`] when the underlying pipeline
+    /// has no adaptive target or the gate deadline is outside its fixed bound.
+    pub fn enable_target_gated_playout(
+        &mut self,
+        config: TargetGatedPlayoutConfig,
+    ) -> Result<(), TargetGatedPlayoutSetupError> {
+        self.pipeline.enable_target_gated_playout(config)
+    }
+
+    /// Runs one target-gated decode or PLC decision outside the output callback.
+    ///
+    /// `arrivals_pending` must be supplied by the caller's packet-polling
+    /// scheduler; it is never inferred from the output callback.
+    ///
+    /// # Errors
+    ///
+    /// Returns the stream-local decoder error.
+    pub fn decode_next_with_arrivals_pending(
+        &mut self,
+        arrivals_pending: bool,
+    ) -> Result<DecodeStep, DecodeWorkerError<D::Error>> {
+        self.pipeline
+            .decode_next_with_arrivals_pending(arrivals_pending)
+    }
+
+    /// Disables target-gated playout and returns to immediate decode decisions.
+    pub fn disable_target_gated_playout(&mut self) {
+        self.pipeline.disable_target_gated_playout();
     }
 
     /// Rotates this stream to a newer authenticated media epoch.

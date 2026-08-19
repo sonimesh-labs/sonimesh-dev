@@ -73,7 +73,7 @@ pub use receiver_pcm_endpoint_factory::{
 };
 pub use receiver_pipeline::{
     AdaptiveTargetConfig, AdaptiveTargetSetupError, FreshSessionInstallError,
-    ReceiverPipelineError, ReceiverStreamPipeline,
+    ReceiverPipelineError, ReceiverStreamPipeline, TargetGatedPlayoutSetupError,
 };
 pub use reconnect_grace::{
     ReconnectGraceController, ReconnectGraceError, ReconnectGraceObservation, ReconnectGraceState,

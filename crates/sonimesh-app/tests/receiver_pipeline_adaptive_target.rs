@@ -13,12 +13,12 @@ use std::sync::Mutex;
 use std::thread;
 
 use sonimesh_app::{
-    AdaptiveTargetConfig, FreshSessionInstallError, ReceiverStreamPipeline, UdpPollOutcome,
-    UdpReceiverPipeline,
+    AdaptiveTargetConfig, FreshSessionInstallError, ReceiverStreamPipeline,
+    TargetGatedPlayoutSetupError, UdpPollOutcome, UdpReceiverPipeline,
 };
 use sonimesh_audio::{
     DecodeStep, FrameDecoder, InsertOutcome, JitterMode, JitterTargetConfig, RealtimePcmConsumer,
-    RealtimePcmPopOutcome, realtime_pcm_queue,
+    RealtimePcmPopOutcome, TargetGatedPlayoutConfig, realtime_pcm_queue,
 };
 use sonimesh_diagnostics::{ExportSessionSnapshot, StreamCounters, build_export_bundle};
 use sonimesh_protocol::{MediaDirection, MediaKeyContext, MediaSealer, SessionSecret};
@@ -110,6 +110,15 @@ fn adaptive_pipeline_for_context(
     (pipeline, sealer, queue)
 }
 
+fn admit_without_decode(pipeline: &mut Pipeline, sealer: &mut MediaSealer, sample_timestamp: u64) {
+    let packet = sealer.seal(0, sample_timestamp, &[7]).unwrap();
+    let mut plaintext = [0_u8; MAX_ENCODED_BYTES];
+    assert_eq!(
+        pipeline.receive(&packet.datagram, &mut plaintext).unwrap(),
+        InsertOutcome::Inserted
+    );
+}
+
 fn send(pipeline: &mut Pipeline, sealer: &mut MediaSealer, sample_timestamp: u64) {
     let packet = sealer.seal(0, sample_timestamp, &[7]).unwrap();
     let mut plaintext = [0_u8; MAX_ENCODED_BYTES];
@@ -160,6 +169,52 @@ fn target_state(counters: &StreamCounters) -> (u16, u16, u16, u32, u32, u32) {
         snapshot.target_raised_steps,
         snapshot.target_lowered_steps,
     )
+}
+
+#[test]
+fn target_gated_decode_waits_for_pending_arrivals_until_the_deadline() {
+    let counters = Arc::new(StreamCounters::default());
+    let ticks = vec![20_u64];
+    let (mut pipeline, mut sealer, _queue) = adaptive_pipeline(&ticks, Arc::clone(&counters));
+    assert!(matches!(
+        pipeline.enable_target_gated_playout(TargetGatedPlayoutConfig { max_gate_ticks: 0 }),
+        Err(TargetGatedPlayoutSetupError::Scheduler(_))
+    ));
+    pipeline
+        .enable_target_gated_playout(TargetGatedPlayoutConfig { max_gate_ticks: 2 })
+        .unwrap();
+
+    admit_without_decode(&mut pipeline, &mut sealer, 0);
+
+    assert_eq!(
+        pipeline.decode_next_with_arrivals_pending(true).unwrap(),
+        DecodeStep::NotReady
+    );
+    assert_eq!(
+        pipeline.decode_next_with_arrivals_pending(true).unwrap(),
+        DecodeStep::NotReady
+    );
+    assert!(matches!(
+        pipeline.decode_next_with_arrivals_pending(true).unwrap(),
+        DecodeStep::Decoded { sequence: 0, .. }
+    ));
+}
+
+#[test]
+fn ordinary_decode_is_an_immediate_drain_when_target_gating_is_enabled() {
+    let counters = Arc::new(StreamCounters::default());
+    let ticks = vec![20_u64];
+    let (mut pipeline, mut sealer, _queue) = adaptive_pipeline(&ticks, Arc::clone(&counters));
+    pipeline
+        .enable_target_gated_playout(TargetGatedPlayoutConfig { max_gate_ticks: 2 })
+        .unwrap();
+
+    admit_without_decode(&mut pipeline, &mut sealer, 0);
+
+    assert!(matches!(
+        pipeline.decode_next().unwrap(),
+        DecodeStep::Decoded { sequence: 0, .. }
+    ));
 }
 
 #[test]

@@ -1,7 +1,7 @@
 # ADR 0016: Adaptive jitter target control
 
 - Status: Provisional pending Phase 2 jitter evidence
-- Date: 2026-08-13
+- Date: 2026-08-19
 
 ## Context
 
@@ -17,10 +17,11 @@ clock relationship and belongs to the drift controller
 ([ADR 0007](./0007-drift-control-decision.md)). The two signals must not be
 combined in one fast control loop.
 
-No playout scheduler exists yet, and no hardware jitter evidence is selected
-by this record. This record fixes the target-controller boundary before that
-scheduler starts; it does not change the `JitterBuffer` container or the
-single-stream MVP path.
+No hardware jitter evidence is selected by this record. The bounded
+`TargetGatedPlayout` scheduler now exists as a scheduling-domain primitive, and
+`ReceiverStreamPipeline` exposes it through an explicit opt-in boundary; the
+single-stream default path remains unchanged until a production scheduler
+chooses and supplies the in-flight-arrival signal.
 
 ## Decision
 
@@ -142,8 +143,15 @@ and forced-playout invariants on arbitrary per-tick inputs. Both
 deterministic
 scheduler scenarios (`jitter_scheduler_scenario.rs` and
 `mixer_jitter_scheduler_scenario.rs`) now drive every playout tick through
-that primitive. The product output-callback wiring that consumes the
-scheduler remains Phase 2 work.
+that primitive. `ReceiverStreamPipeline` and its UDP wrapper now expose an
+explicit `enable_target_gated_playout` plus
+`decode_next_with_arrivals_pending` boundary: a caller-owned packet scheduler
+supplies whether authenticated arrivals are still pending, the pipeline gates
+below-target decode ticks within the fixed deadline, and the ordinary decode
+method remains an immediate drain path. This is software scheduling evidence,
+not proof of a production output-callback integration or physical latency.
+The default single-stream path stays ungated until a platform/control owner
+adopts the boundary deliberately.
 Deterministic property walks (`jitter_scheduler_property.rs`,
 `multi_stream_jitter_target_property.rs`) and libFuzzer targets
 (`jitter_scheduler`, `multi_stream_jitter_target`) now drive the
