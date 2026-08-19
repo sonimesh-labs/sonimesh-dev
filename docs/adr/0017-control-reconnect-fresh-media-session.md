@@ -29,9 +29,11 @@ from a `StartStream` or `Rotate` command after an authenticated reconnection)
 and whose full key context has never been issued before within this pairing
 lifetime.
 
-- The allocator retains the root secret (`SessionSecret`) and returns it by
-  borrow together with the derived `MediaKeyContext`; it never exposes the
-  secret through a public owned value.
+- The allocator retains the root secret (`SessionSecret`) and returns an
+  `IssuedMediaSession` grant that borrows the root together with its derived
+  `MediaKeyContext`; callers cannot obtain an allocator root without first
+  receiving a grant, reducing accidental root/context mispairing at the call
+  boundary.
 - The no-reuse key is the full key context: session ID, stream ID, key epoch,
   and direction. A key rotation (same session, higher epoch) and a fresh
   session (new session ID) are both new contexts; replaying any previously

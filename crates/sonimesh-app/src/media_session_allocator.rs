@@ -13,7 +13,7 @@
 //! that selects the media identity remains external (ADR 0017).
 //!
 //! [`supply`]: MediaSessionAllocator::supply
-//! [`root`]: MediaSessionAllocator::root
+//! [`root`]: IssuedMediaSession::root
 
 use core::fmt;
 
@@ -57,13 +57,42 @@ impl fmt::Display for MediaSessionAllocatorError {
 
 impl std::error::Error for MediaSessionAllocatorError {}
 
-/// One freshly supplied media key context together with the retained root.
+/// One fresh media context bound to the allocator's pairing root.
 ///
-/// Callers obtain the context from [`MediaSessionAllocator::supply`] and the
-/// root borrow from [`MediaSessionAllocator::root`], then hand both to
-/// `ReceiverStreamPipeline::install_fresh_session` (or initial pipeline
-/// construction). The root borrow lasts only for the call, so no long-lived
-/// borrow of the allocator is required.
+/// The allocator returns this grant from [`MediaSessionAllocator::supply`]
+/// rather than exposing its root independently. Use [`Self::context`] and
+/// [`Self::root`] together when constructing or replacing a protected media
+/// pipeline. The root reference is borrowed from the allocator, so another
+/// identity cannot be supplied while the grant remains live.
+pub struct IssuedMediaSession<'a> {
+    context: MediaKeyContext,
+    root: &'a SessionSecret,
+}
+
+impl IssuedMediaSession<'_> {
+    /// Returns the fresh context selected by the authenticated control domain.
+    #[must_use]
+    pub const fn context(&self) -> MediaKeyContext {
+        self.context
+    }
+
+    /// Returns the pairing root bound to [`Self::context`].
+    #[must_use]
+    pub const fn root(&self) -> &SessionSecret {
+        self.root
+    }
+}
+
+impl fmt::Debug for IssuedMediaSession<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("IssuedMediaSession")
+            .field("context", &self.context)
+            .field("root", &"[REDACTED]")
+            .finish()
+    }
+}
+
 /// Control-domain owner of the pairing media root and its freshness record.
 ///
 /// A fresh pairing root replaces the whole allocator (drop the old instance and
@@ -100,23 +129,15 @@ impl MediaSessionAllocator {
             .any(|issued| *issued == Some(context))
     }
 
-    /// Returns the retained pairing media root for one authenticated identity.
-    ///
-    /// The root is shared by every media session in this pairing lifetime; pair
-    /// it with the context returned by [`Self::supply`] to install or rotate a
-    /// stream in the receiver pipeline.
-    #[must_use]
-    pub const fn root(&self) -> &SessionSecret {
-        &self.root
-    }
-
-    /// Issues a fresh media key context for an authenticated media identity.
+    /// Issues a fresh, root-bound media context for an authenticated identity.
     ///
     /// The caller supplies the identity selected by the authenticated control
     /// plane (for example from a `StartStream` or `Rotate` command after an
     /// authenticated reconnection). The allocator validates the context and
     /// rejects any context already issued in this pairing lifetime before
-    /// recording it, so the caller can install it with [`Self::root`].
+    /// recording it. On success it returns a grant that carries the matching
+    /// root borrow; callers cannot obtain an allocator root without first
+    /// holding a grant.
     ///
     /// # Errors
     ///
@@ -129,7 +150,7 @@ impl MediaSessionAllocator {
         &mut self,
         identity: MediaStreamIdentity,
         direction: MediaDirection,
-    ) -> Result<MediaKeyContext, MediaSessionAllocatorError> {
+    ) -> Result<IssuedMediaSession<'_>, MediaSessionAllocatorError> {
         let context = identity
             .media_key_context(direction)
             .map_err(|_| MediaSessionAllocatorError::InvalidIdentity)?;
@@ -141,7 +162,10 @@ impl MediaSessionAllocator {
         }
         self.issued[self.issued_len] = Some(context);
         self.issued_len += 1;
-        Ok(context)
+        Ok(IssuedMediaSession {
+            context,
+            root: &self.root,
+        })
     }
 }
 
@@ -177,7 +201,10 @@ mod tests {
         let mut allocator = MediaSessionAllocator::new(SessionSecret::new([0xA5; 32]));
         let id = identity(7, 1, 0);
 
-        let context = allocator.supply(id, DIRECTION).expect("fresh identity");
+        let context = allocator
+            .supply(id, DIRECTION)
+            .expect("fresh identity")
+            .context();
 
         assert_eq!(context.session_id, 7);
         assert_eq!(context.stream_id, 1);
@@ -218,10 +245,14 @@ mod tests {
     fn a_new_epoch_for_the_same_session_is_a_fresh_context() {
         let mut allocator = MediaSessionAllocator::new(SessionSecret::new([0xA5; 32]));
 
-        let first = allocator.supply(identity(7, 1, 0), DIRECTION).unwrap();
+        let first = allocator
+            .supply(identity(7, 1, 0), DIRECTION)
+            .unwrap()
+            .context();
         let rotated = allocator
             .supply(identity(7, 1, 1), DIRECTION)
-            .expect("higher epoch is a fresh context");
+            .expect("higher epoch is a fresh context")
+            .context();
 
         assert_eq!(rotated.session_id, first.session_id);
         assert_eq!(rotated.key_epoch, 1);
@@ -235,7 +266,8 @@ mod tests {
 
         let fresh = allocator
             .supply(identity(8, 1, 0), DIRECTION)
-            .expect("new session id is a fresh context");
+            .expect("new session id is a fresh context")
+            .context();
 
         assert_eq!(fresh.session_id, 8);
     }
@@ -247,24 +279,30 @@ mod tests {
 
         let other_direction = allocator
             .supply(identity(7, 1, 0), MediaDirection::DesktopToAndroid)
-            .expect("opposite direction is a distinct key context");
+            .expect("opposite direction is a distinct key context")
+            .context();
 
         assert_eq!(other_direction.direction, MediaDirection::DesktopToAndroid);
         assert_eq!(allocator.issued_count(), 2);
     }
 
     #[test]
-    fn root_is_shared_across_fresh_sessions_and_redacted_in_debug() {
+    fn grants_bind_each_context_to_the_retained_root_and_debug_is_redacted() {
         let mut allocator = MediaSessionAllocator::new(SessionSecret::new([0xA5; 32]));
-        let first = allocator.supply(identity(7, 1, 0), DIRECTION).unwrap();
-        let second = allocator.supply(identity(8, 1, 0), DIRECTION).unwrap();
+        let first_root = {
+            let grant = allocator.supply(identity(7, 1, 0), DIRECTION).unwrap();
+            let _ = grant.context();
+            grant.root() as *const SessionSecret
+        };
+        let second_root = {
+            let grant = allocator.supply(identity(8, 1, 0), DIRECTION).unwrap();
+            grant.root() as *const SessionSecret
+        };
 
         let debug = format!("{allocator:?}");
         assert!(!debug.contains("A5"));
         assert!(debug.contains("issued_len: 2"));
-        // The same retained root backs both fresh contexts.
-        assert!(core::ptr::eq(allocator.root(), allocator.root()));
-        let _ = (first, second);
+        assert_eq!(first_root, second_root);
     }
 
     #[test]

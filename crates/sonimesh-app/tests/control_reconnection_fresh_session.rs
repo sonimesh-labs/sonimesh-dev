@@ -153,9 +153,10 @@ fn control_reconnection_supplies_a_fresh_session_while_udp_stays_reachable() {
 
     // First authenticated control session and media stream.
     let (mut coordinator, token) = ready_coordinator();
-    let first_context = allocator
+    let first_grant = allocator
         .supply(identity(7, 9, 0), DIRECTION)
         .expect("first identity is fresh");
+    let first_context = first_grant.context();
     let first = negotiate_and_start(&mut coordinator, token, &start(7, 9, 0, 10));
     assert_eq!(first.identity, identity(7, 9, 0));
     assert_eq!(coordinator.state().phase(), SessionPhase::Streaming);
@@ -164,7 +165,7 @@ fn control_reconnection_supplies_a_fresh_session_while_udp_stays_reachable() {
     let (producer, mut consumer) = realtime_pcm_queue::<4>(4).expect("pcm queue");
     let mut pipeline = Pipeline::bind(
         "127.0.0.1:0".parse().expect("loopback address"),
-        allocator.root(),
+        first_grant.root(),
         first_context,
         ByteDecoder,
         producer,
@@ -174,7 +175,7 @@ fn control_reconnection_supplies_a_fresh_session_while_udp_stays_reachable() {
     .expect("pipeline with first session");
     let old_sender =
         UdpMediaSender::bind("127.0.0.1:0".parse().expect("loopback address")).expect("old sender");
-    let mut old_sealer = MediaSealer::new(allocator.root(), first_context).expect("old sealer");
+    let mut old_sealer = MediaSealer::new(first_grant.root(), first_context).expect("old sealer");
     let first_packet = old_sealer.seal(0, 0, &[1]).expect("first packet");
     assert!(
         old_sender
@@ -234,9 +235,10 @@ fn control_reconnection_supplies_a_fresh_session_while_udp_stays_reachable() {
     let fresh_token = coordinator
         .install_authenticated_control_session()
         .expect("fresh transport token");
-    let fresh_context = allocator
+    let fresh_grant = allocator
         .supply(identity(8, 9, 0), DIRECTION)
         .expect("reconnection identity is fresh");
+    let fresh_context = fresh_grant.context();
     let fresh = negotiate_and_start(&mut coordinator, fresh_token, &start(8, 9, 0, 20));
     assert_eq!(fresh.identity, identity(8, 9, 0));
     assert_eq!(coordinator.state().phase(), SessionPhase::Streaming);
@@ -244,7 +246,7 @@ fn control_reconnection_supplies_a_fresh_session_while_udp_stays_reachable() {
     // The fresh session installs over the same socket and clears the source pin.
     let previous_addr = pipeline.local_addr().expect("pipeline address");
     pipeline
-        .install_fresh_session(allocator.root(), fresh_context, 0)
+        .install_fresh_session(fresh_grant.root(), fresh_context, 0)
         .expect("fresh session installs");
     assert_eq!(pipeline.local_addr().unwrap(), previous_addr);
     assert_eq!(pipeline.pinned_source(), None);
@@ -267,7 +269,8 @@ fn control_reconnection_supplies_a_fresh_session_while_udp_stays_reachable() {
     // The fresh session's packets rebind the source and decode.
     let fresh_sender = UdpMediaSender::bind("127.0.0.1:0".parse().expect("loopback address"))
         .expect("fresh sender");
-    let mut fresh_sealer = MediaSealer::new(allocator.root(), fresh_context).expect("fresh sealer");
+    let mut fresh_sealer =
+        MediaSealer::new(fresh_grant.root(), fresh_context).expect("fresh sealer");
     let fresh_packet = fresh_sealer.seal(0, 0, &[5]).expect("fresh packet");
     assert!(
         fresh_sender
@@ -297,11 +300,15 @@ fn control_reconnection_supplies_a_fresh_session_while_udp_stays_reachable() {
     // The allocator enforces the no-reuse record across the whole reconnection:
     // neither the retired nor the fresh key context can be issued again.
     assert_eq!(
-        allocator.supply(identity(7, 9, 0), DIRECTION),
+        allocator
+            .supply(identity(7, 9, 0), DIRECTION)
+            .map(|grant| grant.context()),
         Err(MediaSessionAllocatorError::IdentityReused)
     );
     assert_eq!(
-        allocator.supply(identity(8, 9, 0), DIRECTION),
+        allocator
+            .supply(identity(8, 9, 0), DIRECTION)
+            .map(|grant| grant.context()),
         Err(MediaSessionAllocatorError::IdentityReused)
     );
     assert_eq!(allocator.issued_count(), 2);

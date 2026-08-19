@@ -82,7 +82,10 @@ impl AllocatorModel {
             Ok(context) => Ok(context),
             Err(_) => Err(MediaSessionAllocatorError::InvalidIdentity),
         };
-        let actual = self.allocator.supply(identity, direction);
+        let actual = self
+            .allocator
+            .supply(identity, direction)
+            .map(|grant| grant.context());
         assert_eq!(actual, expected, "supply diverged from the no-reuse model");
         if let Ok(context) = actual {
             self.issued.push(context);

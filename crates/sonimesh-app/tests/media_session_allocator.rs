@@ -50,14 +50,14 @@ fn allocator_supplies_a_fresh_reconnection_session_to_the_pipeline() {
 
     // First authenticated session installs and admits its own packets.
     let (mut old_sealer, mut pipeline) = {
-        let first_context = allocator
+        let grant = allocator
             .supply(identity(7, 1, 0), DIRECTION)
             .expect("first identity is fresh");
-        let root = allocator.root();
-        let sealer = MediaSealer::new(root, first_context).expect("first sealer");
+        let first_context = grant.context();
+        let sealer = MediaSealer::new(grant.root(), first_context).expect("first sealer");
         let (producer, _consumer) = realtime_pcm_queue::<4>(4).expect("pcm queue");
         let pipeline = ReceiverStreamPipeline::<ByteDecoder, 4, 8, 4>::new(
-            root,
+            grant.root(),
             first_context,
             ByteDecoder,
             producer,
@@ -77,11 +77,12 @@ fn allocator_supplies_a_fresh_reconnection_session_to_the_pipeline() {
     );
 
     // An authenticated reconnection supplies a fresh session (new session id).
-    let fresh_context = allocator
+    let fresh_grant = allocator
         .supply(identity(8, 1, 0), DIRECTION)
         .expect("new session id is fresh");
+    let fresh_context = fresh_grant.context();
     pipeline
-        .install_fresh_session(allocator.root(), fresh_context, 0)
+        .install_fresh_session(fresh_grant.root(), fresh_context, 0)
         .expect("fresh session installs");
     assert_eq!(pipeline.context(), fresh_context);
 
@@ -94,7 +95,8 @@ fn allocator_supplies_a_fresh_reconnection_session_to_the_pipeline() {
     );
 
     // The fresh session's packets are admitted and decode.
-    let mut fresh_sealer = MediaSealer::new(allocator.root(), fresh_context).expect("fresh sealer");
+    let mut fresh_sealer =
+        MediaSealer::new(fresh_grant.root(), fresh_context).expect("fresh sealer");
     let fresh_packet = fresh_sealer.seal(0, 0, &[2]).expect("fresh packet");
     assert_eq!(
         pipeline
@@ -135,18 +137,20 @@ fn a_fresh_pairing_root_resets_the_no_reuse_record() {
     // two roots derive distinct AEAD keys for the same context tuple.
     let old_packet = {
         let mut allocator = MediaSessionAllocator::new(SessionSecret::new([0x3C; 32]));
-        let context = allocator
+        let grant = allocator
             .supply(identity(7, 1, 0), DIRECTION)
             .expect("first pairing identity");
-        let mut sealer = MediaSealer::new(allocator.root(), context).unwrap();
+        let context = grant.context();
+        let mut sealer = MediaSealer::new(grant.root(), context).unwrap();
         sealer.seal(0, 0, &[1]).unwrap()
     };
     let fresh_packet = {
         let mut allocator = MediaSessionAllocator::new(SessionSecret::new([0x5A; 32]));
-        let context = allocator
+        let grant = allocator
             .supply(identity(7, 1, 0), DIRECTION)
             .expect("fresh root may reuse the identity with new key material");
-        let mut sealer = MediaSealer::new(allocator.root(), context).unwrap();
+        let context = grant.context();
+        let mut sealer = MediaSealer::new(grant.root(), context).unwrap();
         sealer.seal(0, 0, &[2]).unwrap()
     };
 
@@ -170,7 +174,10 @@ fn the_no_reuse_record_capacity_is_pinned_and_exposed() {
 fn issued_context_matches_the_protocol_key_context() {
     let mut allocator = MediaSessionAllocator::new(SessionSecret::new([0x3C; 32]));
 
-    let context = allocator.supply(identity(7, 3, 5), DIRECTION).unwrap();
+    let context = allocator
+        .supply(identity(7, 3, 5), DIRECTION)
+        .unwrap()
+        .context();
 
     let expected = MediaKeyContext::new(7, 3, 5, DIRECTION).unwrap();
     assert_eq!(context, expected);

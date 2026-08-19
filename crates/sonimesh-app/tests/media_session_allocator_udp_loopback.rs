@@ -68,13 +68,14 @@ fn allocator_supplies_the_fresh_root_and_context_through_the_udp_path() {
 
     // First authenticated session: the allocator supplies the identity/context
     // and its retained root backs the sealer and the pipeline bind.
-    let first_context = allocator
+    let first_grant = allocator
         .supply(identity(7, 1, 0), DIRECTION)
         .expect("first identity is fresh");
+    let first_context = first_grant.context();
     let (producer, mut consumer) = realtime_pcm_queue::<4>(4).expect("pcm queue");
     let mut pipeline = Pipeline::bind(
         "127.0.0.1:0".parse().expect("loopback address"),
-        allocator.root(),
+        first_grant.root(),
         first_context,
         ByteDecoder,
         producer,
@@ -85,7 +86,7 @@ fn allocator_supplies_the_fresh_root_and_context_through_the_udp_path() {
 
     let old_sender =
         UdpMediaSender::bind("127.0.0.1:0".parse().expect("loopback address")).expect("old sender");
-    let mut old_sealer = MediaSealer::new(allocator.root(), first_context).expect("old sealer");
+    let mut old_sealer = MediaSealer::new(first_grant.root(), first_context).expect("old sealer");
     let old_packet = old_sealer.seal(0, 0, &[1]).expect("old packet");
     assert!(
         old_sender
@@ -107,12 +108,13 @@ fn allocator_supplies_the_fresh_root_and_context_through_the_udp_path() {
 
     // Authenticated reconnection supplies a fresh session through the same
     // pairing root: a new media session id is a fresh context (ADR 0017).
-    let fresh_context = allocator
+    let fresh_grant = allocator
         .supply(identity(8, 1, 0), DIRECTION)
         .expect("reconnection session is fresh");
+    let fresh_context = fresh_grant.context();
     let previous_addr = pipeline.local_addr().expect("pipeline address");
     pipeline
-        .install_fresh_session(allocator.root(), fresh_context, 0)
+        .install_fresh_session(fresh_grant.root(), fresh_context, 0)
         .expect("fresh session installs");
     assert_eq!(pipeline.local_addr().unwrap(), previous_addr);
     assert_eq!(pipeline.pinned_source(), None);
@@ -135,7 +137,8 @@ fn allocator_supplies_the_fresh_root_and_context_through_the_udp_path() {
     // The fresh session's packets rebind the source and decode.
     let fresh_sender = UdpMediaSender::bind("127.0.0.1:0".parse().expect("loopback address"))
         .expect("fresh sender");
-    let mut fresh_sealer = MediaSealer::new(allocator.root(), fresh_context).expect("fresh sealer");
+    let mut fresh_sealer =
+        MediaSealer::new(fresh_grant.root(), fresh_context).expect("fresh sealer");
     let fresh_packet = fresh_sealer.seal(0, 0, &[5]).expect("fresh packet");
     assert!(
         fresh_sender

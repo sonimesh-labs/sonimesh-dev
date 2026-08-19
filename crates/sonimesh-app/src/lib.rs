@@ -49,7 +49,8 @@ pub use format_adapted_render_source_factory::{
     FormatAdaptedRenderSourceFactory, SourcePcmFormat, SourcePcmFormatError,
 };
 pub use media_session_allocator::{
-    MAX_RETAINED_MEDIA_IDENTITIES, MediaSessionAllocator, MediaSessionAllocatorError,
+    IssuedMediaSession, MAX_RETAINED_MEDIA_IDENTITIES, MediaSessionAllocator,
+    MediaSessionAllocatorError,
 };
 pub use mixer_membership_controller::{
     AdmittedAdaptedStream, AdmittedStream, MixerAdmissionError, MixerMembershipController,

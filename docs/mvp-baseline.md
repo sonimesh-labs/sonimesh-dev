@@ -173,9 +173,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   protected admission, rejects silent endpoint changes without advancing replay
   state, and permits rebinding only after fresh-session installation.
 - a bounded `MediaSessionAllocator` (ADR 0017) that owns the one-time pairing
-  media root and issues a fresh `(secret, context)` pair for an authenticated
-  control-plane reconnection: the full key context is never re-issued within a
-  pairing lifetime, the no-reuse record is fixed at 16 entries and fails closed
+  media root and issues a fresh root-bound grant containing `(secret, context)`
+  for an authenticated control-plane reconnection. The full key context is never
+  re-issued within a pairing lifetime, the no-reuse record is fixed at 16 entries and fails closed
   when full, and a fresh pairing root replaces the allocator. A seeded property
   walk and a byte-driven libFuzzer target drive arbitrary identity/direction
   supplies against an independent no-reuse model, asserting the exact outcome

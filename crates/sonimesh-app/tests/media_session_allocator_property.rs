@@ -147,7 +147,7 @@ fn run_walk(config: &WalkConfig, counters: &mut WalkCounters) {
             random_identity(&mut rng, config.narrow)
         };
 
-        let real = allocator.supply(id, direction);
+        let real = allocator.supply(id, direction).map(|grant| grant.context());
         let expected = model.expected(id, direction);
         assert_eq!(
             real, expected,
