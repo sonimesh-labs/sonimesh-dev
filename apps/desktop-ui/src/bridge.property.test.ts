@@ -100,6 +100,8 @@ function initialMetrics(): StreamMetrics {
     targetSmoothedJitterMs: 36,
     targetRaisedSteps: 0,
     targetLoweredSteps: 2,
+    targetGatedTicks: '12',
+    targetForcedPlayouts: '1',
     streamResets: '3',
     nominalInputSampleRateHz: 48_000,
     nominalOutputSampleRateHz: 48_000,
@@ -312,6 +314,8 @@ class PreviewBridgeModel {
         m.targetSmoothedJitterMs += 6
         m.targetFrames = Math.min(m.targetFrames + 1, m.targetMaxFrames)
         m.targetRaisedSteps += 1
+        m.targetGatedTicks = addToCounter(m.targetGatedTicks, 2)
+        m.targetForcedPlayouts = addToCounter(m.targetForcedPlayouts, 1)
         m.currentJitterMs += 14
         m.playoutDelayMs += 4
         return

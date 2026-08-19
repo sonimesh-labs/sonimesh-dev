@@ -74,6 +74,8 @@ function receiverSnapshot(session: DesktopSnapshot['session']): DesktopSnapshot 
       targetSmoothedJitterMs: 0,
       targetRaisedSteps: 0,
       targetLoweredSteps: 0,
+      targetGatedTicks: '0',
+      targetForcedPlayouts: '0',
       streamResets: '0',
       nominalInputSampleRateHz: 48_000,
       nominalOutputSampleRateHz: 48_000,

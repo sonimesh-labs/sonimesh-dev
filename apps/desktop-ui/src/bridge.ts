@@ -87,6 +87,8 @@ const INITIAL_PREVIEW_SNAPSHOT: DesktopSnapshot = {
     targetSmoothedJitterMs: 36,
     targetRaisedSteps: 0,
     targetLoweredSteps: 2,
+    targetGatedTicks: '12',
+    targetForcedPlayouts: '1',
     streamResets: '3',
     nominalInputSampleRateHz: 48_000,
     nominalOutputSampleRateHz: 48_000,
@@ -327,6 +329,8 @@ export class PreviewDesktopBridge implements DesktopBridge {
     metrics.targetSmoothedJitterMs += 6
     metrics.targetFrames = Math.min(metrics.targetFrames + 1, metrics.targetMaxFrames)
     metrics.targetRaisedSteps += 1
+    metrics.targetGatedTicks = addToCounter(metrics.targetGatedTicks, 2)
+    metrics.targetForcedPlayouts = addToCounter(metrics.targetForcedPlayouts, 1)
 
     metrics.currentJitterMs += 14
     metrics.playoutDelayMs += 4

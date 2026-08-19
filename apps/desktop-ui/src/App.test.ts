@@ -82,6 +82,8 @@ function previewSnapshot(): DesktopSnapshot {
       targetSmoothedJitterMs: 36,
       targetRaisedSteps: 0,
       targetLoweredSteps: 2,
+      targetGatedTicks: '12',
+      targetForcedPlayouts: '1',
       streamResets: '3',
       nominalInputSampleRateHz: 48_000,
       nominalOutputSampleRateHz: 48_000,

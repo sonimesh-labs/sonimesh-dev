@@ -78,6 +78,10 @@ export interface StreamMetrics {
   targetSmoothedJitterMs: number
   targetRaisedSteps: number
   targetLoweredSteps: number
+  /** Target-gated decode ticks in the active scheduler epoch. */
+  targetGatedTicks: MetricCounter
+  /** Below-target plays forced after the gate deadline in the active epoch. */
+  targetForcedPlayouts: MetricCounter
   streamResets: MetricCounter
   nominalInputSampleRateHz: number
   nominalOutputSampleRateHz: number

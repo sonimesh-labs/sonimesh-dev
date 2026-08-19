@@ -28,6 +28,8 @@ function metrics(overrides: Partial<StreamMetrics> = {}): StreamMetrics {
     targetSmoothedJitterMs: 0,
     targetRaisedSteps: 0,
     targetLoweredSteps: 0,
+    targetGatedTicks: '0',
+    targetForcedPlayouts: '0',
     streamResets: '0',
     nominalInputSampleRateHz: 48_000,
     nominalOutputSampleRateHz: 48_000,
@@ -108,6 +110,8 @@ describe('DiagnosticsPanel', () => {
           targetSmoothedJitterMs: 36,
           targetRaisedSteps: 1,
           targetLoweredSteps: 2,
+          targetGatedTicks: '12',
+          targetForcedPlayouts: '3',
         }),
       },
     })
@@ -125,6 +129,8 @@ describe('DiagnosticsPanel', () => {
     expect(value('Smoothed jitter')).toBe('36 ms')
     expect(value('Target raised')).toBe('1')
     expect(value('Target lowered')).toBe('2')
+    expect(value('Gated ticks')).toBe('12')
+    expect(value('Forced playouts')).toBe('3')
   })
 
   it('emits a diagnostic-export request from the preview-only action', async () => {

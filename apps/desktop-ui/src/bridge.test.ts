@@ -300,6 +300,8 @@ describe('PreviewDesktopBridge', () => {
     expect(burst.metrics.targetMaxFrames).toBe(4)
     expect(burst.metrics.targetSmoothedJitterMs).toBe(42)
     expect(burst.metrics.targetRaisedSteps).toBe(1)
+    expect(burst.metrics.targetGatedTicks).toBe('14')
+    expect(burst.metrics.targetForcedPlayouts).toBe('2')
 
     expect(again.metrics.authenticatedPackets).toBe('12940')
     expect(again.metrics.currentJitterMs).toBe(66)
@@ -308,6 +310,8 @@ describe('PreviewDesktopBridge', () => {
     expect(again.metrics.jitterHighWaterFrames).toBe(7)
     expect(again.metrics.targetFrames).toBe(4)
     expect(again.metrics.targetRaisedSteps).toBe(2)
+    expect(again.metrics.targetGatedTicks).toBe('16')
+    expect(again.metrics.targetForcedPlayouts).toBe('3')
 
     expect(burst.metrics.streamResets).toBe(before.metrics.streamResets)
     expect(burst.metrics.driftHardResyncs).toBe(before.metrics.driftHardResyncs)

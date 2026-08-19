@@ -125,6 +125,8 @@ function formatBytes(bytes: string) {
           <div><dt>Smoothed jitter</dt><dd>{{ metrics.targetSmoothedJitterMs }} ms</dd></div>
           <div><dt>Target raised</dt><dd>{{ metrics.targetRaisedSteps }}</dd></div>
           <div><dt>Target lowered</dt><dd>{{ metrics.targetLoweredSteps }}</dd></div>
+          <div><dt>Gated ticks</dt><dd>{{ formatCounter(metrics.targetGatedTicks) }}</dd></div>
+          <div><dt>Forced playouts</dt><dd>{{ formatCounter(metrics.targetForcedPlayouts) }}</dd></div>
         </dl>
       </section>
     </div>
