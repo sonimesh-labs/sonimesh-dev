@@ -1060,6 +1060,47 @@ mod tests {
     }
 
     #[test]
+    fn start_aborts_pending_operation_when_membership_queue_cannot_cover_rollback() {
+        let mut bridge = bridge(FakeOutput::default());
+        let session = bridge.install_authenticated_control_session().unwrap();
+        bridge.accept(session, &hello_envelope()).unwrap();
+        let mut pipeline = FakePipeline::<SOURCE_SAMPLES>::default();
+        start_one(&mut bridge, session, identity(1), &mut pipeline);
+
+        // Leave the coordinator's first stream active while filling the
+        // bounded callback queue through the mixer-only membership boundary.
+        for stream_id in 2..=8 {
+            let stream = identity(stream_id);
+            bridge
+                .mixer_mut()
+                .start_stream(request(stream), 8, None, &mut pipeline)
+                .unwrap();
+            bridge.mixer_mut().remove_stream(stream).unwrap();
+        }
+        bridge
+            .mixer_mut()
+            .start_stream(request(identity(9)), 8, None, &mut pipeline)
+            .unwrap();
+        assert_eq!(bridge.mixer().pending_commands(), MAX_MIXER_COMMAND_QUEUE);
+
+        let (token, request) = prepare_start(&mut bridge, session, identity(10));
+        assert!(matches!(
+            bridge.execute_start(token, request, None, &mut pipeline),
+            Err(ControlToMixerError::Mixer(
+                MixerStreamSessionError::Membership(MixerAdmissionError::CommandQueueFull)
+            ))
+        ));
+
+        // The preflight must abort the control operation before touching the
+        // output or mixer, leaving both domains unchanged and retryable.
+        assert_eq!(bridge.state().phase(), SessionPhase::Streaming);
+        assert_eq!(bridge.coordinator().stream_count(), 1);
+        assert_eq!(bridge.mixer().stream_count(), 2);
+        assert!(bridge.output_active());
+        assert_eq!(bridge.mixer().pending_commands(), MAX_MIXER_COMMAND_QUEUE);
+    }
+
+    #[test]
     fn lifecycle_starts_output_with_first_stream_and_stops_with_last() {
         let mut bridge = bridge(FakeOutput::default());
         let session = bridge.install_authenticated_control_session().unwrap();
