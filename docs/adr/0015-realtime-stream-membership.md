@@ -176,6 +176,10 @@ The bridge starts the platform output with the first stream, admits and
 removes per-stream pipelines, commits the coordinator's tokenized
 start/rotation/stop completions, and rolls back partial work when a start,
 rotation, or stop fails so the coordinator and mixer membership stay in sync.
+Before a start or stop commit it preflights the bounded membership-command slots
+needed for both the operation and any compensating rollback; a full queue leaves
+the tokenized operation pending-free and both domains unchanged until the next
+callback drains commands.
 A platform fault observed by `monitor` retires the membership boundary and
 moves the lifecycle to `OutputUnavailable`; `recover_output` recreates the
 mixer source and returns every persisted stream identity, and `recover_stream`

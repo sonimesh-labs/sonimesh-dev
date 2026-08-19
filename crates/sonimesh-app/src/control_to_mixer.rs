@@ -13,7 +13,7 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use sonimesh_audio::{MAX_PCM_QUEUE_BLOCKS, RealtimeQueueConfigError};
+use sonimesh_audio::{MAX_MIXER_COMMAND_QUEUE, MAX_PCM_QUEUE_BLOCKS, RealtimeQueueConfigError};
 use sonimesh_diagnostics::{
     ExportPlatformFormat, ExportSessionPhase, ExportSessionSnapshot, StreamCounters,
     StreamMetricsSnapshot,
@@ -345,6 +345,31 @@ where
         observation
     }
 
+    /// Preflights bounded callback-command capacity for an operation and its rollback.
+    ///
+    /// The control domain is the only normal membership publisher, while the
+    /// realtime callback only drains commands. Reserving before committing an
+    /// operation ensures that a failed coordinator completion can publish its
+    /// compensating remove instead of leaving control and mixer membership out
+    /// of sync.
+    fn ensure_membership_command_capacity(
+        &self,
+        required_commands: usize,
+    ) -> Result<(), ControlToMixerError> {
+        if required_commands > MAX_MIXER_COMMAND_QUEUE
+            || self
+                .mixer
+                .pending_commands()
+                .saturating_add(required_commands)
+                > MAX_MIXER_COMMAND_QUEUE
+        {
+            return Err(ControlToMixerError::Mixer(
+                MixerStreamSessionError::Membership(MixerAdmissionError::CommandQueueFull),
+            ));
+        }
+        Ok(())
+    }
+
     /// Prepares the output, admits one stream, and commits the start.
     ///
     /// The platform output starts when this is the first stream. On admission
@@ -366,6 +391,14 @@ where
     where
         P: ReceiverPcmProducerInstaller<S>,
     {
+        // Start publishes one insert. If control completion later rejects the
+        // operation, rollback must publish a second remove, so preflight both
+        // queue slots before changing either domain.
+        if let Err(error) = self.ensure_membership_command_capacity(2) {
+            let _ = self.coordinator.abort_pending(token);
+            return Err(error);
+        }
+
         let mut started_output = false;
         if !self.output_active {
             if let Err(error) = self.mixer.start_output(self.selection.clone()) {
@@ -461,6 +494,17 @@ where
         token: ControlOperationToken,
         identity: MediaStreamIdentity,
     ) -> Result<(), ControlToMixerError> {
+        // Stop publishes one remove when the output membership is active. Do
+        // not commit the control stop unless that bounded command can be
+        // published; otherwise the coordinator would retire a stream the
+        // mixer was still rendering.
+        if self.mixer.removal_requires_membership_command(identity) {
+            if let Err(error) = self.ensure_membership_command_capacity(1) {
+                let _ = self.coordinator.abort_pending(token);
+                return Err(error);
+            }
+        }
+
         self.coordinator
             .complete_stop(token, identity)
             .map_err(ControlToMixerError::Control)?;
@@ -643,7 +687,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use sonimesh_audio::{MAX_PCM_QUEUE_BLOCKS, RealtimePcmProducer, RealtimeQueueConfigError};
+    use sonimesh_audio::{
+        MAX_MIXER_COMMAND_QUEUE, MAX_PCM_QUEUE_BLOCKS, RealtimePcmProducer,
+        RealtimeQueueConfigError,
+    };
     use sonimesh_platform::{
         AudioOutput, OutputConfig, OutputDeviceId, OutputDeviceInfo, OutputError, OutputHealth,
         RenderSource, SampleFormat,
@@ -966,6 +1013,50 @@ mod tests {
         assert_eq!(streaming.active_streams(), 1);
         assert!(streaming.pending_mixer_commands() >= 1);
         assert!(streaming.output().stream_active());
+    }
+
+    #[test]
+    fn stop_keeps_control_and_mixer_streams_when_membership_queue_is_full() {
+        let mut bridge = bridge(FakeOutput::default());
+        let session = bridge.install_authenticated_control_session().unwrap();
+        bridge.accept(session, &hello_envelope()).unwrap();
+        let mut pipeline = FakePipeline::<SOURCE_SAMPLES>::default();
+        start_one(&mut bridge, session, identity(1), &mut pipeline);
+
+        // Fill the callback queue through the same mixer membership boundary.
+        // The active coordinator stream remains in slot 0 while the spare slot
+        // is repeatedly inserted and removed; the final insert makes the queue
+        // exactly full without changing coordinator-owned stream membership.
+        for stream_id in 2..=8 {
+            let stream = identity(stream_id);
+            bridge
+                .mixer_mut()
+                .start_stream(request(stream), 8, None, &mut pipeline)
+                .unwrap();
+            bridge.mixer_mut().remove_stream(stream).unwrap();
+        }
+        bridge
+            .mixer_mut()
+            .start_stream(request(identity(9)), 8, None, &mut pipeline)
+            .unwrap();
+        assert_eq!(bridge.mixer().pending_commands(), MAX_MIXER_COMMAND_QUEUE);
+
+        let token = match bridge.accept(session, &stop_envelope(identity(1))) {
+            Ok(ControlStreamAction::Stop { token, .. }) => token,
+            other => panic!("expected a stop action, got {other:?}"),
+        };
+        assert!(matches!(
+            bridge.execute_stop(token, identity(1)),
+            Err(ControlToMixerError::Mixer(
+                MixerStreamSessionError::Membership(MixerAdmissionError::CommandQueueFull)
+            ))
+        ));
+
+        assert_eq!(bridge.state().phase(), SessionPhase::Streaming);
+        assert_eq!(bridge.coordinator().stream_count(), 1);
+        assert_eq!(bridge.mixer().stream_count(), 2);
+        assert!(bridge.output_active());
+        assert_eq!(bridge.mixer().pending_commands(), MAX_MIXER_COMMAND_QUEUE);
     }
 
     #[test]

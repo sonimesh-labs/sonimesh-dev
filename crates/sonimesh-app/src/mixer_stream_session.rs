@@ -221,6 +221,17 @@ where
         Ok(StartedMixerStream { slot })
     }
 
+    /// Returns whether removing `identity` would publish a realtime membership
+    /// command for the current output lifetime.
+    ///
+    /// During output recovery the stream record persists while the membership
+    /// boundary is retired, so removing it only updates control-domain state and
+    /// does not consume command-queue capacity.
+    #[must_use]
+    pub fn removal_requires_membership_command(&self, identity: MediaStreamIdentity) -> bool {
+        self.membership.is_some() && self.slot_for(identity).is_some()
+    }
+
     /// Removes one admitted stream and retires its slot.
     ///
     /// When the membership boundary is retired (output faulted or stopped) the
