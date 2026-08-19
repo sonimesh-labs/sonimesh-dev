@@ -477,8 +477,8 @@ than the target encoded frames are buffered, drains without gating once no
 frames are in flight, and forces a playout when the gate deadline expires,
 so a mid-stream stall stays bounded and the run always completes. The receiver
 pipeline now exposes this decision through an explicit opt-in scheduling
-boundary; production output-callback adoption and hardware timing remain
-future Phase 2 work.
+boundary; production output-callback adoption remains future Phase 2 work,
+and hardware timing still requires platform evidence.
 
 For the receiver, a bounded relative arrival-jitter estimator in
 `sonimesh-audio` converts inter-arrival times into sender-sample units and
