@@ -143,12 +143,16 @@ where
         Ok(())
     }
 
-    /// Stops the platform backend without mutating receiver lifecycle state.
+    /// Stops the platform backend without reporting a platform fault.
+    ///
+    /// Lifecycle completion remains owned by the caller. A deliberate stop is
+    /// distinct from [`Self::monitor`], which records a non-healthy backend
+    /// fault for the next control snapshot.
     pub fn stop(&mut self) {
         self.output.stop();
         self.endpoint_factory.clear_output_format();
         self.stream_active = false;
-        self.fault_reported = true;
+        self.fault_reported = false;
     }
 
     /// Borrows the platform adapter for control-domain device operations.
@@ -472,7 +476,7 @@ mod tests {
     }
 
     #[test]
-    fn stop_marks_a_fault_and_keeps_the_selection() {
+    fn stop_keeps_the_selection_without_reporting_a_fault() {
         let mut pipeline = FakePipeline::default();
         let mut controller = controller(FakeOutput::default());
         controller.start(selection(None), &mut pipeline).unwrap();
@@ -482,7 +486,7 @@ mod tests {
         let snapshot = controller.snapshot();
         assert!(snapshot.selection_retained());
         assert!(!snapshot.stream_active());
-        assert!(snapshot.fault_reported());
+        assert!(!snapshot.fault_reported());
     }
 
     #[test]

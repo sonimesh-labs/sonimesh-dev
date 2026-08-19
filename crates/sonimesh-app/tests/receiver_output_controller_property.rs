@@ -220,7 +220,7 @@ impl ReceiverOutputModel {
         self.stop_calls += 1;
         self.published = false;
         self.stream_active = false;
-        self.fault_reported = true;
+        self.fault_reported = false;
     }
 }
 

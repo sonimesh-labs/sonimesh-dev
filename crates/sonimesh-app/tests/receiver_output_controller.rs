@@ -443,6 +443,13 @@ fn explicit_stop_clears_format_disarms_stale_health_and_allows_recovery() {
     controller.stop();
 
     assert_eq!(controller.monitor(), None);
+    let stopped_snapshot = controller.snapshot();
+    assert!(!stopped_snapshot.stream_active());
+    assert!(
+        !stopped_snapshot.fault_reported(),
+        "an explicit stop must not masquerade as a reported output fault"
+    );
+    assert_eq!(stopped_snapshot.health(), OutputHealth::StreamError);
     assert_eq!(controller.output().stop_calls, 1);
     assert_eq!(pipeline.queued_pcm_blocks(), 1);
     let stopped = counters.snapshot();
