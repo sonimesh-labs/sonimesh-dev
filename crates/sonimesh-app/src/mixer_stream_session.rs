@@ -340,21 +340,27 @@ where
     ) -> Result<StartedMixerStream, MixerStreamSessionError> {
         let next_budget = frames_per_block(next)?;
         let next_format = source_format_of(next)?;
-        let slot = self
+        let record_slot = self
             .slot_for(previous)
             .ok_or(MixerStreamSessionError::UnknownStream(previous))?;
         if self.slot_for(next.identity).is_some() {
             return Err(MixerStreamSessionError::DuplicateStream(next.identity));
         }
-        let Some(record) = self.records[slot].as_mut() else {
+        let Some(record) = self.records[record_slot].as_mut() else {
             return Err(MixerStreamSessionError::UnknownStream(previous));
         };
         if next_budget != record.samples_per_block || next_format != record.source_format {
             return Err(MixerStreamSessionError::RotationFormatChange);
         }
+        // A recovered record can occupy a different fresh mixer slot from its
+        // stable record-table position. Preserve the latter for lookup while
+        // reporting the slot the stream currently occupies to the caller.
+        let membership_slot = record.membership_slot.unwrap_or(record_slot);
         record.identity = next.identity;
         record.pump.begin_epoch();
-        Ok(StartedMixerStream { slot })
+        Ok(StartedMixerStream {
+            slot: membership_slot,
+        })
     }
 
     /// Applies one bounded drift correction to one stream's adapter.
@@ -1221,11 +1227,18 @@ mod tests {
         assert_eq!(session.pending_commands(), 2);
 
         // Record-table positions stay stable while recovery assigns fresh mixer
-        // slots, so removal must target the current membership slot rather than
-        // the persisted record position.
+        // slots, so public operations must report and target the current
+        // membership slot rather than the persisted record position.
+        let mut rotated_identity = identity(1);
+        rotated_identity.key_epoch = 1;
+        let rotated = session
+            .rotate_stream(identity(1), request(rotated_identity))
+            .unwrap();
+        assert_eq!(rotated.slot, 1);
+
         session.remove_stream(identity(2)).unwrap();
         assert_eq!(session.pending_commands(), 3);
-        session.remove_stream(identity(1)).unwrap();
+        session.remove_stream(rotated_identity).unwrap();
         assert_eq!(session.pending_commands(), 4);
         assert_eq!(session.stream_count(), 0);
     }
