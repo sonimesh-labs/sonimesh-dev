@@ -198,6 +198,10 @@ where
         if self.slot_for(request.identity).is_some() {
             return Err(MixerStreamSessionError::DuplicateStream(request.identity));
         }
+        let membership = self
+            .membership
+            .as_mut()
+            .ok_or(MixerStreamSessionError::OutputNotActive)?;
         // Record-table positions persist across output lifetimes and are
         // independent from current mixer membership slots. Reserve a vacant
         // record before publishing an admission so a partial recovery cannot
@@ -205,10 +209,6 @@ where
         let record_slot = self.records.iter().position(Option::is_none).ok_or(
             MixerStreamSessionError::Membership(MixerAdmissionError::SlotTableFull),
         )?;
-        let membership = self
-            .membership
-            .as_mut()
-            .ok_or(MixerStreamSessionError::OutputNotActive)?;
         let gain = GainControlHandle::new();
         let admitted = membership
             .admit_adapted_stream::<S>(
@@ -1164,6 +1164,24 @@ mod tests {
             session.start_stream(request(identity(2)), 8, None, &mut pipeline),
             Err(MixerStreamSessionError::OutputNotActive)
         );
+    }
+
+    #[test]
+    fn start_reports_output_not_active_before_record_capacity() {
+        let mut session = session(FakeOutput::default());
+        session.start_output(selection(None)).unwrap();
+        let mut first_pipeline = FakePipeline::<SOURCE_SAMPLES>::default();
+        let mut second_pipeline = FakePipeline::<SOURCE_SAMPLES>::default();
+        let mut third_pipeline = FakePipeline::<SOURCE_SAMPLES>::default();
+        started(&mut session, identity(1), &mut first_pipeline);
+        started(&mut session, identity(2), &mut second_pipeline);
+
+        session.retire_output_preserving_streams();
+        assert_eq!(
+            session.start_stream(request(identity(3)), 8, None, &mut third_pipeline),
+            Err(MixerStreamSessionError::OutputNotActive)
+        );
+        assert_eq!(session.stream_count(), 2);
     }
 
     #[test]
