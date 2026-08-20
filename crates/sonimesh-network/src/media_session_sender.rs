@@ -19,6 +19,8 @@ pub enum MediaSessionSenderError {
     RotationContextMismatch,
     /// Rotation did not advance to a strictly newer key epoch.
     NonIncreasingEpoch,
+    /// A fresh session reused the active media session ID.
+    ReusedSessionId,
 }
 
 impl fmt::Debug for MediaSessionSenderError {
@@ -32,6 +34,7 @@ impl fmt::Debug for MediaSessionSenderError {
             Self::Crypto(error) => formatter.debug_tuple("Crypto").field(error).finish(),
             Self::RotationContextMismatch => formatter.write_str("RotationContextMismatch"),
             Self::NonIncreasingEpoch => formatter.write_str("NonIncreasingEpoch"),
+            Self::ReusedSessionId => formatter.write_str("ReusedSessionId"),
         }
     }
 }
@@ -49,6 +52,9 @@ impl fmt::Display for MediaSessionSenderError {
             Self::NonIncreasingEpoch => {
                 formatter.write_str("media session rotation did not advance the key epoch")
             }
+            Self::ReusedSessionId => {
+                formatter.write_str("fresh media session reused the active session ID")
+            }
         }
     }
 }
@@ -58,7 +64,9 @@ impl std::error::Error for MediaSessionSenderError {
         match self {
             Self::Socket(error) => Some(error),
             Self::Crypto(error) => Some(error),
-            Self::RotationContextMismatch | Self::NonIncreasingEpoch => None,
+            Self::RotationContextMismatch | Self::NonIncreasingEpoch | Self::ReusedSessionId => {
+                None
+            }
         }
     }
 }
@@ -296,19 +304,26 @@ impl MediaSessionSender {
     /// Installs authenticated media state for a newly established session.
     ///
     /// This replaces the sealer and context for a fresh session, stream, and
-    /// epoch and restarts the sequence at zero. The routing destination is
-    /// unchanged; call [`Self::set_peer`] when the fresh session targets a new
+    /// epoch and restarts the sequence at zero. The replacement must use a
+    /// different media session ID; the receiver uses that boundary to prevent
+    /// stale-session replay and source rebinding under the old identity. The
+    /// routing destination is unchanged; call [`Self::set_peer`] when the fresh
+    /// session targets a new
     /// endpoint.
     ///
     /// # Errors
     ///
-    /// Returns [`MediaSessionSenderError::Crypto`] when the media key cannot be
-    /// derived from the new session secret.
+    /// Returns [`MediaSessionSenderError::ReusedSessionId`] when the replacement
+    /// reuses the active media session ID, or [`MediaSessionSenderError::Crypto`]
+    /// when the media key cannot be derived from the new session secret.
     pub fn install_fresh_session(
         &mut self,
         secret: &SessionSecret,
         context: MediaKeyContext,
     ) -> Result<(), MediaSessionSenderError> {
+        if context.session_id == self.context.session_id {
+            return Err(MediaSessionSenderError::ReusedSessionId);
+        }
         let sealer = MediaSealer::new(secret, context).map_err(MediaSessionSenderError::Crypto)?;
         self.sealer = sealer;
         self.context = context;
@@ -435,6 +450,30 @@ mod tests {
         assert_eq!(
             outcome,
             super::MediaSessionSendOutcome::Sent { sequence: 0 }
+        );
+    }
+
+    #[test]
+    fn fresh_session_rejects_a_reused_session_id_without_resetting_sequence() {
+        let mut sender = sender(1);
+        sender.send_frame(0, 0, &[1]).unwrap();
+        let active = sender.context();
+        let reused = MediaKeyContext::new(
+            active.session_id,
+            active.stream_id + 1,
+            active.key_epoch + 1,
+            active.direction,
+        )
+        .unwrap();
+
+        assert!(matches!(
+            sender.install_fresh_session(&secret(), reused),
+            Err(MediaSessionSenderError::ReusedSessionId)
+        ));
+        assert_eq!(sender.context(), active);
+        assert_eq!(
+            sender.send_frame(0, 960, &[2]).unwrap(),
+            super::MediaSessionSendOutcome::Sent { sequence: 1 }
         );
     }
 
