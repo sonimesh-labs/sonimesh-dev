@@ -241,11 +241,19 @@ fn write_bundle_atomically(directory: &Path, sequence: u64, bundle: &str) -> io:
         .write(true)
         .create_new(true)
         .open(&pending_path)?;
-    pending.write_all(bundle.as_bytes())?;
-    pending.sync_all()?;
+    // Once this call has created the pending file, clean it up on any later
+    // write, flush, or rename failure. Crash recovery still handles a process
+    // that dies before cleanup, while a live store must not poison its next
+    // sequence with a stale pending path after a transient I/O error.
+    let result = pending
+        .write_all(bundle.as_bytes())
+        .and_then(|()| pending.sync_all());
     drop(pending);
-    fs::rename(&pending_path, &final_path)?;
-    Ok(())
+    let result = result.and_then(|()| fs::rename(&pending_path, &final_path));
+    if result.is_err() {
+        let _ = fs::remove_file(&pending_path);
+    }
+    result
 }
 
 /// Failure while opening or retaining an on-disk export store.
@@ -323,6 +331,33 @@ impl std::error::Error for ExportStoreError {
 mod tests {
     use super::*;
 
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_TEMP_DIR: AtomicU64 = AtomicU64::new(0);
+
+    struct TempDir(PathBuf);
+
+    impl TempDir {
+        fn new() -> Self {
+            let base = std::env::temp_dir().join("sonimesh-export-store-unit-tests");
+            let id = NEXT_TEMP_DIR.fetch_add(1, Ordering::Relaxed);
+            let path = base.join(format!("{}-{id}", std::process::id()));
+            let _ = fs::remove_dir_all(&path);
+            fs::create_dir_all(&path).expect("create temporary directory");
+            Self(path)
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
     #[test]
     fn export_file_names_round_trip_through_the_parser() {
         for sequence in [0, 1, 9, 10, 123_456, u64::MAX] {
@@ -356,5 +391,18 @@ mod tests {
         assert_eq!(parse_pending_file_name("export-notes.json.pending"), None);
         assert_eq!(parse_pending_file_name("export-1.json.pending"), None);
         assert_eq!(parse_pending_file_name("notes.txt.pending"), None);
+    }
+
+    #[test]
+    fn failed_atomic_rename_does_not_poison_the_pending_path() {
+        let directory = TempDir::new();
+        fs::create_dir(directory.path().join(export_file_name(0)))
+            .expect("create conflicting final directory");
+
+        let error = write_bundle_atomically(directory.path(), 0, "bundle")
+            .expect_err("rename over a directory must fail");
+
+        assert_ne!(error.kind(), io::ErrorKind::NotFound);
+        assert!(!directory.path().join(pending_file_name(0)).exists());
     }
 }
