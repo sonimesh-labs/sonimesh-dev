@@ -77,6 +77,16 @@ pub enum MediaSessionSendError {
     PayloadTooLarge,
     /// The sender sequence for the current key epoch is exhausted.
     SequenceExhausted,
+    /// The operating system accepted fewer bytes than the sealed datagram.
+    ///
+    /// The packet sequence is consumed and callers must not retry the same
+    /// media frame under this epoch.
+    IncompleteDatagram {
+        /// Bytes reported as accepted by the operating system.
+        sent: usize,
+        /// Complete sealed datagram byte length requested by the sender.
+        expected: usize,
+    },
     /// The sealer rejected the frame for a reason outside the bounded policy.
     Crypto(MediaCryptoError),
     /// The operating system rejected the send operation.
@@ -88,6 +98,11 @@ impl fmt::Debug for MediaSessionSendError {
         match self {
             Self::PayloadTooLarge => formatter.write_str("PayloadTooLarge"),
             Self::SequenceExhausted => formatter.write_str("SequenceExhausted"),
+            Self::IncompleteDatagram { sent, expected } => formatter
+                .debug_struct("IncompleteDatagram")
+                .field("sent", sent)
+                .field("expected", expected)
+                .finish(),
             Self::Crypto(error) => formatter.debug_tuple("Crypto").field(error).finish(),
             Self::Io(error) => formatter
                 .debug_tuple("Io")
@@ -107,6 +122,10 @@ impl fmt::Display for MediaSessionSendError {
                 )
             }
             Self::SequenceExhausted => formatter.write_str("media key epoch sequence is exhausted"),
+            Self::IncompleteDatagram { sent, expected } => write!(
+                formatter,
+                "UDP media send accepted {sent} of {expected} sealed datagram bytes"
+            ),
             Self::Crypto(error) => write!(formatter, "media frame sealing failed: {error}"),
             Self::Io(error) => write!(formatter, "UDP media send failed: {error}"),
         }
@@ -116,7 +135,9 @@ impl fmt::Display for MediaSessionSendError {
 impl std::error::Error for MediaSessionSendError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::PayloadTooLarge | Self::SequenceExhausted => None,
+            Self::PayloadTooLarge | Self::SequenceExhausted | Self::IncompleteDatagram { .. } => {
+                None
+            }
             Self::Crypto(error) => Some(error),
             Self::Io(error) => Some(error),
         }
@@ -251,8 +272,10 @@ impl MediaSessionSender {
     ///
     /// Returns [`MediaSessionSendError::PayloadTooLarge`] for an oversized
     /// frame, [`MediaSessionSendError::SequenceExhausted`] when the current key
-    /// epoch requires rotation, or [`MediaSessionSendError::Io`] when the
-    /// operating system rejects the send.
+    /// epoch requires rotation, [`MediaSessionSendError::IncompleteDatagram`]
+    /// when the operating system reports a short write after the sequence was
+    /// consumed, or [`MediaSessionSendError::Io`] when the operating system
+    /// rejects the send.
     pub fn send_frame(
         &mut self,
         flags: u8,
@@ -343,8 +366,10 @@ fn map_seal_error(error: MediaCryptoError) -> MediaSessionSendError {
 ///
 /// The sealer already consumed `sequence` before the transport result existed,
 /// so a full send buffer still reports the consumed sequence and the receiver
-/// observes a gap rather than a retried frame. The sealer only produces bounded
-/// datagrams, so an impossible oversized transport result fails closed.
+/// observes a gap rather than a retried frame. A short transport result likewise
+/// fails closed without permitting a retry of the same frame. The sealer only
+/// produces bounded datagrams, so an impossible oversized transport result also
+/// fails closed.
 fn classify_send_outcome(
     result: Result<bool, UdpSendError>,
     sequence: u32,
@@ -353,6 +378,9 @@ fn classify_send_outcome(
         Ok(true) => Ok(MediaSessionSendOutcome::Sent { sequence }),
         Ok(false) => Ok(MediaSessionSendOutcome::BufferFull { sequence }),
         Err(UdpSendError::DatagramTooLarge) => Err(MediaSessionSendError::PayloadTooLarge),
+        Err(UdpSendError::IncompleteDatagram { sent, expected }) => {
+            Err(MediaSessionSendError::IncompleteDatagram { sent, expected })
+        }
         Err(UdpSendError::Io(error)) => Err(MediaSessionSendError::Io(error)),
     }
 }
@@ -510,9 +538,19 @@ mod tests {
     }
 
     #[test]
-    fn oversized_frame_debug_exposes_only_the_bound() {
-        let error = MediaSessionSendError::PayloadTooLarge;
-        assert_eq!(format!("{error:?}"), "PayloadTooLarge");
+    fn bounded_send_errors_expose_only_safe_metadata() {
+        let oversized = MediaSessionSendError::PayloadTooLarge;
+        assert_eq!(format!("{oversized:?}"), "PayloadTooLarge");
+
+        let incomplete = MediaSessionSendError::IncompleteDatagram {
+            sent: 24,
+            expected: 48,
+        };
+        assert_eq!(
+            format!("{incomplete:?}"),
+            "IncompleteDatagram { sent: 24, expected: 48 }"
+        );
+        assert!(std::error::Error::source(&incomplete).is_none());
     }
 
     #[test]
@@ -573,6 +611,23 @@ mod tests {
         assert!(matches!(
             classify_send_outcome(Err(UdpSendError::DatagramTooLarge), 41),
             Err(MediaSessionSendError::PayloadTooLarge)
+        ));
+    }
+
+    #[test]
+    fn short_sealed_datagram_fails_closed_without_claiming_delivery() {
+        assert!(matches!(
+            classify_send_outcome(
+                Err(UdpSendError::IncompleteDatagram {
+                    sent: 47,
+                    expected: 48,
+                }),
+                41,
+            ),
+            Err(MediaSessionSendError::IncompleteDatagram {
+                sent: 47,
+                expected: 48,
+            })
         ));
     }
 

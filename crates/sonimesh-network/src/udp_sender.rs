@@ -19,6 +19,13 @@ use crate::redacted_io_error::RedactedIoError;
 pub enum UdpSendError {
     /// The payload exceeded the protocol's complete-media limit.
     DatagramTooLarge,
+    /// The operating system accepted fewer bytes than the complete datagram.
+    IncompleteDatagram {
+        /// Bytes reported as accepted by the operating system.
+        sent: usize,
+        /// Complete datagram byte length requested by the caller.
+        expected: usize,
+    },
     /// The operating system rejected the send operation.
     Io(io::Error),
 }
@@ -27,6 +34,11 @@ impl fmt::Debug for UdpSendError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::DatagramTooLarge => formatter.write_str("DatagramTooLarge"),
+            Self::IncompleteDatagram { sent, expected } => formatter
+                .debug_struct("IncompleteDatagram")
+                .field("sent", sent)
+                .field("expected", expected)
+                .finish(),
             Self::Io(error) => formatter
                 .debug_tuple("Io")
                 .field(&RedactedIoError(error))
@@ -44,6 +56,10 @@ impl fmt::Display for UdpSendError {
                     "UDP media datagram exceeds {MAX_MEDIA_DATAGRAM_LEN} bytes"
                 )
             }
+            Self::IncompleteDatagram { sent, expected } => write!(
+                formatter,
+                "UDP media send accepted {sent} of {expected} datagram bytes"
+            ),
             Self::Io(error) => write!(formatter, "UDP media send failed: {error}"),
         }
     }
@@ -52,7 +68,7 @@ impl fmt::Display for UdpSendError {
 impl std::error::Error for UdpSendError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::DatagramTooLarge => None,
+            Self::DatagramTooLarge | Self::IncompleteDatagram { .. } => None,
             Self::Io(error) => Some(error),
         }
     }
@@ -104,25 +120,30 @@ impl UdpMediaSender {
     /// # Errors
     ///
     /// Returns [`UdpSendError::DatagramTooLarge`] before touching the socket
-    /// when the payload exceeds the protocol limit, or [`UdpSendError::Io`]
-    /// when the operating system rejects the send.
+    /// when the payload exceeds the protocol limit,
+    /// [`UdpSendError::IncompleteDatagram`] when the operating system reports
+    /// a short write, or [`UdpSendError::Io`] when the operating system rejects
+    /// the send.
     pub fn send_to(&self, peer: SocketAddr, payload: &[u8]) -> Result<bool, UdpSendError> {
         if payload.len() > MAX_MEDIA_DATAGRAM_LEN {
             return Err(UdpSendError::DatagramTooLarge);
         }
-        classify_send_result(self.socket.send_to(payload, peer))
+        classify_send_result(self.socket.send_to(payload, peer), payload.len())
     }
 }
 
 /// Maps one operating-system send result to the bounded public outcome.
 ///
 /// A full non-blocking send buffer reports `Ok(false)` as backpressure without
-/// an error, so the caller applies its own drop or pacing policy. Datagrams the
-/// operating system rejects as too large map to the protocol bound instead of a
-/// raw I/O error.
-fn classify_send_result(result: io::Result<usize>) -> Result<bool, UdpSendError> {
+/// an error, so the caller applies its own drop or pacing policy. A successful
+/// send must report the complete datagram length; a short result is rejected
+/// rather than being reported as an authenticated media packet on the wire.
+/// Datagrams the operating system rejects as too large map to the protocol
+/// bound instead of a raw I/O error.
+fn classify_send_result(result: io::Result<usize>, expected: usize) -> Result<bool, UdpSendError> {
     match result {
-        Ok(_) => Ok(true),
+        Ok(sent) if sent == expected => Ok(true),
+        Ok(sent) => Err(UdpSendError::IncompleteDatagram { sent, expected }),
         Err(error) if error.kind() == io::ErrorKind::WouldBlock => Ok(false),
         Err(error) if is_datagram_too_large(&error) => Err(UdpSendError::DatagramTooLarge),
         Err(error) => Err(UdpSendError::Io(error)),
@@ -154,12 +175,19 @@ mod tests {
     }
 
     #[test]
-    fn oversized_datagram_debug_exposes_only_the_bound() {
-        let error = UdpSendError::DatagramTooLarge;
+    fn bounded_send_errors_expose_only_safe_metadata() {
+        let oversized = UdpSendError::DatagramTooLarge;
+        assert_eq!(format!("{oversized:?}"), "DatagramTooLarge");
 
-        let debug = format!("{error:?}");
-
-        assert_eq!(debug, "DatagramTooLarge");
+        let incomplete = UdpSendError::IncompleteDatagram {
+            sent: 24,
+            expected: 48,
+        };
+        assert_eq!(
+            format!("{incomplete:?}"),
+            "IncompleteDatagram { sent: 24, expected: 48 }"
+        );
+        assert!(std::error::Error::source(&incomplete).is_none());
     }
 
     #[test]
@@ -174,15 +202,26 @@ mod tests {
     }
 
     #[test]
-    fn successful_send_reports_handed_to_the_operating_system() {
-        assert!(matches!(classify_send_result(Ok(1_200)), Ok(true)));
+    fn complete_send_reports_handed_to_the_operating_system() {
+        assert!(matches!(classify_send_result(Ok(1_200), 1_200), Ok(true)));
+    }
+
+    #[test]
+    fn short_send_is_rejected_instead_of_reported_as_complete() {
+        assert!(matches!(
+            classify_send_result(Ok(1_199), 1_200),
+            Err(UdpSendError::IncompleteDatagram {
+                sent: 1_199,
+                expected: 1_200
+            })
+        ));
     }
 
     #[test]
     fn full_send_buffer_reports_backpressure_without_an_error() {
         let error = io::Error::new(io::ErrorKind::WouldBlock, "send buffer is full");
 
-        assert!(matches!(classify_send_result(Err(error)), Ok(false)));
+        assert!(matches!(classify_send_result(Err(error), 1_200), Ok(false)));
     }
 
     #[test]
@@ -191,7 +230,7 @@ mod tests {
             let error = io::Error::from_raw_os_error(raw_os_error);
 
             assert!(matches!(
-                classify_send_result(Err(error)),
+                classify_send_result(Err(error), 1_200),
                 Err(UdpSendError::DatagramTooLarge)
             ));
         }
@@ -201,7 +240,7 @@ mod tests {
     fn unrelated_os_error_maps_to_the_io_variant_and_preserves_the_kind() {
         let error = io::Error::new(io::ErrorKind::PermissionDenied, "firewall dropped the send");
 
-        match classify_send_result(Err(error)) {
+        match classify_send_result(Err(error), 1_200) {
             Err(UdpSendError::Io(error)) => {
                 assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
             }
