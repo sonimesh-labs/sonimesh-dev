@@ -57,6 +57,14 @@ pub enum UntrustedControlError {
     Io(io::Error),
     /// A previous encoded frame is still waiting for socket progress.
     WritePending,
+    /// The byte stream violated the [`Write`] contract by reporting more bytes
+    /// than were supplied.
+    InvalidWriteLength {
+        /// Bytes reported by the stream implementation.
+        written: usize,
+        /// Bytes available in the supplied write slice.
+        expected: usize,
+    },
 }
 
 impl fmt::Debug for UntrustedControlError {
@@ -68,6 +76,11 @@ impl fmt::Debug for UntrustedControlError {
                 .field(&RedactedIoError(error))
                 .finish(),
             Self::WritePending => formatter.write_str("WritePending"),
+            Self::InvalidWriteLength { written, expected } => formatter
+                .debug_struct("InvalidWriteLength")
+                .field("written", written)
+                .field("expected", expected)
+                .finish(),
         }
     }
 }
@@ -80,6 +93,10 @@ impl fmt::Display for UntrustedControlError {
             Self::WritePending => {
                 formatter.write_str("untrusted control stream has a pending write")
             }
+            Self::InvalidWriteLength { written, expected } => write!(
+                formatter,
+                "untrusted control stream reported {written} written bytes for {expected} supplied bytes"
+            ),
         }
     }
 }
@@ -89,7 +106,7 @@ impl std::error::Error for UntrustedControlError {
         match self {
             Self::Protocol(error) => Some(error),
             Self::Io(error) => Some(error),
-            Self::WritePending => None,
+            Self::WritePending | Self::InvalidWriteLength { .. } => None,
         }
     }
 }
@@ -202,7 +219,9 @@ impl<S: Read + Write> UntrustedControlStream<S> {
     /// # Errors
     ///
     /// Returns [`UntrustedControlError::Io`] and retires the stream when a
-    /// non-transient socket write fails.
+    /// non-transient socket write fails. An implementation that violates the
+    /// [`Write`] contract by reporting more bytes than were supplied is also
+    /// rejected and retired without advancing the bounded write offset.
     pub fn flush_write(&mut self) -> Result<UntrustedControlWrite, UntrustedControlError> {
         if self.terminated {
             return Ok(UntrustedControlWrite::Closed);
@@ -220,6 +239,11 @@ impl<S: Read + Write> UntrustedControlStream<S> {
                 Ok(UntrustedControlWrite::Closed)
             }
             Ok(written) => {
+                let expected = self.write_len - self.write_offset;
+                if written > expected {
+                    self.terminated = true;
+                    return Err(UntrustedControlError::InvalidWriteLength { written, expected });
+                }
                 self.write_offset += written;
                 if self.write_offset == self.write_len {
                     self.write_len = 0;
@@ -432,6 +456,59 @@ mod debug_tests {
         };
 
         assert_eq!(control_payload_kind(&envelope), "missing");
+    }
+
+    struct OverreportingWriter;
+
+    impl io::Read for OverreportingWriter {
+        fn read(&mut self, _buffer: &mut [u8]) -> io::Result<usize> {
+            Ok(0)
+        }
+    }
+
+    impl io::Write for OverreportingWriter {
+        fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+            Ok(buffer.len().saturating_add(1))
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn overreported_write_length_terminates_without_panicking() {
+        let envelope = Envelope {
+            protocol_version: 1,
+            request_id: 1,
+            payload: Some(envelope::Payload::Hello(Hello {
+                supported_versions: vec![1],
+                capabilities: vec![],
+                display_name: String::new(),
+            })),
+        };
+        let mut stream = super::UntrustedControlStream::from_io(OverreportingWriter);
+
+        let error = stream
+            .send(&envelope)
+            .expect_err("invalid write must fail closed");
+        let (written, expected) = match &error {
+            UntrustedControlError::InvalidWriteLength { written, expected } => {
+                (*written, *expected)
+            }
+            other => panic!("expected invalid write length, got {other:?}"),
+        };
+        assert_eq!(written, expected + 1);
+        assert!(expected > 0);
+        assert_eq!(
+            stream.flush_write().unwrap(),
+            super::UntrustedControlWrite::Closed
+        );
+        assert!(std::error::Error::source(&error).is_none());
+        assert_eq!(
+            format!("{error:?}"),
+            format!("InvalidWriteLength {{ written: {written}, expected: {expected} }}")
+        );
     }
 
     #[test]
