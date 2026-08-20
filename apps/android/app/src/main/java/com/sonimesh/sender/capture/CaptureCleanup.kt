@@ -41,6 +41,23 @@ internal fun mergeCaptureFatalFailures(
     return primary
 }
 
+/** Thread-safe holder for fatal failures deferred until bounded teardown completes. */
+internal class DeferredCaptureFatalFailure {
+    private var failure: Throwable? = null
+
+    @Synchronized
+    fun retain(next: Throwable?) {
+        failure = mergeCaptureFatalFailures(failure, next)
+    }
+
+    @Synchronized
+    fun take(): Throwable? {
+        val retained = failure
+        failure = null
+        return retained
+    }
+}
+
 /** Runs every bounded cleanup step and rethrows the first deferred fatal failure. */
 internal fun runAllCaptureCleanupSteps(vararg steps: () -> Unit): Int {
     val result = collectCaptureCleanupFailures(*steps)

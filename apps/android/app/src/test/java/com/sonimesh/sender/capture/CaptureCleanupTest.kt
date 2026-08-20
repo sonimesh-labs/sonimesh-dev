@@ -93,6 +93,20 @@ class CaptureCleanupTest {
     }
 
     @Test
+    fun deferred_fatal_failure_keeps_all_failures_until_finish_claimed() {
+        val first = AssertionError("reader failed")
+        val second = LinkageError("record stop failed")
+        val deferred = DeferredCaptureFatalFailure()
+
+        deferred.retain(first)
+        deferred.retain(second)
+
+        assertSame(first, deferred.take())
+        assertEquals(listOf(second), first.suppressedExceptions)
+        assertEquals(null, deferred.take())
+    }
+
+    @Test
     fun ordinary_failure_count_is_exact() {
         val failedSteps = runAllCaptureCleanupSteps(
             { throw IllegalStateException("first") },

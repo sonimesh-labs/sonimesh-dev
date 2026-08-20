@@ -46,8 +46,7 @@ class CaptureService : Service() {
     @Volatile
     private var pendingCleanupFailureCount: Int = 0
 
-    @Volatile
-    private var pendingFatalFailure: Throwable? = null
+    private val pendingFatalFailure = DeferredCaptureFatalFailure()
 
     override fun onCreate() {
         super.onCreate()
@@ -369,6 +368,11 @@ class CaptureService : Service() {
                     null -> Unit
                 }
             }
+        } catch (failure: Throwable) {
+            // A fatal reader failure must still take the one teardown path. The
+            // gate keeps final release behind reader exit; finishTeardownIfReady
+            // rethrows the retained failure after all bounded cleanup steps.
+            teardown(TerminalOutcome.Failed("Capture reader failed"), failure)
         } finally {
             teardownGate.markReaderExited()
             mainHandler.post { finishTeardownIfReady() }
@@ -415,7 +419,8 @@ class CaptureService : Service() {
         )
     }
 
-    private fun teardown(outcome: TerminalOutcome) {
+    private fun teardown(outcome: TerminalOutcome, fatalFailure: Throwable? = null) {
+        pendingFatalFailure.retain(fatalFailure)
         if (teardownGate.beginTeardown()) {
             pendingOutcome = outcome
             val stopRequests = collectCaptureCleanupFailures(
@@ -423,7 +428,7 @@ class CaptureService : Service() {
                 { audioRecord?.stop() },
             )
             pendingCleanupFailureCount = stopRequests.ordinaryFailureCount
-            pendingFatalFailure = stopRequests.fatalFailure
+            pendingFatalFailure.retain(stopRequests.fatalFailure)
             teardownGate.markOutcomeReady()
         }
         finishTeardownIfReady()
@@ -461,19 +466,12 @@ class CaptureService : Service() {
             { stopSelf() },
         )
         val failedCleanupSteps = pendingCleanupFailureCount + finalCleanup.ordinaryFailureCount
-        val pendingFatal = pendingFatalFailure
+        val pendingFatal = pendingFatalFailure.take()
         pendingCleanupFailureCount = 0
-        pendingFatalFailure = null
         if (failedCleanupSteps > 0) {
             Log.e(LOG_TAG, "Capture cleanup completed with $failedCleanupSteps failed steps")
         }
-        val fatalFailure = pendingFatal ?: finalCleanup.fatalFailure
-        if (pendingFatal != null && finalCleanup.fatalFailure != null
-            && finalCleanup.fatalFailure !== pendingFatal
-        ) {
-            pendingFatal.addSuppressed(finalCleanup.fatalFailure)
-        }
-        fatalFailure?.let { throw it }
+        mergeCaptureFatalFailures(pendingFatal, finalCleanup.fatalFailure)?.let { throw it }
     }
 
     private sealed interface TerminalOutcome {
