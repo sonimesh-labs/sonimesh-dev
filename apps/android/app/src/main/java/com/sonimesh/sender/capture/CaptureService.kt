@@ -43,6 +43,12 @@ class CaptureService : Service() {
     @Volatile
     private var pendingOutcome: TerminalOutcome? = null
 
+    @Volatile
+    private var pendingCleanupFailureCount: Int = 0
+
+    @Volatile
+    private var pendingFatalFailure: Throwable? = null
+
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
@@ -392,8 +398,12 @@ class CaptureService : Service() {
     private fun teardown(outcome: TerminalOutcome) {
         if (teardownGate.beginTeardown()) {
             pendingOutcome = outcome
-            runCatching { captureThread?.interrupt() }
-            audioRecord?.let { record -> runCatching { record.stop() } }
+            val stopRequests = collectCaptureCleanupFailures(
+                { captureThread?.interrupt() },
+                { audioRecord?.stop() },
+            )
+            pendingCleanupFailureCount = stopRequests.ordinaryFailureCount
+            pendingFatalFailure = stopRequests.fatalFailure
             teardownGate.markOutcomeReady()
         }
         finishTeardownIfReady()
@@ -413,7 +423,7 @@ class CaptureService : Service() {
         projectionCallback = null
         pendingOutcome = null
 
-        val failedCleanupSteps = runAllCaptureCleanupSteps(
+        val finalCleanup = collectCaptureCleanupFailures(
             { record?.release() },
             {
                 if (projection != null && callback != null) {
@@ -430,9 +440,20 @@ class CaptureService : Service() {
             { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) },
             { stopSelf() },
         )
+        val failedCleanupSteps = pendingCleanupFailureCount + finalCleanup.ordinaryFailureCount
+        val pendingFatal = pendingFatalFailure
+        pendingCleanupFailureCount = 0
+        pendingFatalFailure = null
         if (failedCleanupSteps > 0) {
             Log.e(LOG_TAG, "Capture cleanup completed with $failedCleanupSteps failed steps")
         }
+        val fatalFailure = pendingFatal ?: finalCleanup.fatalFailure
+        if (pendingFatal != null && finalCleanup.fatalFailure != null
+            && finalCleanup.fatalFailure !== pendingFatal
+        ) {
+            pendingFatal.addSuppressed(finalCleanup.fatalFailure)
+        }
+        fatalFailure?.let { throw it }
     }
 
     private sealed interface TerminalOutcome {

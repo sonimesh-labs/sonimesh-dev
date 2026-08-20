@@ -50,6 +50,31 @@ class CaptureCleanupTest {
     }
 
     @Test
+    fun collection_retains_fatal_failure_and_continues_after_it() {
+        val fatal = AssertionError("stop request failed")
+        val observed = mutableListOf<Int>()
+
+        val result = collectCaptureCleanupFailures(
+            {
+                observed += 0
+                throw IllegalStateException("ordinary failure")
+            },
+            {
+                observed += 1
+                throw fatal
+            },
+            {
+                observed += 2
+                throw SecurityException("later ordinary failure")
+            },
+        )
+
+        assertEquals(listOf(0, 1, 2), observed)
+        assertEquals(2, result.ordinaryFailureCount)
+        assertSame(fatal, result.fatalFailure)
+    }
+
+    @Test
     fun ordinary_failure_count_is_exact() {
         val failedSteps = runAllCaptureCleanupSteps(
             { throw IllegalStateException("first") },
