@@ -431,6 +431,34 @@ mod tests {
     }
 
     #[test]
+    fn failed_pairing_revocation_preserves_the_active_record_and_media_root() {
+        let mut pairing = PairingInvitationController::<1>::new();
+        let mut pairing_session = SessionState::IDLE;
+        pairing
+            .begin(&mut pairing_session, PairingId::new([1; 16]), 100, 50, 1)
+            .expect("pairing invitation begins");
+        let mut coordinator = ControlStreamCoordinator::new(SessionState::READY, &[])
+            .expect("bounded coordinator policy");
+        let mut allocator = MediaSessionAllocator::new(SessionSecret::new([0xA5; 32]));
+        let context = allocator
+            .supply(identity(7, 1, 0), DIRECTION)
+            .expect("fresh identity")
+            .context();
+
+        assert_eq!(
+            allocator.revoke_for_pairing(&mut coordinator, &mut pairing),
+            Err(PairingInvitationError::InvalidSessionState(
+                SessionState::READY
+            ))
+        );
+        assert_eq!(pairing.state(), Some(PairingRecordState::Active));
+        assert_eq!(coordinator.state(), SessionState::READY);
+        assert!(!allocator.is_revoked());
+        assert_eq!(allocator.issued_count(), 1);
+        assert!(allocator.contains(context));
+    }
+
+    #[test]
     fn reconnect_grace_expiry_retires_the_media_root_with_the_control_session() {
         let (mut coordinator, token, _) = authenticated_pairing_owner();
         let mut allocator = MediaSessionAllocator::new(SessionSecret::new([0xA5; 32]));

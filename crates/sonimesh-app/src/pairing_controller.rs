@@ -175,6 +175,7 @@ impl<const MAX_SOURCES: usize> PairingInvitationController<MAX_SOURCES> {
         session: &mut SessionState,
         now_ms: u64,
     ) -> Result<PairingRecordState, PairingInvitationError> {
+        self.ensure_state_can_synchronize(*session)?;
         let record = self
             .record
             .as_mut()
@@ -236,6 +237,7 @@ impl<const MAX_SOURCES: usize> PairingInvitationController<MAX_SOURCES> {
         &mut self,
         session: &mut SessionState,
     ) -> Result<PairingRecordState, PairingInvitationError> {
+        self.ensure_state_can_synchronize(*session)?;
         let state = {
             let record = self
                 .record
@@ -261,6 +263,7 @@ impl<const MAX_SOURCES: usize> PairingInvitationController<MAX_SOURCES> {
         &mut self,
         session: &mut SessionState,
     ) -> Result<PairingRecordState, PairingInvitationError> {
+        self.ensure_state_can_synchronize(*session)?;
         let state = {
             let record = self
                 .record
@@ -271,6 +274,16 @@ impl<const MAX_SOURCES: usize> PairingInvitationController<MAX_SOURCES> {
         };
         self.synchronize_state(session)?;
         Ok(state)
+    }
+
+    fn ensure_state_can_synchronize(
+        &self,
+        session: SessionState,
+    ) -> Result<(), PairingInvitationError> {
+        if self.state() == Some(PairingRecordState::Active) && session != SessionState::PAIRING {
+            return Err(PairingInvitationError::InvalidSessionState(session));
+        }
+        Ok(())
     }
 
     fn synchronize_state(&self, session: &mut SessionState) -> Result<(), PairingInvitationError> {
@@ -583,6 +596,41 @@ mod tests {
             Err(PairingInvitationError::MissingInvitation)
         );
         assert_eq!(controller.state(), None);
+    }
+
+    #[test]
+    fn invalid_session_state_does_not_mutate_an_active_invitation() {
+        let mut controller = controller();
+        let mut pairing_session = SessionState::IDLE;
+        controller
+            .begin(&mut pairing_session, id(1), 100, 1_000, 3)
+            .unwrap();
+        let mut wrong_session = SessionState::READY;
+
+        assert_eq!(
+            controller.observe(&mut wrong_session, 200),
+            Err(PairingInvitationError::InvalidSessionState(
+                SessionState::READY
+            ))
+        );
+        assert_eq!(controller.state(), Some(PairingRecordState::Active));
+
+        assert_eq!(
+            controller.expire(&mut wrong_session),
+            Err(PairingInvitationError::InvalidSessionState(
+                SessionState::READY
+            ))
+        );
+        assert_eq!(controller.state(), Some(PairingRecordState::Active));
+
+        assert_eq!(
+            controller.revoke(&mut wrong_session),
+            Err(PairingInvitationError::InvalidSessionState(
+                SessionState::READY
+            ))
+        );
+        assert_eq!(controller.state(), Some(PairingRecordState::Active));
+        assert_eq!(wrong_session, SessionState::READY);
     }
 
     #[test]
