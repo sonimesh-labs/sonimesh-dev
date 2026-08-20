@@ -65,6 +65,14 @@ pub enum UntrustedControlError {
         /// Bytes available in the supplied write slice.
         expected: usize,
     },
+    /// The byte stream violated the [`Read`] contract by reporting more bytes
+    /// than fit in the supplied buffer.
+    InvalidReadLength {
+        /// Bytes reported by the stream implementation.
+        read: usize,
+        /// Bytes available in the supplied read buffer.
+        expected: usize,
+    },
 }
 
 impl fmt::Debug for UntrustedControlError {
@@ -79,6 +87,11 @@ impl fmt::Debug for UntrustedControlError {
             Self::InvalidWriteLength { written, expected } => formatter
                 .debug_struct("InvalidWriteLength")
                 .field("written", written)
+                .field("expected", expected)
+                .finish(),
+            Self::InvalidReadLength { read, expected } => formatter
+                .debug_struct("InvalidReadLength")
+                .field("read", read)
                 .field("expected", expected)
                 .finish(),
         }
@@ -97,6 +110,10 @@ impl fmt::Display for UntrustedControlError {
                 formatter,
                 "untrusted control stream reported {written} written bytes for {expected} supplied bytes"
             ),
+            Self::InvalidReadLength { read, expected } => write!(
+                formatter,
+                "untrusted control stream reported {read} read bytes for {expected} supplied bytes"
+            ),
         }
     }
 }
@@ -106,7 +123,9 @@ impl std::error::Error for UntrustedControlError {
         match self {
             Self::Protocol(error) => Some(error),
             Self::Io(error) => Some(error),
-            Self::WritePending | Self::InvalidWriteLength { .. } => None,
+            Self::WritePending
+            | Self::InvalidWriteLength { .. }
+            | Self::InvalidReadLength { .. } => None,
         }
     }
 }
@@ -285,6 +304,9 @@ impl<S: Read + Write> UntrustedControlStream<S> {
                     return Ok(UntrustedControlPoll::Closed);
                 }
                 Err(ReadState::Io(error)) => return self.io_failure(error),
+                Err(ReadState::InvalidLength { read, expected }) => {
+                    return self.invalid_read_length(read, expected);
+                }
             }
             if self.length_filled < CONTROL_LENGTH_BYTES {
                 return Ok(UntrustedControlPoll::Empty);
@@ -314,6 +336,9 @@ impl<S: Read + Write> UntrustedControlStream<S> {
                     return Ok(UntrustedControlPoll::Closed);
                 }
                 Err(ReadState::Io(error)) => return self.io_failure(error),
+                Err(ReadState::InvalidLength { read, expected }) => {
+                    return self.invalid_read_length(read, expected);
+                }
             }
         }
         if self.frame_filled < CONTROL_LENGTH_BYTES + payload_len {
@@ -345,6 +370,10 @@ impl<S: Read + Write> UntrustedControlStream<S> {
         match self.stream.read(&mut self.buffer[start..end]) {
             Ok(0) => Err(ReadState::Closed),
             Ok(read) => {
+                let expected = end - start;
+                if read > expected {
+                    return Err(ReadState::InvalidLength { read, expected });
+                }
                 if reading_length {
                     self.length_filled += read;
                 } else {
@@ -376,12 +405,22 @@ impl<S: Read + Write> UntrustedControlStream<S> {
         self.terminated = true;
         Err(UntrustedControlError::Protocol(error))
     }
+
+    fn invalid_read_length(
+        &mut self,
+        read: usize,
+        expected: usize,
+    ) -> Result<UntrustedControlPoll, UntrustedControlError> {
+        self.terminated = true;
+        Err(UntrustedControlError::InvalidReadLength { read, expected })
+    }
 }
 
 enum ReadState {
     WouldBlock,
     Closed,
     Io(io::Error),
+    InvalidLength { read: usize, expected: usize },
 }
 
 #[cfg(test)]
@@ -508,6 +547,44 @@ mod debug_tests {
         assert_eq!(
             format!("{error:?}"),
             format!("InvalidWriteLength {{ written: {written}, expected: {expected} }}")
+        );
+    }
+
+    struct OverreportingReader;
+
+    impl io::Read for OverreportingReader {
+        fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+            Ok(buffer.len().saturating_add(1))
+        }
+    }
+
+    impl io::Write for OverreportingReader {
+        fn write(&mut self, _buffer: &[u8]) -> io::Result<usize> {
+            Ok(0)
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn overreported_read_length_terminates_without_panicking() {
+        let mut stream = super::UntrustedControlStream::from_io(OverreportingReader);
+
+        let error = stream.poll().expect_err("invalid read must fail closed");
+        assert!(matches!(
+            error,
+            UntrustedControlError::InvalidReadLength {
+                read: 5,
+                expected: 4
+            }
+        ));
+        assert_eq!(stream.poll().unwrap(), UntrustedControlPoll::Closed);
+        assert!(std::error::Error::source(&error).is_none());
+        assert_eq!(
+            format!("{error:?}"),
+            "InvalidReadLength { read: 5, expected: 4 }"
         );
     }
 
