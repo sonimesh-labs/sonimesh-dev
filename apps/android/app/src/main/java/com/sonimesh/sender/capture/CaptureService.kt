@@ -368,6 +368,10 @@ class CaptureService : Service() {
                     null -> Unit
                 }
             }
+        } catch (_: Exception) {
+            // Unexpected ordinary reader exceptions still retire the capture
+            // generation without being escalated as fatal JVM failures.
+            teardown(TerminalOutcome.Failed("Capture reader failed"))
         } catch (failure: Throwable) {
             // A fatal reader failure must still take the one teardown path. The
             // gate keeps final release behind reader exit; finishTeardownIfReady
