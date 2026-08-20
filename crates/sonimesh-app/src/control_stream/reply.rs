@@ -152,7 +152,29 @@ impl ControlReply {
         error: &ControlStreamError,
     ) -> Result<Envelope, ControlFrameError> {
         let (code, retryable) = wire_error_contract(error);
-        Self::error(code, retryable, &error.to_string())?.into_envelope(request_id)
+        Self::error(code, retryable, wire_error_detail(error))?.into_envelope(request_id)
+    }
+}
+
+/// Returns a bounded, stable detail for one wire rejection.
+///
+/// Nested decoder and platform error strings are intentionally not copied to
+/// the wire: they are not part of the control protocol contract and may grow
+/// beyond the bounded detail field or expose implementation-specific parser
+/// text. The structured code and retry bit carry the machine-readable result;
+/// this detail remains short and safe for peer display.
+fn wire_error_detail(error: &ControlStreamError) -> &'static str {
+    match error {
+        ControlStreamError::Protocol(_) => "control command failed protocol validation",
+        ControlStreamError::Negotiation(_) => "control hello negotiation failed",
+        ControlStreamError::Transition(_) => "control lifecycle transition failed",
+        ControlStreamError::ReconnectGrace(_) => "reconnect grace operation failed",
+        _ => match wire_error_contract(error).0 {
+            ErrorCode::IncompatibleVersion => "control protocol versions are incompatible",
+            ErrorCode::UnsupportedCapability => "requested control capability is unsupported",
+            ErrorCode::RetryLater => "control operation is temporarily unavailable",
+            _ => "control request was rejected",
+        },
     }
 }
 
@@ -316,6 +338,23 @@ mod tests {
                 "wrong retry flag for {error:?}"
             );
         }
+    }
+
+    #[test]
+    fn rejection_details_are_stable_and_bounded_for_nested_protocol_errors() {
+        let protocol_error = decode_control_frame(&[0, 0, 0, 1, 0x80]).unwrap_err();
+        let error = ControlStreamError::Protocol(protocol_error);
+
+        let envelope = ControlReply::for_rejection(204, &error).unwrap();
+        let Some(envelope::Payload::Error(response)) = envelope.payload else {
+            panic!("protocol rejection did not produce an error response");
+        };
+
+        assert_eq!(
+            response.detail,
+            "control command failed protocol validation"
+        );
+        assert!(response.detail.len() <= sonimesh_protocol::MAX_CONTROL_DETAIL_BYTES);
     }
 
     #[test]
