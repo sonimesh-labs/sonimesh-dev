@@ -80,6 +80,11 @@ impl<const SOURCE_SAMPLES_PER_BLOCK: usize, const OUTPUT_SAMPLES_PER_BLOCK: usiz
 /// One admitted mixer stream owned across output lifetimes.
 struct StreamRecord {
     identity: MediaStreamIdentity,
+    /// Slot occupied in the current output lifetime, if this persisted record
+    /// has already rejoined its fresh mixer membership. Record-table position is
+    /// intentionally independent so recovery order cannot overwrite another
+    /// persisted stream.
+    membership_slot: Option<usize>,
     source_format: SourcePcmFormat,
     source_queue_capacity: usize,
     /// Frames per source block the pump was compiled and admitted for.
@@ -210,6 +215,7 @@ where
         pipeline.replace_pcm_producer(admitted.source_producer);
         self.records[slot] = Some(StreamRecord {
             identity: request.identity,
+            membership_slot: Some(slot),
             source_format,
             source_queue_capacity,
             samples_per_block: expected,
@@ -229,7 +235,11 @@ where
     /// does not consume command-queue capacity.
     #[must_use]
     pub fn removal_requires_membership_command(&self, identity: MediaStreamIdentity) -> bool {
-        self.membership.is_some() && self.slot_for(identity).is_some()
+        self.membership.is_some()
+            && self
+                .slot_for(identity)
+                .and_then(|record_slot| self.records[record_slot].as_ref())
+                .is_some_and(|record| record.membership_slot.is_some())
     }
 
     /// Removes one admitted stream and retires its slot.
@@ -246,15 +256,20 @@ where
         &mut self,
         identity: MediaStreamIdentity,
     ) -> Result<(), MixerStreamSessionError> {
-        let slot = self
+        let record_slot = self
             .slot_for(identity)
             .ok_or(MixerStreamSessionError::UnknownStream(identity))?;
-        if let Some(membership) = self.membership.as_mut() {
+        let membership_slot = self.records[record_slot]
+            .as_ref()
+            .and_then(|record| record.membership_slot);
+        if let (Some(membership), Some(membership_slot)) =
+            (self.membership.as_mut(), membership_slot)
+        {
             membership
-                .remove_stream(slot)
+                .remove_stream(membership_slot)
                 .map_err(MixerStreamSessionError::Membership)?;
         }
-        self.records[slot] = None;
+        self.records[record_slot] = None;
         Ok(())
     }
 
@@ -373,6 +388,7 @@ where
         let health = self.output.monitor();
         if health.is_some() {
             self.membership = None;
+            self.clear_membership_slots();
         }
         health
     }
@@ -429,34 +445,36 @@ where
     where
         P: ReceiverPcmProducerInstaller<S>,
     {
-        let slot = self
+        let record_slot = self
             .slot_for(identity)
             .ok_or(MixerStreamSessionError::UnknownStream(identity))?;
+        let Some(record) = self.records[record_slot].as_ref() else {
+            return Err(MixerStreamSessionError::UnknownStream(identity));
+        };
+        if record.membership_slot.is_some() {
+            return Err(MixerStreamSessionError::DuplicateStream(identity));
+        }
+        let source_format = record.source_format;
+        let source_queue_capacity = record.source_queue_capacity;
+        let gain = record.gain.clone();
+        let counters = record.counters.clone();
         let membership = self
             .membership
             .as_mut()
             .ok_or(MixerStreamSessionError::OutputNotActive)?;
-        let Some(record) = self.records[slot].as_ref() else {
-            return Err(MixerStreamSessionError::UnknownStream(identity));
-        };
         let admitted = membership
-            .admit_adapted_stream::<S>(
-                record.source_format,
-                record.source_queue_capacity,
-                record.gain.clone(),
-                record.counters.clone(),
-            )
+            .admit_adapted_stream::<S>(source_format, source_queue_capacity, gain, counters)
             .map_err(MixerStreamSessionError::Membership)?;
-        let new_slot = admitted.slot;
+        let membership_slot = admitted.slot;
         pipeline.replace_pcm_producer(admitted.source_producer);
-        let Some(record) = self.records[slot].as_mut() else {
+        let Some(record) = self.records[record_slot].as_mut() else {
             return Err(MixerStreamSessionError::UnknownStream(identity));
         };
         record.pump = Box::new(admitted.adapter);
-        if new_slot != slot {
-            self.records[new_slot] = self.records[slot].take();
-        }
-        Ok(StartedMixerStream { slot: new_slot })
+        record.membership_slot = Some(membership_slot);
+        Ok(StartedMixerStream {
+            slot: membership_slot,
+        })
     }
 
     /// Stops the output and retires every stream record.
@@ -471,6 +489,7 @@ where
     pub fn retire_output_preserving_streams(&mut self) {
         self.output.stop();
         self.membership = None;
+        self.clear_membership_slots();
     }
 
     /// Returns the clone of one stream's gain and mute handle.
@@ -578,6 +597,12 @@ where
     /// Mutably borrows the platform adapter outside the realtime callback.
     pub fn output_mut(&mut self) -> &mut O {
         self.output.output_mut()
+    }
+
+    fn clear_membership_slots(&mut self) {
+        for record in self.records.iter_mut().flatten() {
+            record.membership_slot = None;
+        }
     }
 
     fn slot_for(&self, identity: MediaStreamIdentity) -> Option<usize> {
@@ -1155,6 +1180,54 @@ mod tests {
             session.recover_stream(identity(9), &mut pipeline),
             Err(MixerStreamSessionError::UnknownStream(identity(9)))
         );
+    }
+
+    #[test]
+    fn recovery_keeps_records_when_streams_rejoin_out_of_record_order() {
+        let output = FakeOutput {
+            health: OutputHealth::CallbackCapacityExceeded,
+            ..Default::default()
+        };
+        let mut session = session(output);
+        session.start_output(selection(None)).unwrap();
+        let mut first_pipeline = FakePipeline::<SOURCE_SAMPLES>::default();
+        let mut second_pipeline = FakePipeline::<SOURCE_SAMPLES>::default();
+        started(&mut session, identity(1), &mut first_pipeline);
+        started(&mut session, identity(2), &mut second_pipeline);
+        assert_eq!(
+            session.monitor(),
+            Some(OutputHealth::CallbackCapacityExceeded)
+        );
+
+        assert_eq!(
+            session.recover_output().unwrap(),
+            vec![identity(1), identity(2)]
+        );
+        let second = session
+            .recover_stream(identity(2), &mut second_pipeline)
+            .unwrap();
+        assert_eq!(second.slot, 0);
+        let first = session
+            .recover_stream(identity(1), &mut first_pipeline)
+            .unwrap();
+        assert_eq!(first.slot, 1);
+
+        assert_eq!(session.stream_count(), 2);
+        assert_eq!(session.pending_commands(), 2);
+        assert_eq!(
+            session.recover_stream(identity(2), &mut second_pipeline),
+            Err(MixerStreamSessionError::DuplicateStream(identity(2)))
+        );
+        assert_eq!(session.pending_commands(), 2);
+
+        // Record-table positions stay stable while recovery assigns fresh mixer
+        // slots, so removal must target the current membership slot rather than
+        // the persisted record position.
+        session.remove_stream(identity(2)).unwrap();
+        assert_eq!(session.pending_commands(), 3);
+        session.remove_stream(identity(1)).unwrap();
+        assert_eq!(session.pending_commands(), 4);
+        assert_eq!(session.stream_count(), 0);
     }
 
     #[test]

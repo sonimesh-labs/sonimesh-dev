@@ -2,7 +2,7 @@
 
 > Status: architecture draft for feasibility validation
 > Version: 1.0.0
-> Updated: 2026-08-19
+> Updated: 2026-08-20
 
 This document describes the intended product boundary and engineering constraints
 for SoniMesh. It deliberately separates verified platform facts, implementation
@@ -583,8 +583,11 @@ controller plus the membership boundary and the per-stream adapter pumps,
 starts the output, admits streams through `admit_adapted_stream`, installs
 each stream's source producer into its caller-owned pipeline, advances the
 adapters after every decode step, and after output-device recreation re-admits
-every persisted stream against a fresh empty slot table. Per-stream drift
-control (`MixerStreamDriftController`) samples only the bounded adapter
+every persisted stream against a fresh empty slot table. Persisted records keep
+stable identity-table positions while separately tracking their current mixer
+slot, so callers may re-admit streams in any order without overwriting another
+record or publishing duplicate membership. Per-stream drift control
+(`MixerStreamDriftController`) samples only the bounded adapter
 source queue, publishes bounded ppm corrections to the stream's resampler,
 retires the adapter epoch on an emergency occupancy threshold, and resets
 after recovery. Stream lifecycle is composed in `ControlToMixerBridge`: it
