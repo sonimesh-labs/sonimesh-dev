@@ -27,6 +27,20 @@ internal fun collectCaptureCleanupFailures(vararg steps: () -> Unit): CaptureCle
     return CaptureCleanupResult(ordinaryFailureCount, fatalFailure)
 }
 
+/** Keeps the first fatal failure and attaches a later cleanup failure to it. */
+internal fun mergeCaptureFatalFailures(
+    primary: Throwable?,
+    secondary: Throwable?,
+): Throwable? {
+    if (primary == null) {
+        return secondary
+    }
+    if (secondary != null && secondary !== primary) {
+        primary.addSuppressed(secondary)
+    }
+    return primary
+}
+
 /** Runs every bounded cleanup step and rethrows the first deferred fatal failure. */
 internal fun runAllCaptureCleanupSteps(vararg steps: () -> Unit): Int {
     val result = collectCaptureCleanupFailures(*steps)

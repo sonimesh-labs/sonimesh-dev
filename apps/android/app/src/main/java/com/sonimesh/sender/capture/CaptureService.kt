@@ -101,6 +101,16 @@ class CaptureService : Service() {
 
     private fun startCapture(resultCode: Int, resultData: Intent) {
         var candidateRecord: AudioRecord? = null
+        var deferredFailure: Throwable? = null
+
+        fun requestTeardown(outcome: TerminalOutcome) {
+            try {
+                teardown(outcome)
+            } catch (failure: Throwable) {
+                deferredFailure = mergeCaptureFatalFailures(deferredFailure, failure)
+            }
+        }
+
         try {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
                 != PackageManager.PERMISSION_GRANTED
@@ -134,24 +144,34 @@ class CaptureService : Service() {
             CaptureStateStore.publishCapturing(format)
             startCaptureThread(record, format)
         } catch (error: SecurityException) {
-            teardown(TerminalOutcome.Failed("Capture permission was rejected by the platform"))
+            requestTeardown(TerminalOutcome.Failed("Capture permission was rejected by the platform"))
         } catch (error: IllegalArgumentException) {
-            teardown(TerminalOutcome.Failed("Capture format was rejected by the platform"))
+            requestTeardown(TerminalOutcome.Failed("Capture format was rejected by the platform"))
         } catch (error: IllegalStateException) {
-            teardown(TerminalOutcome.Failed("Capture could not start"))
+            requestTeardown(TerminalOutcome.Failed("Capture could not start"))
         } catch (error: CaptureSetupException) {
-            teardown(TerminalOutcome.Failed(error.message ?: "Capture setup failed"))
+            requestTeardown(TerminalOutcome.Failed(error.message ?: "Capture setup failed"))
+        } catch (error: Throwable) {
+            // Preserve an unexpected fatal setup failure while still taking the
+            // normal teardown path before it can escape this method.
+            deferredFailure = mergeCaptureFatalFailures(deferredFailure, error)
+            requestTeardown(TerminalOutcome.Failed("Capture setup failed"))
         } finally {
             candidateRecord?.let { record ->
-                val failedCleanupSteps = runAllCaptureCleanupSteps({ record.release() })
-                if (failedCleanupSteps > 0) {
+                val cleanup = collectCaptureCleanupFailures({ record.release() })
+                if (cleanup.ordinaryFailureCount > 0) {
                     Log.e(
                         LOG_TAG,
-                        "Capture setup cleanup completed with $failedCleanupSteps failed steps",
+                        "Capture setup cleanup completed with ${cleanup.ordinaryFailureCount} failed steps",
                     )
                 }
+                deferredFailure = mergeCaptureFatalFailures(
+                    deferredFailure,
+                    cleanup.fatalFailure,
+                )
             }
         }
+        deferredFailure?.let { throw it }
     }
 
     @android.annotation.SuppressLint("MissingPermission")

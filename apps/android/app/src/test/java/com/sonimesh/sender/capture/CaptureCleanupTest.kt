@@ -75,6 +75,24 @@ class CaptureCleanupTest {
     }
 
     @Test
+    fun merging_fatal_failures_preserves_the_first_and_suppresses_the_later() {
+        val primary = AssertionError("setup failed")
+        val secondary = LinkageError("candidate release failed")
+
+        val merged = mergeCaptureFatalFailures(primary, secondary)
+
+        assertSame(primary, merged)
+        assertEquals(listOf(secondary), primary.suppressedExceptions)
+    }
+
+    @Test
+    fun merging_without_a_primary_failure_adopts_the_cleanup_failure() {
+        val secondary = LinkageError("candidate release failed")
+
+        assertSame(secondary, mergeCaptureFatalFailures(null, secondary))
+    }
+
+    @Test
     fun ordinary_failure_count_is_exact() {
         val failedSteps = runAllCaptureCleanupSteps(
             { throw IllegalStateException("first") },
