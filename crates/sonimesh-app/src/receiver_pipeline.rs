@@ -271,6 +271,11 @@ where
             .map_err(AdaptiveTargetSetupError::Arrival)?;
         let target =
             AdaptiveJitterTarget::new(adaptive.target).map_err(AdaptiveTargetSetupError::Target)?;
+        if target.max_frames() > JITTER_CAPACITY {
+            return Err(AdaptiveTargetSetupError::Target(
+                JitterTargetConfigError::TargetExceedsCapacity,
+            ));
+        }
         let mut pipeline = Self::new(
             secret,
             context,

@@ -13,8 +13,8 @@ use std::sync::Mutex;
 use std::thread;
 
 use sonimesh_app::{
-    AdaptiveTargetConfig, FreshSessionInstallError, ReceiverStreamPipeline,
-    TargetGatedPlayoutSetupError, UdpPollOutcome, UdpReceiverPipeline,
+    AdaptiveTargetConfig, AdaptiveTargetSetupError, FreshSessionInstallError,
+    ReceiverStreamPipeline, TargetGatedPlayoutSetupError, UdpPollOutcome, UdpReceiverPipeline,
 };
 use sonimesh_audio::{
     DecodeStep, FrameDecoder, InsertOutcome, JitterMode, JitterTargetConfig, RealtimePcmConsumer,
@@ -26,6 +26,9 @@ use sonimesh_protocol::{MediaDirection, MediaKeyContext, MediaSealer, SessionSec
 const JITTER_CAPACITY: usize = 4;
 const MAX_ENCODED_BYTES: usize = 8;
 const PCM_SAMPLES_PER_BLOCK: usize = 4;
+
+type SmallCapacityPipeline =
+    ReceiverStreamPipeline<ByteDecoder, 2, MAX_ENCODED_BYTES, PCM_SAMPLES_PER_BLOCK>;
 
 struct ByteDecoder;
 
@@ -183,6 +186,32 @@ fn target_gated_playout_requires_an_adaptive_target() {
         pipeline.enable_target_gated_playout(TargetGatedPlayoutConfig { max_gate_ticks: 2 }),
         Err(TargetGatedPlayoutSetupError::MissingAdaptiveTarget)
     );
+}
+
+#[test]
+fn adaptive_target_cannot_exceed_the_pipeline_jitter_capacity() {
+    let secret = SessionSecret::new([0xA5; 32]);
+    let counters = Arc::new(StreamCounters::default());
+    let (producer, _consumer) = realtime_pcm_queue::<PCM_SAMPLES_PER_BLOCK>(4).unwrap();
+
+    assert!(matches!(
+        SmallCapacityPipeline::new_with_adaptive_target(
+            &secret,
+            context(),
+            ByteDecoder,
+            producer,
+            counters,
+            0,
+            AdaptiveTargetConfig {
+                target: JitterTargetConfig::preset(JitterMode::Balanced, 20, JITTER_CAPACITY),
+                arrival_ticks_per_second: 1_000,
+                tick_source: Box::new(|| 0),
+            },
+        ),
+        Err(AdaptiveTargetSetupError::Target(
+            sonimesh_audio::JitterTargetConfigError::TargetExceedsCapacity,
+        ))
+    ));
 }
 
 #[test]
