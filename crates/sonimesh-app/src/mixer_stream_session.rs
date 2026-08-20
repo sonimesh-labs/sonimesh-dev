@@ -198,6 +198,13 @@ where
         if self.slot_for(request.identity).is_some() {
             return Err(MixerStreamSessionError::DuplicateStream(request.identity));
         }
+        // Record-table positions persist across output lifetimes and are
+        // independent from current mixer membership slots. Reserve a vacant
+        // record before publishing an admission so a partial recovery cannot
+        // overwrite a waiting record whose old position matches a fresh slot.
+        let record_slot = self.records.iter().position(Option::is_none).ok_or(
+            MixerStreamSessionError::Membership(MixerAdmissionError::SlotTableFull),
+        )?;
         let membership = self
             .membership
             .as_mut()
@@ -213,7 +220,7 @@ where
             .map_err(MixerStreamSessionError::Membership)?;
         let slot = admitted.slot;
         pipeline.replace_pcm_producer(admitted.source_producer);
-        self.records[slot] = Some(StreamRecord {
+        self.records[record_slot] = Some(StreamRecord {
             identity: request.identity,
             membership_slot: Some(slot),
             source_format,
@@ -1185,6 +1192,56 @@ mod tests {
         assert_eq!(
             session.recover_stream(identity(9), &mut pipeline),
             Err(MixerStreamSessionError::UnknownStream(identity(9)))
+        );
+    }
+
+    #[test]
+    fn new_stream_cannot_overwrite_a_waiting_recovery_record() {
+        let output = FakeOutput {
+            health: OutputHealth::CallbackCapacityExceeded,
+            ..Default::default()
+        };
+        let mut session = session(output);
+        session.start_output(selection(None)).unwrap();
+        let mut first_pipeline = FakePipeline::<SOURCE_SAMPLES>::default();
+        let mut second_pipeline = FakePipeline::<SOURCE_SAMPLES>::default();
+        let mut third_pipeline = FakePipeline::<SOURCE_SAMPLES>::default();
+        started(&mut session, identity(1), &mut first_pipeline);
+        started(&mut session, identity(2), &mut second_pipeline);
+        assert_eq!(
+            session.monitor(),
+            Some(OutputHealth::CallbackCapacityExceeded)
+        );
+
+        assert_eq!(
+            session.recover_output().unwrap(),
+            vec![identity(1), identity(2)]
+        );
+        assert_eq!(
+            session
+                .recover_stream(identity(2), &mut second_pipeline)
+                .unwrap()
+                .slot,
+            0
+        );
+
+        // The fresh mixer still has a membership slot, but both persisted
+        // record-table entries belong to streams awaiting recovery. A new
+        // stream must fail closed rather than overwrite either record.
+        assert_eq!(
+            session.start_stream(request(identity(3)), 8, None, &mut third_pipeline),
+            Err(MixerStreamSessionError::Membership(
+                MixerAdmissionError::SlotTableFull
+            ))
+        );
+        assert_eq!(session.stream_count(), 2);
+        assert!(session.gain(identity(2)).is_ok());
+        assert_eq!(
+            session
+                .recover_stream(identity(1), &mut first_pipeline)
+                .unwrap()
+                .slot,
+            1
         );
     }
 
