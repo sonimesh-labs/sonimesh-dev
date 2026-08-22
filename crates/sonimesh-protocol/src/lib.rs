@@ -10,6 +10,7 @@ mod media_header;
 mod media_key;
 mod negotiation;
 mod pairing_binding;
+mod pairing_qr;
 mod replay;
 
 /// Generated internal types for the control-plane source schema.
@@ -40,5 +41,10 @@ pub use negotiation::{ControlNegotiationError, NegotiatedControl, negotiate_hell
 pub use pairing_binding::{
     PAIRING_TLS_EXPORTER_LABEL, PAIRING_TLS_EXPORTER_LEN, PairingBinding, PairingBindingError,
     PairingRole,
+};
+pub use pairing_qr::{
+    MAX_QR_PAYLOAD_LEN, PairingQrPayload, PairingQrView, QR_HOST_MAX_LEN, QR_PAYLOAD_MAGIC,
+    QR_PAYLOAD_VERSION, QR_PREFIX_LEN, QR_SPKI_MAX_LEN, QR_SPKI_MIN_LEN, QrPayloadError,
+    parse_pairing_qr_payload,
 };
 pub use replay::{ReplayDecision, ReplayWindow};
