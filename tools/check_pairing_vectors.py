@@ -55,6 +55,20 @@ KOTLIN_TEST_PATH = (
     / "security"
     / "PairingTlsBindingVectorTest.kt"
 )
+KOTLIN_HANDSHAKE_TEST_PATH = (
+    REPO_ROOT
+    / "apps"
+    / "android"
+    / "app"
+    / "src"
+    / "test"
+    / "java"
+    / "com"
+    / "sonimesh"
+    / "sender"
+    / "security"
+    / "PairingHandshakeTest.kt"
+)
 
 
 def hkdf_extract(salt: bytes, ikm: bytes) -> bytes:
@@ -218,6 +232,27 @@ def kotlin_test_vectors(source: str) -> dict[str, bytes]:
     return vectors
 
 
+KOTLIN_HANDSHAKE_MARKER_TO_VECTOR = {
+    "expectedClientProof": "client_proof",
+    "expectedDesktopProof": "server_proof",
+    "handshake.verifiedMediaRoot()": "media_root",
+}
+
+
+def kotlin_handshake_vectors(source: str) -> dict[str, bytes]:
+    """Extracts composition pins from the Android handshake test."""
+    vectors: dict[str, bytes] = {}
+    for marker, vector in KOTLIN_HANDSHAKE_MARKER_TO_VECTOR.items():
+        marker_start = source.index(marker)
+        if vector == "media_root":
+            match = re.search(r'"([0-9a-fA-F]{64})"', source[marker_start:], re.MULTILINE)
+        else:
+            match = re.search(r'hex\("([0-9a-fA-F]+)"\)', source[marker_start:])
+        if match is not None:
+            vectors[vector] = bytes.fromhex(match.group(1))
+    return vectors
+
+
 def cross_source_errors(
     doc_source: str | None = None,
     rust_source: str | None = None,
@@ -237,18 +272,23 @@ def cross_source_errors(
             rust_source = RUST_TEST_PATH.read_text(encoding="utf-8")
         if kotlin_source is None:
             kotlin_source = KOTLIN_TEST_PATH.read_text(encoding="utf-8")
+        handshake_source = KOTLIN_HANDSHAKE_TEST_PATH.read_text(encoding="utf-8")
     except OSError as exc:
         return [f"cannot read pairing vector sources: {exc}"]
 
     doc = doc_vectors(doc_source)
     rust = rust_test_vectors(rust_source)
     kotlin = kotlin_test_vectors(kotlin_source)
+    handshake = kotlin_handshake_vectors(handshake_source)
     if set(doc) != set(VECTOR_NAMES):
         errors.append("pairing vector doc must pin all three expected outputs")
     if set(rust) != set(VECTOR_NAMES):
         errors.append("Rust pairing test must pin all three vectors")
     if set(kotlin) != set(VECTOR_NAMES):
         errors.append("Kotlin pairing test must pin all three vectors")
+    if set(handshake) != set(VECTOR_NAMES):
+        errors.append("Android handshake test must pin all three vectors")
+
     for vector in VECTOR_NAMES:
         expected = published_vectors()[vector]
         doc_value = doc.get(vector)
@@ -270,6 +310,13 @@ def cross_source_errors(
             errors.append(
                 f"pairing {vector} Kotlin pin differs from the Python pin: "
                 f"kotlin {kotlin_value.hex().upper()} "
+                f"pin {expected.hex().upper()}"
+            )
+        handshake_value = handshake.get(vector)
+        if handshake_value is not None and handshake_value != expected:
+            errors.append(
+                f"pairing {vector} Android handshake pin differs from the Python pin: "
+                f"android {handshake_value.hex().upper()} "
                 f"pin {expected.hex().upper()}"
             )
     return errors
