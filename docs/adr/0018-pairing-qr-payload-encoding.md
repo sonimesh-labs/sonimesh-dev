@@ -66,6 +66,13 @@ TLS channel through the transcript-bound proof.
 - The Android host-JVM `PairingQr` mirror and `PairingQrVectorTest` reproduce
   the same golden bytes and the same rejection behavior, so a Kotlin sender
   cannot drift from the Rust receiver-side layout.
+- The Android host-JVM `PairingHandshake` test-source model pins the client-role
+  composition over that decoder and binding: a canonical invitation derives
+  the published Android proof, the desktop server proof unlocks the published
+  media root, reflected or wrong proofs and changed exporters fail closed, and
+  foreign scans, corrupted scans, or noncanonical exporters are rejected before
+  proof derivation. It remains isolated from TLS, camera capture, attempt
+  limiting, trust storage, production code paths, and any pairing capability.
 - `tools/check_pairing_qr_vectors.py` reimplements the layout in pure
   standard-library Python, re-encodes and decodes the published vector,
   rejects mutated magic/version/length fields, and cross-reads the pins from
