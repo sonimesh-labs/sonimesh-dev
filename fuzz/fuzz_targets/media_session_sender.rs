@@ -223,6 +223,22 @@ impl SenderWalk {
     fn fresh_session(&mut self, session_delta: u8, epoch: u16) {
         let session_id = SESSION_ID ^ u64::from(session_delta).wrapping_mul(0x9E37_79B9_7F4A_7C15);
         let target = context(session_id, STREAM_ID, epoch);
+        if session_id == self.model_context.session_id {
+            // A byte-derived delta can collide with the active session ID.
+            // The no-reuse boundary (ADR 0017) must reject that fail-closed
+            // without changing the sender state or consuming a sequence.
+            assert!(matches!(
+                self.sender
+                    .install_fresh_session(&SessionSecret::new([0xA5; 32]), target),
+                Err(MediaSessionSenderError::ReusedSessionId)
+            ));
+            assert_eq!(
+                self.sender.context(),
+                self.model_context,
+                "a rejected fresh session must not change the sender context"
+            );
+            return;
+        }
         self.sender
             .install_fresh_session(&SessionSecret::new([0xA5; 32]), target)
             .expect("fresh session context is valid");
