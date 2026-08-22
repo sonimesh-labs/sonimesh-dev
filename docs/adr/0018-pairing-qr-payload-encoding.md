@@ -75,6 +75,18 @@ TLS channel through the transcript-bound proof.
   panic the decoder, every accepted view respects the documented bounds, and
   every accepted mutation of the published vector re-encodes byte-exactly;
   committed through the finite CI smoke.
+- The `sonimesh-app` pairing handshake composition
+  (`begin_from_rendered_payload` / `verify_scanned_proof`) now drives the
+  encoded payload through the real decoder, the real `PairingBinding`
+  transcript, and the real invitation owner: unit tests prove the rendered
+  payload round-trips, a correct client proof reaches `Ready` with a media
+  root that seals identical datagrams to an independent derivation, a
+  reflected server proof is rejected without consuming the invitation, a
+  foreign scan, corrupted scan, short exporter, or expired invitation each
+  fail closed before charging an attempt, and integration tests carry the
+  resulting root through `MediaSealer`/`MediaOpener` and the
+  `MediaSessionAllocator` no-reuse record. The exporter is still modeled,
+  not exported from a live TLS provider.
 - No physical device, TLS provider, or camera result is claimed: this ADR
   covers only the bounded byte representation between a rendered QR image and
   the existing pure pairing boundaries.

@@ -1,7 +1,7 @@
 # MVP implementation baseline
 
 > Status: foundation implemented; platform feasibility remains open
-> Updated: 2026-08-19
+> Updated: 2026-08-22
 
 This baseline turns the architecture documents into a buildable core without
 claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
@@ -177,6 +177,19 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   owns zeroization, redacted `Debug`, and a byte-driven libFuzzer target; the
   platform owner that renders or scans an actual QR image remains
   unimplemented.
+- a desktop-side pairing handshake composition in `sonimesh-app`
+  (`begin_from_rendered_payload` / `verify_scanned_proof`) that chains the QR
+  codec, the pure TLS-exporter pairing binding, and the bounded invitation
+  owner: rendering encodes and re-decodes its own payload as a self-check,
+  verification rejects a foreign or corrupted scan before any derivation,
+  verifies the peer's client-role proof in constant time through the real
+  transcript binding (reflected proofs fail), charges exactly one admitted
+  attempt, and on success consumes the invitation, moves the session to
+  `Ready`, and returns the media root bound to that exporter transcript. An
+  integration test carries that root through `MediaSealer`/`MediaOpener` and
+  the ADR 0017 allocator no-reuse record. The TLS exporter is still supplied
+  by the test; no live provider export, camera scan, or pairing transport is
+  claimed.
 - a non-blocking fixed-buffer UDP media receiver composition that rejects
   oversized datagrams before parser ingress, pins the source only after complete
   protected admission, rejects silent endpoint changes without advancing replay
@@ -330,9 +343,11 @@ jitter, and output-backend ADRs using measured 10/20 ms and device results.
   coverage-guided fuzz evidence exists;
 - first pairing, TLS, QR bootstrap, identity storage, revocation, or actual
   root-secret provisioning; the pure TLS-exporter vector does not prove a TLS
-  provider can pin the QR SPKI or export the required bytes. AEAD/HKDF media
-  protection and bounded epoch rotation exist only after a caller supplies an
-  authenticated control-session secret;
+  provider can pin the QR SPKI or export the required bytes, and the desktop
+  handshake composition still receives a modeled exporter rather than one from
+  a live pinned TLS 1.3 connection. AEAD/HKDF media protection and bounded
+  epoch rotation exist only after a caller supplies an authenticated
+  control-session secret;
 - authenticated TLS control transport, discovery, and control-plane address
   migration/reconnection. The UDP source pin can be reset by a fresh media
   session, but the untrusted TCP framing reader cannot authorize or supply one;
