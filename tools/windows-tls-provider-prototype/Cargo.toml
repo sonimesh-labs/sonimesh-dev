@@ -10,6 +10,7 @@ publish.workspace = true
 [dependencies]
 rcgen = { version = "0.13.2", default-features = false, features = ["ring"] }
 rustls = { version = "=0.23.27", default-features = false, features = ["ring", "std"] }
+sonimesh-app = { path = "../../crates/sonimesh-app" }
 sonimesh-protocol = { path = "../../crates/sonimesh-protocol" }
 x509-parser = "0.18.1"
 zeroize = "1.9.0"

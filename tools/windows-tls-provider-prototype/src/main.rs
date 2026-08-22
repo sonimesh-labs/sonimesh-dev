@@ -30,6 +30,14 @@ const PROBE_CONTEXT: [u8; 16] = [
 ];
 const SOCKET_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Fixed non-secret lab secret for the in-memory handshake-composition
+/// stage. It never persists beyond the process and is never printed.
+const LAB_INVITATION_SECRET: [u8; 32] = [
+    0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xAB, 0xAC, 0xAD, 0xAE,
+    0xAF, 0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6, 0xB7, 0xB8, 0xB9, 0xBA, 0xBB, 0xBC, 0xBD,
+    0xBE, 0xBF,
+];
+
 type ProbeResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 fn main() {
@@ -60,6 +68,10 @@ fn run_probe() -> ProbeResult<ProtocolVersion> {
         return Err(io::Error::other("client and server negotiated different TLS versions").into());
     }
 
+    // The transport probe passed; drive the pure desktop pairing composition
+    // in memory with the real exported bytes before the altered-pin stage.
+    run_handshake_composition(&positive.client_exporter, &spki_pin)?;
+
     let mut altered_pin = spki_pin;
     let final_byte = altered_pin
         .last_mut()
@@ -72,12 +84,14 @@ fn run_probe() -> ProbeResult<ProtocolVersion> {
     Ok(positive.client_version)
 }
 
-fn success_output_lines(version: ProtocolVersion) -> [&'static str; 5] {
+fn success_output_lines(version: ProtocolVersion) -> [&'static str; 7] {
     [
         "tls13_handshake: ok",
         "tls13_certificate_verify: ok",
         tls_version_output_line(version),
         "exporter: matched (32 bytes)",
+        "handshake_composition: ok",
+        "handshake_media_root_seal: matched",
         "altered_spki: rejected",
     ]
 }
@@ -105,6 +119,112 @@ struct ProbeExporters {
     server_exporter: Zeroizing<[u8; PAIRING_TLS_EXPORTER_LEN]>,
     client_version: ProtocolVersion,
     server_version: ProtocolVersion,
+}
+
+/// Drives the pure desktop pairing composition in memory with the real
+/// exported bytes (spike protocol: in-memory handshake-composition stage).
+///
+/// Both roles run in this one process: the invitation is rendered with the
+/// generated SPKI as its pin, the Android-role proof is derived from the
+/// real exporter, and `verify_scanned_proof` must reach the trusted outcome
+/// with a media root that seals a datagram identical to an independent
+/// derivation. No network pairing message is exchanged and nothing persists.
+fn run_handshake_composition(
+    exporter: &Zeroizing<[u8; PAIRING_TLS_EXPORTER_LEN]>,
+    spki_pin: &[u8],
+) -> ProbeResult<()> {
+    use sonimesh_app::{
+        PairingHandshakeOutcome, PairingId, PairingInvitationController,
+        PairingQrInvitation, ScannedProofAttempt, SessionPhase, SessionState,
+        begin_from_rendered_payload, verify_scanned_proof,
+    };
+    use sonimesh_protocol::{MediaDirection, MediaKeyContext, MAX_QR_PAYLOAD_LEN};
+
+    const INVITATION_ID: PairingId = PairingId::new([
+        0x5A, 0x5B, 0x5C, 0x5D, 0x5E, 0x5F, 0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68,
+        0x69,
+    ]);
+
+    let mut pairing = PairingInvitationController::<4>::new();
+    let mut session = SessionState::IDLE;
+    let mut payload_out = vec![0_u8; MAX_QR_PAYLOAD_LEN];
+    let written = begin_from_rendered_payload(
+        &mut pairing,
+        &mut session,
+        1_000,
+        60_000,
+        2,
+        PairingQrInvitation {
+            id: INVITATION_ID,
+            pairing_secret: LAB_INVITATION_SECRET,
+            control_host: "localhost",
+            control_port: 47_610,
+            desktop_tls_spki: spki_pin,
+            expires_at_ms: 61_000,
+        },
+        &mut payload_out,
+    )
+    .map_err(|error| io::Error::other(format!("invitation render failed: {error}")))?;
+
+    // The Android peer derives its proof from the real exported transcript.
+    let peer_binding = sonimesh_protocol::PairingBinding::new(
+        1,
+        INVITATION_ID.as_bytes(),
+        LAB_INVITATION_SECRET,
+        exporter.as_ref(),
+    )
+    .map_err(|error| io::Error::other(format!("peer binding failed: {error}")))?;
+    let client_proof = peer_binding
+        .local_proof(sonimesh_protocol::PairingRole::AndroidClient)
+        .map_err(|error| io::Error::other(format!("peer proof failed: {error}")))?;
+
+    let outcome = verify_scanned_proof(
+        &mut pairing,
+        &mut session,
+        1_500,
+        sonimesh_app::PairingSource::new([0xB0; 16]),
+        exporter.as_ref(),
+        ScannedProofAttempt {
+            scanned_payload: &payload_out[..written],
+            expected_pairing_id: INVITATION_ID,
+            pairing_secret: LAB_INVITATION_SECRET,
+            peer_proof: &client_proof,
+        },
+    )
+    .map_err(|error| io::Error::other(format!("handshake rejected: {error}")))?;
+
+    let PairingHandshakeOutcome::Ready { media_root } = outcome else {
+        return Err(io::Error::other("handshake did not reach the trusted outcome").into());
+    };
+    if session.phase() != SessionPhase::Ready {
+        return Err(io::Error::other("session did not reach the ready phase").into());
+    }
+
+    // The handshake root must match an independent derivation of the same
+    // transcript: both roots seal one identical datagram.
+    let expected_root = peer_binding
+        .media_root()
+        .map_err(|error| io::Error::other(format!("media root failed: {error}")))?;
+    let context = MediaKeyContext {
+        session_id: 0x5A5B_5C5D_5E5F_6061,
+        stream_id: 1,
+        key_epoch: 0,
+        direction: MediaDirection::AndroidToDesktop,
+    };
+    let mut from_handshake = sonimesh_protocol::MediaSealer::new(&media_root, context)
+        .map_err(|error| io::Error::other(format!("handshake sealer failed: {error}")))?;
+    let mut from_expected = sonimesh_protocol::MediaSealer::new(&expected_root, context)
+        .map_err(|error| io::Error::other(format!("expected sealer failed: {error}")))?;
+    let sealed_handshake = from_handshake
+        .seal(0, 7_000, &[0x33_u8; 48])
+        .map_err(|error| io::Error::other(format!("handshake seal failed: {error}")))?;
+    let sealed_expected = from_expected
+        .seal(0, 7_000, &[0x33_u8; 48])
+        .map_err(|error| io::Error::other(format!("expected seal failed: {error}")))?;
+    if sealed_handshake.datagram != sealed_expected.datagram {
+        return Err(io::Error::other("media root seal mismatched the derivation").into());
+    }
+    Ok(())
 }
 
 fn run_loopback(
@@ -319,6 +439,8 @@ mod tests {
                 "tls13_certificate_verify: ok",
                 "tls_version: TLSv1.3",
                 "exporter: matched (32 bytes)",
+                "handshake_composition: ok",
+                "handshake_media_root_seal: matched",
                 "altered_spki: rejected",
             ]
         );

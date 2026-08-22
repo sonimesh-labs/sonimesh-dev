@@ -1742,6 +1742,7 @@ version = "0.1.0"
 dependencies = [
  "rcgen",
  "rustls",
+ "sonimesh-app",
  "sonimesh-protocol",
  "x509-parser",
  "zeroize",
