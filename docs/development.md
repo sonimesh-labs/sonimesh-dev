@@ -147,11 +147,15 @@ cargo +nightly-2026-07-18 fuzz run export_retention_journal -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run media_session_allocator -- -max_len=64
 ~~~
 
-`cargo-fuzz` supports LibFuzzer execution on x86-64 Unix-like systems rather
-than Windows MSVC, so Windows contributors should run these commands through
-WSL or another Linux environment. The Linux CI job is configured for 512
-executions per target; that finite run is a smoke gate, not long-duration
-fuzzing or native Opus-decoder evidence.
+Native Windows MSVC execution is supported and verified: install any current
+nightly toolchain with `cargo-fuzz`, and put the MSVC ASan runtime DLL
+(`clang_rt.asan_dynamic-x86_64.dll`, shipped under
+`<VS>\VC\Tools\MSVC\<ver>\bin\Hostx64\x64`) on `PATH` before running a
+sanitizer build, because the linked binary loads it at startup. Targets that
+compile the bundled libopus through CMake additionally need the
+`CMAKE_POLICY_VERSION_MINIMUM=3.5` environment variable described above. The
+Linux CI job is configured for 512 executions per target; that finite run is a
+smoke gate, not long-duration fuzzing or native Opus-decoder evidence.
 
 On Windows, the read-only CPAL feasibility probe can enumerate output devices
 without starting a stream:
