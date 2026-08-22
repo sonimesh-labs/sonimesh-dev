@@ -10,6 +10,7 @@ mod media_header;
 mod media_key;
 mod negotiation;
 mod pairing_binding;
+mod pairing_proof;
 mod pairing_qr;
 mod replay;
 
@@ -41,6 +42,10 @@ pub use negotiation::{ControlNegotiationError, NegotiatedControl, negotiate_hell
 pub use pairing_binding::{
     PAIRING_TLS_EXPORTER_LABEL, PAIRING_TLS_EXPORTER_LEN, PairingBinding, PairingBindingError,
     PairingRole,
+};
+pub use pairing_proof::{
+    PROOF_FRAME_LEN, PROOF_FRAME_MAGIC, PROOF_FRAME_VERSION, PairingProofFrame,
+    PairingProofFrameError, parse_pairing_proof_frame,
 };
 pub use pairing_qr::{
     MAX_QR_PAYLOAD_LEN, PairingQrPayload, PairingQrView, QR_HOST_MAX_LEN, QR_PAYLOAD_MAGIC,

@@ -54,6 +54,8 @@ jobs:
           python tools/check_pairing_vectors.py
           python tools/check_pairing_qr_vectors.py --self-test
           python tools/check_pairing_qr_vectors.py
+          python tools/check_pairing_proof_frame.py --self-test
+          python tools/check_pairing_proof_frame.py
           python tools/check_control_frame_vectors.py --self-test
           python tools/check_control_frame_vectors.py
           python tools/check_media_header_vectors.py --self-test
@@ -169,6 +171,7 @@ jobs:
           cargo +nightly-2026-07-18 fuzz run protected_media_ingress -- -runs=512 -max_len=1264 -timeout=5
           cargo +nightly-2026-07-18 fuzz run pairing_binding -- -runs=512 -max_len=4096 -timeout=5
           cargo +nightly-2026-07-18 fuzz run pairing_qr -- -runs=512 -max_len=1024 -timeout=5
+          cargo +nightly-2026-07-18 fuzz run pairing_proof -- -runs=512 -max_len=128 -timeout=5
           cargo +nightly-2026-07-18 fuzz run untrusted_control_stream -- -runs=512 -max_len=65540 -timeout=5
           cargo +nightly-2026-07-18 fuzz run negotiation -- -runs=512 -max_len=66052 -timeout=5
           cargo +nightly-2026-07-18 fuzz run stream_decode_worker -- -runs=512 -max_len=64 -timeout=5

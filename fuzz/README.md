@@ -154,6 +154,12 @@ The network-scenario targets (`jitter_target`, `jitter_scheduler`, `multi_stream
   round-trips byte-exactly through the bounded encoder; truncations of the
   published vector must stay rejected or bounded. It does not create a TLS
   connection, pairing record, proof exchange, or trust state.
+- `pairing_proof` feeds arbitrary bytes plus deterministic mutations of the
+  published pairing proof frame through the fixed-length proof-frame decoder,
+  asserting every accepted view respects the documented 55-byte layout and
+  re-encodes byte-exactly; wrong-length, foreign-magic, and mutated-header
+  candidates must stay rejected. It performs no TLS, derivation, verification,
+  pairing-record consumption, or trust storage.
 - `negotiation` feeds arbitrary bytes and mutations of the published Hello
   frame through control decoding into the bounded hello validation and
   capability-intersection negotiation, so adversarial version and capability
@@ -302,6 +308,7 @@ cargo +nightly-2026-07-18 fuzz run mixer_membership_scenario -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run protected_media_ingress -- -max_len=1264
 cargo +nightly-2026-07-18 fuzz run pairing_binding -- -max_len=4096
 cargo +nightly-2026-07-18 fuzz run pairing_qr -- -max_len=1024
+cargo +nightly-2026-07-18 fuzz run pairing_proof -- -max_len=128
 cargo +nightly-2026-07-18 fuzz run untrusted_control_stream -- -max_len=65540
 cargo +nightly-2026-07-18 fuzz run negotiation -- -max_len=66052
 cargo +nightly-2026-07-18 fuzz run control_stream_coordinator -- -max_len=1024

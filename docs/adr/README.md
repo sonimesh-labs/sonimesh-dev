@@ -75,3 +75,5 @@ documented.
   control-plane transport gate.
 - [ADR 0018: Pairing QR payload encoding boundary](./0018-pairing-qr-payload-encoding.md) —
   provisional bounded version-one QR wire format pending the platform pairing owner.
+- [ADR 0019: Pairing proof-exchange frame boundary](./0019-pairing-proof-exchange-frame.md) —
+  provisional fixed-length transcript-proof wire frame inside the pinned TLS channel.
