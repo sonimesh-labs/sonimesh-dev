@@ -163,8 +163,20 @@ verifier. The positive path must show that client and server export equal,
 exactly 32-byte values for the specified label and a fixed public 16-byte
 context; an altered expected SPKI must make the handshake fail. The tool may
 reuse only the public exporter constants from `sonimesh-protocol`; it must not
-implement QR encoding, pairing records, proof exchange, trust storage,
+implement QR image encoding or scanning, trust storage,
 revocation, discovery, or media networking.
+
+After the transport probe succeeds on the positive connection, the same tool
+may additionally drive the existing pure desktop composition from ADR 0018
+(`begin_from_rendered_payload` / `verify_scanned_proof`) entirely in memory:
+render one invitation with the generated SPKI as its pin, derive the
+Android-role proof from the real exported bytes, admit it through the real
+invitation owner, and require the resulting media root to seal a datagram
+identical to an independent derivation. Both roles run in one process; no
+network pairing message is exchanged. This stage is composition evidence for
+this host's exporter only: it does not enable pairing, does not claim Android
+interoperability, and must be skipped entirely whenever any earlier probe
+stage fails.
 
 The spike must use a bounded loopback listener, join its server thread, and
 retain no certificate, SPKI, private-key DER, exporter, pairing input, or
@@ -214,6 +226,10 @@ Recorded spike evidence:
   and [2026-07-20 result](../measurements/2026-07-20-android-keystore-spike.md);
 - [Windows TLS provider spike protocol](../measurements/windows-tls-provider-spike.md)
   and [2026-07-20 result](../measurements/2026-07-20-windows-tls-provider-spike.md);
+  the 2026-08-22 rerun
+  ([result](../measurements/2026-08-22-windows-tls-provider-spike.md)) adds the
+  in-memory handshake-composition stage driven by a real exported value on the
+  reference Windows host;
 - [Android TLS provider spike protocol](../measurements/android-tls-provider-spike.md)
   and [2026-07-20 result](../measurements/2026-07-20-android-tls-provider-spike.md).
 

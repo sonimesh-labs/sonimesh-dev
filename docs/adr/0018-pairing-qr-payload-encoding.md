@@ -85,8 +85,12 @@ TLS channel through the transcript-bound proof.
   foreign scan, corrupted scan, short exporter, or expired invitation each
   fail closed before charging an attempt, and integration tests carry the
   resulting root through `MediaSealer`/`MediaOpener` and the
-  `MediaSessionAllocator` no-reuse record. The exporter is still modeled,
-  not exported from a live TLS provider.
+  `MediaSessionAllocator` no-reuse record. The exporter is modeled in the
+  crate tests; the Windows TLS provider spike additionally drives this same
+  composition with a real exported value from its pinned TLS 1.3 loopback
+  connection (see the spike protocol's in-memory handshake-composition
+  stage), so the composition is proven against a live provider export on
+  that host.
 - No physical device, TLS provider, or camera result is claimed: this ADR
   covers only the bounded byte representation between a rendered QR image and
   the existing pure pairing boundaries.
