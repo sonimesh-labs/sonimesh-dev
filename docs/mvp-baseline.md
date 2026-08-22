@@ -190,6 +190,13 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   the ADR 0017 allocator no-reuse record. The TLS exporter is still supplied
   by the test; no live provider export, camera scan, or pairing transport is
   claimed.
+- a host-JVM Android-role pairing handshake composition model in the
+  Android test sources that chains the same QR decoder and TLS-binding mirror:
+  it derives the published Android proof from one transcript, verifies the peer
+  desktop proof, and releases only the matching media root, while foreign or
+  corrupted scans and noncanonical exporters fail before derivation. It is
+  not production code and proves neither TLS transport, camera scanning,
+  attempt limiting, trust storage, nor device interoperability.
 - a non-blocking fixed-buffer UDP media receiver composition that rejects
   oversized datagrams before parser ingress, pins the source only after complete
   protected admission, rejects silent endpoint changes without advancing replay
@@ -342,12 +349,12 @@ jitter, and output-backend ADRs using measured 10/20 ms and device results.
   behind the ADR 0009 gate until Windows/Android ABI, power, and sustained
   coverage-guided fuzz evidence exists;
 - first pairing, TLS, QR bootstrap, identity storage, revocation, or actual
-  root-secret provisioning; the pure TLS-exporter vector does not prove a TLS
-  provider can pin the QR SPKI or export the required bytes, and the desktop
-  handshake composition still receives a modeled exporter rather than one from
-  a live pinned TLS 1.3 connection. AEAD/HKDF media protection and bounded
-  epoch rotation exist only after a caller supplies an authenticated
-  control-session secret;
+  root-secret provisioning. The Windows TLS spike has since proven only that a
+  live pinned Rustls 1.3 exporter can drive the pure desktop handshake
+  composition in memory on that host; it does not prove Android interoperability,
+  a production provider, QR image transport, trust storage, or pairing. AEAD/HKDF
+  media protection and bounded epoch rotation exist only after a caller supplies
+  an authenticated control-session secret;
 - authenticated TLS control transport, discovery, and control-plane address
   migration/reconnection. The UDP source pin can be reset by a fresh media
   session, but the untrusted TCP framing reader cannot authorize or supply one;
