@@ -13,6 +13,15 @@ impl PairingId {
     pub const fn new(bytes: [u8; 16]) -> Self {
         Self(bytes)
     }
+
+    /// Returns the raw 128-bit identifier bytes for QR payload encoding.
+    ///
+    /// The ID is a public invitation handle, not a secret; its `Debug`
+    /// output stays redacted to keep it out of logs.
+    #[must_use]
+    pub const fn as_bytes(&self) -> [u8; 16] {
+        self.0
+    }
 }
 
 impl fmt::Debug for PairingId {

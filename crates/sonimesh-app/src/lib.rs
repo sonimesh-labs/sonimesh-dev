@@ -16,6 +16,7 @@ mod mixer_stream_drift;
 mod mixer_stream_session;
 mod output_controller;
 mod pairing_controller;
+mod pairing_handshake;
 mod pairing_record;
 mod pcm_render_source;
 mod receiver_output_controller;
@@ -61,6 +62,10 @@ pub use mixer_stream_drift::MixerStreamDriftController;
 pub use mixer_stream_session::{MixerStreamSession, MixerStreamSessionError, StartedMixerStream};
 pub use output_controller::{OutputController, OutputLifecycleError, OutputSelection};
 pub use pairing_controller::{PairingInvitationController, PairingInvitationError};
+pub use pairing_handshake::{
+    MAX_HANDSHAKE_SOURCES, PairingHandshakeError, PairingHandshakeOutcome, PairingQrInvitation,
+    ScannedProofAttempt, begin_from_rendered_payload, verify_scanned_proof,
+};
 pub use pairing_record::{
     MAX_PAIRING_ATTEMPTS_PER_SOURCE, PairingAttemptOutcome, PairingId, PairingProofVerification,
     PairingRecord, PairingRecordError, PairingRecordState, PairingSource,
