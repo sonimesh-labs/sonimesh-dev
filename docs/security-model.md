@@ -43,8 +43,11 @@ forwarded through an untrusted channel is not sufficient.
 
 The QR payload, TLS pinning, transcript-binding requirement, identity storage,
 and revocation boundary are specified by
-[ADR 0008](./adr/0008-first-pairing-and-identity.md). The repository does not
-yet implement this flow.
+[ADR 0008](./adr/0008-first-pairing-and-identity.md). The bounded version-one
+QR byte layout is now implemented and pinned by
+[ADR 0018](./adr/0018-pairing-qr-payload-encoding.md) and the
+[pairing QR vector](./protocol/pairing-qr-vectors.md); the platform pairing
+owner that renders and scans it remains unimplemented.
 
 The pairing TLS-binding vector fixes a TLS 1.3 exporter call with QR `pairing_id`
 as context, followed by HKDF-SHA256 role proofs and media-root derivation. A

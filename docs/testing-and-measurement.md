@@ -58,6 +58,9 @@ Cover at least:
 - published Rust/Kotlin vectors for the fixed TLS 1.3 exporter inputs,
   role-separated pairing proofs, and one-time media-root derivation; a vector
   result does not qualify TLS-provider exporter support or QR SPKI pinning;
+- the published pairing QR payload vector (bounded version-one encode/decode
+  layout pinned by Rust, Kotlin, and Python mirrors; a scanned payload
+  confers no trust by itself);
 - pairing expiry, single use, bounded source/attempt admission, and proof-verifier
   gating before a session can become trusted;
 - sequence exhaustion at the epoch boundary (pinned by the host-JVM
@@ -127,6 +130,9 @@ flags byte in the authenticated header and a tag byte on every input plus a ciph
 payloads, and requires every rejected path to clear plaintext.
 The pairing target exercises both local roles, rejects reflected and altered
 proofs, and checks arbitrary proof input against the exact opposite-role proof.
+The pairing QR target feeds arbitrary bytes and deterministic mutations of the
+published vector through the bounded QR payload decoder, proving every
+accepted view respects the documented field bounds and re-encodes byte-exactly.
 The realtime audio targets feed adversarial rate metadata, sample payloads,
 occupancy snapshots, arrival ticks, and membership scripts into the bounded
 windowed-sinc nominal resampler, peak limiter, channel mapper, drift
@@ -186,7 +192,9 @@ native Opus decoder.
 Independent cross-language vector verifiers in `tools/` recompute the published
 Rust vectors from the documented labels, constants, and byte layouts using only
 the Python standard library: `check_pairing_vectors.py` (HMAC/HKDF-SHA256
-pairing proofs and media root), `check_media_key_vectors.py` (media key
+pairing proofs and media root), `check_pairing_qr_vectors.py` (the bounded
+version-one pairing QR payload encode/decode layout and its published vector),
+`check_media_key_vectors.py` (media key
 derivation and the 96-bit nonce layout for both directions),
 `check_negotiation_vectors.py` (bounded version-one hello capability
 negotiation), `check_control_frame_vectors.py` (Protobuf wire encoding of all
@@ -207,16 +215,19 @@ sample-rate/channel window, 512-byte detail, and media-key epoch) from
 `src/media_header.rs`,
 `src/media_crypto.rs`, `src/control.rs`, the Kotlin mirrors (`MediaHeader.kt`,
 `MediaCrypto.kt`, `ControlFrame.kt`), and the `docs/mvp-baseline.md`
-capacities table, and recomputes the derived bounds. The pairing, control-frame,
+capacities table, and recomputes the derived bounds. The pairing, QR-payload,
+control-frame,
 media-crypto, and negotiation verifiers also re-read the values pinned in the
 vector docs and the Rust pins (`src/pairing_binding.rs`,
+`src/pairing_qr.rs`,
 `tests/control_frame.rs`, `tests/media_crypto.rs`, and, for negotiation,
 `src/control.rs`, `src/negotiation.rs`, and `tests/negotiation.rs`); the
 media-key and media-header verifiers re-read the Rust pins in
-`src/media_key.rs` and `tests/media_header_vector.rs`; all eight verifiers
+`src/media_key.rs` and `tests/media_header_vector.rs`; all nine verifiers
 additionally re-read their Kotlin counterparts:
 `PairingTlsBindingVectorTest` (derived through the JVM `PairingTlsBinding`
-mirror), `ControlFrameVectorTest` (encoded through the JVM `ControlFrame`
+mirror), `PairingQrVectorTest` (encoded through the JVM `PairingQr` mirror),
+`ControlFrameVectorTest` (encoded through the JVM `ControlFrame`
 mirror), `MediaCryptoVectorTest` (sealed through the JVM `MediaCrypto`
 mirror), `MediaHeaderVectorTest` (whose header is encoded through the JVM
 `MediaHeader` mirror), `MediaKeyVectorTest` (derived through the JVM

@@ -168,6 +168,15 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   1.3 handshake, performs no TLS, QR, pairing-record consumption, network I/O,
   certificate validation, or persistent identity storage, and therefore does
   not establish pairing or root-secret provisioning.
+- a bounded, allocation-free version-one pairing QR payload codec
+  ([ADR 0018](./adr/0018-pairing-qr-payload-encoding.md)) with a published
+  Rust/Kotlin/Python vector: a 67-byte fixed prefix plus a bounded printable
+  UTF-8 control host (1–255 bytes) and exact desktop DER SPKI (32–512 bytes),
+  an 834-byte complete-payload maximum, fail-closed length/version/port/expiry/
+  host validation before any copy, a borrowed pairing secret so the scanner
+  owns zeroization, redacted `Debug`, and a byte-driven libFuzzer target; the
+  platform owner that renders or scans an actual QR image remains
+  unimplemented.
 - a non-blocking fixed-buffer UDP media receiver composition that rejects
   oversized datagrams before parser ingress, pins the source only after complete
   protected admission, rejects silent endpoint changes without advancing replay
@@ -301,6 +310,7 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
 | Output channels | 1–8 | Reject zero or excessive layouts |
 | Requested callback | default or 16–8192 frames | Fixed request may be unsupported |
 | Maximum callback | 16–8192 frames | Oversized callback emits silence and a fault |
+| Pairing QR payload | 834 bytes (67 + 255 + 512) | Reject before decoding; host ≤255, SPKI 32–512 |
 | Active source count | One for MVP | Separate ingress and buffers per future source |
 | Retained media identities per pairing | 16 entries | Fail closed when full; fresh pairing root required |
 

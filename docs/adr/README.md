@@ -73,3 +73,5 @@ documented.
 - [ADR 0017: Authenticated control-plane reconnection supplies a fresh media session](./0017-control-reconnect-fresh-media-session.md) —
   provisional `MediaSessionAllocator` no-reuse boundary pending the authenticated
   control-plane transport gate.
+- [ADR 0018: Pairing QR payload encoding boundary](./0018-pairing-qr-payload-encoding.md) —
+  provisional bounded version-one QR wire format pending the platform pairing owner.
