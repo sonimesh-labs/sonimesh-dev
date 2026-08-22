@@ -101,12 +101,18 @@ fn send_and_poll(
 }
 
 /// Decodes one admitted frame and pops the queued PCM block, asserting the
-/// sequence, sample count, decoded payload byte, and queue discontinuity flag.
+/// producer-local sequence, sample count, decoded payload byte, and queue
+/// discontinuity flag.
+///
+/// `expected_pcm_sequence` is the model's producer-local block counter, not
+/// the packet sequence: every stream-local retirement (`begin_epoch`) resets
+/// that counter to zero inside a fresh queue epoch.
 fn assert_decoded_and_popped(
     pipeline: &mut Pipeline,
     consumer: &mut RealtimePcmConsumer<4>,
     expected_sequence: u32,
     expected_payload: u8,
+    expected_pcm_sequence: u64,
     expect_discontinuity: bool,
 ) {
     let decoded = pipeline.decode_next().unwrap();
@@ -132,9 +138,10 @@ fn assert_decoded_and_popped(
                 sequence,
                 discontinuity,
                 discarded_stale_blocks: 0,
-            } if sequence == u64::from(expected_sequence) && discontinuity == expect_discontinuity
+            } if sequence == expected_pcm_sequence && discontinuity == expect_discontinuity
         ),
-        "expected a clean filled block for {expected_sequence}, got {popped:?}"
+        "expected a clean filled block at producer-local sequence \
+         {expected_pcm_sequence}, got {popped:?}"
     );
     assert!(
         (output[0] - f32::from(expected_payload)).abs() < f32::EPSILON,
@@ -159,6 +166,7 @@ fn deliver_fresh(
     admitted_seqs: &mut Vec<u32>,
     admitted_datagrams: &mut Vec<Vec<u8>>,
     consumer: &mut RealtimePcmConsumer<4>,
+    next_pcm_sequence: &mut u64,
     queue_epoch_dirty: &mut bool,
 ) {
     let source = sender.local_addr().unwrap();
@@ -196,8 +204,19 @@ fn deliver_fresh(
         "fresh packet from {source} must be processed"
     );
     *pinned = Some(source);
-    assert_decoded_and_popped(pipeline, consumer, sequence, payload, *queue_epoch_dirty);
+    assert_decoded_and_popped(
+        pipeline,
+        consumer,
+        sequence,
+        payload,
+        *next_pcm_sequence,
+        *queue_epoch_dirty,
+    );
     *queue_epoch_dirty = false;
+    let pcm_sequence = *next_pcm_sequence;
+    *next_pcm_sequence = pcm_sequence
+        .checked_add(1)
+        .expect("test PCM sequences stay small");
 
     model.authenticated += 1;
     *next_expected = sequence.checked_add(1).expect("test sequences stay small");
@@ -243,6 +262,7 @@ fn randomized_udp_deliveries_match_an_independent_pin_replay_and_counter_model()
     let mut admitted_datagrams: Vec<Vec<u8>> = Vec::new();
     let mut retired_epoch_packet: Option<Vec<u8>> = None;
     let mut queue_epoch_dirty = false;
+    let mut next_pcm_sequence = 0_u64;
 
     for step in 0..STEPS {
         let roll = rng.next_u32() % 20;
@@ -263,6 +283,9 @@ fn randomized_udp_deliveries_match_an_independent_pin_replay_and_counter_model()
                 admitted_seqs.clear();
                 admitted_datagrams.clear();
                 queue_epoch_dirty = true;
+                // The rotation retires the PCM producer's queue epoch, so its
+                // local block counter restarts at zero.
+                next_pcm_sequence = 0;
                 model.stream_resets += 1;
             }
             1 => {
@@ -294,6 +317,9 @@ fn randomized_udp_deliveries_match_an_independent_pin_replay_and_counter_model()
                 admitted_seqs.clear();
                 admitted_datagrams.clear();
                 queue_epoch_dirty = true;
+                // The fresh session retires the PCM producer's queue epoch, so
+                // its local block counter restarts at zero.
+                next_pcm_sequence = 0;
                 model.stream_resets += 1;
             }
             2 => {
@@ -354,9 +380,14 @@ fn randomized_udp_deliveries_match_an_independent_pin_replay_and_counter_model()
                     &mut consumer,
                     sequence,
                     payload,
+                    next_pcm_sequence,
                     queue_epoch_dirty,
                 );
                 queue_epoch_dirty = false;
+                let pcm_sequence = next_pcm_sequence;
+                next_pcm_sequence = pcm_sequence
+                    .checked_add(1)
+                    .expect("test PCM sequences stay small");
 
                 model.authenticated += 1;
                 next_expected = sequence.checked_add(1).expect("test sequences stay small");
@@ -371,9 +402,13 @@ fn randomized_udp_deliveries_match_an_independent_pin_replay_and_counter_model()
                     .map(|last| rng.next_usize(last + 1))
                 {
                     let sequence = admitted_seqs[index];
-                    assert_eq!(
-                        replay.accept_authenticated(sequence),
-                        ReplayDecision::Duplicate
+                    // Re-recording an already-admitted sequence never mutates
+                    // the oracle, so this query predicts the exact decision
+                    // without advancing the stream's replay state.
+                    let decision = replay.accept_authenticated(sequence);
+                    assert!(
+                        matches!(decision, ReplayDecision::Duplicate | ReplayDecision::TooOld),
+                        "an admitted sequence must replay as duplicate or stale"
                     );
                     let result =
                         send_and_poll(&sender_a, &mut pipeline, &admitted_datagrams[index]);
@@ -381,13 +416,15 @@ fn randomized_udp_deliveries_match_an_independent_pin_replay_and_counter_model()
                         matches!(
                             result,
                             Err(UdpReceiverError::Pipeline(ReceiverPipelineError::Ingress(
-                                IngressError::Replay(ReplayDecision::Duplicate)
-                            )))
+                                IngressError::Replay(observed)
+                            ))) if observed == decision
                         ),
-                        "duplicate delivery must be rejected by replay"
+                        "replaying an admitted packet must match the oracle decision"
                     );
                     model.authenticated += 1;
-                    model.duplicate += 1;
+                    if decision == ReplayDecision::Duplicate {
+                        model.duplicate += 1;
+                    }
                     model.rejected += 1;
                 }
             }
@@ -429,6 +466,7 @@ fn randomized_udp_deliveries_match_an_independent_pin_replay_and_counter_model()
                     &mut admitted_seqs,
                     &mut admitted_datagrams,
                     &mut consumer,
+                    &mut next_pcm_sequence,
                     &mut queue_epoch_dirty,
                 );
             }

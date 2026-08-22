@@ -132,6 +132,9 @@ struct UdpWalk {
     admitted_datagrams: Vec<Vec<u8>>,
     retired_epoch_packet: Option<Vec<u8>>,
     queue_epoch_dirty: bool,
+    /// Model of the PCM producer's local block counter. Every stream-local
+    /// retirement (`begin_epoch`) resets it to zero inside a new queue epoch.
+    next_pcm_sequence: u64,
     step: usize,
 }
 
@@ -189,6 +192,7 @@ impl UdpWalk {
             admitted_datagrams: Vec::new(),
             retired_epoch_packet: None,
             queue_epoch_dirty: false,
+            next_pcm_sequence: 0,
             step: 0,
         }
     }
@@ -265,12 +269,17 @@ impl UdpWalk {
     }
 
     /// Decodes one admitted frame and pops the queued PCM block, asserting the
-    /// sequence, sample count, decoded payload byte, and queue discontinuity
-    /// flag.
+    /// producer-local sequence, sample count, decoded payload byte, and queue
+    /// discontinuity flag.
+    ///
+    /// `expected_pcm_sequence` is the model's producer-local block counter,
+    /// not the packet sequence: every stream-local retirement (`begin_epoch`)
+    /// resets that counter to zero inside a fresh queue epoch.
     fn assert_decoded_and_popped(
         &mut self,
         expected_sequence: u32,
         expected_payload: u8,
+        expected_pcm_sequence: u64,
         expect_discontinuity: bool,
     ) {
         let decoded = self.pipeline.decode_next().unwrap();
@@ -295,16 +304,25 @@ impl UdpWalk {
                     sequence,
                     discontinuity,
                     discarded_stale_blocks: 0,
-                } if sequence == u64::from(expected_sequence)
+                } if sequence == expected_pcm_sequence
                     && discontinuity == expect_discontinuity
             ),
-            "expected a clean filled block for {expected_sequence}, got {popped:?}"
+            "expected a clean filled block at producer-local sequence \
+             {expected_pcm_sequence}, got {popped:?}"
         );
         assert!(
             (output[0] - f32::from(expected_payload)).abs() < f32::EPSILON,
             "expected payload {expected_payload}, got {}",
             output[0]
         );
+    }
+
+    /// Bumps the producer-local PCM block counter after one drained pop.
+    fn advance_pcm_sequence(&mut self) {
+        let pcm_sequence = self.next_pcm_sequence;
+        self.next_pcm_sequence = pcm_sequence
+            .checked_add(1)
+            .expect("fuzz PCM sequences stay small");
     }
 
     /// Seals, sends, and decodes one fresh packet from the chosen endpoint,
@@ -359,8 +377,14 @@ impl UdpWalk {
             "fresh packet from {source} must be processed"
         );
         self.pinned = Some(source);
-        self.assert_decoded_and_popped(sequence, payload, self.queue_epoch_dirty);
+        self.assert_decoded_and_popped(
+            sequence,
+            payload,
+            self.next_pcm_sequence,
+            self.queue_epoch_dirty,
+        );
         self.queue_epoch_dirty = false;
+        self.advance_pcm_sequence();
 
         self.counters.authenticated += 1;
         self.next_expected = sequence.checked_add(1).expect("test sequences stay small");
@@ -435,12 +459,17 @@ impl UdpWalk {
         );
         self.counters.stream_resets += 1;
         self.queue_epoch_dirty = true;
+        // The jitter resynchronization retires the PCM producer's queue epoch,
+        // so the next block is producer-local sequence 0 and always
+        // discontinuous regardless of the pre-resync model state.
         self.assert_decoded_and_popped(
             last_sequence.expect("resync sequence exists"),
             last_payload,
+            0,
             true,
         );
         self.queue_epoch_dirty = false;
+        self.next_pcm_sequence = 1;
     }
 
     /// Rotates to a strictly newer epoch; the pin survives rotation.
@@ -464,6 +493,9 @@ impl UdpWalk {
         self.admitted_seqs.clear();
         self.admitted_datagrams.clear();
         self.queue_epoch_dirty = true;
+        // The rotation retires the PCM producer's queue epoch, so its local
+        // block counter restarts at zero.
+        self.next_pcm_sequence = 0;
         self.counters.stream_resets += 1;
     }
 
@@ -497,6 +529,9 @@ impl UdpWalk {
         self.admitted_seqs.clear();
         self.admitted_datagrams.clear();
         self.queue_epoch_dirty = true;
+        // The fresh session retires the PCM producer's queue epoch, so its
+        // local block counter restarts at zero.
+        self.next_pcm_sequence = 0;
         self.counters.stream_resets += 1;
     }
 
@@ -559,8 +594,14 @@ impl UdpWalk {
             "the valid twin of a failed packet must still be admitted"
         );
         self.pinned = Some(self.source_a);
-        self.assert_decoded_and_popped(sequence, payload, self.queue_epoch_dirty);
+        self.assert_decoded_and_popped(
+            sequence,
+            payload,
+            self.next_pcm_sequence,
+            self.queue_epoch_dirty,
+        );
         self.queue_epoch_dirty = false;
+        self.advance_pcm_sequence();
 
         self.counters.authenticated += 1;
         self.next_expected = sequence.checked_add(1).expect("test sequences stay small");
@@ -569,13 +610,17 @@ impl UdpWalk {
     }
 
     /// Replays an admitted datagram; the authenticated replay window rejects
-    /// the duplicate.
+    /// it as a duplicate or as out-of-window stale.
     fn deliver_duplicate(&mut self, index: usize) {
         self.step += 1;
         let sequence = self.admitted_seqs[index];
-        assert_eq!(
-            self.replay.accept_authenticated(sequence),
-            ReplayDecision::Duplicate
+        // Re-recording an already-admitted sequence never mutates the oracle,
+        // so this query predicts the exact decision without advancing the
+        // stream's replay state.
+        let decision = self.replay.accept_authenticated(sequence);
+        assert!(
+            matches!(decision, ReplayDecision::Duplicate | ReplayDecision::TooOld),
+            "an admitted sequence must replay as duplicate or stale, got {decision:?}"
         );
         let datagram = self.admitted_datagrams[index].clone();
         let result = send_and_poll(&self.sender_a, &mut self.pipeline, &datagram);
@@ -583,13 +628,15 @@ impl UdpWalk {
             matches!(
                 result,
                 Err(UdpReceiverError::Pipeline(ReceiverPipelineError::Ingress(
-                    IngressError::Replay(ReplayDecision::Duplicate)
-                )))
+                    IngressError::Replay(observed)
+                ))) if observed == decision
             ),
-            "duplicate delivery must be rejected by replay"
+            "replaying an admitted packet must be rejected as {decision:?}, got {result:?}"
         );
         self.counters.authenticated += 1;
-        self.counters.duplicate += 1;
+        if decision == ReplayDecision::Duplicate {
+            self.counters.duplicate += 1;
+        }
         self.counters.rejected += 1;
     }
 

@@ -232,7 +232,10 @@ impl ReceiverOutputModel {
         self.stop_calls += 1;
         self.published = false;
         self.stream_active = false;
-        self.fault_reported = true;
+        // A deliberate stop is distinct from a monitored fault: it retires the
+        // stream without reporting one, so a later snapshot must not claim a
+        // platform fault happened.
+        self.fault_reported = false;
     }
 }
 

@@ -215,7 +215,10 @@ impl MixerOutputModel {
         self.membership_active = false;
         self.output_format_present = false;
         self.stream_active = false;
-        self.fault_reported = true;
+        // A deliberate stop is distinct from a monitored fault: it retires the
+        // stream without reporting one, so a later snapshot must not claim a
+        // platform fault happened.
+        self.fault_reported = false;
     }
 }
 
