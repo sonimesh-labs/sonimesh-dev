@@ -248,26 +248,31 @@ fn randomized_deliveries_match_an_independent_replay_and_counter_model() {
                     .map(|last| rng.next_usize(last + 1))
                 {
                     let sequence = admitted_seqs[index];
-                    assert_eq!(
-                        replay.accept_authenticated(sequence),
-                        ReplayDecision::Duplicate
+                    // Re-recording an already-admitted sequence never mutates
+                    // the oracle, so this query predicts the exact decision
+                    // without advancing the stream's replay state.
+                    let decision = replay.accept_authenticated(sequence);
+                    assert!(
+                        matches!(decision, ReplayDecision::Duplicate | ReplayDecision::TooOld),
+                        "an admitted sequence must replay as duplicate or stale"
                     );
                     let result = pipeline.receive(&admitted_datagrams[index], &mut plaintext);
                     assert!(
                         matches!(
                             result,
-                            Err(ReceiverPipelineError::Ingress(IngressError::Replay(
-                                ReplayDecision::Duplicate
-                            )))
+                            Err(ReceiverPipelineError::Ingress(IngressError::Replay(observed)))
+                                if observed == decision
                         ),
-                        "duplicate delivery must be rejected by replay"
+                        "replaying an admitted packet must match the oracle decision"
                     );
                     assert!(
                         plaintext.iter().all(|byte| *byte == 0),
                         "rejected duplicate must zero plaintext"
                     );
                     model.authenticated += 1;
-                    model.duplicate += 1;
+                    if decision == ReplayDecision::Duplicate {
+                        model.duplicate += 1;
+                    }
                     model.rejected += 1;
                 }
             }
