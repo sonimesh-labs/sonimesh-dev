@@ -50,6 +50,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "pairing_qr"
+path = "fuzz_targets/pairing_qr.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "untrusted_control_stream"
 path = "fuzz_targets/untrusted_control_stream.rs"
 test = false

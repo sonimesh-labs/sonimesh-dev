@@ -148,6 +148,12 @@ The network-scenario targets (`jitter_target`, `jitter_scheduler`, `multi_stream
   pure TLS-binding helper. It asserts exact opposite-role verification while
   rejecting reflected and altered proofs; it does not create a TLS connection,
   QR payload, identity, pairing record, or trust state.
+- `pairing_qr` feeds arbitrary bytes plus deterministic mutations of the
+  published pairing QR vector through the bounded QR payload decoder,
+  asserting every accepted view respects the documented field bounds and
+  round-trips byte-exactly through the bounded encoder; truncations of the
+  published vector must stay rejected or bounded. It does not create a TLS
+  connection, pairing record, proof exchange, or trust state.
 - `negotiation` feeds arbitrary bytes and mutations of the published Hello
   frame through control decoding into the bounded hello validation and
   capability-intersection negotiation, so adversarial version and capability
@@ -295,6 +301,7 @@ cargo +nightly-2026-07-18 fuzz run target_gated_playout -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run mixer_membership_scenario -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run protected_media_ingress -- -max_len=1264
 cargo +nightly-2026-07-18 fuzz run pairing_binding -- -max_len=4096
+cargo +nightly-2026-07-18 fuzz run pairing_qr -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run untrusted_control_stream -- -max_len=65540
 cargo +nightly-2026-07-18 fuzz run negotiation -- -max_len=66052
 cargo +nightly-2026-07-18 fuzz run control_stream_coordinator -- -max_len=1024

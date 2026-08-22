@@ -41,6 +41,7 @@ python tools/check_fuzz_targets.py
 python tools/check_adr_index.py
 python tools/check_preview_alignment.py
 python tools/check_pairing_vectors.py
+python tools/check_pairing_qr_vectors.py
 python tools/check_control_frame_vectors.py
 python tools/check_media_header_vectors.py
 python tools/check_media_key_vectors.py
@@ -126,6 +127,7 @@ cargo +nightly-2026-07-18 fuzz run target_gated_playout -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run mixer_membership_scenario -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run protected_media_ingress -- -max_len=1264
 cargo +nightly-2026-07-18 fuzz run pairing_binding -- -max_len=4096
+cargo +nightly-2026-07-18 fuzz run pairing_qr -- -max_len=1024
 cargo +nightly-2026-07-18 fuzz run untrusted_control_stream -- -max_len=65540
 cargo +nightly-2026-07-18 fuzz run negotiation -- -max_len=66052
 cargo +nightly-2026-07-18 fuzz run stream_decode_worker -- -max_len=64
