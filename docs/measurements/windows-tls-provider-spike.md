@@ -90,6 +90,34 @@ handshake_composition: ok
 handshake_media_root_seal: matched
 ```
 
+## Proof-frame exchange stage
+
+After the in-memory composition succeeds, the tool may exercise the ADR 0019
+wire frames over one additional fresh loopback TLS 1.3 connection using the
+same exporter inputs and lab invitation fields:
+
+1. the Android-role side derives its client proof from the real exporter,
+   encodes it as a `PairingProofFrame`, and writes exactly the 55-byte frame
+   into the pinned channel;
+2. the desktop side reads exactly one frame-length buffer, parses it with
+   `parse_pairing_proof_frame`, requires the scanned pairing ID and the
+   Android-client role byte, verifies the carried proof in constant time
+   through `PairingBinding::verify_peer_proof`, then answers with its own
+   server-role frame;
+3. the client verifies that server frame the same way and requires both
+   verifications to succeed before either side closes.
+
+This stage proves that the fixed frame layout survives a real channel
+boundary between two independent TLS connections' endpoints on this host. It
+still runs both roles in one process over loopback; it does not claim an
+Android peer, a production transport, or network pairing. The altered-pin
+connection must still fail afterward, and every earlier failure leaves this
+stage skipped rather than half-run. Output adds at most this line:
+
+```text
+proof_frame_exchange: ok (both roles verified)
+```
+
 ## Required record
 
 | Field | Recorded value |
@@ -106,6 +134,7 @@ handshake_media_root_seal: matched
 | Altered SPKI outcome | Must be rejected |
 | Handshake-composition outcome | `ok` or not reached; never partially run |
 | Media-root seal equality | `matched` or not reached |
+| Proof-frame exchange outcome | `ok` or not reached; never partially run |
 | Server thread/listener cleanup | — |
 | Disk persistence observed | Must be none |
 | Android/provider interoperability | `not measured` |
@@ -114,9 +143,9 @@ handshake_media_root_seal: matched
 
 A successful result proves only that this Rustls/provider configuration can
 complete the bounded local TLS 1.3 probe, bind a DER SPKI to the server's TLS
-1.3 handshake signature, export matching 32-byte context-bound material, and
-satisfy the pure desktop pairing composition in memory on this host. It does
-not prove a production QR schema, certificate lifecycle, remote-network
-behavior, Android TLS compatibility, transcript-proof exchange over a real
-channel, trust storage, revocation, rate limiting, or pairing security as a
-whole.
+1.3 handshake signature, export matching 32-byte context-bound material,
+satisfy the pure desktop pairing composition in memory on this host, and
+carry the ADR 0019 proof frames through a real pinned-channel exchange
+between two loopback endpoints. It does not prove a production QR schema,
+certificate lifecycle, remote-network behavior, Android TLS compatibility,
+trust storage, revocation, rate limiting, or pairing security as a whole.

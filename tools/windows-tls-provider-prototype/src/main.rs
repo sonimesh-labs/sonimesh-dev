@@ -4,7 +4,7 @@
 //! transport. It creates one in-memory lab certificate for a loopback probe.
 
 use std::fmt;
-use std::io;
+use std::io::{self, Read as _, Write as _};
 use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
 use std::thread;
@@ -19,9 +19,12 @@ use rustls::pki_types::{
 };
 use rustls::{
     ClientConfig, ClientConnection, DigitallySignedStruct, Error, ProtocolVersion, ServerConfig,
-    ServerConnection, SignatureScheme, version,
+    ServerConnection, SignatureScheme, StreamOwned, version,
 };
-use sonimesh_protocol::{PAIRING_TLS_EXPORTER_LABEL, PAIRING_TLS_EXPORTER_LEN};
+use sonimesh_protocol::{
+    PAIRING_TLS_EXPORTER_LABEL, PAIRING_TLS_EXPORTER_LEN, PROOF_FRAME_LEN, PairingBinding,
+    PairingProofFrame, PairingRole, parse_pairing_proof_frame,
+};
 use x509_parser::parse_x509_certificate;
 use zeroize::{Zeroize, Zeroizing};
 
@@ -33,9 +36,8 @@ const SOCKET_TIMEOUT: Duration = Duration::from_secs(5);
 /// Fixed non-secret lab secret for the in-memory handshake-composition
 /// stage. It never persists beyond the process and is never printed.
 const LAB_INVITATION_SECRET: [u8; 32] = [
-    0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xAB, 0xAC, 0xAD, 0xAE,
-    0xAF, 0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6, 0xB7, 0xB8, 0xB9, 0xBA, 0xBB, 0xBC, 0xBD,
-    0xBE, 0xBF,
+    0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xAB, 0xAC, 0xAD, 0xAE, 0xAF,
+    0xB0, 0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6, 0xB7, 0xB8, 0xB9, 0xBA, 0xBB, 0xBC, 0xBD, 0xBE, 0xBF,
 ];
 
 type ProbeResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -72,6 +74,15 @@ fn run_probe() -> ProbeResult<ProtocolVersion> {
     // in memory with the real exported bytes before the altered-pin stage.
     run_handshake_composition(&positive.client_exporter, &spki_pin)?;
 
+    // The composition passed in memory; now exchange the transcript proofs as
+    // bounded wire frames over a second live loopback TLS connection so the
+    // frame layout is exercised end to end across a real channel boundary.
+    run_frame_exchange(
+        Arc::clone(&server_config),
+        &positive.client_exporter,
+        &spki_pin,
+    )?;
+
     let mut altered_pin = spki_pin;
     let final_byte = altered_pin
         .last_mut()
@@ -84,7 +95,7 @@ fn run_probe() -> ProbeResult<ProtocolVersion> {
     Ok(positive.client_version)
 }
 
-fn success_output_lines(version: ProtocolVersion) -> [&'static str; 7] {
+fn success_output_lines(version: ProtocolVersion) -> [&'static str; 8] {
     [
         "tls13_handshake: ok",
         "tls13_certificate_verify: ok",
@@ -92,6 +103,7 @@ fn success_output_lines(version: ProtocolVersion) -> [&'static str; 7] {
         "exporter: matched (32 bytes)",
         "handshake_composition: ok",
         "handshake_media_root_seal: matched",
+        "proof_frame_exchange: ok (both roles verified)",
         "altered_spki: rejected",
     ]
 }
@@ -134,11 +146,11 @@ fn run_handshake_composition(
     spki_pin: &[u8],
 ) -> ProbeResult<()> {
     use sonimesh_app::{
-        PairingHandshakeOutcome, PairingId, PairingInvitationController,
-        PairingQrInvitation, ScannedProofAttempt, SessionPhase, SessionState,
-        begin_from_rendered_payload, verify_scanned_proof,
+        PairingHandshakeOutcome, PairingId, PairingInvitationController, PairingQrInvitation,
+        ScannedProofAttempt, SessionPhase, SessionState, begin_from_rendered_payload,
+        verify_scanned_proof,
     };
-    use sonimesh_protocol::{MediaDirection, MediaKeyContext, MAX_QR_PAYLOAD_LEN};
+    use sonimesh_protocol::{MAX_QR_PAYLOAD_LEN, MediaDirection, MediaKeyContext};
 
     const INVITATION_ID: PairingId = PairingId::new([
         0x5A, 0x5B, 0x5C, 0x5D, 0x5E, 0x5F, 0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68,
@@ -248,6 +260,177 @@ fn run_loopback(
         client_version,
         server_version,
     })
+}
+
+/// Exchanges the transcript proofs as bounded wire frames over one live
+/// loopback TLS connection (spike protocol: proof-frame exchange stage).
+///
+/// The Android-role side derives its client proof from the real exporter,
+/// wraps it in a `PairingProofFrame`, and writes exactly the 55-byte frame
+/// into the pinned TLS channel; the desktop side parses it, checks that its
+/// pairing ID matches, verifies the carried proof through the pure binding,
+/// then answers with its own server frame which the client verifies the same
+/// way.
+fn run_frame_exchange(
+    server_config: Arc<ServerConfig>,
+    exporter: &Zeroizing<[u8; PAIRING_TLS_EXPORTER_LEN]>,
+    spki_pin: &[u8],
+) -> ProbeResult<()> {
+    const INVITATION_ID: [u8; 16] = [
+        0x5A, 0x5B, 0x5C, 0x5D, 0x5E, 0x5F, 0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68,
+        0x69,
+    ];
+
+    let listener = TcpListener::bind(("127.0.0.1", 0))?;
+    let address = listener.local_addr()?;
+
+    let desktop_secret = LAB_INVITATION_SECRET;
+    // Clone for the server thread before moving; the original stays in this
+    // scope so the client closure below can borrow it.
+    let server_exporter = exporter.clone();
+    let server = thread::spawn(move || -> ProbeResult<()> {
+        let (stream, _) = listener.accept()?;
+        configure_socket(&stream)?;
+        let mut tls = StreamOwned::new(ServerConnection::new(server_config)?, stream);
+        while tls.conn.is_handshaking() {
+            tls.conn.complete_io(&mut tls.sock)?;
+        }
+
+        // Receive exactly one bounded client frame from the pinned channel.
+        let mut wire = [0_u8; PROOF_FRAME_LEN];
+        tls.read_exact(&mut wire)?;
+        let received = parse_pairing_proof_frame(&wire)
+            .map_err(|error| io::Error::other(format!("client frame rejected: {error}")))?;
+        if received.pairing_id != INVITATION_ID || received.role != PairingRole::AndroidClient {
+            return Err(io::Error::other("client frame identity mismatched").into());
+        }
+
+        let binding =
+            PairingBinding::new(1, INVITATION_ID, desktop_secret, server_exporter.as_ref())
+                .map_err(|error| io::Error::other(format!("desktop binding failed: {error}")))?;
+        if !binding
+            .verify_peer_proof(PairingRole::DesktopServer, &received.proof)
+            .map_err(|error| io::Error::other(format!("client verification failed: {error}")))?
+        {
+            return Err(io::Error::other("client proof did not verify").into());
+        }
+
+        // Answer with the desktop server-role frame over the same channel.
+        let server_frame = PairingProofFrame {
+            protocol_version: 1,
+            role: PairingRole::DesktopServer,
+            pairing_id: INVITATION_ID,
+            proof: binding
+                .local_proof(PairingRole::DesktopServer)
+                .map_err(|error| {
+                    io::Error::other(format!("server proof derivation failed: {error}"))
+                })?,
+        };
+        let mut wire = [0_u8; PROOF_FRAME_LEN];
+        let written = server_frame
+            .encode_into(&mut wire)
+            .map_err(|error| io::Error::other(format!("server frame rejected: {error}")))?;
+        tls.write_all(&wire[..written])?;
+        tls.flush()?;
+        Ok(())
+    });
+
+    // Android-role client: same invitation inputs, live exporter. The server
+    // thread owns its cloned copy; this closure borrows the original.
+    let client_result = (|| -> ProbeResult<()> {
+        let stream = TcpStream::connect_timeout(&address, SOCKET_TIMEOUT)?;
+        configure_socket(&stream)?;
+        let config = client_config(spki_pin.to_vec())?;
+        let server_name = ServerName::try_from("localhost")?.to_owned();
+        let mut tls = StreamOwned::new(
+            ClientConnection::new(Arc::new(config), server_name)?,
+            stream,
+        );
+        while tls.conn.is_handshaking() {
+            tls.conn.complete_io(&mut tls.sock)?;
+        }
+
+        let binding =
+            PairingBinding::new(1, INVITATION_ID, LAB_INVITATION_SECRET, exporter.as_ref())
+                .map_err(|error| io::Error::other(format!("android binding failed: {error}")))?;
+        let client_frame = PairingProofFrame {
+            protocol_version: 1,
+            role: PairingRole::AndroidClient,
+            pairing_id: INVITATION_ID,
+            proof: binding
+                .local_proof(PairingRole::AndroidClient)
+                .map_err(|error| {
+                    io::Error::other(format!("client proof derivation failed: {error}"))
+                })?,
+        };
+        send_proof_frame(&mut tls, &client_frame)?;
+
+        // Verify the desktop's server frame from the same pinned channel.
+        let received = read_proof_frame(&mut tls)?;
+        if received.pairing_id != INVITATION_ID || received.role != PairingRole::DesktopServer {
+            return Err(io::Error::other("server frame identity mismatched").into());
+        }
+        if !binding
+            .verify_peer_proof(PairingRole::AndroidClient, &received.proof)
+            .map_err(|error| io::Error::other(format!("server verification failed: {error}")))?
+        {
+            return Err(io::Error::other("server proof did not verify").into());
+        }
+
+        // The exchange must compose with the media-root handoff: the client's
+        // root is derived and sealed against a fixed datagram.
+        seal_exchange_media_root(&binding)?;
+        Ok(())
+    })();
+
+    let server_result = server
+        .join()
+        .map_err(|_| io::Error::other("frame-exchange server thread panicked"))?;
+    client_result?;
+    server_result?;
+    Ok(())
+}
+
+/// Writes one bounded proof frame into the pinned TLS stream.
+fn send_proof_frame(
+    tls: &mut (impl io::Read + io::Write),
+    frame: &PairingProofFrame,
+) -> ProbeResult<()> {
+    let mut wire = [0_u8; PROOF_FRAME_LEN];
+    let written = frame
+        .encode_into(&mut wire)
+        .map_err(|error| io::Error::other(format!("proof frame rejected: {error}")))?;
+    tls.write_all(&wire[..written])?;
+    tls.flush()?;
+    Ok(())
+}
+
+/// Reads exactly one bounded proof frame from the pinned TLS stream and parses it.
+fn read_proof_frame(tls: &mut (impl io::Read + io::Write)) -> ProbeResult<PairingProofFrame> {
+    let mut wire = [0_u8; PROOF_FRAME_LEN];
+    tls.read_exact(&mut wire)?;
+    let frame = parse_pairing_proof_frame(&wire)
+        .map_err(|error| io::Error::other(format!("proof frame rejected: {error}")))?;
+    Ok(frame)
+}
+
+/// Derives the exchange media root and seals one fixed datagram with it.
+fn seal_exchange_media_root(binding: &PairingBinding) -> ProbeResult<()> {
+    let root = binding
+        .media_root()
+        .map_err(|error| io::Error::other(format!("media root failed: {error}")))?;
+    let context = sonimesh_protocol::MediaKeyContext {
+        session_id: 0x5A5B_5C5D_5E5F_6061,
+        stream_id: 1,
+        key_epoch: 0,
+        direction: sonimesh_protocol::MediaDirection::AndroidToDesktop,
+    };
+    let mut sealer = sonimesh_protocol::MediaSealer::new(&root, context)
+        .map_err(|error| io::Error::other(format!("exchange sealer failed: {error}")))?;
+    let _ = sealer
+        .seal(0, 7_000, &[0x33_u8; 48])
+        .map_err(|error| io::Error::other(format!("exchange seal failed: {error}")))?;
+    Ok(())
 }
 
 fn client_exporter(
@@ -441,6 +624,7 @@ mod tests {
                 "exporter: matched (32 bytes)",
                 "handshake_composition: ok",
                 "handshake_media_root_seal: matched",
+                "proof_frame_exchange: ok (both roles verified)",
                 "altered_spki: rejected",
             ]
         );

@@ -22,6 +22,7 @@ handshake-composition stage.
 | Altered SPKI outcome | rejected before completing the handshake |
 | Handshake-composition outcome | ok — rendered invitation, real-exporter Android-role proof admitted by `verify_scanned_proof`, session reached `Ready` |
 | Media-root seal equality | matched — the handshake root sealed a datagram identical to an independent derivation |
+| Proof-frame exchange outcome | ok — client frame admitted and verified by the desktop, server frame verified by the Android role over one fresh pinned TLS connection (ADR 0019 stage) |
 | Server thread/listener cleanup | joined; listener dropped with the owning thread |
 | Disk persistence observed | none |
 | Android/provider interoperability | not measured |
@@ -35,6 +36,7 @@ tls_version: TLSv1.3
 exporter: matched (32 bytes)
 handshake_composition: ok
 handshake_media_root_seal: matched
+proof_frame_exchange: ok (both roles verified)
 altered_spki: rejected
 ~~~
 
@@ -46,9 +48,12 @@ signature, export matching 32-byte context-bound material, and satisfy the
 pure desktop pairing composition from ADR 0018 in memory on this host: the
 live exported bytes drove `begin_from_rendered_payload` /
 `verify_scanned_proof` to the trusted outcome with a media root that seals
-identically to an independent derivation.
+identically to an independent derivation. The same run also exchanged both
+transcript proofs as bounded ADR 0019 frames through one fresh pinned TLS
+connection between loopback endpoints, so the fixed frame layout is proven
+across a real channel boundary on this host.
 
 It does not prove production QR rendering or scanning, certificate lifecycle,
-remote-network behavior, Android TLS compatibility, transcript-proof exchange
-over a real network channel, trust storage, revocation, rate limiting, or
-pairing security as a whole. No pairing capability is enabled.
+remote-network behavior, Android TLS compatibility, trust storage, revocation,
+rate limiting, or pairing security as a whole. Both frame-exchange roles still
+run in one process over loopback. No pairing capability is enabled.

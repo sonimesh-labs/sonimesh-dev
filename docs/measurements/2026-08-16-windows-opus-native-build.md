@@ -11,7 +11,7 @@
 > and power evidence, and sustained coverage-guided malformed-payload
 > fuzzing against the native decoder are still pending. The deterministic
 > probe also includes structured mutations of valid encoded frames.
-> Updated: 2026-08-16
+> Updated: 2026-08-22
 
 ## Summary
 
