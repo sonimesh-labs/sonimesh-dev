@@ -9,7 +9,8 @@
 > throughput pass for both shapes, all with recovery.
 > ADR 0009 remains Provisional: Android ABI packaging, allocation-profile
 > and power evidence, and sustained coverage-guided malformed-payload
-> fuzzing against the native decoder are still pending.
+> fuzzing against the native decoder are still pending. The deterministic
+> probe also includes structured mutations of valid encoded frames.
 > Updated: 2026-08-16
 
 ## Summary
@@ -149,6 +150,7 @@ opus_20ms_cpu: encode+decode mean 1650.1 us/frame (606 frames/s); decode-only me
 opus_20ms_sustained: 120 s of tone audio in 9.01 s wall (13.3x realtime; 1502.5 us/frame; ~7.5% of one core estimate)
 opus_malformed_payload: rejected
 opus_malformed_sweep: ok (1000 payloads; 642 rejected; 358 accepted-bounded)
+opus_valid_mutation_sweep: ok (10ms; 1000 cases; 3 rejected; 997 accepted-bounded)
 opus_native_build: ok
 ```
 
@@ -200,9 +202,14 @@ SNR of 15.9 dB and 31.8 dB, and loss-window means from 30.0 dB to 33.4 dB
 holds and no block goes silent. The spectrally richer content conceals less
 cleanly than the single tone (the 10 ms PLC burst floor and recovery SNR are
 lower), which is the expected direction for non-tonal material. The
-malformed-payload sweep remains a deterministic bounded probe
-(fixed-seed xorshift32, 1,000 payloads up to the datagram limit) rather
-than a coverage-guided fuzz result.
+malformed-payload coverage now includes two deterministic bounded probes:
+the original fixed-seed xorshift32 sweep of 1,000 payloads up to the datagram
+limit and, added on 2026-08-22, 1,000 structured mutations of eight freshly
+encoded valid 10 ms frames (byte substitutions, bit flips, truncations,
+zeroed tails, and appended garbage). The structured run reported 3 rejections
+and 997 bounded accepts; every successful decode stayed within the negotiated
+sample bound. Both remain prototype-level regression evidence rather than a
+coverage-guided fuzz result.
 
 The bounded reorder probe adds the first jitter-buffer reorder signal.
 With a six-frame out-of-order arrival batch (sequences 13, 10, 15, 12, 11,
