@@ -22,9 +22,11 @@
 //! the negotiated 10 ms and
 //! 20 ms shapes at equal per-second codec bitrates (steady-state quality,
 //! per-packet wire overhead, wall-clock-matched PLC, and per-second CPU
-//! cost), and sweeps bounded deterministic malformed payloads that must
-//! surface as stream-local errors or bounded decodes. It is not a quality,
-//! power, latency, Android ABI, or coverage-guided fuzz result.
+//! cost), sweeps bounded deterministic malformed payloads, and mutates fresh
+//! valid encoded frames through byte/bit damage, truncation, zeroed tails,
+//! and appended garbage that must surface as stream-local errors or bounded
+//! decodes. It is not a quality, power, latency, Android ABI, or
+//! coverage-guided fuzz result.
 
 use sonimesh_audio::{
     DecodeStep, FrameDecoder, InsertOutcome, OPUS_CHANNELS, OpusFrameConfig, RealtimePcmConsumer,
@@ -100,6 +102,15 @@ const SUSTAINED_AUDIO_SECONDS: u32 = 120;
 const SUSTAINED_PROBE_REPEATS: usize = 2;
 /// Deterministic malformed-payload sweep size.
 const MALFORMED_SWEEP_PAYLOADS: usize = 1_000;
+/// Deterministic valid-frame mutation count per encoded frame shape.
+const MUTATION_SWEEP_FRAMES: usize = 8;
+/// Mutations attempted per valid source frame, including truncation and
+/// extension families, while keeping the total bounded and deterministic.
+const MUTATIONS_PER_FRAME: usize = 125;
+/// Frame duration swept by the structured valid-frame mutation probe.
+const MUTATION_FRAME_MS: u16 = 10;
+/// Total deterministic structured mutations in one valid-frame sweep.
+const MUTATION_CASES: usize = MUTATION_SWEEP_FRAMES * MUTATIONS_PER_FRAME;
 /// Lowest plausible RMS for a decoded 0.25-amplitude tone block.
 const DECODED_RMS_MIN: f32 = 0.05;
 /// Highest plausible RMS for a decoded 0.25-amplitude tone block.
@@ -2773,6 +2784,116 @@ fn sweep_malformed_payloads() -> ProbeResult<(usize, usize)> {
     Ok((rejected, accepted))
 }
 
+/// Sweeps deterministic mutations of freshly encoded valid frames through a
+/// native decoder.
+///
+/// Random-byte sweeps can miss structured packet corruption. This probe
+/// encodes deterministic source frames, then flips bytes and bits at fixed
+/// positions and probes truncations/extensions around each encoded length.
+/// Every case must either fail as a stream-local decoder error or decode to
+/// no more than the negotiated block; none may panic or exceed the block.
+fn sweep_valid_frame_mutations(expected_samples: usize) -> ProbeResult<(usize, usize)> {
+    let mut encoder = opus::Encoder::new(
+        SAMPLE_RATE_HZ,
+        opus::Channels::Stereo,
+        opus::Application::Audio,
+    )
+    .map_err(|error| error.to_string())?;
+    let content = tone(MUTATION_SWEEP_FRAMES * expected_samples);
+    let mut packet = [0_u8; MAX_ENCODED_BYTES];
+    let mut output = [0.0_f32; MAX_PCM_SAMPLES_PER_BLOCK];
+    let mut decoder = NativeOpusDecoder {
+        decoder: opus::Decoder::new(SAMPLE_RATE_HZ, opus::Channels::Stereo)
+            .map_err(|error| error.to_string())?,
+    };
+    let mut rejected = 0_usize;
+    let mut accepted = 0_usize;
+
+    for frame_index in 0..MUTATION_SWEEP_FRAMES {
+        let start = frame_index * expected_samples;
+        let len = encode_frame(
+            &mut encoder,
+            &content[start..start + expected_samples],
+            &mut packet,
+        )?;
+        for mutation_index in 0..MUTATIONS_PER_FRAME {
+            let mut mutated = packet;
+            let position = (frame_index * MUTATIONS_PER_FRAME + mutation_index * 7) % len.max(1);
+            match mutation_index % 5 {
+                // Byte substitution.
+                0 => mutated[position] ^= 0xA5,
+                // Single-bit flip cycles through all eight positions.
+                1 => mutated[position] ^= 1 << (mutation_index % 8),
+                // Truncation from one byte down to the minimum Opus payload.
+                2 => {
+                    let keep = (mutation_index % len.saturating_sub(1).max(1)) + 1;
+                    for byte in &mut mutated[keep..] {
+                        *byte = 0;
+                    }
+                    if decode_bounded(
+                        &mut decoder,
+                        &mutated[..keep],
+                        &mut output,
+                        expected_samples,
+                    )? {
+                        accepted += 1;
+                    } else {
+                        rejected += 1;
+                    }
+                    continue;
+                }
+                // Zeroed tail preserves framing metadata while corrupting later data.
+                3 => {
+                    let zero_from = (mutation_index * 3) % len;
+                    for byte in &mut mutated[zero_from..len] {
+                        *byte = 0;
+                    }
+                }
+                // Appended garbage must never expand the decoded sample bound.
+                _ => {
+                    let append = (mutation_index % 16) + 1;
+                    let end = (len + append).min(MAX_ENCODED_BYTES);
+                    for byte in &mut mutated[len..end] {
+                        *byte = u8::try_from(mutation_index & 0xFF).expect("masked byte fits u8");
+                    }
+                    if decode_bounded(&mut decoder, &mutated[..end], &mut output, expected_samples)?
+                    {
+                        accepted += 1;
+                    } else {
+                        rejected += 1;
+                    }
+                    continue;
+                }
+            }
+            if decode_bounded(&mut decoder, &mutated[..len], &mut output, expected_samples)? {
+                accepted += 1;
+            } else {
+                rejected += 1;
+            }
+        }
+    }
+    Ok((rejected, accepted))
+}
+
+/// Decodes one candidate and enforces the negotiated sample-count bound.
+///
+/// Returns `true` only for a successful decode of one to `expected_samples`
+/// interleaved samples; any decoder error returns `false` without crashing.
+fn decode_bounded(
+    decoder: &mut NativeOpusDecoder,
+    payload: &[u8],
+    output: &mut [f32; MAX_PCM_SAMPLES_PER_BLOCK],
+    expected_samples: usize,
+) -> ProbeResult<bool> {
+    match decoder.decode(payload, output) {
+        Ok(samples) if samples > 0 && samples <= expected_samples => Ok(true),
+        Ok(samples) => Err(format!(
+            "valid-frame mutation accepted {samples} samples beyond the negotiated bound"
+        )),
+        Err(_) => Ok(false),
+    }
+}
+
 /// Runs every probe step and returns the ordered success lines.
 fn run_probe() -> ProbeResult<Vec<String>> {
     let mut lines = Vec::new();
@@ -2813,6 +2934,17 @@ fn run_probe() -> ProbeResult<Vec<String>> {
     let (rejected, accepted) = sweep_malformed_payloads()?;
     lines.push(format!(
         "opus_malformed_sweep: ok ({MALFORMED_SWEEP_PAYLOADS} payloads; {rejected} rejected; {accepted} accepted-bounded)"
+    ));
+
+    // Structured mutations target real bit damage and truncated packets rather
+    // than only uniformly random bytes. The 10 ms shape exercises the shorter
+    // SILK/CELT packet layout deterministically.
+    let frame = OpusFrameConfig::new(SAMPLE_RATE_HZ, OPUS_CHANNELS, MUTATION_FRAME_MS)
+        .map_err(|error| error.to_string())?;
+    let (mutated_rejected, mutated_accepted) =
+        sweep_valid_frame_mutations(frame.interleaved_samples())?;
+    lines.push(format!(
+        "opus_valid_mutation_sweep: ok ({MUTATION_FRAME_MS}ms; {MUTATION_CASES} cases; {mutated_rejected} rejected; {mutated_accepted} accepted-bounded)"
     ));
 
     lines.push("opus_native_build: ok".to_owned());
@@ -3007,9 +3139,10 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::{
-        DTX_ACTIVE_FRAMES, DTX_FRAME_MS, DTX_PAUSE_FRAMES, DurationCmpWire, OPUS_CHANNELS,
-        SAMPLE_RATE_HZ, TONE_AMPLITUDE, best_aligned_snr, block_rms, duration_cmp_wire,
-        frames_for_audio, is_dropped, snr_db, speech_like, speech_with_pauses, sustained_summary,
+        DTX_ACTIVE_FRAMES, DTX_FRAME_MS, DTX_PAUSE_FRAMES, DurationCmpWire, MUTATION_SWEEP_FRAMES,
+        MUTATIONS_PER_FRAME, OPUS_CHANNELS, SAMPLE_RATE_HZ, TONE_AMPLITUDE, best_aligned_snr,
+        block_rms, duration_cmp_wire, frames_for_audio, is_dropped, snr_db, speech_like,
+        speech_with_pauses, sustained_summary,
     };
 
     #[test]
@@ -3126,6 +3259,22 @@ mod tests {
         assert!(is_dropped(10, Some(10)));
         assert!(!is_dropped(19, Some(10)));
     }
+
+    #[test]
+    fn mutation_positions_are_deterministic_and_bounded() {
+        let len = 100_usize;
+        let mut positions = std::collections::BTreeSet::new();
+        for frame_index in 0..MUTATION_SWEEP_FRAMES {
+            for mutation_index in 0..MUTATIONS_PER_FRAME {
+                let position =
+                    (frame_index * MUTATIONS_PER_FRAME + mutation_index * 7) % len.max(1);
+                assert!(position < len);
+                positions.insert(position);
+            }
+        }
+        assert_eq!(positions.len(), len);
+    }
+
     #[test]
     fn speech_with_pauses_has_deterministic_silent_gaps() {
         let frame_samples =
