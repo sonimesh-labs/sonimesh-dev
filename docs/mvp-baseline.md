@@ -179,17 +179,21 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   unimplemented.
 - a desktop-side pairing handshake composition in `sonimesh-app`
   (`begin_from_rendered_payload` / `verify_scanned_proof`) that chains the QR
-  codec, the pure TLS-exporter pairing binding, and the bounded invitation
-  owner: rendering encodes and re-decodes its own payload as a self-check,
-  verification rejects a foreign or corrupted scan before any derivation,
-  verifies the peer's client-role proof in constant time through the real
-  transcript binding (reflected proofs fail), charges exactly one admitted
-  attempt, and on success consumes the invitation, moves the session to
-  `Ready`, and returns the media root bound to that exporter transcript. An
-  integration test carries that root through `MediaSealer`/`MediaOpener` and
-  the ADR 0017 allocator no-reuse record. The TLS exporter is still supplied
-  by the test; no live provider export, camera scan, or pairing transport is
-  claimed.
+  codec, the ADR 0019 proof-frame codec, the pure TLS-exporter pairing
+  binding, and the bounded invitation owner: rendering encodes and re-decodes
+  its own payload as a self-check, verification rejects a foreign or
+  corrupted scan before any derivation, parses the peer's raw proof frame and
+  requires the Android-client role byte plus the scanned pairing ID before
+  any HKDF work or attempt charging, verifies the carried proof in constant
+  time through the real transcript binding (reflected proofs fail at both
+  the frame boundary and the binding), charges exactly one admitted attempt,
+  and on success consumes the invitation, moves the session to `Ready`, and
+  returns the media root bound to that exporter transcript together with the
+  exact server-role reply frame to write back. An integration test carries
+  that root through `MediaSealer`/`MediaOpener` and the ADR 0017 allocator
+  no-reuse record and verifies the reply frame through the peer transcript.
+  The TLS exporter is still supplied by the test; no live provider export,
+  camera scan, or pairing transport is claimed.
 - a host-JVM Android-role pairing handshake composition model in the
   Android test sources that chains the same QR decoder and TLS-binding mirror:
   it derives the published Android proof from one transcript, verifies the peer

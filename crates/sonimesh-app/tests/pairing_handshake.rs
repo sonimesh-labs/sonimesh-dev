@@ -14,7 +14,7 @@ use sonimesh_app::{
     PairingQrInvitation, ScannedProofAttempt, begin_from_rendered_payload, verify_scanned_proof,
 };
 use sonimesh_protocol::{
-    MAX_QR_PAYLOAD_LEN, MediaDirection, MediaKeyContext, PAIRING_TLS_EXPORTER_LEN,
+    MAX_QR_PAYLOAD_LEN, MediaDirection, MediaKeyContext, PAIRING_TLS_EXPORTER_LEN, PROOF_FRAME_LEN,
 };
 
 const HOST: &str = "desktop-01.lab.local";
@@ -80,6 +80,24 @@ fn render(now_ms: u64) -> (RenderedInvitation, sonimesh_app::SessionState) {
     )
 }
 
+/// Wraps one proof into the canonical ADR 0019 wire frame bytes.
+fn frame_bytes(
+    protocol_version: u8,
+    role: sonimesh_protocol::PairingRole,
+    pairing_id: [u8; 16],
+    proof: [u8; 32],
+) -> Vec<u8> {
+    let frame = sonimesh_protocol::PairingProofFrame {
+        protocol_version,
+        role,
+        pairing_id,
+        proof,
+    };
+    let mut out = vec![0_u8; PROOF_FRAME_LEN];
+    frame.encode_into(&mut out).expect("a fixed frame encodes");
+    out
+}
+
 #[test]
 fn rendered_scan_verify_flow_reaches_ready_and_drives_the_allocator() {
     let (mut rendered, mut session) = render(1_000);
@@ -96,6 +114,12 @@ fn rendered_scan_verify_flow_reaches_ready_and_drives_the_allocator() {
     let client_proof = peer_binding
         .local_proof(sonimesh_protocol::PairingRole::AndroidClient)
         .expect("client proof derivation");
+    let client_frame = frame_bytes(
+        1,
+        sonimesh_protocol::PairingRole::AndroidClient,
+        rendered.id.as_bytes(),
+        client_proof,
+    );
 
     let outcome = verify_scanned_proof(
         &mut rendered.pairing,
@@ -107,15 +131,36 @@ fn rendered_scan_verify_flow_reaches_ready_and_drives_the_allocator() {
             scanned_payload: &rendered.payload,
             expected_pairing_id: rendered.id,
             pairing_secret: rendered.secret,
-            peer_proof: &client_proof,
+            peer_proof_frame: &client_frame,
         },
     )
     .expect("the correct proof completes the handshake");
 
-    let PairingHandshakeOutcome::Ready { media_root } = outcome else {
+    let PairingHandshakeOutcome::Ready {
+        media_root,
+        reply_frame,
+    } = outcome
+    else {
         panic!("the trusted outcome must carry the media root");
     };
     assert_eq!(session.phase(), sonimesh_app::SessionPhase::Ready);
+
+    // The rendered reply frame is the desktop's server-role proof bound to
+    // this invitation; the Android role verifies it through the same
+    // transcript binding.
+    assert_eq!(
+        reply_frame.role,
+        sonimesh_protocol::PairingRole::DesktopServer
+    );
+    assert_eq!(reply_frame.pairing_id, rendered.id.as_bytes());
+    assert!(
+        peer_binding
+            .verify_peer_proof(
+                sonimesh_protocol::PairingRole::AndroidClient,
+                &reply_frame.proof
+            )
+            .expect("reply verification derives")
+    );
 
     // The root seals and opens media exactly like an ADR 0005 transcript root.
     let context = MediaKeyContext {
@@ -174,6 +219,12 @@ fn the_same_transcript_on_both_sides_yields_matching_proofs_and_roots() {
     let client_proof = shared
         .local_proof(sonimesh_protocol::PairingRole::AndroidClient)
         .unwrap();
+    let client_frame = frame_bytes(
+        1,
+        sonimesh_protocol::PairingRole::AndroidClient,
+        rendered.id.as_bytes(),
+        client_proof,
+    );
 
     let outcome = verify_scanned_proof(
         &mut rendered.pairing,
@@ -185,11 +236,11 @@ fn the_same_transcript_on_both_sides_yields_matching_proofs_and_roots() {
             scanned_payload: &rendered.payload,
             expected_pairing_id: rendered.id,
             pairing_secret: rendered.secret,
-            peer_proof: &client_proof,
+            peer_proof_frame: &client_frame,
         },
     )
     .expect("handshake completes");
-    let PairingHandshakeOutcome::Ready { media_root } = outcome else {
+    let PairingHandshakeOutcome::Ready { media_root, .. } = outcome else {
         panic!("expected the ready outcome");
     };
 

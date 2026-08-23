@@ -4,7 +4,7 @@
 //! transport. It creates one in-memory lab certificate for a loopback probe.
 
 use std::fmt;
-use std::io::{self, Read as _, Write as _};
+use std::io;
 use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
 use std::thread;
@@ -150,7 +150,7 @@ fn run_handshake_composition(
         ScannedProofAttempt, SessionPhase, SessionState, begin_from_rendered_payload,
         verify_scanned_proof,
     };
-    use sonimesh_protocol::{MAX_QR_PAYLOAD_LEN, MediaDirection, MediaKeyContext};
+    use sonimesh_protocol::MAX_QR_PAYLOAD_LEN;
 
     const INVITATION_ID: PairingId = PairingId::new([
         0x5A, 0x5B, 0x5C, 0x5D, 0x5E, 0x5F, 0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68,
@@ -178,7 +178,8 @@ fn run_handshake_composition(
     )
     .map_err(|error| io::Error::other(format!("invitation render failed: {error}")))?;
 
-    // The Android peer derives its proof from the real exported transcript.
+    // The Android peer derives its proof from the real exported transcript
+    // and wraps it in the canonical ADR 0019 wire frame.
     let peer_binding = sonimesh_protocol::PairingBinding::new(
         1,
         INVITATION_ID.as_bytes(),
@@ -189,6 +190,16 @@ fn run_handshake_composition(
     let client_proof = peer_binding
         .local_proof(sonimesh_protocol::PairingRole::AndroidClient)
         .map_err(|error| io::Error::other(format!("peer proof failed: {error}")))?;
+    let client_frame = sonimesh_protocol::PairingProofFrame {
+        protocol_version: 1,
+        role: sonimesh_protocol::PairingRole::AndroidClient,
+        pairing_id: INVITATION_ID.as_bytes(),
+        proof: client_proof,
+    };
+    let mut frame_wire = [0_u8; PROOF_FRAME_LEN];
+    client_frame
+        .encode_into(&mut frame_wire)
+        .map_err(|error| io::Error::other(format!("peer frame rejected: {error}")))?;
 
     let outcome = verify_scanned_proof(
         &mut pairing,
@@ -200,14 +211,35 @@ fn run_handshake_composition(
             scanned_payload: &payload_out[..written],
             expected_pairing_id: INVITATION_ID,
             pairing_secret: LAB_INVITATION_SECRET,
-            peer_proof: &client_proof,
+            peer_proof_frame: &frame_wire,
         },
     )
     .map_err(|error| io::Error::other(format!("handshake rejected: {error}")))?;
 
-    let PairingHandshakeOutcome::Ready { media_root } = outcome else {
+    let PairingHandshakeOutcome::Ready {
+        media_root,
+        reply_frame,
+    } = outcome
+    else {
         return Err(io::Error::other("handshake did not reach the trusted outcome").into());
     };
+
+    // The rendered server reply must be the canonical frame whose carried
+    // proof the Android role verifies as its peer proof.
+    if reply_frame.role != sonimesh_protocol::PairingRole::DesktopServer
+        || reply_frame.pairing_id != INVITATION_ID.as_bytes()
+    {
+        return Err(io::Error::other("reply frame identity mismatched").into());
+    }
+    let verified = peer_binding
+        .verify_peer_proof(
+            sonimesh_protocol::PairingRole::AndroidClient,
+            &reply_frame.proof,
+        )
+        .map_err(|error| io::Error::other(format!("reply verification failed: {error}")))?;
+    if !verified {
+        return Err(io::Error::other("reply proof did not verify").into());
+    }
     if session.phase() != SessionPhase::Ready {
         return Err(io::Error::other("session did not reach the ready phase").into());
     }
@@ -217,15 +249,23 @@ fn run_handshake_composition(
     let expected_root = peer_binding
         .media_root()
         .map_err(|error| io::Error::other(format!("media root failed: {error}")))?;
-    let context = MediaKeyContext {
+    require_identical_seals(&media_root, &expected_root)
+}
+
+/// Seals one fixed datagram under both roots and requires byte equality.
+fn require_identical_seals(
+    handshake_root: &sonimesh_protocol::SessionSecret,
+    expected_root: &sonimesh_protocol::SessionSecret,
+) -> ProbeResult<()> {
+    let context = sonimesh_protocol::MediaKeyContext {
         session_id: 0x5A5B_5C5D_5E5F_6061,
         stream_id: 1,
         key_epoch: 0,
-        direction: MediaDirection::AndroidToDesktop,
+        direction: sonimesh_protocol::MediaDirection::AndroidToDesktop,
     };
-    let mut from_handshake = sonimesh_protocol::MediaSealer::new(&media_root, context)
+    let mut from_handshake = sonimesh_protocol::MediaSealer::new(handshake_root, context)
         .map_err(|error| io::Error::other(format!("handshake sealer failed: {error}")))?;
-    let mut from_expected = sonimesh_protocol::MediaSealer::new(&expected_root, context)
+    let mut from_expected = sonimesh_protocol::MediaSealer::new(expected_root, context)
         .map_err(|error| io::Error::other(format!("expected sealer failed: {error}")))?;
     let sealed_handshake = from_handshake
         .seal(0, 7_000, &[0x33_u8; 48])
@@ -295,44 +335,12 @@ fn run_frame_exchange(
         while tls.conn.is_handshaking() {
             tls.conn.complete_io(&mut tls.sock)?;
         }
-
-        // Receive exactly one bounded client frame from the pinned channel.
-        let mut wire = [0_u8; PROOF_FRAME_LEN];
-        tls.read_exact(&mut wire)?;
-        let received = parse_pairing_proof_frame(&wire)
-            .map_err(|error| io::Error::other(format!("client frame rejected: {error}")))?;
-        if received.pairing_id != INVITATION_ID || received.role != PairingRole::AndroidClient {
-            return Err(io::Error::other("client frame identity mismatched").into());
-        }
-
-        let binding =
-            PairingBinding::new(1, INVITATION_ID, desktop_secret, server_exporter.as_ref())
-                .map_err(|error| io::Error::other(format!("desktop binding failed: {error}")))?;
-        if !binding
-            .verify_peer_proof(PairingRole::DesktopServer, &received.proof)
-            .map_err(|error| io::Error::other(format!("client verification failed: {error}")))?
-        {
-            return Err(io::Error::other("client proof did not verify").into());
-        }
-
-        // Answer with the desktop server-role frame over the same channel.
-        let server_frame = PairingProofFrame {
-            protocol_version: 1,
-            role: PairingRole::DesktopServer,
-            pairing_id: INVITATION_ID,
-            proof: binding
-                .local_proof(PairingRole::DesktopServer)
-                .map_err(|error| {
-                    io::Error::other(format!("server proof derivation failed: {error}"))
-                })?,
-        };
-        let mut wire = [0_u8; PROOF_FRAME_LEN];
-        let written = server_frame
-            .encode_into(&mut wire)
-            .map_err(|error| io::Error::other(format!("server frame rejected: {error}")))?;
-        tls.write_all(&wire[..written])?;
-        tls.flush()?;
-        Ok(())
+        serve_desktop_proof_exchange(
+            &mut tls,
+            INVITATION_ID,
+            desktop_secret,
+            server_exporter.as_ref(),
+        )
     });
 
     // Android-role client: same invitation inputs, live exporter. The server
@@ -349,38 +357,7 @@ fn run_frame_exchange(
         while tls.conn.is_handshaking() {
             tls.conn.complete_io(&mut tls.sock)?;
         }
-
-        let binding =
-            PairingBinding::new(1, INVITATION_ID, LAB_INVITATION_SECRET, exporter.as_ref())
-                .map_err(|error| io::Error::other(format!("android binding failed: {error}")))?;
-        let client_frame = PairingProofFrame {
-            protocol_version: 1,
-            role: PairingRole::AndroidClient,
-            pairing_id: INVITATION_ID,
-            proof: binding
-                .local_proof(PairingRole::AndroidClient)
-                .map_err(|error| {
-                    io::Error::other(format!("client proof derivation failed: {error}"))
-                })?,
-        };
-        send_proof_frame(&mut tls, &client_frame)?;
-
-        // Verify the desktop's server frame from the same pinned channel.
-        let received = read_proof_frame(&mut tls)?;
-        if received.pairing_id != INVITATION_ID || received.role != PairingRole::DesktopServer {
-            return Err(io::Error::other("server frame identity mismatched").into());
-        }
-        if !binding
-            .verify_peer_proof(PairingRole::AndroidClient, &received.proof)
-            .map_err(|error| io::Error::other(format!("server verification failed: {error}")))?
-        {
-            return Err(io::Error::other("server proof did not verify").into());
-        }
-
-        // The exchange must compose with the media-root handoff: the client's
-        // root is derived and sealed against a fixed datagram.
-        seal_exchange_media_root(&binding)?;
-        Ok(())
+        run_android_proof_exchange(&mut tls, INVITATION_ID, exporter.as_ref())
     })();
 
     let server_result = server
@@ -389,6 +366,81 @@ fn run_frame_exchange(
     client_result?;
     server_result?;
     Ok(())
+}
+
+/// Desktop side of the frame exchange: read the client frame, verify it,
+/// and answer with the server-role frame over the same pinned channel.
+fn serve_desktop_proof_exchange(
+    tls: &mut (impl io::Read + io::Write),
+    invitation_id: [u8; 16],
+    pairing_secret: [u8; 32],
+    exporter: &[u8],
+) -> ProbeResult<()> {
+    // Receive exactly one bounded client frame from the pinned channel.
+    let received = read_proof_frame(tls)?;
+    if received.pairing_id != invitation_id || received.role != PairingRole::AndroidClient {
+        return Err(io::Error::other("client frame identity mismatched").into());
+    }
+
+    let binding = PairingBinding::new(1, invitation_id, pairing_secret, exporter)
+        .map_err(|error| io::Error::other(format!("desktop binding failed: {error}")))?;
+    if !binding
+        .verify_peer_proof(PairingRole::DesktopServer, &received.proof)
+        .map_err(|error| io::Error::other(format!("client verification failed: {error}")))?
+    {
+        return Err(io::Error::other("client proof did not verify").into());
+    }
+
+    // Answer with the desktop server-role frame over the same channel.
+    let server_frame = PairingProofFrame {
+        protocol_version: 1,
+        role: PairingRole::DesktopServer,
+        pairing_id: invitation_id,
+        proof: binding
+            .local_proof(PairingRole::DesktopServer)
+            .map_err(|error| {
+                io::Error::other(format!("server proof derivation failed: {error}"))
+            })?,
+    };
+    send_proof_frame(tls, &server_frame)
+}
+
+/// Android-role side of the frame exchange: send the client frame, then
+/// verify the desktop's server-role reply through the same binding.
+fn run_android_proof_exchange(
+    tls: &mut (impl io::Read + io::Write),
+    invitation_id: [u8; 16],
+    exporter: &[u8],
+) -> ProbeResult<()> {
+    let binding = PairingBinding::new(1, invitation_id, LAB_INVITATION_SECRET, exporter)
+        .map_err(|error| io::Error::other(format!("android binding failed: {error}")))?;
+    let client_frame = PairingProofFrame {
+        protocol_version: 1,
+        role: PairingRole::AndroidClient,
+        pairing_id: invitation_id,
+        proof: binding
+            .local_proof(PairingRole::AndroidClient)
+            .map_err(|error| {
+                io::Error::other(format!("client proof derivation failed: {error}"))
+            })?,
+    };
+    send_proof_frame(tls, &client_frame)?;
+
+    // Verify the desktop's server frame from the same pinned channel.
+    let received = read_proof_frame(tls)?;
+    if received.pairing_id != invitation_id || received.role != PairingRole::DesktopServer {
+        return Err(io::Error::other("server frame identity mismatched").into());
+    }
+    if !binding
+        .verify_peer_proof(PairingRole::AndroidClient, &received.proof)
+        .map_err(|error| io::Error::other(format!("server verification failed: {error}")))?
+    {
+        return Err(io::Error::other("server proof did not verify").into());
+    }
+
+    // The exchange must compose with the media-root handoff: the client's
+    // root is derived and sealed against a fixed datagram.
+    seal_exchange_media_root(&binding)
 }
 
 /// Writes one bounded proof frame into the pinned TLS stream.

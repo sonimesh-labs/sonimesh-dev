@@ -1,16 +1,18 @@
 # Windows TLS provider spike result
 
 > Status: local lab run; composition evidence for this host only
-> Updated: 2026-08-22
+> Updated: 2026-08-23
 
 One run of `cargo run -p windows-tls-provider-prototype` on the reference
 Windows host, following the
 [spike protocol](./windows-tls-provider-spike.md) including the in-memory
-handshake-composition stage.
+handshake-composition stage. The run was repeated on 2026-08-23 after the
+desktop composition began consuming the ADR 0019 proof frames; the recorded
+output below is from that repeat and matches the original stage-for-stage.
 
 | Field | Recorded value |
 | --- | --- |
-| Date and local time | 2026-08-22 (local) |
+| Date and local time | 2026-08-23 (local) |
 | Windows edition/build and architecture | Windows 10 Home China, build 26200 (NT 10.0.26200.0), 64-bit |
 | Rust version and host target | rustc 1.85.0 (4d91de4e4 2025-02-17), x86_64-pc-windows-msvc |
 | Rustls, provider, and rcgen versions | Rustls 0.23.27 / ring / rcgen 0.13.2 |

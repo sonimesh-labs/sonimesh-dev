@@ -3,20 +3,24 @@
 //! This module composes the boundaries that already exist individually:
 //! [`parse_pairing_qr_payload`] validates the scanned invitation,
 //! [`PairingBinding`] derives the role-separated proofs and the one-time
-//! media root, and [`PairingInvitationController`] owns the bounded
-//! invitation lifecycle that admits exactly one transcript-bound proof.
-//! The composition exists so a platform pairing owner cannot accidentally
-//! skip a step: trust is established only when the decoded QR view, the
-//! externally supplied TLS exporter bytes, and the peer's proof all agree
-//! inside one admitted attempt. It performs no TLS, no network I/O, and no
-//! persistent identity storage; the exporter must come from the pinned TLS
-//! 1.3 connection described by ADR 0008.
+//! media root, [`crate::parse_pairing_proof_frame`] bounds the wire frame the
+//! peer's proof arrived in, and [`PairingInvitationController`] owns the
+//! bounded invitation lifecycle that admits exactly one transcript-bound
+//! proof. The composition exists so a platform pairing owner cannot
+//! accidentally skip a step: trust is established only when the decoded QR
+//! view, the externally supplied TLS exporter bytes, and the peer's proof
+//! all agree inside one admitted attempt. A verified attempt additionally
+//! renders the exact server-role reply frame to send back, so the reply can
+//! never be built from unverified inputs. It performs no TLS, no network
+//! I/O, and no persistent identity storage; the exporter must come from the
+//! pinned TLS 1.3 connection described by ADR 0008.
 
 use core::fmt;
 
 use sonimesh_protocol::{
-    PAIRING_TLS_EXPORTER_LEN, PairingBinding, PairingBindingError, PairingQrPayload, PairingRole,
-    SessionSecret, parse_pairing_qr_payload,
+    PAIRING_TLS_EXPORTER_LEN, PairingBinding, PairingBindingError, PairingProofFrame,
+    PairingProofFrameError, PairingQrPayload, PairingQrView, PairingRole, SessionSecret,
+    parse_pairing_proof_frame, parse_pairing_qr_payload,
 };
 
 use crate::{
@@ -39,6 +43,8 @@ pub enum PairingHandshakeError {
     ProofRejected,
     /// The TLS exporter could not be used to derive the binding.
     InvalidExporterLength,
+    /// The peer proof frame failed its bounded wire validation.
+    ProofFrame(PairingProofFrameError),
 }
 
 impl fmt::Display for PairingHandshakeError {
@@ -61,6 +67,9 @@ impl fmt::Display for PairingHandshakeError {
             Self::InvalidExporterLength => {
                 formatter.write_str("TLS exporter must be exactly 32 bytes")
             }
+            Self::ProofFrame(error) => {
+                write!(formatter, "peer proof frame was rejected: {error}")
+            }
         }
     }
 }
@@ -71,6 +80,7 @@ impl std::error::Error for PairingHandshakeError {
             Self::Qr(error) => Some(error),
             Self::Binding(error) => Some(error),
             Self::Invitation(error) => Some(error),
+            Self::ProofFrame(error) => Some(error),
             _ => None,
         }
     }
@@ -79,7 +89,8 @@ impl std::error::Error for PairingHandshakeError {
 /// Outcome of one composed desktop-side pairing handshake.
 ///
 /// `Ready` carries the one-time media root derived from the same exporter
-/// transcript that authenticated the peer proof; it becomes the
+/// transcript that authenticated the peer proof plus the exact server-role
+/// reply frame to write back into that channel; the root becomes the
 /// [`crate::MediaSessionAllocator`] root once the trusted session starts
 /// streaming. Rejected outcomes keep the invitation active with its bounded
 /// remaining attempts.
@@ -88,6 +99,10 @@ pub enum PairingHandshakeOutcome {
     Ready {
         /// One-time media root for the ADR 0005/0017 allocator boundary.
         media_root: SessionSecret,
+        /// The exact server-role proof frame to send back inside the pinned
+        /// channel. It is rendered only after the peer's frame verified, so a
+        /// caller cannot transmit a reply for an unauthenticated exchange.
+        reply_frame: PairingProofFrame,
     },
     /// The proof was well-formed but invalid; attempts remain bounded.
     Rejected {
@@ -102,6 +117,7 @@ impl fmt::Debug for PairingHandshakeOutcome {
             Self::Ready { .. } => formatter
                 .debug_struct("Ready")
                 .field("media_root", &"[REDACTED]")
+                .field("reply_frame", &"[REDACTED]")
                 .finish(),
             Self::Rejected { attempts_remaining } => formatter
                 .debug_struct("Rejected")
@@ -215,8 +231,10 @@ pub struct ScannedProofAttempt<'a> {
     pub expected_pairing_id: PairingId,
     /// The one-time secret the desktop rendered into that invitation.
     pub pairing_secret: [u8; 32],
-    /// The peer's proof received inside the pinned TLS channel.
-    pub peer_proof: &'a [u8],
+    /// The peer's raw ADR 0019 proof frame exactly as received inside the
+    /// pinned TLS channel. It must carry the Android-client role byte and
+    /// this invitation's pairing ID before any derivation runs.
+    pub peer_proof_frame: &'a [u8],
 }
 
 /// Admits one scanned proof attempt through the real binding and owner.
@@ -224,23 +242,26 @@ pub struct ScannedProofAttempt<'a> {
 /// The caller supplies the raw QR bytes the scanner read, the TLS exporter
 /// from its already-pinned TLS 1.3 connection, and the attempt inputs. The
 /// composition decodes the scan, rejects a mismatched invitation before
-/// deriving anything, builds the [`PairingBinding`] from the exporter
-/// transcript, verifies the peer proof for the opposite role in constant
+/// deriving anything, parses the peer's proof frame and requires the
+/// Android-client role byte plus this invitation's pairing ID before any
+/// derivation runs, builds the [`PairingBinding`] from the exporter
+/// transcript, verifies the carried proof for the opposite role in constant
 /// time through the binding (reflections fail), and charges exactly one
 /// admitted attempt on the invitation record.
 ///
 /// A verified proof consumes the invitation and yields the media root bound
-/// to this transcript; any rejection keeps the invitation active until its
-/// attempts or lifetime end.
+/// to this transcript together with the exact server-role reply frame to
+/// write back into the pinned channel; any rejection keeps the invitation
+/// active until its attempts or lifetime end.
 ///
 /// # Errors
 ///
 /// Returns [`PairingHandshakeError`] for a rejected scan, mismatched
-/// invitation, invalid exporter or derivation input, or an admission failure
-/// (expired, consumed, revoked, rate-limited, or table-full). A well-formed
-/// but incorrect proof returns [`PairingHandshakeOutcome::Rejected`] instead
-/// of an error, matching the record's distinction between an invalid proof
-/// and a failed verifier.
+/// invitation or proof-frame identity, invalid exporter or derivation input,
+/// or an admission failure (expired, consumed, revoked, rate-limited, or
+/// table-full). A well-formed but incorrect proof returns
+/// [`PairingHandshakeOutcome::Rejected`] instead of an error, matching the
+/// record's distinction between an invalid proof and a failed verifier.
 pub fn verify_scanned_proof(
     pairing: &mut PairingInvitationController<MAX_HANDSHAKE_SOURCES>,
     session: &mut SessionState,
@@ -258,6 +279,12 @@ pub fn verify_scanned_proof(
     if view.pairing_id != expected_id {
         return Err(PairingHandshakeError::InvitationMismatch);
     }
+    // The wire frame is validated against this invitation's identity before
+    // any HKDF work: a foreign pairing ID, a server-role byte (reflection),
+    // or any noncanonical frame is rejected at the boundary itself.
+    let peer_frame = parse_pairing_proof_frame(attempt.peer_proof_frame)
+        .map_err(PairingHandshakeError::ProofFrame)?;
+    require_frame_identity(&peer_frame, &view)?;
     if pairing.state() != Some(PairingRecordState::Active) {
         return Err(PairingHandshakeError::Invitation(
             PairingInvitationError::MissingInvitation,
@@ -276,7 +303,7 @@ pub fn verify_scanned_proof(
     // proof. `verify_peer_proof` derives the opposite role internally, so a
     // reflected server proof cannot verify as its own peer proof.
     let outcome = pairing.verify_proof(session, now_ms, source, || {
-        match binding.verify_peer_proof(PairingRole::DesktopServer, attempt.peer_proof) {
+        match binding.verify_peer_proof(PairingRole::DesktopServer, &peer_frame.proof) {
             Ok(true) => PairingProofVerification::Verified,
             Ok(false) => PairingProofVerification::Rejected,
             Err(_) => PairingProofVerification::Failed,
@@ -288,17 +315,64 @@ pub fn verify_scanned_proof(
             let media_root = binding
                 .media_root()
                 .map_err(PairingHandshakeError::Binding)?;
+            let reply_frame = server_reply_frame(&binding, &view);
             debug_assert_eq!(
                 session.phase(),
                 SessionPhase::Ready,
                 "the invitation owner must establish trust after a paired proof"
             );
-            Ok(PairingHandshakeOutcome::Ready { media_root })
+            Ok(PairingHandshakeOutcome::Ready {
+                media_root,
+                reply_frame,
+            })
         }
         Ok(PairingAttemptOutcome::Rejected { attempts_remaining }) => {
             Ok(PairingHandshakeOutcome::Rejected { attempts_remaining })
         }
         Err(error) => Err(PairingHandshakeError::Invitation(error)),
+    }
+}
+
+/// Requires that the decoded proof frame belongs to this scanned invitation.
+///
+/// The frame must carry the same pairing ID the QR view carries and the
+/// Android-client role byte, because the desktop verifies only the client
+/// role. This runs before any HKDF work, so a foreign invitation's frame or
+/// a reflected server-role frame is rejected at the wire boundary instead of
+/// consuming an attempt or leaking derivation timing.
+fn require_frame_identity(
+    frame: &PairingProofFrame,
+    view: &PairingQrView<'_>,
+) -> Result<(), PairingHandshakeError> {
+    if frame.pairing_id != view.pairing_id {
+        return Err(PairingHandshakeError::InvitationMismatch);
+    }
+    if frame.role != PairingRole::AndroidClient {
+        return Err(PairingHandshakeError::ProofRejected);
+    }
+    if u32::from(frame.protocol_version) != sonimesh_protocol::CONTROL_PROTOCOL_VERSION {
+        return Err(PairingHandshakeError::Binding(
+            PairingBindingError::InvalidProtocolVersion,
+        ));
+    }
+    Ok(())
+}
+
+/// Renders the exact desktop server-role reply frame for this exchange.
+///
+/// Called only after the peer's client-role proof verified, so the reply is
+/// always bound to the authenticated transcript. The caller writes
+/// [`PROOF_FRAME_LEN`] bytes into its pinned channel unchanged.
+fn server_reply_frame(binding: &PairingBinding, view: &PairingQrView<'_>) -> PairingProofFrame {
+    let protocol_version = u8::try_from(sonimesh_protocol::CONTROL_PROTOCOL_VERSION)
+        .expect("the control protocol version fits in one byte");
+    PairingProofFrame {
+        protocol_version,
+        role: PairingRole::DesktopServer,
+        pairing_id: view.pairing_id,
+        proof: binding
+            .local_proof(PairingRole::DesktopServer)
+            .expect("a canonical binding always derives both role proofs"),
     }
 }
 
@@ -312,7 +386,10 @@ mod tests {
         PairingId, PairingInvitationController, PairingRecordState, PairingSource, SessionPhase,
         SessionState,
     };
-    use sonimesh_protocol::{MAX_QR_PAYLOAD_LEN, PAIRING_TLS_EXPORTER_LEN};
+    use sonimesh_protocol::{
+        MAX_QR_PAYLOAD_LEN, PAIRING_TLS_EXPORTER_LEN, PROOF_FRAME_LEN, PairingProofFrame,
+        PairingRole,
+    };
 
     const HOST: &str = "desktop-01.lab.local";
     const PORT: u16 = 47_610;
@@ -324,6 +401,24 @@ mod tests {
 
     fn source(byte: u8) -> PairingSource {
         PairingSource::new([byte; 16])
+    }
+
+    /// Wraps one proof into the canonical ADR 0019 wire frame bytes.
+    fn frame_bytes(
+        protocol_version: u8,
+        role: PairingRole,
+        pairing_id: [u8; 16],
+        proof: [u8; 32],
+    ) -> Vec<u8> {
+        let frame = PairingProofFrame {
+            protocol_version,
+            role,
+            pairing_id,
+            proof,
+        };
+        let mut out = vec![0_u8; PROOF_FRAME_LEN];
+        frame.encode_into(&mut out).expect("a fixed frame encodes");
+        out
     }
 
     struct Invitation {
@@ -419,6 +514,12 @@ mod tests {
         let client_proof = binding
             .local_proof(sonimesh_protocol::PairingRole::AndroidClient)
             .expect("proof derivation succeeds");
+        let client_frame = frame_bytes(
+            1,
+            PairingRole::AndroidClient,
+            invitation.id.as_bytes(),
+            client_proof,
+        );
 
         let outcome = verify_scanned_proof(
             &mut invitation.pairing,
@@ -430,12 +531,16 @@ mod tests {
                 scanned_payload: &invitation.payload,
                 expected_pairing_id: invitation.id,
                 pairing_secret: invitation.secret,
-                peer_proof: &client_proof,
+                peer_proof_frame: &client_frame,
             },
         )
         .expect("a correct peer proof completes the handshake");
 
-        let PairingHandshakeOutcome::Ready { media_root } = outcome else {
+        let PairingHandshakeOutcome::Ready {
+            media_root,
+            reply_frame: _,
+        } = outcome
+        else {
             panic!("a verified proof must yield the ready outcome");
         };
         assert_eq!(invitation.session.phase(), SessionPhase::Ready);
@@ -479,10 +584,17 @@ mod tests {
             &exporter,
         )
         .unwrap();
-        // The server-role proof is a reflected local proof and must fail.
+        // The reflected server-role proof arrives in a canonical frame and
+        // must fail as a rejected attempt, not an error.
         let reflected = binding
             .local_proof(sonimesh_protocol::PairingRole::DesktopServer)
             .unwrap();
+        let reflected_frame = frame_bytes(
+            1,
+            PairingRole::AndroidClient,
+            invitation.id.as_bytes(),
+            reflected,
+        );
 
         let outcome = verify_scanned_proof(
             &mut invitation.pairing,
@@ -494,7 +606,7 @@ mod tests {
                 scanned_payload: &invitation.payload,
                 expected_pairing_id: invitation.id,
                 pairing_secret: invitation.secret,
-                peer_proof: &reflected,
+                peer_proof_frame: &reflected_frame,
             },
         )
         .expect("a well-formed wrong proof is a rejection, not an error");
@@ -508,10 +620,43 @@ mod tests {
         assert_eq!(invitation.session.phase(), SessionPhase::Pairing);
         assert_eq!(invitation.pairing.state(), Some(PairingRecordState::Active));
 
+        // A server-role byte in the frame itself is rejected at the boundary
+        // before charging an attempt.
+        let server_frame = frame_bytes(
+            1,
+            PairingRole::DesktopServer,
+            invitation.id.as_bytes(),
+            reflected,
+        );
+        assert_eq!(
+            verify_scanned_proof(
+                &mut invitation.pairing,
+                &mut invitation.session,
+                155,
+                source(0x44),
+                &exporter,
+                ScannedProofAttempt {
+                    scanned_payload: &invitation.payload,
+                    expected_pairing_id: invitation.id,
+                    pairing_secret: invitation.secret,
+                    peer_proof_frame: &server_frame,
+                },
+            )
+            .expect_err("a reflected frame role must fail at the boundary"),
+            PairingHandshakeError::ProofRejected
+        );
+        assert_eq!(invitation.pairing.state(), Some(PairingRecordState::Active));
+
         // The correct proof still completes within the remaining attempts.
         let client_proof = binding
             .local_proof(sonimesh_protocol::PairingRole::AndroidClient)
             .unwrap();
+        let client_frame = frame_bytes(
+            1,
+            PairingRole::AndroidClient,
+            invitation.id.as_bytes(),
+            client_proof,
+        );
         assert!(matches!(
             verify_scanned_proof(
                 &mut invitation.pairing,
@@ -523,7 +668,7 @@ mod tests {
                     scanned_payload: &invitation.payload,
                     expected_pairing_id: invitation.id,
                     pairing_secret: invitation.secret,
-                    peer_proof: &client_proof,
+                    peer_proof_frame: &client_frame,
                 },
             ),
             Ok(PairingHandshakeOutcome::Ready { .. })
@@ -560,12 +705,74 @@ mod tests {
                 scanned_payload: &other_payload[..written],
                 expected_pairing_id: invitation.id,
                 pairing_secret: invitation.secret,
-                peer_proof: &[0; 32],
+                peer_proof_frame: &[0; PROOF_FRAME_LEN],
             },
         )
         .expect_err("a foreign invitation must not be admitted");
 
         assert_eq!(error, PairingHandshakeError::InvitationMismatch);
+        assert_eq!(invitation.pairing.state(), Some(PairingRecordState::Active));
+        assert_eq!(invitation.session.phase(), SessionPhase::Pairing);
+    }
+
+    #[test]
+    fn a_foreign_frame_pairing_id_is_rejected_before_any_derivation() {
+        let mut invitation = begin_invitation(100);
+        let exporter = exporter(0xA0);
+        // A canonical frame whose identity belongs to another invitation.
+        let foreign_frame =
+            frame_bytes(1, PairingRole::AndroidClient, id(0x77).as_bytes(), [0; 32]);
+
+        let error = verify_scanned_proof(
+            &mut invitation.pairing,
+            &mut invitation.session,
+            150,
+            source(0x44),
+            &exporter,
+            ScannedProofAttempt {
+                scanned_payload: &invitation.payload,
+                expected_pairing_id: invitation.id,
+                pairing_secret: invitation.secret,
+                peer_proof_frame: &foreign_frame,
+            },
+        )
+        .expect_err("a foreign frame identity must fail at the boundary");
+
+        assert_eq!(error, PairingHandshakeError::InvitationMismatch);
+        assert_eq!(invitation.pairing.state(), Some(PairingRecordState::Active));
+    }
+
+    #[test]
+    fn a_noncanonical_frame_is_rejected_without_charging_an_attempt() {
+        let mut invitation = begin_invitation(100);
+
+        let mut trailing = vec![0_u8; PROOF_FRAME_LEN];
+        trailing.push(0);
+        let mut magic = frame_bytes(
+            1,
+            PairingRole::AndroidClient,
+            invitation.id.as_bytes(),
+            [0; 32],
+        );
+        magic[0] = b'X';
+        let candidates: [&[u8]; 4] = [&[], &[0_u8; PROOF_FRAME_LEN - 1], &trailing, &magic];
+        for candidate in candidates {
+            let error = verify_scanned_proof(
+                &mut invitation.pairing,
+                &mut invitation.session,
+                150,
+                source(0x44),
+                &exporter(0xA0),
+                ScannedProofAttempt {
+                    scanned_payload: &invitation.payload,
+                    expected_pairing_id: invitation.id,
+                    pairing_secret: invitation.secret,
+                    peer_proof_frame: candidate,
+                },
+            )
+            .expect_err("a noncanonical frame must fail at the boundary");
+            assert!(matches!(error, PairingHandshakeError::ProofFrame(_)));
+        }
         assert_eq!(invitation.pairing.state(), Some(PairingRecordState::Active));
         assert_eq!(invitation.session.phase(), SessionPhase::Pairing);
     }
@@ -586,7 +793,7 @@ mod tests {
                 scanned_payload: &invitation.payload,
                 expected_pairing_id: invitation.id,
                 pairing_secret: invitation.secret,
-                peer_proof: &[0; 32],
+                peer_proof_frame: &[0; PROOF_FRAME_LEN],
             },
         )
         .expect_err("a short exporter must fail closed");
@@ -614,7 +821,7 @@ mod tests {
                 scanned_payload: &corrupted,
                 expected_pairing_id: invitation.id,
                 pairing_secret: invitation.secret,
-                peer_proof: &[0; 32],
+                peer_proof_frame: &[0; PROOF_FRAME_LEN],
             },
         )
         .expect_err("a corrupted scan must not be admitted");
@@ -627,6 +834,14 @@ mod tests {
     #[test]
     fn an_expired_invitation_rejects_before_deriving_anything() {
         let mut invitation = begin_invitation(100);
+        // A canonical client-role frame for this identity reaches the
+        // invitation owner; only its lifetime rejects it.
+        let frame = frame_bytes(
+            1,
+            PairingRole::AndroidClient,
+            invitation.id.as_bytes(),
+            [0; 32],
+        );
 
         let error = verify_scanned_proof(
             &mut invitation.pairing,
@@ -638,7 +853,7 @@ mod tests {
                 scanned_payload: &invitation.payload,
                 expected_pairing_id: invitation.id,
                 pairing_secret: invitation.secret,
-                peer_proof: &[0; 32],
+                peer_proof_frame: &frame,
             },
         )
         .expect_err("an expired invitation must reject the handshake");
@@ -649,5 +864,64 @@ mod tests {
             Some(PairingRecordState::Expired)
         );
         assert_eq!(invitation.session.phase(), SessionPhase::Idle);
+    }
+
+    #[test]
+    fn the_reply_frame_verifies_as_the_desktop_server_role() {
+        let mut invitation = begin_invitation(100);
+        let exporter = exporter(0xA0);
+        let binding = sonimesh_protocol::PairingBinding::new(
+            1,
+            invitation.id.as_bytes(),
+            invitation.secret,
+            &exporter,
+        )
+        .unwrap();
+        let client_proof = binding.local_proof(PairingRole::AndroidClient).unwrap();
+        let client_frame = frame_bytes(
+            1,
+            PairingRole::AndroidClient,
+            invitation.id.as_bytes(),
+            client_proof,
+        );
+
+        let outcome = verify_scanned_proof(
+            &mut invitation.pairing,
+            &mut invitation.session,
+            150,
+            source(0x44),
+            &exporter,
+            ScannedProofAttempt {
+                scanned_payload: &invitation.payload,
+                expected_pairing_id: invitation.id,
+                pairing_secret: invitation.secret,
+                peer_proof_frame: &client_frame,
+            },
+        )
+        .expect("the handshake completes");
+
+        let PairingHandshakeOutcome::Ready { reply_frame, .. } = outcome else {
+            panic!("expected the ready outcome");
+        };
+        // The reply is the server-role frame bound to this invitation and the
+        // same transcript: the Android side verifies it as its peer proof.
+        assert_eq!(reply_frame.role, PairingRole::DesktopServer);
+        assert_eq!(reply_frame.pairing_id, invitation.id.as_bytes());
+        let reencoded = frame_bytes(
+            reply_frame.protocol_version,
+            reply_frame.role,
+            reply_frame.pairing_id,
+            reply_frame.proof,
+        );
+        let decoded = sonimesh_protocol::parse_pairing_proof_frame(&reencoded)
+            .expect("the rendered reply decodes canonically");
+        assert!(
+            binding
+                .verify_peer_proof(PairingRole::AndroidClient, &decoded.proof)
+                .unwrap()
+        );
+        // The Debug output stays redacted.
+        let debug = format!("{reply_frame:?}");
+        assert!(debug.contains("[REDACTED]"));
     }
 }

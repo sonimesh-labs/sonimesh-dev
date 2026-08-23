@@ -45,6 +45,15 @@ The frame is deliberately independent of the unauthenticated control-plane
 envelope: pairing proofs flow only inside the freshly established pinned TLS
 channel, never across the plain TCP framing boundary.
 
+The desktop handshake composition in `sonimesh-app` consumes the frame at its
+boundary: `verify_scanned_proof` now takes the peer's raw frame bytes, parses
+them with the bounded decoder, and requires the Android-client role byte and
+the scanned invitation's pairing ID before any HKDF work or attempt charging;
+a verified attempt renders the exact server-role reply frame in its `Ready`
+outcome, so a platform owner transmits only a frame derived from the
+authenticated transcript and can never skip the identity checks by passing
+bare proof bytes.
+
 ## Security implications
 
 The frame carries a public transcript-proof value whose secrecy is irrelevant
@@ -67,6 +76,13 @@ representation.
   reflected proof failing closed, and reject short output buffers, wrong
   lengths (short, empty, trailing), foreign magic, unsupported frame and
   protocol versions, unknown role bytes, and verify redacted `Debug`.
+- The desktop handshake composition (`verify_scanned_proof`) unit tests prove
+  the boundary behavior: a foreign frame pairing ID, a server-role byte in
+  the frame, or any noncanonical frame is rejected before an attempt is
+  charged; a canonical client frame with a wrong proof still consumes
+  exactly one attempt; and a successful exchange renders a reply frame whose
+  carried proof verifies as the desktop server role under the same
+  transcript binding.
 - The Android host-JVM `PairingProofFrame` mirror and
   `PairingProofFrameVectorTest` reproduce the same golden bytes for both
   roles and the same rejection behavior, so a Kotlin sender cannot drift from
