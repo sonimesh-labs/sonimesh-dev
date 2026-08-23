@@ -361,11 +361,15 @@ jitter, and output-backend ADRs using measured 10/20 ms and device results.
   an authenticated control-session secret;
 - authenticated TLS control transport, discovery, and control-plane address
   migration/reconnection. The UDP source pin can be reset by a fresh media
-  session, but the untrusted TCP framing reader cannot authorize or supply one.
-  A provisional type-state wrapper ([ADR 0020](./adr/0020-authenticated-control-transport.md))
-  now unlocks bounded control framing only after a verified pairing proof
-  exchange over the pinned channel; wiring that wrapper into the coordinator
-  token lifecycle and an Android runtime provider remain open.
+  session, and the untrusted TCP framing reader still cannot authorize or
+  supply one by itself. The ADR 0020 type-state wrapper now unlocks bounded
+  control framing only after a verified pairing proof exchange over the
+  pinned channel, and the loopback integration test drives that framing into
+  hello negotiation, the coordinator transport token, a fresh allocator
+  identity, and a completed start. What remains open is a production TLS
+  provider behind the same wrapper (the Windows spike binary proves the
+  live-exporter exchange on one host), an Android runtime provider, and
+  discovery.
 - Windows output backend selection, physical device/power lifecycle evidence,
   and latency qualification. The independent direct-WASAPI prototype and
   controlled same-host callback comparison exist, but do not settle a backend;

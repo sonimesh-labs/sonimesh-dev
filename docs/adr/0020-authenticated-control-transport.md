@@ -74,6 +74,12 @@ errors).
   foreign invitation pairing ID, noncanonical frame bytes, wrong proof
   inside a canonical frame, short-exporter construction failure, and
   `send_reply_frame`/`into_framing` refusal on an unverified wrapper.
+- The `sonimesh-app` loopback integration test
+  (`tests/authenticated_control_transport.rs`) drives the full application
+  path over a real TCP socket pair: proof exchange, framing unlock, hello
+  negotiation through `ControlStreamCoordinator`, the installed transport
+  token authorizing a fresh identity via the ADR 0017 allocator, and a
+  completed start into Streaming.
 - The Windows TLS provider spike remains the live-channel evidence for the
   same exchange shape; this module adds the type-state boundary around it.
 - No wire-schema change: envelopes and proof frames keep their published
