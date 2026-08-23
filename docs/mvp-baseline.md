@@ -1,7 +1,7 @@
 # MVP implementation baseline
 
 > Status: foundation implemented; platform feasibility remains open
-> Updated: 2026-08-22
+> Updated: 2026-08-23
 
 This baseline turns the architecture documents into a buildable core without
 claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
@@ -361,7 +361,11 @@ jitter, and output-backend ADRs using measured 10/20 ms and device results.
   an authenticated control-session secret;
 - authenticated TLS control transport, discovery, and control-plane address
   migration/reconnection. The UDP source pin can be reset by a fresh media
-  session, but the untrusted TCP framing reader cannot authorize or supply one;
+  session, but the untrusted TCP framing reader cannot authorize or supply one.
+  A provisional type-state wrapper ([ADR 0020](./adr/0020-authenticated-control-transport.md))
+  now unlocks bounded control framing only after a verified pairing proof
+  exchange over the pinned channel; wiring that wrapper into the coordinator
+  token lifecycle and an Android runtime provider remain open.
 - Windows output backend selection, physical device/power lifecycle evidence,
   and latency qualification. The independent direct-WASAPI prototype and
   controlled same-host callback comparison exist, but do not settle a backend;

@@ -77,3 +77,5 @@ documented.
   provisional bounded version-one QR wire format pending the platform pairing owner.
 - [ADR 0019: Pairing proof-exchange frame boundary](./0019-pairing-proof-exchange-frame.md) —
   provisional fixed-length transcript-proof wire frame inside the pinned TLS channel.
+- [ADR 0020: Authenticated control-plane transport boundary](./0020-authenticated-control-transport.md) —
+  provisional type-state wrapper that unlocks bounded control framing only after the pairing proof exchange.
