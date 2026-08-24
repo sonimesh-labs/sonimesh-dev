@@ -17,11 +17,17 @@ use rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
 use zeroize::{Zeroize, Zeroizing};
 
 use sonimesh_app::{
-    InvitationInputs, PairingId, PairingInvitationController, PairingQrInvitation, PairingSource,
-    SessionState, accept_pairing_connection, begin_from_rendered_payload,
+    ControlStreamAction, ControlStreamCoordinator, InvitationInputs, PairingId,
+    PairingInvitationController, PairingQrInvitation, PairingSource, SessionState,
+    accept_pairing_connection, begin_from_rendered_payload,
 };
-use sonimesh_network::{client_config, connect_pinned_client, server_config};
-use sonimesh_protocol::{MAX_QR_PAYLOAD_LEN, PROOF_FRAME_LEN, PairingProofFrame, PairingRole};
+use sonimesh_network::{
+    UntrustedControlStream, client_config, connect_pinned_client, server_config,
+};
+use sonimesh_protocol::{
+    CONTROL_PROTOCOL_VERSION, Capability, Envelope, Hello, MAX_QR_PAYLOAD_LEN, PROOF_FRAME_LEN,
+    PairingProofFrame, PairingRole, envelope,
+};
 
 const HOST: &str = "localhost";
 /// Fixed non-secret lab secret; never printed.
@@ -69,7 +75,9 @@ fn the_listener_completes_one_trusted_pairing_exchange() -> TestResult<()> {
     payload_out.truncate(written);
     assert_eq!(session.phase(), sonimesh_app::SessionPhase::Pairing);
 
-    // Desktop thread: run the listener through one full exchange.
+    // Desktop thread: run the listener through one full exchange, then
+    // install the authenticated control session and negotiate hello over
+    // the trusted channel's bounded framing.
     let desktop_payload = payload_out.clone();
     let desktop = thread::spawn(move || -> TestResult<()> {
         let (trusted, _media_root) = accept_pairing_connection(
@@ -85,7 +93,31 @@ fn the_listener_completes_one_trusted_pairing_exchange() -> TestResult<()> {
                 scanned_payload: &desktop_payload,
             }),
         )?;
-        let (_channel, _exporter) = trusted.into_parts();
+        let (channel, _exporter) = trusted.into_parts();
+
+        // Trust is already established; the framing boundary is the only
+        // remaining wrapper before coordinator envelopes.
+        let mut coordinator =
+            ControlStreamCoordinator::new(session, &[Capability::FrameDuration20Ms])
+                .expect("coordinator constructs after trust");
+        let token = coordinator
+            .install_authenticated_control_session()
+            .expect("a READY session issues its transport token");
+        let mut framed = UntrustedControlStream::from_io(channel);
+
+        // Negotiate hello over the live TLS-framed control channel.
+        let mut poll = framed.poll()?;
+        while matches!(poll, sonimesh_network::UntrustedControlPoll::Empty) {
+            thread::yield_now();
+            poll = framed.poll()?;
+        }
+        let sonimesh_network::UntrustedControlPoll::Frame(hello) = poll else {
+            return Err("desktop did not receive a hello frame".into());
+        };
+        assert!(matches!(
+            coordinator.accept(token, &hello),
+            Ok(ControlStreamAction::Negotiated(_))
+        ));
         Ok(())
     });
 
@@ -118,6 +150,23 @@ fn the_listener_completes_one_trusted_pairing_exchange() -> TestResult<()> {
     let reply = sonimesh_protocol::parse_pairing_proof_frame(&reply_wire)?;
     assert_eq!(reply.role, PairingRole::DesktopServer);
     assert!(binding.verify_peer_proof(PairingRole::AndroidClient, &reply.proof)?);
+
+    // With trust on both sides, send hello through the bounded framing so
+    // the desktop coordinator negotiates it over the live TLS channel.
+    let mut framed = UntrustedControlStream::from_io(channel);
+    let hello = Envelope {
+        protocol_version: CONTROL_PROTOCOL_VERSION,
+        request_id: 7,
+        payload: Some(envelope::Payload::Hello(Hello {
+            supported_versions: vec![CONTROL_PROTOCOL_VERSION],
+            capabilities: vec![Capability::FrameDuration20Ms as i32],
+            display_name: "loopback sender".to_owned(),
+        })),
+    };
+    assert!(matches!(
+        framed.send(&hello)?,
+        sonimesh_network::UntrustedControlWrite::Complete
+    ));
 
     desktop.join().expect("desktop thread joins")?;
     Ok(())
