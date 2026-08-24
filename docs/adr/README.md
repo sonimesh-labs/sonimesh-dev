@@ -79,3 +79,6 @@ documented.
   provisional fixed-length transcript-proof wire frame inside the pinned TLS channel.
 - [ADR 0020: Authenticated control-plane transport boundary](./0020-authenticated-control-transport.md) —
   provisional type-state wrapper that unlocks bounded control framing only after the pairing proof exchange.
+- [ADR 0021: Production TLS provider selection for pairing](./0021-production-tls-provider.md) —
+  provisional Rustls(`ring`) on the desktop and explicit Conscrypt on Android,
+  pending cross-platform interoperability evidence.

@@ -368,8 +368,10 @@ jitter, and output-backend ADRs using measured 10/20 ms and device results.
   hello negotiation, the coordinator transport token, a fresh allocator
   identity, and a completed start. What remains open is a production TLS
   provider behind the same wrapper (the Windows spike binary proves the
-  live-exporter exchange on one host), an Android runtime provider, and
-  discovery.
+  live-exporter exchange on one host; [ADR 0021](./adr/0021-production-tls-provider.md)
+  now names Rustls(`ring`) and explicit Conscrypt as the provisional
+  selection, pending cross-platform interoperability evidence), an Android
+  runtime provider, and discovery.
 - Windows output backend selection, physical device/power lifecycle evidence,
   and latency qualification. The independent direct-WASAPI prototype and
   controlled same-host callback comparison exist, but do not settle a backend;
