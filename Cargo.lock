@@ -1301,7 +1301,11 @@ version = "0.1.0"
 name = "sonimesh-network"
 version = "0.1.0"
 dependencies = [
+ "rcgen",
+ "rustls",
  "sonimesh-protocol",
+ "x509-parser",
+ "zeroize",
 ]
 
 [[package]]
@@ -1836,6 +1840,7 @@ dependencies = [
  "lazy_static",
  "nom",
  "oid-registry",
+ "ring",
  "rusticata-macros",
  "thiserror 2.0.20",
  "time",

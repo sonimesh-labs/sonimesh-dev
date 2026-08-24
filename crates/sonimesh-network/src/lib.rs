@@ -1,6 +1,7 @@
 //! Network-domain boundaries for SoniMesh.
 
 mod authenticated_control_stream;
+mod desktop_tls;
 mod ingress;
 mod media_session_sender;
 mod protected_ingress;
@@ -15,6 +16,9 @@ mod untrusted_control_stream;
 pub use authenticated_control_stream::{
     AuthenticatedControlError, AuthenticatedControlHandshake, AuthenticatedControlStream,
     VerifiedPeerProof, binding_for_channel,
+};
+pub use desktop_tls::{
+    DesktopTlsError, accept_pinned_server, client_config, connect_pinned_client, server_config,
 };
 pub use ingress::{Authenticator, IngressError, MediaIngress, ReceivedFrame, StreamIdentity};
 pub use media_session_sender::{
