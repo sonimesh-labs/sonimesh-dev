@@ -2,6 +2,7 @@
 
 mod arrival_clock;
 mod channel_mapped_render_source;
+mod control_listen;
 mod control_snapshot;
 mod control_stream;
 mod control_to_mixer;
@@ -31,6 +32,9 @@ mod udp_receiver_pipeline;
 
 pub use arrival_clock::monotonic_tick_source;
 pub use channel_mapped_render_source::{ChannelMappedRenderSource, ChannelMappedRenderSourceError};
+pub use control_listen::{
+    ControlListenError, InvitationInputs, TrustedControlChannel, accept_pairing_connection,
+};
 pub use control_snapshot::{
     DesktopControlSnapshot, OutputSnapshot, OutputSnapshotSource, PairingSnapshotState,
 };

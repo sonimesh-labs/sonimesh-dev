@@ -18,7 +18,8 @@ pub use authenticated_control_stream::{
     VerifiedPeerProof, binding_for_channel,
 };
 pub use desktop_tls::{
-    DesktopTlsError, accept_pinned_server, client_config, connect_pinned_client, server_config,
+    DesktopTlsError, PinnedClientChannel, PinnedServerChannel, accept_pinned_server, client_config,
+    connect_pinned_client, server_config,
 };
 pub use ingress::{Authenticator, IngressError, MediaIngress, ReceivedFrame, StreamIdentity};
 pub use media_session_sender::{
@@ -26,6 +27,7 @@ pub use media_session_sender::{
 };
 pub use protected_ingress::{ProtectedIngressError, ProtectedMediaIngress};
 pub use protocol_authenticator::ProtocolAuthenticator;
+pub use rustls::ServerConfig;
 pub use source_endpoint_pin::{SourceEndpointAdmissionError, SourceEndpointPin};
 pub use udp_receiver::{ReceivedDatagram, UdpMediaReceiver, UdpReceiveError};
 pub use udp_sender::{UdpMediaSender, UdpSendError};
