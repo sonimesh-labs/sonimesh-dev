@@ -99,6 +99,14 @@ inputs remain zeroized/redacted per ADR 0008 logging rules.
   `cargo test -p windows-tls-provider-prototype`.
 - Android: device result dated 2026-07-20 on vivo V2309A / Android 15 with the
   declared Conscrypt and Keystore behavior.
+- The desktop selection is implemented as
+  `sonimesh-network::desktop_tls` (pinned client verifier, TLS 1.3-only
+  server config, exporter extraction into zeroized storage). Loopback
+  integration tests prove a real pinned handshake exports equal bytes on
+  both sides, an altered SPKI fails closed, and the trusted channel drives
+  the full pairing composition through hello negotiation in the
+  `sonimesh-app` control-listen suite. These are same-host Rustls results;
+  they do not measure cross-platform behavior.
 - Cross-platform interoperability (Android Conscrypt ↔ Windows Rustls over a
   real network socket with the real exporter feeding both transcript bindings)
   has **not** been measured yet; this ADR stays Provisional until that

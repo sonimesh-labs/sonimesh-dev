@@ -364,14 +364,19 @@ jitter, and output-backend ADRs using measured 10/20 ms and device results.
   session, and the untrusted TCP framing reader still cannot authorize or
   supply one by itself. The ADR 0020 type-state wrapper now unlocks bounded
   control framing only after a verified pairing proof exchange over the
-  pinned channel, and the loopback integration test drives that framing into
+  pinned channel, and loopback integration tests drive that framing into
   hello negotiation, the coordinator transport token, a fresh allocator
-  identity, and a completed start. What remains open is a production TLS
-  provider behind the same wrapper (the Windows spike binary proves the
-  live-exporter exchange on one host; [ADR 0021](./adr/0021-production-tls-provider.md)
-  now names Rustls(`ring`) and explicit Conscrypt as the provisional
-  selection, pending cross-platform interoperability evidence), an Android
-  runtime provider, and discovery.
+  identity, and a completed start. The desktop production provider now
+  exists behind [ADR 0021](./adr/0021-production-tls-provider.md):
+  `sonimesh-network::desktop_tls` establishes pinned Rustls(`ring`) TLS 1.3
+  channels, an application-domain listener accepts one invitation-gated
+  connection per call, verifies the peer proof through the real pairing
+  owner over the live exporter, writes the reply frame back, and the
+  trusted channel negotiates hello through the coordinator in a loopback
+  test. What remains open is cross-platform interoperability (Android
+  Conscrypt against this desktop stack; ADR 0021 stays Provisional until
+  that measurement exists), an Android runtime provider wiring, discovery,
+  and any concurrent-accept server loop.
 - Windows output backend selection, physical device/power lifecycle evidence,
   and latency qualification. The independent direct-WASAPI prototype and
   controlled same-host callback comparison exist, but do not settle a backend;
