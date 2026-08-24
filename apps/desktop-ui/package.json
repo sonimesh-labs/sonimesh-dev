@@ -10,8 +10,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@lucide/vue": "1.24.0",
-    "vue": "3.5.40"
+    "@lucide/vue": "1.33.0",
+    "vue": "3.5.41"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "6.0.8",
