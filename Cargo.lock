@@ -1274,11 +1274,14 @@ checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
 name = "sonimesh-app"
 version = "0.1.0"
 dependencies = [
+ "rcgen",
+ "rustls",
  "sonimesh-audio",
  "sonimesh-diagnostics",
  "sonimesh-network",
  "sonimesh-platform",
  "sonimesh-protocol",
+ "zeroize",
 ]
 
 [[package]]

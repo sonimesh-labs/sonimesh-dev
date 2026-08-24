@@ -17,12 +17,24 @@ use rustls::pki_types::{
     CertificateDer, PrivateKeyDer, ServerName, SubjectPublicKeyInfoDer, UnixTime,
 };
 use rustls::{
-    ClientConfig, ClientConnection, DigitallySignedStruct, Error, ProtocolVersion, ServerConfig,
-    ServerConnection, version,
+    ClientConfig, ClientConnection, ConnectionCommon, DigitallySignedStruct, Error,
+    ProtocolVersion, ServerConfig, ServerConnection, StreamOwned, version,
 };
 use zeroize::Zeroizing;
 
 use sonimesh_protocol::{PAIRING_TLS_EXPORTER_LABEL, PAIRING_TLS_EXPORTER_LEN};
+
+/// Drives one channel's TLS handshake to completion over its socket.
+macro_rules! drive_handshake {
+    ($channel:expr) => {
+        while $channel.conn.is_handshaking() {
+            $channel
+                .conn
+                .complete_io(&mut $channel.sock)
+                .map_err(DesktopTlsError::Io)?;
+        }
+    };
+}
 
 /// Failure while establishing or using a pinned desktop TLS channel.
 #[derive(Debug)]
@@ -199,76 +211,120 @@ pub fn server_config(
         .map_err(DesktopTlsError::Configuration)
 }
 
-/// Completes the client role of one pinned connection over `stream`.
+/// A completed pinned TLS channel usable as a plain `Read + Write` stream.
+///
+/// Wrapping `rustls::StreamOwned` keeps the TLS state machine and the socket
+/// together so the caller can drive proof frames through the same channel
+/// the exporter came from.
+pub type PinnedClientChannel = rustls::StreamOwned<ClientConnection, std::net::TcpStream>;
+
+/// Server-side counterpart of [`PinnedClientChannel`].
+pub type PinnedServerChannel = rustls::StreamOwned<ServerConnection, std::net::TcpStream>;
+
+/// Completes the client role of one pinned connection over a TCP stream.
 ///
 /// Drives the handshake to completion, requires TLS 1.3, extracts exactly
 /// [`PAIRING_TLS_EXPORTER_LEN`] bytes with the pairing label and context,
-/// and returns the connection plus the zeroized exporter for
-/// [`AuthenticatedControlHandshake`](crate::AuthenticatedControlHandshake).
+/// and returns the readable/writable channel plus the zeroized exporter.
+/// The channel feeds
+/// [`AuthenticatedControlHandshake`](crate::AuthenticatedControlHandshake)
+/// directly.
 ///
 /// # Errors
 ///
 /// Returns the matching [`DesktopTlsError`] variant for every failure shape:
 /// invalid server name, socket error, handshake rejection (including a wrong
 /// pin), non-TLS 1.3 negotiation, or exporter failure.
-pub fn connect_pinned_client<S: std::io::Read + std::io::Write>(
+pub fn connect_pinned_client(
     config: ClientConfig,
     server_name: &str,
     context: &[u8; 16],
-    mut stream: S,
-) -> Result<(ClientConnection, Zeroizing<[u8; PAIRING_TLS_EXPORTER_LEN]>), DesktopTlsError> {
+    stream: std::net::TcpStream,
+) -> Result<
+    (
+        PinnedClientChannel,
+        Zeroizing<[u8; PAIRING_TLS_EXPORTER_LEN]>,
+    ),
+    DesktopTlsError,
+> {
     let name = ServerName::try_from(server_name.to_owned())
         .map_err(|_| DesktopTlsError::InvalidServerName)?
         .to_owned();
-    let mut connection =
+    let connection =
         ClientConnection::new(Arc::new(config), name).map_err(DesktopTlsError::Configuration)?;
-    while connection.is_handshaking() {
-        connection
-            .complete_io(&mut stream)
-            .map_err(|error: std::io::Error| {
-                DesktopTlsError::Handshake(rustls::Error::General(error.to_string()))
-            })?;
-    }
-    confirm_tls13(connection.protocol_version())?;
-    let mut exporter = Zeroizing::new([0_u8; PAIRING_TLS_EXPORTER_LEN]);
-    connection
-        .export_keying_material(
-            exporter.as_mut(),
-            PAIRING_TLS_EXPORTER_LABEL,
-            Some(context.as_slice()),
-        )
-        .map_err(|_| DesktopTlsError::NotTls13)?;
-    Ok((connection, exporter))
+    let mut channel = StreamOwned::new(connection, stream);
+    drive_handshake!(channel);
+    confirm_tls13(channel.conn.protocol_version())?;
+    let exporter = extract_exporter(&channel.conn, context)?;
+    Ok((channel, exporter))
 }
 
-/// Completes the server role of one pinned connection over `stream`.
+/// Completes the server role of one pinned connection over a TCP stream.
 ///
 /// # Errors
 ///
 /// Returns the matching [`DesktopTlsError`] variant for every failure shape.
-pub fn accept_pinned_server<S: std::io::Read + std::io::Write>(
+pub fn accept_pinned_server(
     config: Arc<ServerConfig>,
     context: &[u8; 16],
-    mut stream: S,
-) -> Result<(ServerConnection, Zeroizing<[u8; PAIRING_TLS_EXPORTER_LEN]>), DesktopTlsError> {
-    let mut connection = ServerConnection::new(config).map_err(DesktopTlsError::Configuration)?;
-    while connection.is_handshaking() {
-        connection
-            .complete_io(&mut stream)
-            .map_err(|error: std::io::Error| {
-                DesktopTlsError::Handshake(rustls::Error::General(error.to_string()))
-            })?;
-    }
-    confirm_tls13(connection.protocol_version())?;
+    stream: std::net::TcpStream,
+) -> Result<
+    (
+        PinnedServerChannel,
+        Zeroizing<[u8; PAIRING_TLS_EXPORTER_LEN]>,
+    ),
+    DesktopTlsError,
+> {
+    let connection = ServerConnection::new(config).map_err(DesktopTlsError::Configuration)?;
+    let mut channel = StreamOwned::new(connection, stream);
+    drive_handshake!(channel);
+    confirm_tls13(channel.conn.protocol_version())?;
+    let exporter = extract_exporter(&channel.conn, context)?;
+    Ok((channel, exporter))
+}
+
+fn extract_exporter<C>(
+    connection: &C,
+    context: &[u8; 16],
+) -> Result<Zeroizing<[u8; PAIRING_TLS_EXPORTER_LEN]>, DesktopTlsError>
+where
+    C: ExportPairingMaterial,
+{
     let mut exporter = Zeroizing::new([0_u8; PAIRING_TLS_EXPORTER_LEN]);
     connection
-        .export_keying_material(
-            exporter.as_mut(),
-            PAIRING_TLS_EXPORTER_LABEL,
-            Some(context.as_slice()),
-        )
+        .export_pairing_material(exporter.as_mut(), Some(context.as_slice()))
         .map_err(|_| DesktopTlsError::NotTls13)?;
-    Ok((connection, exporter))
+    Ok(exporter)
+}
+
+trait ExportPairingMaterial {
+    fn export_pairing_material(
+        &self,
+        output: &mut [u8],
+        context: Option<&[u8]>,
+    ) -> Result<(), rustls::Error>;
+}
+
+impl ExportPairingMaterial for ClientConnection {
+    fn export_pairing_material(
+        &self,
+        output: &mut [u8],
+        context: Option<&[u8]>,
+    ) -> Result<(), rustls::Error> {
+        ConnectionCommon::export_keying_material(self, output, PAIRING_TLS_EXPORTER_LABEL, context)
+            .map(|_| ())
+    }
+}
+
+impl ExportPairingMaterial for ServerConnection {
+    fn export_pairing_material(
+        &self,
+        output: &mut [u8],
+        context: Option<&[u8]>,
+    ) -> Result<(), rustls::Error> {
+        ConnectionCommon::export_keying_material(self, output, PAIRING_TLS_EXPORTER_LABEL, context)
+            .map(|_| ())
+    }
 }
 
 fn confirm_tls13(negotiated: Option<ProtocolVersion>) -> Result<(), DesktopTlsError> {
