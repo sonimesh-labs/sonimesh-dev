@@ -42,11 +42,17 @@
       "service_lost_callback": "observed",
       "candidate_trusted": false,
       "result": "passed"
+    },
+    "candidate_ledger_model": {
+      "lost_removes_candidate": true,
+      "unknown_loss_is_noop": true,
+      "fixed_bound_eviction": true,
+      "result": "passed"
     }
   },
   "instrumentation": {
     "runner": "AndroidJUnitRunner",
-    "tests_in_class": 5,
+    "tests_in_class": 7,
     "result": "ok"
   },
   "limitations": [

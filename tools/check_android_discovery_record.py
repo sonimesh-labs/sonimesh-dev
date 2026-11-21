@@ -118,6 +118,7 @@ def validate_record(record: Any) -> None:
             "picker_without_broad_permission",
             "denied_permission_probe",
             "local_service_with_broad_permission",
+            "candidate_ledger_model",
         },
     )
     request_shape = require_object(
@@ -162,6 +163,19 @@ def validate_record(record: Any) -> None:
     if local["candidate_trusted"] is not False or local["result"] != "passed":
         raise ValueError("local service candidate must remain untrusted")
 
+    ledger = require_object(
+        observations["candidate_ledger_model"],
+        "observations.candidate_ledger_model",
+        {"lost_removes_candidate", "unknown_loss_is_noop", "fixed_bound_eviction", "result"},
+    )
+    if ledger != {
+        "lost_removes_candidate": True,
+        "unknown_loss_is_noop": True,
+        "fixed_bound_eviction": True,
+        "result": "passed",
+    }:
+        raise ValueError("candidate ledger model must pass every bounded stale-candidate rule")
+
     instrumentation = require_object(
         root["instrumentation"], "instrumentation", {"runner", "tests_in_class", "result"}
     )
@@ -193,8 +207,9 @@ class DiscoveryRecordTests(unittest.TestCase):
                 "picker_without_broad_permission": {"callback_outcome": "stopped", "terminal_callback": True, "result": "passed"},
                 "denied_permission_probe": {"permission_state": "denied", "outcome": "callback_failed", "error_code": 7, "service_found_callback": "not_observed", "result": "passed"},
                 "local_service_with_broad_permission": {"registration_callback": "observed", "service_found_callback": "observed", "service_lost_callback": "observed", "candidate_trusted": False, "result": "passed"},
+                "candidate_ledger_model": {"lost_removes_candidate": True, "unknown_loss_is_noop": True, "fixed_bound_eviction": True, "result": "passed"},
             },
-            "instrumentation": {"runner": "AndroidJUnitRunner", "tests_in_class": 5, "result": "ok"},
+            "instrumentation": {"runner": "AndroidJUnitRunner", "tests_in_class": 7, "result": "ok"},
             "limitations": ["emulator only"],
         }
 

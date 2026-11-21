@@ -14,6 +14,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
+import java.util.LinkedHashSet
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
@@ -29,6 +30,34 @@ import org.junit.runner.RunWith
  */
 @RunWith(AndroidJUnit4::class)
 class Android17DiscoveryProbeTest {
+    @Test
+    fun candidate_ledger_removes_lost_services_and_ignores_unknown_loss() {
+        val ledger = CandidateLedger(maxCandidates = 2)
+
+        assertTrue(ledger.recordFound("desktop-a"))
+        assertTrue(ledger.recordFound("desktop-b"))
+        assertTrue(ledger.contains("desktop-a"))
+        assertTrue(ledger.contains("desktop-b"))
+
+        assertTrue(ledger.recordLost("desktop-a"))
+        assertTrue(!ledger.contains("desktop-a"))
+        assertTrue(ledger.contains("desktop-b"))
+        assertTrue(!ledger.recordLost("desktop-a"))
+    }
+
+    @Test
+    fun candidate_ledger_evicts_oldest_entry_at_the_fixed_bound() {
+        val ledger = CandidateLedger(maxCandidates = 2)
+
+        assertTrue(ledger.recordFound("desktop-a"))
+        assertTrue(ledger.recordFound("desktop-b"))
+        assertTrue(ledger.recordFound("desktop-c"))
+
+        assertTrue(!ledger.contains("desktop-a"))
+        assertTrue(ledger.contains("desktop-b"))
+        assertTrue(ledger.contains("desktop-c"))
+    }
+
     @Test
     fun discovery_request_uses_the_picker_flag() {
         assumeTrue("Android 17 is required", Build.VERSION.SDK_INT >= 37)
@@ -318,6 +347,28 @@ class Android17DiscoveryProbeTest {
         data object Stopped : CallbackOutcome
         data object PermissionDenied : CallbackOutcome
         data class Failed(val code: Int) : CallbackOutcome
+    }
+
+    /** Bounded model for discovery candidates; it never carries trust state. */
+    private class CandidateLedger(private val maxCandidates: Int) {
+        private val candidates = LinkedHashSet<String>()
+
+        init {
+            require(maxCandidates > 0)
+        }
+
+        fun recordFound(name: String): Boolean {
+            if (name.isEmpty()) return false
+            if (!candidates.add(name)) return false
+            if (candidates.size > maxCandidates) {
+                candidates.iterator().next().let(candidates::remove)
+            }
+            return true
+        }
+
+        fun recordLost(name: String): Boolean = candidates.remove(name)
+
+        fun contains(name: String): Boolean = candidates.contains(name)
     }
 
     private companion object {

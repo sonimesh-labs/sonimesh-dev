@@ -46,3 +46,8 @@ JUnit assumption skip after cleanup; it is not treated as evidence that the
 platform supports the flow. A passing probe records callback behavior only.
 Service discovery remains unauthenticated, and no discovered address or name
 may establish trust.
+
+The test class also contains a bounded candidate-ledger model. Its unit tests
+pin the stale-candidate policy (loss removes the entry, unknown loss is a no-op,
+and insertion evicts the oldest entry at the fixed bound); this model is not
+cross-device networking evidence.
