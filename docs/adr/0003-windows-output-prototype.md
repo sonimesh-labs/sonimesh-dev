@@ -201,6 +201,11 @@ errors and zero oversized callback/render observations; CPAL observed a
 only and does not satisfy the lifecycle, power, Windows 11, or
 physical/acoustic latency requirements below.
 
+The same run repeated start/stop five times per backend at 250 ms per cycle. All
+cycles were healthy with zero capacity faults and stream errors; this is bounded
+recreation evidence and does not qualify physical removal, sleep/wake, or soak
+behavior.
+
 - enumerate the default and representative USB/Bluetooth output devices on the
   Windows 11 reference host;
 - record requested versus observed callback sizes, sample format, rate, and channel

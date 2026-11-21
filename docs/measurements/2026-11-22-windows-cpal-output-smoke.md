@@ -73,3 +73,20 @@ The runs do not select a release backend and do not establish callback latency,
 acoustic latency, device removal, default-role change, sleep/wake recovery,
 power behavior, or Windows 11 compatibility. Longer/lifecycle runs and physical
 latency measurements remain required by ADR 0003.
+
+## Repeated start/stop smoke
+
+The bounded five-cycle lifecycle commands were then run with 250 ms active time
+per cycle:
+
+```powershell
+cargo run -p sonimesh-platform --example output_lifecycle_smoke --features cpal-output
+cargo run -p windows-wasapi-prototype --bin wasapi_lifecycle_smoke
+```
+
+All ten cycles reported `health=Healthy`, zero oversized callbacks/renders, and
+zero stream errors. CPAL reported 24–25 callbacks per cycle with a 1,056-frame
+maximum; direct WASAPI reported 25–26 renders per cycle with a 480-frame maximum
+and a 1,056-frame priming buffer. This is bounded control-domain recreation
+evidence only; it does not cover physical removal, sleep/wake, or an extended
+soak.
