@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import unittest
 from datetime import datetime
@@ -15,6 +16,10 @@ from typing import Any
 CURRENT_SCHEMA_VERSION = 1
 MAX_ERROR_CODE = 255
 ALLOWED_PERMISSION_STATES = frozenset({"denied", "granted"})
+FORBIDDEN_IDENTIFIERS = (
+    re.compile(r"emulator-\d+", re.IGNORECASE),
+    re.compile(r"SoniMeshProbe-\d+", re.IGNORECASE),
+)
 
 
 def require_object(value: Any, label: str, keys: set[str]) -> dict[str, Any]:
@@ -191,6 +196,21 @@ def validate_record(record: Any) -> None:
         not isinstance(item, str) or not item.strip() for item in limitations
     ):
         raise ValueError("limitations must be a nonempty list of strings")
+    for value in iter_strings(root):
+        if any(pattern.search(value) for pattern in FORBIDDEN_IDENTIFIERS):
+            raise ValueError("record contains a stable device or random service identifier")
+
+
+def iter_strings(value: Any):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for key, child in value.items():
+            yield from iter_strings(key)
+            yield from iter_strings(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from iter_strings(child)
 
 
 class DiscoveryRecordTests(unittest.TestCase):
@@ -223,6 +243,11 @@ class DiscoveryRecordTests(unittest.TestCase):
 
     def test_rejects_trusted_candidate(self) -> None:
         self.record["observations"]["local_service_with_broad_permission"]["candidate_trusted"] = True
+        with self.assertRaises(ValueError):
+            validate_record(self.record)
+
+    def test_rejects_stable_or_random_identifiers(self) -> None:
+        self.record["limitations"] = ["captured on emulator-5554"]
         with self.assertRaises(ValueError):
             validate_record(self.record)
 
