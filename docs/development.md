@@ -259,6 +259,39 @@ and Keystore experiments live in the separate `:tls-provider-spike` test app.
 The guard does not qualify Android capture, native codec behavior, or indirect
 dependency reachability.
 
+## Cross-platform TLS lab probe
+
+The `interop-server` binary and `DesktopInteropTlsTest` are an opt-in lab
+experiment for ADR 0021. The server listens on `127.0.0.1:47610` by default,
+generates a fresh certificate, prints its public SPKI and waits at most 30
+seconds for one connection. Start it only when the test is ready:
+
+~~~powershell
+cargo run -p windows-tls-provider-prototype --bin interop-server
+~~~
+
+For an attached emulator, use `adb reverse tcp:47610 tcp:47610`, then run the
+instrumentation test by its fully qualified class name, supplying `desktopHost`
+as `127.0.0.1`, `desktopPort` as `47610`, and `spkiHex` as the server's printed
+SPKI. A direct emulator invocation is:
+
+~~~powershell
+adb reverse tcp:47610 tcp:47610
+adb shell am instrument -w `
+  -e desktopHost 127.0.0.1 `
+  -e desktopPort 47610 `
+  -e spkiHex <SPKI_HEX_FROM_SERVER> `
+  com.sonimesh.tlsproviderspike.test/androidx.test.runner.AndroidJUnitRunner
+~~~
+
+For a physical device the server requires an explicit reachable bind address
+and the client needs the corresponding host and port. Both the Android test and
+server must succeed. The fixed public lab secret provides no real peer
+authentication; never reuse this probe's inputs in a product session. Ordinary
+instrumentation runs skip the interop test when no arguments are supplied.
+An emulator/ADB run is not WLAN or physical-device evidence and does not close
+ADR 0021's cross-platform gate.
+
 ## Desktop UI checks
 
 ~~~powershell

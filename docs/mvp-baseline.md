@@ -1,7 +1,7 @@
 # MVP implementation baseline
 
 > Status: foundation implemented; platform feasibility remains open
-> Updated: 2026-08-25
+> Updated: 2026-11-22
 
 This baseline turns the architecture documents into a buildable core without
 claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
@@ -373,10 +373,10 @@ jitter, and output-backend ADRs using measured 10/20 ms and device results.
   connection per call, verifies the peer proof through the real pairing
   owner over the live exporter, writes the reply frame back, and the
   trusted channel negotiates hello through the coordinator in a loopback
-  test. What remains open is cross-platform interoperability (Android
-  Conscrypt against this desktop stack; ADR 0021 stays Provisional until
-  that measurement exists), an Android runtime provider wiring, discovery,
-  and any concurrent-accept server loop.
+  test. A 2026-11-22 emulator/ADB reverse-loopback run now records Conscrypt
+  against this desktop stack, but physical WLAN/OEM interoperability remains
+  open and ADR 0021 stays Provisional. Android runtime provider wiring,
+  discovery, and any concurrent-accept server loop remain open.
 - Windows output backend selection, physical device/power lifecycle evidence,
   and latency qualification. The independent direct-WASAPI prototype and
   controlled same-host callback comparison exist, but do not settle a backend;

@@ -14,6 +14,7 @@ runs. Read the environment and limitations in each record before generalizing.
 ## TLS and credential storage
 
 - [Android TLS protocol](./android-tls-provider-spike.md) and [2026-07-20 run](./2026-07-20-android-tls-provider-spike.md).
+- [Android to desktop TLS interoperability, 2026-11-22](./2026-11-22-android-rustls-tls-interoperability.md) — emulator/ADB reverse-loopback result; physical WLAN remains open.
 - [Windows TLS protocol](./windows-tls-provider-spike.md), [2026-07-20 run](./2026-07-20-windows-tls-provider-spike.md), and [2026-08-22 rerun](./2026-08-22-windows-tls-provider-spike.md).
 - [Windows credential-store protocol](./windows-credential-store-spike.md) and [2026-07-20 run](./2026-07-20-windows-credential-store-spike.md).
 - [ADR 0021](../adr/0021-production-tls-provider.md) tracks the provisional provider choice and cross-platform gate.

@@ -1,5 +1,6 @@
 [package]
 name = "windows-tls-provider-prototype"
+default-run = "windows-tls-provider-prototype"
 description = "Windows TLS 1.3 SPKI pin and exporter feasibility tool for SoniMesh"
 version.workspace = true
 edition.workspace = true

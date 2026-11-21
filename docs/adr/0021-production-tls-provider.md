@@ -93,12 +93,22 @@ inputs remain zeroized/redacted per ADR 0008 logging rules.
 
 ## Validation evidence
 
+- A separate cross-platform lab probe may use a fresh ephemeral desktop
+  certificate, a manually transferred public SPKI pin, and a fixed public test
+  pairing secret. Both peers derive and verify role-separated ADR 0008 proofs
+  from their local exporters; exporter and media-root bytes must not be sent or
+  logged. The listener defaults to loopback and accepts one connection. This
+  probe is not production pairing or identity storage.
 - Windows: spike result dated 2026-07-20 plus the 2026-08-22 rerun that adds
   the in-memory handshake-composition stage and the live-channel proof-frame
   exchange; `tools/windows-tls-provider-prototype` reproduces it locally via
   `cargo test -p windows-tls-provider-prototype`.
 - Android: device result dated 2026-07-20 on vivo V2309A / Android 15 with the
   declared Conscrypt and Keystore behavior.
+- Android emulator to desktop Rustls: [2026-11-22 result](../measurements/2026-11-22-android-rustls-tls-interoperability.md)
+  completed the pinned TLS 1.3 handshake and both role proofs over an ADB
+  reverse-loopback route. This is cross-implementation evidence, but not a
+  physical WLAN or OEM result.
 - The desktop selection is implemented as
   `sonimesh-network::desktop_tls` (pinned client verifier, TLS 1.3-only
   server config, exporter extraction into zeroized storage). Loopback
@@ -107,10 +117,10 @@ inputs remain zeroized/redacted per ADR 0008 logging rules.
   the full pairing composition through hello negotiation in the
   `sonimesh-app` control-listen suite. These are same-host Rustls results;
   they do not measure cross-platform behavior.
-- Cross-platform interoperability (Android Conscrypt ↔ Windows Rustls over a
-  real network socket with the real exporter feeding both transcript bindings)
-  has **not** been measured yet; this ADR stays Provisional until that
-  measurement record exists.
+- Cross-platform interoperability over a physical Android-to-Windows WLAN
+  socket, with the real exporter feeding both transcript bindings, has **not**
+  been measured yet. The emulator/ADB reverse-loopback result is insufficient
+  to promote this ADR beyond **Provisional**.
 - The ADR 0020 loopback integration test continues to prove the application
   path behind whichever provider supplies the channel.
 
