@@ -14,6 +14,7 @@
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::Arc;
+use std::time::Duration;
 
 use zeroize::Zeroizing;
 
@@ -25,6 +26,9 @@ use crate::{
     PairingHandshakeError, PairingHandshakeOutcome, PairingId, PairingInvitationController,
     PairingSource, ScannedProofAttempt, SessionState, verify_scanned_proof,
 };
+
+/// Bounds the TLS handshake, proof-frame read, and reply write for one invite.
+pub const DEFAULT_PAIRING_IO_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Failure while accepting and verifying one pinned pairing connection.
 #[derive(Debug)]
@@ -145,7 +149,39 @@ pub fn accept_pairing_connection(
     source: PairingSource,
     inputs: &InvitationInputs<'_>,
 ) -> Result<(TrustedControlChannel, sonimesh_protocol::SessionSecret), ControlListenError> {
+    accept_pairing_connection_with_timeout(
+        listener,
+        tls,
+        pairing,
+        session,
+        now_ms,
+        source,
+        inputs,
+        DEFAULT_PAIRING_IO_TIMEOUT,
+    )
+}
+
+/// Accepts one invitation-gated connection with an explicit socket deadline.
+///
+/// The deadline applies after the listener accepts a TCP peer. It bounds the
+/// TLS handshake, the fixed proof-frame read, and the reply write, so a peer
+/// cannot hold the invitation owner indefinitely by sending partial bytes.
+#[allow(clippy::too_many_arguments)]
+fn accept_pairing_connection_with_timeout(
+    listener: &TcpListener,
+    tls: Arc<TlsServerConfig>,
+    pairing: &mut PairingInvitationController<4>,
+    session: &mut SessionState,
+    now_ms: u64,
+    source: PairingSource,
+    inputs: &InvitationInputs<'_>,
+    io_timeout: Duration,
+) -> Result<(TrustedControlChannel, sonimesh_protocol::SessionSecret), ControlListenError> {
     let (stream, _) = listener.accept().map_err(ControlListenError::Socket)?;
+    stream
+        .set_read_timeout(Some(io_timeout))
+        .and_then(|()| stream.set_write_timeout(Some(io_timeout)))
+        .map_err(ControlListenError::Socket)?;
     let (mut channel, exporter) = accept_pinned_server(tls, &inputs.invitation.as_bytes(), stream)
         .map_err(ControlListenError::Tls)?;
 
@@ -190,6 +226,74 @@ pub fn accept_pairing_connection(
         .write_all(&reply_wire)
         .and_then(|()| channel.flush())
         .map_err(ControlListenError::ReplyWrite)?;
+    // The deadline protects only connection establishment and proof exchange;
+    // the authenticated control stream owns its idle policy separately.
+    channel
+        .sock
+        .set_read_timeout(None)
+        .and_then(|()| channel.sock.set_write_timeout(None))
+        .map_err(ControlListenError::ReplyWrite)?;
 
     Ok((TrustedControlChannel { channel, exporter }, media_root))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::{TcpListener, TcpStream};
+    use std::sync::Arc;
+    use std::thread;
+    use std::time::Duration;
+
+    use rcgen::generate_simple_self_signed;
+    use rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
+    use zeroize::{Zeroize, Zeroizing};
+
+    use super::{
+        ControlListenError, InvitationInputs, PairingId, PairingInvitationController,
+        PairingSource, SessionState, accept_pairing_connection_with_timeout,
+    };
+    use sonimesh_network::{DesktopTlsError, server_config};
+
+    #[test]
+    fn stalled_peer_times_out_before_proof_admission() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("listener binds");
+        let address = listener.local_addr().expect("listener address");
+        let certified_key =
+            generate_simple_self_signed(vec!["localhost".to_owned()]).expect("certificate");
+        let certificate = certified_key.cert.der().clone();
+        let mut private_key_der = Zeroizing::new(certified_key.key_pair.serialize_der());
+        let private_key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(private_key_der.to_vec()));
+        private_key_der.zeroize();
+        let tls = Arc::new(server_config(certificate, private_key).expect("server config"));
+
+        let server = thread::spawn(move || {
+            let mut pairing = PairingInvitationController::<4>::new();
+            let mut session = SessionState::IDLE;
+            let empty_payload = [];
+            let inputs = InvitationInputs {
+                invitation: PairingId::new([0x31; 16]),
+                pairing_secret: [0x32; 32],
+                scanned_payload: &empty_payload,
+            };
+            accept_pairing_connection_with_timeout(
+                &listener,
+                tls,
+                &mut pairing,
+                &mut session,
+                0,
+                PairingSource::new([0x33; 16]),
+                &inputs,
+                Duration::from_millis(100),
+            )
+        });
+
+        let client = TcpStream::connect(address).expect("client connects");
+        let result = server.join().expect("timeout worker does not panic");
+        drop(client);
+        assert!(matches!(
+            result,
+            Err(ControlListenError::Tls(DesktopTlsError::Io(error)))
+                if matches!(error.kind(), std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock)
+        ));
+    }
 }

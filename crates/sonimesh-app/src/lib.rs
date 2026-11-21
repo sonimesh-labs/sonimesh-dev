@@ -33,7 +33,8 @@ mod udp_receiver_pipeline;
 pub use arrival_clock::monotonic_tick_source;
 pub use channel_mapped_render_source::{ChannelMappedRenderSource, ChannelMappedRenderSourceError};
 pub use control_listen::{
-    ControlListenError, InvitationInputs, TrustedControlChannel, accept_pairing_connection,
+    ControlListenError, DEFAULT_PAIRING_IO_TIMEOUT, InvitationInputs, TrustedControlChannel,
+    accept_pairing_connection,
 };
 pub use control_snapshot::{
     DesktopControlSnapshot, OutputSnapshot, OutputSnapshotSource, PairingSnapshotState,

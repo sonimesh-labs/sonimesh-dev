@@ -36,6 +36,7 @@ const LAB_PAIRING_SECRET: [u8; 32] = [0xC9_u8; 32];
 type TestResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 #[test]
+#[allow(clippy::too_many_lines)] // one end-to-end authenticated listener scenario
 fn the_listener_completes_one_trusted_pairing_exchange() -> TestResult<()> {
     let listener = TcpListener::bind("127.0.0.1:0")?;
     let address = listener.local_addr()?;
@@ -94,6 +95,8 @@ fn the_listener_completes_one_trusted_pairing_exchange() -> TestResult<()> {
             }),
         )?;
         let (channel, _exporter) = trusted.into_parts();
+        assert_eq!(channel.sock.read_timeout()?, None);
+        assert_eq!(channel.sock.write_timeout()?, None);
 
         // Trust is already established; the framing boundary is the only
         // remaining wrapper before coordinator envelopes.

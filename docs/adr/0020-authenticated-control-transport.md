@@ -51,6 +51,12 @@ pairing owner. The media root from `VerifiedPeerProof` feeds the existing
 [`MediaSessionAllocator`](./0017-control-reconnect-fresh-media-session.md)
 boundary unchanged.
 
+The application-domain invitation listener applies a fixed read/write deadline
+after accepting a TCP peer. The default is 30 seconds and covers the TLS
+handshake, the one proof frame, and the reply write; the implementation keeps
+the shorter-deadline injection private to tests. The listener still accepts
+only one invitation-gated connection per call.
+
 ## Security implications
 
 The type-state split makes an unauthenticated control channel unrepresentable:
@@ -82,6 +88,9 @@ errors).
   completed start into Streaming.
 - The Windows TLS provider spike remains the live-channel evidence for the
   same exchange shape; this module adds the type-state boundary around it.
+- The invitation listener's timeout test keeps a peer that sends no ClientHello
+  from occupying the pairing owner indefinitely; the deadline also covers the
+  fixed proof-frame read and reply write.
 - No wire-schema change: envelopes and proof frames keep their published
   layouts and cross-language vectors.
 

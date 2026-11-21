@@ -370,7 +370,8 @@ jitter, and output-backend ADRs using measured 10/20 ms and device results.
   exists behind [ADR 0021](./adr/0021-production-tls-provider.md):
   `sonimesh-network::desktop_tls` establishes pinned Rustls(`ring`) TLS 1.3
   channels, an application-domain listener accepts one invitation-gated
-  connection per call, verifies the peer proof through the real pairing
+  connection per call with a fixed 30-second post-accept I/O deadline, verifies
+  the peer proof through the real pairing
   owner over the live exporter, writes the reply frame back, and the
   trusted channel negotiates hello through the coordinator in a loopback
   test. A 2026-11-22 emulator/ADB reverse-loopback run now records Conscrypt
