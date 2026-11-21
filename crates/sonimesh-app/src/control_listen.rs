@@ -12,7 +12,7 @@
 //! lifecycle itself.
 
 use std::io::{Read, Write};
-use std::net::TcpListener;
+use std::net::{TcpListener, TcpStream, ToSocketAddrs};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -29,6 +29,65 @@ use crate::{
 
 /// Bounds the TLS handshake, proof-frame read, and reply write for one invite.
 pub const DEFAULT_PAIRING_IO_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Non-blocking listener handle for a caller-owned pairing accept loop.
+///
+/// The handle only accepts TCP peers. The caller decides when to run the
+/// invitation-gated TLS/proof exchange by passing an accepted stream to
+/// [`accept_pairing_stream`]. Pairing state remains caller-owned and therefore
+/// stays serialized at the handshake boundary.
+pub struct PairingListener {
+    listener: TcpListener,
+}
+
+impl PairingListener {
+    /// Binds a non-blocking pairing listener.
+    ///
+    /// # Errors
+    ///
+    /// Returns the underlying socket error when binding or configuring the
+    /// listener fails.
+    pub fn bind(address: impl ToSocketAddrs) -> Result<Self, std::io::Error> {
+        Self::from_listener(TcpListener::bind(address)?)
+    }
+
+    /// Converts an existing listener to the non-blocking polling boundary.
+    ///
+    /// # Errors
+    ///
+    /// Returns the underlying socket error when enabling non-blocking mode
+    /// fails.
+    pub fn from_listener(listener: TcpListener) -> Result<Self, std::io::Error> {
+        listener.set_nonblocking(true)?;
+        Ok(Self { listener })
+    }
+
+    /// Returns the bound endpoint.
+    ///
+    /// # Errors
+    ///
+    /// Returns the underlying socket error when the local endpoint cannot be
+    /// queried.
+    pub fn local_addr(&self) -> Result<std::net::SocketAddr, std::io::Error> {
+        self.listener.local_addr()
+    }
+
+    /// Accepts one peer without waiting for a connection.
+    ///
+    /// Returns `Ok(None)` when the listener has no queued peer yet.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ControlListenError::Socket`] for an accept error other than
+    /// `WouldBlock`.
+    pub fn try_accept(&self) -> Result<Option<TcpStream>, ControlListenError> {
+        match self.listener.accept() {
+            Ok((stream, _)) => Ok(Some(stream)),
+            Err(error) if matches!(error.kind(), std::io::ErrorKind::WouldBlock) => Ok(None),
+            Err(error) => Err(ControlListenError::Socket(error)),
+        }
+    }
+}
 
 /// Failure while accepting and verifying one pinned pairing connection.
 #[derive(Debug)]
@@ -149,8 +208,9 @@ pub fn accept_pairing_connection(
     source: PairingSource,
     inputs: &InvitationInputs<'_>,
 ) -> Result<(TrustedControlChannel, sonimesh_protocol::SessionSecret), ControlListenError> {
-    accept_pairing_connection_with_timeout(
-        listener,
+    let (stream, _) = listener.accept().map_err(ControlListenError::Socket)?;
+    accept_pairing_stream_with_timeout(
+        stream,
         tls,
         pairing,
         session,
@@ -161,14 +221,40 @@ pub fn accept_pairing_connection(
     )
 }
 
-/// Accepts one invitation-gated connection with an explicit socket deadline.
+/// Completes one invitation-gated exchange on an already accepted TCP stream.
 ///
-/// The deadline applies after the listener accepts a TCP peer. It bounds the
-/// TLS handshake, the fixed proof-frame read, and the reply write, so a peer
-/// cannot hold the invitation owner indefinitely by sending partial bytes.
+/// This is the handshake half of [`PairingListener`]. It is separate from
+/// accepting so a caller can poll or schedule socket admission without making
+/// the pairing owner or the accept loop concurrent.
+///
+/// # Errors
+///
+/// Returns [`ControlListenError`] when the pinned TLS handshake, proof-frame
+/// exchange, invitation admission, or reply write fails.
+pub fn accept_pairing_stream(
+    stream: TcpStream,
+    tls: Arc<TlsServerConfig>,
+    pairing: &mut PairingInvitationController<4>,
+    session: &mut SessionState,
+    now_ms: u64,
+    source: PairingSource,
+    inputs: &InvitationInputs<'_>,
+) -> Result<(TrustedControlChannel, sonimesh_protocol::SessionSecret), ControlListenError> {
+    accept_pairing_stream_with_timeout(
+        stream,
+        tls,
+        pairing,
+        session,
+        now_ms,
+        source,
+        inputs,
+        DEFAULT_PAIRING_IO_TIMEOUT,
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
-fn accept_pairing_connection_with_timeout(
-    listener: &TcpListener,
+fn accept_pairing_stream_with_timeout(
+    stream: TcpStream,
     tls: Arc<TlsServerConfig>,
     pairing: &mut PairingInvitationController<4>,
     session: &mut SessionState,
@@ -177,9 +263,11 @@ fn accept_pairing_connection_with_timeout(
     inputs: &InvitationInputs<'_>,
     io_timeout: Duration,
 ) -> Result<(TrustedControlChannel, sonimesh_protocol::SessionSecret), ControlListenError> {
-    let (stream, _) = listener.accept().map_err(ControlListenError::Socket)?;
+    // Accepted sockets may inherit the listener's non-blocking mode on some
+    // platforms; normalize the handshake stream before applying deadlines.
     stream
-        .set_read_timeout(Some(io_timeout))
+        .set_nonblocking(false)
+        .and_then(|()| stream.set_read_timeout(Some(io_timeout)))
         .and_then(|()| stream.set_write_timeout(Some(io_timeout)))
         .map_err(ControlListenError::Socket)?;
     let (mut channel, exporter) = accept_pinned_server(tls, &inputs.invitation.as_bytes(), stream)
@@ -250,9 +338,34 @@ mod tests {
 
     use super::{
         ControlListenError, InvitationInputs, PairingId, PairingInvitationController,
-        PairingSource, SessionState, accept_pairing_connection_with_timeout,
+        PairingListener, PairingSource, SessionState, accept_pairing_stream_with_timeout,
     };
     use sonimesh_network::{DesktopTlsError, server_config};
+
+    #[test]
+    fn nonblocking_pairing_listener_reports_empty_then_accepts() {
+        let listener = PairingListener::bind("127.0.0.1:0").expect("listener binds");
+        assert!(
+            listener
+                .try_accept()
+                .expect("empty poll succeeds")
+                .is_none()
+        );
+
+        let client = TcpStream::connect(listener.local_addr().expect("listener address"))
+            .expect("client connects");
+        let mut accepted = None;
+        for _ in 0..1_000 {
+            if let Some(stream) = listener.try_accept().expect("accept poll succeeds") {
+                accepted = Some(stream);
+                break;
+            }
+            thread::yield_now();
+        }
+
+        assert!(accepted.is_some(), "queued peer was not accepted");
+        drop(client);
+    }
 
     #[test]
     fn stalled_peer_times_out_before_proof_admission() {
@@ -275,8 +388,9 @@ mod tests {
                 pairing_secret: [0x32; 32],
                 scanned_payload: &empty_payload,
             };
-            accept_pairing_connection_with_timeout(
-                &listener,
+            let (stream, _) = listener.accept().expect("peer connects");
+            accept_pairing_stream_with_timeout(
+                stream,
                 tls,
                 &mut pairing,
                 &mut session,

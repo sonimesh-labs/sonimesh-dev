@@ -51,11 +51,18 @@ pairing owner. The media root from `VerifiedPeerProof` feeds the existing
 [`MediaSessionAllocator`](./0017-control-reconnect-fresh-media-session.md)
 boundary unchanged.
 
-The application-domain invitation listener applies a fixed read/write deadline
-after accepting a TCP peer. The default is 30 seconds and covers the TLS
-handshake, the one proof frame, and the reply write; the implementation keeps
-the shorter-deadline injection private to tests. The listener still accepts
-only one invitation-gated connection per call.
+The application-domain invitation listener exposes two explicit boundaries:
+`PairingListener` owns a non-blocking `TcpListener` and lets a caller poll one
+queued peer with `try_accept`, while `accept_pairing_stream` performs the
+invitation-gated exchange on an already accepted stream. The split lets a
+caller own polling and scheduling without making the mutable pairing owner or
+session state concurrent. It is an admission boundary, not a concurrent
+pairing server loop. The exchange applies a fixed read/write deadline after
+accepting a TCP peer. The default is 30 seconds and covers the TLS handshake,
+the one proof frame, and the reply write; the implementation keeps the
+shorter-deadline injection private to tests. The blocking
+`accept_pairing_connection` compatibility helper remains available for one
+connection per call.
 
 ## Security implications
 
@@ -91,6 +98,9 @@ errors).
 - The invitation listener's timeout test keeps a peer that sends no ClientHello
   from occupying the pairing owner indefinitely; the deadline also covers the
   fixed proof-frame read and reply write.
+- The non-blocking listener unit test verifies an empty poll followed by
+  loopback admission, while the stream-level timeout test verifies that the
+  accepted-stream boundary preserves the serialized handshake owner.
 - No wire-schema change: envelopes and proof frames keep their published
   layouts and cross-language vectors.
 
