@@ -340,7 +340,7 @@ mod tests {
         ControlListenError, InvitationInputs, PairingId, PairingInvitationController,
         PairingListener, PairingSource, SessionState, accept_pairing_stream_with_timeout,
     };
-    use sonimesh_network::{DesktopTlsError, server_config};
+    use sonimesh_network::{DesktopTlsError, client_config, connect_pinned_client, server_config};
 
     #[test]
     fn nonblocking_pairing_listener_reports_empty_then_accepts() {
@@ -407,6 +407,58 @@ mod tests {
         assert!(matches!(
             result,
             Err(ControlListenError::Tls(DesktopTlsError::Io(error)))
+                if matches!(error.kind(), std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock)
+        ));
+    }
+
+    #[test]
+    fn authenticated_peer_times_out_before_sending_the_proof_frame() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("listener binds");
+        let address = listener.local_addr().expect("listener address");
+        let invitation = PairingId::new([0x41; 16]);
+        let certified_key =
+            generate_simple_self_signed(vec!["localhost".to_owned()]).expect("certificate");
+        let certificate = certified_key.cert.der().clone();
+        let spki_pin = certified_key.key_pair.public_key_der();
+        let mut private_key_der = Zeroizing::new(certified_key.key_pair.serialize_der());
+        let private_key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(private_key_der.to_vec()));
+        private_key_der.zeroize();
+        let tls = Arc::new(server_config(certificate, private_key).expect("server config"));
+
+        let server = thread::spawn(move || {
+            let mut pairing = PairingInvitationController::<4>::new();
+            let mut session = SessionState::IDLE;
+            let empty_payload = [];
+            let inputs = InvitationInputs {
+                invitation,
+                pairing_secret: [0x42; 32],
+                scanned_payload: &empty_payload,
+            };
+            let (stream, _) = listener.accept().expect("peer connects");
+            accept_pairing_stream_with_timeout(
+                stream,
+                tls,
+                &mut pairing,
+                &mut session,
+                0,
+                PairingSource::new([0x43; 16]),
+                &inputs,
+                Duration::from_millis(100),
+            )
+        });
+
+        let config = client_config(spki_pin.clone()).expect("client config");
+        let (_channel, _exporter) = connect_pinned_client(
+            config,
+            "localhost",
+            &invitation.as_bytes(),
+            TcpStream::connect(address).expect("client connects"),
+        )
+        .expect("TLS handshake completes");
+        let result = server.join().expect("timeout worker does not panic");
+        assert!(matches!(
+            result,
+            Err(ControlListenError::PeerFrameIo(error))
                 if matches!(error.kind(), std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock)
         ));
     }

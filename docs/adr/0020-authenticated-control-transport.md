@@ -98,6 +98,9 @@ errors).
 - The invitation listener's timeout test keeps a peer that sends no ClientHello
   from occupying the pairing owner indefinitely; the deadline also covers the
   fixed proof-frame read and reply write.
+- A second timeout test completes the pinned TLS handshake, then withholds the
+  proof frame; the same deadline expires during the proof read before invitation
+  admission or session mutation.
 - The non-blocking listener unit test verifies an empty poll followed by
   loopback admission, while the stream-level timeout test verifies that the
   accepted-stream boundary preserves the serialized handshake owner.
