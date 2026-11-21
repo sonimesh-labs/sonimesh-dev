@@ -27,6 +27,8 @@ const TARGET_NONCE_BYTES: usize = 16;
 const TARGET_PREFIX: &str = "SoniMesh/credential-spike/";
 #[cfg(windows)]
 const HEX: &[u8; 16] = b"0123456789abcdef";
+#[cfg(windows)]
+const MAX_CREDENTIAL_BLOB_BYTES: usize = 64 * 1024;
 
 #[cfg(windows)]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -88,6 +90,7 @@ fn nul_terminated_utf16(value: &str) -> Vec<u16> {
 
 #[cfg(windows)]
 fn write_credential(target: &[u16], blob: &mut [u8]) -> Result<(), Box<dyn std::error::Error>> {
+    let _ = checked_blob_size(blob.len())?;
     let blob_size = u32::try_from(blob.len())?;
     let credential = CREDENTIALW {
         Type: CRED_TYPE_GENERIC,
@@ -109,12 +112,25 @@ fn read_credential(target: &[u16]) -> Result<Vec<u8>, Box<dyn std::error::Error>
     if credential.CredentialBlob.is_null() {
         return Err(std::io::Error::other("Credential Manager returned a null blob").into());
     }
-    let byte_count = usize::try_from(credential.CredentialBlobSize)?;
+    let byte_count = checked_blob_size(credential.CredentialBlobSize)?;
     // CredReadW owns a valid blob for CredentialBlobSize bytes until CredFree.
     let bytes =
         unsafe { std::slice::from_raw_parts(credential.CredentialBlob.cast_const(), byte_count) }
             .to_vec();
     Ok(bytes)
+}
+
+#[cfg(windows)]
+fn checked_blob_size(size: impl TryInto<usize>) -> Result<usize, std::io::Error> {
+    let size = size
+        .try_into()
+        .map_err(|_| std::io::Error::other("credential blob size does not fit usize"))?;
+    if size > MAX_CREDENTIAL_BLOB_BYTES {
+        return Err(std::io::Error::other(
+            "credential blob exceeds the prototype bound",
+        ));
+    }
+    Ok(size)
 }
 
 #[cfg(windows)]
@@ -251,6 +267,15 @@ mod tests {
     fn not_found_mapping_uses_the_windows_error_code() {
         let missing = std::io::Error::from_raw_os_error(error_code(ERROR_NOT_FOUND));
         assert!(is_not_found(&missing));
+    }
+
+    #[test]
+    fn credential_blob_bound_accepts_the_limit_and_rejects_larger_values() {
+        assert_eq!(
+            checked_blob_size(MAX_CREDENTIAL_BLOB_BYTES).unwrap(),
+            MAX_CREDENTIAL_BLOB_BYTES
+        );
+        assert!(checked_blob_size(MAX_CREDENTIAL_BLOB_BYTES + 1).is_err());
     }
 }
 

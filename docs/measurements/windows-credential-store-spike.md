@@ -9,6 +9,8 @@ Exercise the Windows Credential Manager API boundary required by ADR 0008 before
 selecting a production format for desktop identity keys or pairing records. The
 spike verifies one temporary Generic Credential lifecycle in the current user
 session: write, read, byte-for-byte validation, delete, and read-after-delete.
+Both write and read paths reject a credential blob over the fixed 64 KiB
+prototype bound before copying it.
 
 The test is not a pairing implementation, cryptographic key test, or proof that
 Credential Manager is the final store. It must not accept, generate, print, or
