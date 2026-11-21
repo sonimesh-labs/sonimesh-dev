@@ -3,8 +3,8 @@
 use std::error::Error;
 
 use sonimesh_app::{
-    ControlStreamError, PairingInvitationError, PairingRecordError, SessionEvent, SessionState,
-    SessionTransitionError,
+    ControlListenError, ControlStreamError, PairingInvitationError, PairingRecordError,
+    SessionEvent, SessionState, SessionTransitionError,
 };
 use sonimesh_protocol::{ControlFrameError, ControlNegotiationError};
 
@@ -66,4 +66,16 @@ fn pairing_errors_retain_record_and_transition_causes() {
             .is_some()
     );
     assert!(Error::source(&PairingInvitationError::MissingInvitation).is_none());
+}
+
+#[test]
+fn pairing_listener_io_errors_retain_the_socket_cause() {
+    let io_error = std::io::Error::new(std::io::ErrorKind::TimedOut, "test timeout");
+    let error = ControlListenError::PeerFrameIo(io_error);
+
+    let cause = source(&error);
+    assert_eq!(
+        cause.downcast_ref::<std::io::Error>().unwrap().kind(),
+        std::io::ErrorKind::TimedOut
+    );
 }

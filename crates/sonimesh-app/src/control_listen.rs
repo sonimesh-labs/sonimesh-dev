@@ -68,9 +68,9 @@ impl core::fmt::Display for ControlListenError {
 impl std::error::Error for ControlListenError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Self::Socket(error) | Self::PeerFrameIo(error) | Self::ReplyWrite(error) => Some(error),
             Self::Tls(error) => Some(error),
             Self::Handshake(error) => Some(error),
-            _ => None,
         }
     }
 }
