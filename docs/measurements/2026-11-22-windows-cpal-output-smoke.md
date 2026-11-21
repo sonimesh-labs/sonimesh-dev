@@ -11,6 +11,7 @@ the two-second default-device silent smoke:
 ```powershell
 cargo run -p sonimesh-platform --example output_probe --features cpal-output
 cargo run -p sonimesh-platform --example output_smoke --features cpal-output
+cargo run -p windows-wasapi-prototype --bin windows-wasapi-prototype
 ```
 
 The run used CPAL 0.18.2 through the Windows WASAPI host. Device identifiers and
@@ -38,6 +39,22 @@ reported 48 kHz, eight channels, and a fixed 480-frame callback range.
 | Oversized callbacks | 0 |
 | Stream errors | 0 |
 
+The independent direct-WASAPI prototype was run immediately afterward against the
+same current default endpoint and duration:
+
+| Field | Observed value |
+| --- | ---: |
+| Configured format | 48,000 Hz, 8 channels, Float32 |
+| Endpoint buffer frames | 1,056 |
+| Primed silence frames | 1,056 |
+| Render cycles | 200 |
+| Latest render frames | 480 |
+| Maximum render frames | 480 |
+| Latest render offset | 2.0784165 s |
+| Largest render gap | 17.6603 ms |
+| Oversized renders | 0 |
+| Stream errors | 0 |
+
 ## Interpretation and limits
 
 This run shows that the current CPAL adapter can open the host's default output,
@@ -46,7 +63,13 @@ reported capacity fault or stream error. The observed 1,056-frame callback is
 within the declared 8,192-frame source bound but exceeds the fixed 480-frame
 request, matching the adapter's documented fallback behavior.
 
-It does not select CPAL as the release backend and does not establish callback
-latency, acoustic latency, device removal, default-role change, sleep/wake
-recovery, power behavior, or Windows 11 compatibility. A like-for-like direct
-WASAPI comparison and longer/lifecycle runs remain required by ADR 0003.
+The two short runs are a same-host, same-format software scheduling comparison:
+both used 48 kHz, eight channels, a 480-frame request, and an 8,192-frame bound;
+neither reported a stream error or an oversized callback/render. CPAL observed a
+1,056-frame callback while direct WASAPI rendered at 480 frames against a 1,056-
+frame endpoint buffer. This difference is an observation, not a latency result.
+
+The runs do not select a release backend and do not establish callback latency,
+acoustic latency, device removal, default-role change, sleep/wake recovery,
+power behavior, or Windows 11 compatibility. Longer/lifecycle runs and physical
+latency measurements remain required by ADR 0003.

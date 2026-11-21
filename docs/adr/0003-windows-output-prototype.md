@@ -192,11 +192,14 @@ diagnostic state, not lifecycle synchronization.
 
 ## Required evidence before acceptance
 
-A 2026-11-22 same-host CPAL smoke opened the current default endpoint for two
-seconds with zero reported stream errors or oversized callbacks; it observed a
-1,056-frame callback against a fixed 480-frame request. The dated record is
-software scheduling evidence only and does not satisfy the comparison, lifecycle,
-power, Windows 11, or physical/acoustic latency requirements below.
+A 2026-11-22 same-host CPAL and direct-WASAPI smoke opened the current default
+endpoint for two seconds with the same 48 kHz, eight-channel Float32 format, a
+fixed 480-frame request, and an 8,192-frame bound. Both reported zero stream
+errors and zero oversized callback/render observations; CPAL observed a
+1,056-frame callback and direct WASAPI rendered 480-frame cycles against a
+1,056-frame endpoint buffer. The dated record is software scheduling evidence
+only and does not satisfy the lifecycle, power, Windows 11, or
+physical/acoustic latency requirements below.
 
 - enumerate the default and representative USB/Bluetooth output devices on the
   Windows 11 reference host;
