@@ -59,6 +59,7 @@ python tools/check_output_recovery_log.py --self-test
 python tools/android_capture_preflight.py --self-test
 python tools/android_discovery_preflight.py --self-test
 python tools/check_android_capture_record.py --self-test
+python tools/check_android_discovery_record.py --self-test
 python tools/check_ci_wiring.py
 Push-Location apps/android
 .\gradlew.bat lintDebug testDebugUnitTest assembleDebug --no-daemon
