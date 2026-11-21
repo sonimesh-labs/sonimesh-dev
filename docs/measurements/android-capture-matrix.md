@@ -1,7 +1,7 @@
 # Android capture feasibility matrix
 
 > Status: partial physical-device evidence; remaining lifecycle matrix required
-> Updated: 2026-08-06
+> Updated: 2026-11-22
 
 This document is the evidence boundary for the capture-only Android bootstrap.
 A successful Gradle build proves only that the application and its bounded
@@ -323,6 +323,23 @@ The application UI process remained foreground because it was open.
 This is an observed `protected_unknown` category result with a capturable
 signal. It does not establish whether any particular media source was protected,
 policy-limited, or permitted by Android playback-capture policy.
+
+### Emulator permission-denied smoke, 2026-11-22
+
+This is a host-controlled lifecycle smoke on the API 37 emulator, not physical
+capture evidence. The read-only preflight reported Google `sdk_gphone64_x86_64`,
+Android 17 / API 37, `x86_64`, and an installed `com.sonimesh.sender` debug APK
+(target SDK 36). After clearing the app state and revoking `RECORD_AUDIO`, the
+operator launched the app, pressed `Start capture`, and selected `Don't allow`
+in the system microphone prompt.
+
+The app returned to its ready state with the exact bounded failure text
+`Capture failed: Microphone permission was not granted`. The foreground activity
+remained `MainActivity`; `dumpsys activity services` and `dumpsys media_projection`
+contained no `com.sonimesh.sender` service or projection entry. No consent data,
+PCM, or source information was retained. This verifies the pre-capture denial
+path on the emulator only; it does not qualify Android OEM behavior, playback
+capture, background execution, power, or latency.
 
 ### Not Yet Measured
 
