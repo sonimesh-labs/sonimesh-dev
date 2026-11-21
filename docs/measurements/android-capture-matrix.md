@@ -35,7 +35,7 @@ behavior matches the lifecycle invariant, not that audio is necessarily present.
 | Idle or silent source | Keep running and report non-definitive no-audio wording | Observed; no source-specific conclusion |
 | Protected or policy-limited source | Do not identify a source-specific denial | Not run |
 | Lock screen/background | Service and notification remain observable; record power behavior | Partial: lock and background observed; power not recorded |
-| Notification stop | Same teardown as projection revocation; resources are released | Observed |
+| Notification stop | Same teardown as projection revocation; resources are released | Observed; API 37 emulator record |
 | Projection `onStop()` | AudioRecord, projection, and capture thread are retired once | Observed |
 | Process recreation | No consent token or capture session is reused | Observed; API 37 emulator record |
 
@@ -464,6 +464,21 @@ absence observations; it does not serialize the post-relaunch zero counters as a
 third snapshot. This is an API 37 emulator process-recreation observation only.
 It does not inspect platform-private token storage or establish physical-device,
 OEM, power, thermal, memory, CPU, source-policy, quality, or latency behavior.
+
+### Emulator notification stop, 2026-11-22
+
+The operator started a fresh whole-screen projection session on the API 37
+emulator, expanded the SoniMesh foreground notification, and activated its
+`Stop capture` action. Before the action, the active session had run for 59.1
+seconds with 2,823,168 captured silent frames and zero read errors. The UI then
+reported `Capture stopped: user requested`, and the terminal snapshot reached
+67.5 seconds with 3,217,408 frames and zero read errors. The notification,
+service, and MediaProjection entry were absent after teardown. The redacted
+record is [`2026-11-22-android-17-notification-stop-record.json`](./2026-11-22-android-17-notification-stop-record.json).
+
+This is an API 37 emulator notification-action and teardown observation only. It
+does not establish physical-device or OEM notification behavior, power, thermal,
+memory, CPU, source-policy, quality, or latency behavior.
 
 ### Not Yet Measured
 
