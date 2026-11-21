@@ -1,14 +1,15 @@
 //! Integration test for the invitation-gated pinned control listener.
 //!
-//! The desktop side runs [`accept_pairing_connection`] against a real
-//! bound listener and TLS config; the Android role connects with the QR
-//! pin, derives its client proof from the live exporter, and sends the
-//! canonical frame. The trusted outcome must carry a media root that seals
-//! identically to an independent derivation, and the reply frame written
-//! back into the channel must verify under the peer binding.
+//! The desktop side polls a real non-blocking listener, then runs
+//! [`accept_pairing_stream`] against the accepted stream and TLS config; the
+//! Android role connects with the QR pin, derives its client proof from the
+//! live exporter, and sends the canonical frame. The trusted outcome must
+//! carry a media root that seals identically to an independent derivation, and
+//! the reply frame written back into the channel must verify under the peer
+//! binding.
 
 use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::TcpStream;
 use std::sync::Arc;
 use std::thread;
 
@@ -18,8 +19,8 @@ use zeroize::{Zeroize, Zeroizing};
 
 use sonimesh_app::{
     ControlStreamAction, ControlStreamCoordinator, InvitationInputs, PairingId,
-    PairingInvitationController, PairingQrInvitation, PairingSource, SessionState,
-    accept_pairing_connection, begin_from_rendered_payload,
+    PairingInvitationController, PairingListener, PairingQrInvitation, PairingSource, SessionState,
+    accept_pairing_stream, begin_from_rendered_payload,
 };
 use sonimesh_network::{
     UntrustedControlStream, client_config, connect_pinned_client, server_config,
@@ -38,7 +39,7 @@ type TestResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 #[test]
 #[allow(clippy::too_many_lines)] // one end-to-end authenticated listener scenario
 fn the_listener_completes_one_trusted_pairing_exchange() -> TestResult<()> {
-    let listener = TcpListener::bind("127.0.0.1:0")?;
+    let listener = PairingListener::bind("127.0.0.1:0")?;
     let address = listener.local_addr()?;
     let invitation_id = PairingId::new([0x7B_u8; 16]);
 
@@ -81,8 +82,14 @@ fn the_listener_completes_one_trusted_pairing_exchange() -> TestResult<()> {
     // the trusted channel's bounded framing.
     let desktop_payload = payload_out.clone();
     let desktop = thread::spawn(move || -> TestResult<()> {
-        let (trusted, _media_root) = accept_pairing_connection(
-            &listener,
+        let stream = loop {
+            if let Some(stream) = listener.try_accept()? {
+                break stream;
+            }
+            thread::yield_now();
+        };
+        let (trusted, _media_root) = accept_pairing_stream(
+            stream,
             Arc::clone(&tls),
             &mut pairing,
             &mut session,
