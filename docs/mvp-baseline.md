@@ -294,9 +294,11 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   permits one final cleanup claimant only after reader exit, continues bounded
   retirement after an ordinary cleanup exception, and rethrows a fatal JVM
   failure after the bounded attempts finish, while ordinary failures emit one
-  count-only redacted diagnostic; partial Vivo physical-device
-  capture and background evidence is recorded in the [Android capture matrix](./measurements/android-capture-matrix.md).
-  The remaining lifecycle, power, source-policy, and OEM matrix is still open.
+  count-only redacted diagnostic; partial Vivo physical-device capture and
+  API 37 emulator evidence for silent capture, lock-screen continuity, projection
+  revocation, notification stop, and process recreation are recorded in the
+  [Android capture matrix](./measurements/android-capture-matrix.md). The
+  remaining lifecycle, power, source-policy, and OEM matrix is still open.
 - a buildable Vue/Vite receiver-control preview with a single low-rate bridge
   boundary, session controls, output selection, per-stream volume and mute,
   pairing-invitation state, and diagnostics presentation for packet,
@@ -345,8 +347,9 @@ jitter, and output-backend ADRs using measured 10/20 ms and device results.
 ## Deliberately not implemented
 
 - complete Android capture hardware/OEM evidence, lifecycle matrix results, and
-  power measurements; partial Vivo capture and background evidence is recorded
-  in the [Android capture matrix](./measurements/android-capture-matrix.md);
+  power measurements; partial Vivo capture plus API 37 emulator lifecycle
+  records are documented in the [Android capture matrix](./measurements/android-capture-matrix.md),
+  but they do not qualify physical-device or OEM behavior;
 - enabling an Opus encoder/decoder binding in the core; prototype-level
   PLC/FEC/DTX, authenticated malformed-payload, and 10 ms vs 20 ms evidence
   is recorded in the dated opus measurement records, and the binding stays
