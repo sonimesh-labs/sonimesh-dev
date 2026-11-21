@@ -12,6 +12,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
@@ -115,6 +116,117 @@ class Android17DiscoveryProbeTest {
         Log.i(TAG, "ACCESS_LOCAL_NETWORK state=$state")
     }
 
+    @Test
+    fun local_service_probe_reports_found_then_lost_without_trusting_the_candidate() {
+        assumeTrue("Android 17 is required", Build.VERSION.SDK_INT >= 37)
+        val arguments = InstrumentationRegistry.getArguments()
+        assumeTrue(
+            "local service probe requires runLocalService=true",
+            arguments.getString("runLocalService") == "true",
+        )
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        Log.i(
+            TAG,
+            "local probe targetPackage=${context.packageName} " +
+                "instrumentationPackage=${InstrumentationRegistry.getInstrumentation().context.packageName} " +
+                "permission=${context.checkSelfPermission(Manifest.permission.ACCESS_LOCAL_NETWORK)}",
+        )
+        assumeTrue(
+            "local service probe requires ACCESS_LOCAL_NETWORK",
+            context.checkSelfPermission(Manifest.permission.ACCESS_LOCAL_NETWORK) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED,
+        )
+
+        val manager = requireNotNull(context.getSystemService(Context.NSD_SERVICE) as? NsdManager)
+        val executor = context.mainExecutor
+        val registered = CountDownLatch(1)
+        val found = CountDownLatch(1)
+        val lost = CountDownLatch(1)
+        val registeredName = AtomicReference<String>()
+        val registrationError = AtomicReference<Int>()
+        val discoveryError = AtomicReference<Int>()
+        val registrationListener = object : NsdManager.RegistrationListener {
+            override fun onServiceRegistered(serviceInfo: NsdServiceInfo) {
+                registeredName.set(serviceInfo.serviceName)
+                registered.countDown()
+            }
+
+            override fun onRegistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
+                registrationError.set(errorCode)
+                registered.countDown()
+            }
+
+            override fun onServiceUnregistered(serviceInfo: NsdServiceInfo) = Unit
+
+            override fun onUnregistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) = Unit
+        }
+        val discoveryListener = object : NsdManager.DiscoveryListener {
+            override fun onDiscoveryStarted(serviceType: String) = Unit
+
+            override fun onDiscoveryStopped(serviceType: String) = Unit
+
+            override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
+                discoveryError.set(errorCode)
+                found.countDown()
+            }
+
+            override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) = Unit
+
+            override fun onServiceFound(serviceInfo: NsdServiceInfo) {
+                if (serviceInfo.serviceName == registeredName.get()) {
+                    found.countDown()
+                }
+            }
+
+            override fun onServiceLost(serviceInfo: NsdServiceInfo) {
+                if (serviceInfo.serviceName == registeredName.get()) {
+                    lost.countDown()
+                }
+            }
+        }
+
+        val serviceInfo = NsdServiceInfo().apply {
+            serviceName = "SoniMeshProbe-${System.nanoTime()}"
+            serviceType = SERVICE_TYPE
+            port = PROBE_PORT
+        }
+        try {
+            manager.registerService(
+                serviceInfo,
+                NsdManager.PROTOCOL_DNS_SD,
+                executor,
+                registrationListener,
+            )
+            if (!registered.await(TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                Log.w(TAG, "local service probe registration callback timed out; platform result is unsupported")
+                assumeTrue("local service registration callback was not delivered", false)
+            }
+            assumeTrue("service registration failed: ${registrationError.get()}", registrationError.get() == null)
+
+            manager.discoverServices(
+                DiscoveryRequest.Builder(SERVICE_TYPE)
+                    .setFlags(DiscoveryRequest.FLAG_NO_PICKER)
+                    .build(),
+                executor,
+                discoveryListener,
+            )
+            if (!found.await(TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                Log.w(TAG, "local service probe discovery callback timed out; platform result is unsupported")
+                assumeTrue("local service was not found", false)
+            }
+            assumeTrue("service discovery failed: ${discoveryError.get()}", discoveryError.get() == null)
+            manager.unregisterService(registrationListener)
+            if (!lost.await(TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                Log.w(TAG, "local service probe removal callback timed out; platform result is unsupported")
+                assumeTrue("local service removal was not observed", false)
+            }
+            Log.i(TAG, "local service probe observed found then lost for ${registeredName.get()}")
+        } finally {
+            runCatching { manager.stopServiceDiscovery(discoveryListener) }
+            runCatching { manager.unregisterService(registrationListener) }
+        }
+    }
+
     private sealed interface CallbackOutcome {
         data object Started : CallbackOutcome
         data object Stopped : CallbackOutcome
@@ -124,6 +236,7 @@ class Android17DiscoveryProbeTest {
     private companion object {
         const val TAG = "Android17DiscoveryProbe"
         const val SERVICE_TYPE = "_sonimesh._tcp"
+        const val PROBE_PORT = 43_210
         const val TIMEOUT_SECONDS = 10L
     }
 }

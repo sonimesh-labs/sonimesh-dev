@@ -31,13 +31,24 @@ rendering it. CI runs its `--self-test` mode; normal mode remains device-only.
 
 An isolated target-SDK 37 discovery spike was then built and installed on the
 same emulator. Its default connected run completed the request-shape and
-permission-state tests. The explicit picker probe was run through the Android
-JUnit runner with `runDiscoveryPicker=true`; all three probe tests passed after
-the test module declared the `INTERNET` permission required by `NsdManager`.
+permission-state tests while leaving both opt-in probes skipped. The explicit
+picker probe was run through the Android JUnit runner with
+`runDiscoveryPicker=true`; the three non-local-service tests passed after the
+test module declared the `INTERNET` permission required by `NsdManager`.
 The probe stopped discovery from its callback and recorded the terminal
 `Stopped` callback; it did not claim a discovered peer or trust establishment.
 The broad `ACCESS_LOCAL_NETWORK` state was `PERMISSION_DENIED` in the probe
 process, so this run does not claim a granted broad-network path.
+
+An opt-in local-service probe was also attempted after an ADB permission grant
+and an AppOps allow on the same emulator. The probe logged
+`targetPackage=com.sonimesh.discoveryspike` with
+`ACCESS_LOCAL_NETWORK` still denied and skipped before registration. An earlier
+attempt that reached `NsdManager.registerService` recorded system-side
+`MdnsAdvertiser` add/remove messages but did not receive the registration
+callback before its bound timeout. The probe now treats missing registration,
+discovery, or removal callbacks as an explicit unsupported-platform assumption
+skip after cleanup; no service-found or service-lost evidence is claimed.
 
 ## Interpretation and limits
 

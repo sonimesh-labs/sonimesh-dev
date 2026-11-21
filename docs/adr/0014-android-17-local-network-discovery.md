@@ -73,7 +73,10 @@ sender does not yet request discovery permissions. It does not satisfy any of
 the discovery validation items above. The separate target-SDK 37 discovery
 spike now exercises the request and picker callback shape on that emulator, but
 it is still emulator-only and does not validate physical networking, broad
-permission denial UX, service removal, or stale-candidate handling.
+permission denial UX, service removal, or stale-candidate handling. Its
+opt-in local-service probe records the permission state and skips unsupported
+registration, discovery, or removal callbacks after cleanup; the current
+emulator run therefore provides no service-removal evidence.
 
 These are lifecycle and permission tests only. They do not qualify pairing,
 TLS exporter support, capture behavior, or physical latency.
