@@ -14,6 +14,7 @@ import java.security.MessageDigest
 import java.security.Principal
 import java.security.PrivateKey
 import java.security.SecureRandom
+import java.security.Security
 import java.security.cert.CertificateException
 import java.security.cert.X509Certificate
 import java.util.Date
@@ -47,6 +48,17 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 @SdkSuppress(minSdkVersion = Build.VERSION_CODES.S)
 class AndroidTlsProviderSpikeTest {
+    @Test
+    fun explicit_conscrypt_context_does_not_install_a_global_provider() {
+        val before = Security.getProviders().map { provider -> provider.name }
+
+        val provider = Conscrypt.newProvider()
+        SSLContext.getInstance("TLS", provider)
+
+        val after = Security.getProviders().map { candidate -> candidate.name }
+        assertEquals(before, after)
+    }
+
     @Test
     fun pinned_tls13_exporter_matches_and_altered_pin_is_rejected() {
         val alias = "sonimesh.tls-provider-spike.${UUID.randomUUID()}"

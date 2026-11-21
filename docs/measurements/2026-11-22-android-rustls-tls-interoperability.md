@@ -33,14 +33,16 @@ exporter, media root, or pairing secret was sent or logged.
 | Role-separated Android proof | Accepted by desktop Rustls |
 | Role-separated desktop proof | Verified by Android Conscrypt test |
 | Published pairing-proof vector | Passed in the Android instrumentation suite |
-| Android keystore and provider spike tests | Passed |
+| Android keystore and provider spike tests | Passed, including explicit-context global-provider isolation |
 | Interop server result | `PROOFS verified on server`, `RESULT pass` |
 | Secret/exporter logging | None observed |
 
 The direct instrumentation run completed four tests successfully, including two
-tests in `DesktopInteropTlsTest`. The connected run recorded five tests on the
+tests in `DesktopInteropTlsTest`. The connected run recorded six tests on the
 same API 37 emulator and skipped only the opt-in network test because the three
-interop arguments were absent, as designed.
+interop arguments were absent, as designed. The additional provider test
+compared the global security-provider names before and after constructing and
+using an explicit Conscrypt context; the list was unchanged.
 
 ## Interpretation and limits
 

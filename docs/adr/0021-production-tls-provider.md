@@ -107,8 +107,10 @@ inputs remain zeroized/redacted per ADR 0008 logging rules.
   declared Conscrypt and Keystore behavior.
 - Android emulator to desktop Rustls: [2026-11-22 result](../measurements/2026-11-22-android-rustls-tls-interoperability.md)
   completed the pinned TLS 1.3 handshake and both role proofs over an ADB
-  reverse-loopback route. This is cross-implementation evidence, but not a
-  physical WLAN or OEM result.
+  reverse-loopback route. The same API 37 run also verifies that creating and
+  using the explicit Conscrypt context leaves the global security-provider list
+  unchanged. This is cross-implementation evidence, but not a physical WLAN or
+  OEM result.
 - The desktop selection is implemented as
   `sonimesh-network::desktop_tls` (pinned client verifier, TLS 1.3-only
   server config, exporter extraction into zeroized storage). Loopback
