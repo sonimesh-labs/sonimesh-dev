@@ -26,6 +26,7 @@ runs. Read the environment and limitations in each record before generalizing.
 - CPAL [2026-07-17 smoke](./2026-07-17-windows-cpal-smoke.md), [2026-07-18 probe](./2026-07-18-windows-cpal-probe.md), and [2026-07-18 smoke](./2026-07-18-windows-cpal-smoke.md).
 - [2026-08-13 output recheck](./2026-08-13-windows-output-recheck.md).
 - [2026-11-22 CPAL output smoke](./2026-11-22-windows-cpal-output-smoke.md) — current-host callback observation; no backend or latency claim.
+- [2026-11-22 output soak smoke](./2026-11-22-windows-output-soak-smoke.md) — five-second CPAL/direct-WASAPI transcript check; no long-duration or latency claim.
 
 ## Opus and UI
 
