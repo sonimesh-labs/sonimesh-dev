@@ -57,3 +57,9 @@ evidence. They do not validate Android 17 permission enforcement on a physical
 device, broad-permission denial UX, service removal, stale-candidate handling,
 manual fallback, or WLAN interoperability. The production capture app remains
 unchanged and discovery stays outside its source boundary.
+
+This preflight is historical: the later [Android 17 discovery lifecycle
+record](./2026-11-22-android-17-discovery-lifecycle-record.json) records the
+picker callback with the broad permission denied, the denied-permission failure
+callback, and same-device service found/lost behavior. Those follow-up results
+remain emulator-only and do not change the limits above.
