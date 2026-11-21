@@ -355,6 +355,39 @@ This is an emulator cancellation-path observation only. It does not establish
 projection behavior on a physical device, foreground-service policy across OEMs,
 or any capture capability.
 
+### Emulator idle/silent capture, 2026-11-22
+
+With the same API 37 emulator, the operator started a fresh whole-screen
+projection session while no audio-producing source was active. The session
+remained active for 104.8 seconds and displayed the bounded `No capturable audio
+detected` state. The retained redacted record is
+[`2026-11-22-android-17-idle-silent-capture-record.json`](./2026-11-22-android-17-idle-silent-capture-record.json).
+
+| Field | Observed value |
+| --- | ---: |
+| Capture format | PCM16, 48,000 Hz, stereo |
+| AudioRecord source / channel mask | 8 / `0xC` |
+| Actual / minimum buffer | 12,288 B / 6,144 B |
+| Read configuration | 1,920 interleaved samples per 20 ms request |
+| Capture duration | 104.8 s |
+| Captured frames | 5,015,552 |
+| Silent frames | 5,015,552 |
+| Silent reads | 9,796 |
+| Read errors | 0 |
+| Terminal state | User requested stop |
+
+After the stop action, the activity returned to its ready state and the
+foreground service, notification, and MediaProjection entry were absent. The
+record was checked with:
+
+```powershell
+python tools/check_android_capture_record.py docs/measurements/2026-11-22-android-17-idle-silent-capture-record.json
+```
+
+This is an API 37 emulator lifecycle and no-signal observation only. The silence
+does not identify an application or policy cause and does not establish physical
+device, OEM, background, power, quality, or latency behavior.
+
 ### Not Yet Measured
 
 - CPU, memory, thermal behavior, and battery impact during an extended

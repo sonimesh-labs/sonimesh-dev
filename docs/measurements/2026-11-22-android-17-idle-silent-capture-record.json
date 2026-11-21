@@ -1,0 +1,57 @@
+{
+  "schema_version": 3,
+  "recorded_at": "2026-11-22T05:53:04+08:00",
+  "scenario": "idle_silent",
+  "device": {
+    "oem": "Google",
+    "model": "sdk_gphone64_x86_64",
+    "android_release": "17",
+    "api_level": 37,
+    "build_fingerprint": "google/sdk_gphone64_x86_64/emu64xa:17/CE2A.260420.051.A2/16418371:user/release-keys"
+  },
+  "app": {
+    "version": "0.1.0-debug",
+    "target_sdk": 36
+  },
+  "observed_source_category": "silent",
+  "capture_format": {
+    "sample_rate_hz": 48000,
+    "channels": 2,
+    "audio_source": 8,
+    "channel_mask": 12,
+    "pcm_format": "PCM16",
+    "buffer_size_bytes": 12288,
+    "minimum_buffer_bytes": 6144,
+    "read_samples": 1920
+  },
+  "initial_snapshot": {
+    "capture_duration_ms": 9900,
+    "last_read_completion_offset_ms": 9890,
+    "captured_frames": 465920,
+    "silent_frames": 465920,
+    "silent_reads": 910,
+    "read_errors": 0
+  },
+  "final_snapshot": {
+    "capture_duration_ms": 104800,
+    "last_read_completion_offset_ms": 104700,
+    "captured_frames": 5015552,
+    "silent_frames": 5015552,
+    "silent_reads": 9796,
+    "read_errors": 0
+  },
+  "terminal_state": "user_requested",
+  "lifecycle": {
+    "notification": "absent",
+    "service": "absent",
+    "projection": "absent",
+    "event_duration_ms": 0,
+    "suppressed_teardown_wakeup": false
+  },
+  "device_conditions": {
+    "battery": "not_measured",
+    "thermal": "not_measured",
+    "cpu": "not_measured",
+    "memory": "not_measured"
+  }
+}

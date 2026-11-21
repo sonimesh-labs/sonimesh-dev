@@ -8,6 +8,7 @@ runs. Read the environment and limitations in each record before generalizing.
 ## Android capture and identity
 
 - [Capture matrix](./android-capture-matrix.md) — capture and lifecycle evidence.
+- [2026-11-22 Android 17 idle/silent capture record](./2026-11-22-android-17-idle-silent-capture-record.json) — API 37 emulator lifecycle and no-signal observation only.
 - [Android 17 local-network preflight, 2026-11-22](./2026-11-22-android-17-local-network-preflight.md) — API 37 emulator and permission-catalog check only; discovery remains unvalidated.
 - [Keystore protocol](./android-keystore-spike.md) and [2026-07-20 run](./2026-07-20-android-keystore-spike.md).
 - [Android host build verification, 2026-08-15](./2026-08-15-android-host-build-verification.md).
