@@ -125,16 +125,18 @@ class Android17DiscoveryProbeTest {
             arguments.getString("runLocalService") == "true",
         )
         val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val localNetworkGranted =
+            context.checkSelfPermission(Manifest.permission.ACCESS_LOCAL_NETWORK) ==
+                android.content.pm.PackageManager.PERMISSION_GRANTED
         Log.i(
             TAG,
             "local probe targetPackage=${context.packageName} " +
                 "instrumentationPackage=${InstrumentationRegistry.getInstrumentation().context.packageName} " +
-                "permission=${context.checkSelfPermission(Manifest.permission.ACCESS_LOCAL_NETWORK)}",
+                "localNetworkGranted=$localNetworkGranted",
         )
         assumeTrue(
             "local service probe requires ACCESS_LOCAL_NETWORK",
-            context.checkSelfPermission(Manifest.permission.ACCESS_LOCAL_NETWORK) ==
-                android.content.pm.PackageManager.PERMISSION_GRANTED,
+            localNetworkGranted,
         )
 
         val manager = requireNotNull(context.getSystemService(Context.NSD_SERVICE) as? NsdManager)
@@ -220,7 +222,7 @@ class Android17DiscoveryProbeTest {
                 Log.w(TAG, "local service probe removal callback timed out; platform result is unsupported")
                 assumeTrue("local service removal was not observed", false)
             }
-            Log.i(TAG, "local service probe observed found then lost for ${registeredName.get()}")
+            Log.i(TAG, "local service probe observed found then lost")
         } finally {
             runCatching { manager.stopServiceDiscovery(discoveryListener) }
             runCatching { manager.unregisterService(registrationListener) }

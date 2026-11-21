@@ -69,14 +69,14 @@ Before Phase 1 can claim discovery:
 
 The [2026-11-22 Android 17 preflight](../measurements/2026-11-22-android-17-local-network-preflight.md)
 only establishes emulator availability and records that the capture-only
-sender does not yet request discovery permissions. It does not satisfy any of
-the discovery validation items above. The separate target-SDK 37 discovery
-spike now exercises the request and picker callback shape on that emulator, but
-it is still emulator-only and does not validate physical networking, broad
-permission denial UX, service removal, or stale-candidate handling. Its
-opt-in local-service probe records the permission state and skips unsupported
-registration, discovery, or removal callbacks after cleanup; the current
-emulator run therefore provides no service-removal evidence.
+sender does not yet request discovery permissions. The separate
+[2026-11-22 discovery lifecycle record](../measurements/2026-11-22-android-17-discovery-lifecycle-record.json)
+adds emulator-only evidence: the picker request reaches a bounded `Stopped`
+callback with broad permission denied, and a same-device opt-in local-service
+probe observes registration, `onServiceFound`, and `onServiceLost` after an
+explicit permission grant. These observations still do not validate physical
+networking, OEM permission UX, cross-device discovery, or stale-candidate
+handling.
 
 These are lifecycle and permission tests only. They do not qualify pairing,
 TLS exporter support, capture behavior, or physical latency.

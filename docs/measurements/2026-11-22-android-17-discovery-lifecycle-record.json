@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-11-22T07:33:18+08:00",
+  "scenario": "android_17_discovery_lifecycle",
+  "device": {
+    "oem": "Google",
+    "model": "sdk_gphone64_x86_64",
+    "android_release": "17",
+    "api_level": 37
+  },
+  "spike": {
+    "package": "com.sonimesh.discoveryspike",
+    "target_sdk": 37,
+    "service_type": "_sonimesh._tcp",
+    "callback_timeout_seconds": 10
+  },
+  "permission": {
+    "name": "ACCESS_LOCAL_NETWORK",
+    "picker_run_state": "denied",
+    "local_service_run_state": "granted"
+  },
+  "observations": {
+    "request_shape": {
+      "picker_flag": "present",
+      "result": "passed"
+    },
+    "picker_without_broad_permission": {
+      "callback_outcome": "stopped",
+      "terminal_callback": true,
+      "result": "passed"
+    },
+    "local_service_with_broad_permission": {
+      "registration_callback": "observed",
+      "service_found_callback": "observed",
+      "service_lost_callback": "observed",
+      "candidate_trusted": false,
+      "result": "passed"
+    }
+  },
+  "instrumentation": {
+    "runner": "AndroidJUnitRunner",
+    "tests_in_class": 4,
+    "result": "ok"
+  },
+  "limitations": [
+    "API 37 Google emulator evidence only; no physical device or OEM matrix.",
+    "The picker run proves a bounded callback with broad permission denied, not peer selection or address delivery.",
+    "The local service run is same-emulator registration and discovery, not cross-device WLAN discovery.",
+    "Discovery candidates remain unauthenticated and are never trusted; pairing, TLS, manual fallback, and stale-candidate behavior remain open."
+  ]
+}

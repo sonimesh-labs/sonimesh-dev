@@ -14,6 +14,7 @@ runs. Read the environment and limitations in each record before generalizing.
 - [2026-11-22 Android 17 process-recreation record](./2026-11-22-android-17-process-recreation-record.json) — API 37 emulator force-stop and fresh-relaunch observation only.
 - [2026-11-22 Android 17 notification-stop record](./2026-11-22-android-17-notification-stop-record.json) — API 37 emulator foreground-notification action and teardown observation only.
 - [Android 17 local-network preflight, 2026-11-22](./2026-11-22-android-17-local-network-preflight.md) — API 37 emulator and permission-catalog check only; discovery remains unvalidated.
+- [2026-11-22 Android 17 discovery lifecycle record](./2026-11-22-android-17-discovery-lifecycle-record.json) — isolated target-SDK 37 emulator picker and same-device service lifecycle observation only.
 - [Keystore protocol](./android-keystore-spike.md) and [2026-07-20 run](./2026-07-20-android-keystore-spike.md).
 - [Android host build verification, 2026-08-15](./2026-08-15-android-host-build-verification.md).
 
