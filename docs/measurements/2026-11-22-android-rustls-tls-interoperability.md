@@ -21,6 +21,7 @@ exporter, media root, or pairing secret was sent or logged.
 | Android provider | `conscrypt-android` 2.6.1, explicitly loaded for the test context |
 | Transport route | ADB reverse `tcp:47610`; desktop listener bound to `127.0.0.1` |
 | Test execution | Direct `adb install -r` and `adb shell am instrument` |
+| Connected test run | `apps/android/gradlew.bat connectedDebugAndroidTest --no-daemon` on `Medium_Phone_API_37.0` (Android 17 / API 37) |
 
 ## Results
 
@@ -37,9 +38,9 @@ exporter, media root, or pairing secret was sent or logged.
 | Secret/exporter logging | None observed |
 
 The direct instrumentation run completed four tests successfully, including two
-tests in `DesktopInteropTlsTest`. A normal connected test run without the three
-interop arguments completed the suite and skipped only the opt-in network test,
-as designed.
+tests in `DesktopInteropTlsTest`. The connected run recorded five tests on the
+same API 37 emulator and skipped only the opt-in network test because the three
+interop arguments were absent, as designed.
 
 ## Interpretation and limits
 
