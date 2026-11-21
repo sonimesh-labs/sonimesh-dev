@@ -388,6 +388,31 @@ This is an API 37 emulator lifecycle and no-signal observation only. The silence
 does not identify an application or policy cause and does not establish physical
 device, OEM, background, power, quality, or latency behavior.
 
+### Emulator projection revocation, 2026-11-22
+
+The operator started a fresh whole-screen projection session on the API 37
+emulator and used the system sharing chip to select `Stop sharing`. The service
+received the projection stop callback and reached the bounded
+`Capture stopped: projection revoked` state. The retained redacted record is
+[`2026-11-22-android-17-projection-revoked-record.json`](./2026-11-22-android-17-projection-revoked-record.json).
+
+| Field | Observed value |
+| --- | ---: |
+| Capture format | PCM16, 48,000 Hz, stereo |
+| AudioRecord source / channel mask | 8 / `0xC` |
+| Actual / minimum buffer | 12,288 B / 6,144 B |
+| Capture duration | 70.9 s |
+| Captured frames | 3,336,192 |
+| Silent frames | 3,336,192 |
+| Silent reads | 6,516 |
+| Read errors | 0 |
+| Terminal state | Projection revoked |
+
+The activity returned to its stopped state and the foreground service,
+notification, and MediaProjection entry were absent after revocation. This is an
+API 37 emulator teardown observation only; it does not establish physical-device
+or OEM projection behavior, power, quality, or latency.
+
 ### Not Yet Measured
 
 - CPU, memory, thermal behavior, and battery impact during an extended
