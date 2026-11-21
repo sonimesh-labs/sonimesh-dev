@@ -14,9 +14,11 @@ Android 17 makes local-network protection mandatory for applications targeting
 SDK 37 or later. The architecture therefore requires the discovery design to
 support both a system-mediated NsdManager picker path and an explicit
 `ACCESS_LOCAL_NETWORK` path where broad local-network access is truly required.
-No Android 17 device is available in this environment, so neither path is
-validated here; this record fixes the intended boundary and the evidence that
-must gate Phase 1 (Windows WLAN MVP) discovery.
+An API 37 emulator is now available, but the production sender still targets
+SDK 36 and has no discovery surface. A 2026-11-22 preflight confirms only the
+platform and permission definitions; neither discovery path is validated here.
+This record fixes the intended boundary and the evidence that must gate Phase 1
+(Windows WLAN MVP) discovery.
 
 ## Decision
 
@@ -64,6 +66,11 @@ Before Phase 1 can claim discovery:
   and stale-candidate handling;
 - manual QR/IP fallback end-to-end on the same devices;
 - report Android model/build, OEM, and network profile for every result.
+
+The [2026-11-22 Android 17 preflight](../measurements/2026-11-22-android-17-local-network-preflight.md)
+only establishes emulator availability and records that the capture-only
+sender does not yet request discovery permissions. It does not satisfy any of
+the discovery validation items above.
 
 These are lifecycle and permission tests only. They do not qualify pairing,
 TLS exporter support, capture behavior, or physical latency.
