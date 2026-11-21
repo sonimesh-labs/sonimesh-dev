@@ -34,6 +34,7 @@ CORE_CHECKS_HEADING = "## Core checks"
 SELF_TEST_ONLY = frozenset(
     {
         "android_capture_preflight.py",
+        "android_discovery_preflight.py",
         "check_android_capture_record.py",
         "check_output_lifecycle_log.py",
         "check_output_recovery_log.py",

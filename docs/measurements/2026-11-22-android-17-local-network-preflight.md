@@ -20,6 +20,15 @@ The inspection also confirmed that the current sender target is SDK 36. No
 Android 17 target-SDK discovery build, `NsdManager` picker, browse flow,
 service-removal handling, or stale-candidate test was run.
 
+The repeatable command for this metadata collection is:
+
+```powershell
+python tools/android_discovery_preflight.py --serial emulator-5554
+```
+
+The tool is read-only and rejects unbounded or non-printable ADB metadata before
+rendering it. CI runs its `--self-test` mode; normal mode remains device-only.
+
 ## Interpretation and limits
 
 This run proves only that an API 37 emulator and the relevant permission names
