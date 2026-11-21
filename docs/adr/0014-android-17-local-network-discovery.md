@@ -70,7 +70,10 @@ Before Phase 1 can claim discovery:
 The [2026-11-22 Android 17 preflight](../measurements/2026-11-22-android-17-local-network-preflight.md)
 only establishes emulator availability and records that the capture-only
 sender does not yet request discovery permissions. It does not satisfy any of
-the discovery validation items above.
+the discovery validation items above. The separate target-SDK 37 discovery
+spike now exercises the request and picker callback shape on that emulator, but
+it is still emulator-only and does not validate physical networking, broad
+permission denial UX, service removal, or stale-candidate handling.
 
 These are lifecycle and permission tests only. They do not qualify pairing,
 TLS exporter support, capture behavior, or physical latency.

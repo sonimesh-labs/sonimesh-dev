@@ -17,12 +17,13 @@ The portable Rust workspace builds without an Android SDK, audio device, or
 network service; the native libopus member also needs CMake and a C toolchain
 (see the Opus codec prototype section below). The capture-only Android
 prototype requires the checked-in Gradle wrapper, Java 21, Android API 36, and
-Android Build Tools 35.0.0.
+Android Build Tools 35.0.0. The isolated Android 17 discovery spike additionally
+requires the Android API 37.0 platform.
 
 When a local SDK is missing one of those components, install the same set the
 Android CI job installs before running the Gradle commands:
-`sdkmanager "platform-tools" "platforms;android-36" "build-tools;35.0.0"`
-(after accepting the licenses). Android Gradle Plugin 8.9.1 defaults to Build
+`sdkmanager "platform-tools" "platforms;android-36" "platforms;android-37.0" "build-tools;35.0.0"`
+(after accepting the licenses). Android Gradle Plugin 8.13.2 defaults to Build
 Tools 35.0.0, so a missing local build-tools component fails the build even
 when the platforms packages are present.
 
@@ -61,6 +62,7 @@ python tools/check_android_capture_record.py --self-test
 python tools/check_ci_wiring.py
 Push-Location apps/android
 .\gradlew.bat lintDebug testDebugUnitTest assembleDebug --no-daemon
+.\gradlew.bat :discovery-spike:lintDebug :discovery-spike:assembleDebugAndroidTest --no-daemon
 .\gradlew.bat :tls-provider-spike:assembleDebugAndroidTest --no-daemon
 Pop-Location
 

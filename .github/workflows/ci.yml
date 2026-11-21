@@ -210,7 +210,7 @@ jobs:
       - name: Install Android build components
         run: |
           yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager "platform-tools" "platforms;android-36" "build-tools;35.0.0"
-      - name: Build Android capture bootstrap
+          sdkmanager "platform-tools" "platforms;android-36" "platforms;android-37.0" "build-tools;35.0.0"
+      - name: Build Android capture and discovery spikes
         working-directory: apps/android
-        run: ./gradlew lintDebug testDebugUnitTest assembleDebug :tls-provider-spike:assembleDebugAndroidTest --no-daemon
+        run: ./gradlew lintDebug testDebugUnitTest assembleDebug :discovery-spike:lintDebug :discovery-spike:assembleDebugAndroidTest :tls-provider-spike:assembleDebugAndroidTest --no-daemon

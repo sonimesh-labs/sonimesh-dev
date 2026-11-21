@@ -378,8 +378,10 @@ jitter, and output-backend ADRs using measured 10/20 ms and device results.
   not claim a concurrent accept/server loop. A 2026-11-22 emulator/ADB
   reverse-loopback run now records Conscrypt against this desktop stack, but
   physical WLAN/OEM interoperability remains open and ADR 0021 stays
-  Provisional. Android runtime provider wiring, discovery, and any
-  concurrent-accept server loop remain open.
+  Provisional. A separate target-SDK 37 discovery spike now records emulator
+  request and picker-stop callbacks under ADR 0014, but Android runtime
+  provider wiring, physical discovery, and any concurrent-accept server loop
+  remain open.
 - Windows output backend selection, physical device/power lifecycle evidence,
   and latency qualification. The independent direct-WASAPI prototype and
   controlled same-host callback comparison exist, but do not settle a backend;

@@ -29,10 +29,20 @@ python tools/android_discovery_preflight.py --serial emulator-5554
 The tool is read-only and rejects unbounded or non-printable ADB metadata before
 rendering it. CI runs its `--self-test` mode; normal mode remains device-only.
 
+An isolated target-SDK 37 discovery spike was then built and installed on the
+same emulator. Its default connected run completed the request-shape and
+permission-state tests. The explicit picker probe was run through the Android
+JUnit runner with `runDiscoveryPicker=true`; all three probe tests passed after
+the test module declared the `INTERNET` permission required by `NsdManager`.
+The probe stopped discovery from its callback and recorded the terminal
+`Stopped` callback; it did not claim a discovered peer or trust establishment.
+The broad `ACCESS_LOCAL_NETWORK` state was `PERMISSION_DENIED` in the probe
+process, so this run does not claim a granted broad-network path.
+
 ## Interpretation and limits
 
-This run proves only that an API 37 emulator and the relevant permission names
-are available for a future discovery spike. It does not validate Android 17
-permission enforcement, picker UX, broad-permission denial behavior, mDNS
-discovery, manual fallback, or any network interoperability. The production
-capture app remains unchanged and discovery stays outside its source boundary.
+This run and the isolated probe establish emulator-only request and callback
+evidence. They do not validate Android 17 permission enforcement on a physical
+device, broad-permission denial UX, service removal, stale-candidate handling,
+manual fallback, or WLAN interoperability. The production capture app remains
+unchanged and discovery stays outside its source boundary.

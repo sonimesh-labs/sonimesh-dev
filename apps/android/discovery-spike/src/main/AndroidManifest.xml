@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- NsdManager requires this for the isolated discovery probe process. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Declared only for the explicit broad-permission probe; production does not use this module. -->
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
+
+    <application
+        android:allowBackup="false"
+        android:label="SoniMesh discovery spike" />
+</manifest>
