@@ -37,7 +37,7 @@ behavior matches the lifecycle invariant, not that audio is necessarily present.
 | Lock screen/background | Service and notification remain observable; record power behavior | Partial: lock and background observed; power not recorded |
 | Notification stop | Same teardown as projection revocation; resources are released | Observed |
 | Projection `onStop()` | AudioRecord, projection, and capture thread are retired once | Observed |
-| Process recreation | No consent token or capture session is reused | Observed |
+| Process recreation | No consent token or capture session is reused | Observed; API 37 emulator record |
 
 ## Physical Run Procedure
 
@@ -438,6 +438,32 @@ the service, notification, and MediaProjection entry were absent afterward. This
 is an API 37 emulator continuity observation only. It does not establish
 physical-device or OEM lock-screen behavior, power, thermal, memory, CPU,
 source-policy, quality, or latency behavior.
+
+### Emulator process recreation, 2026-11-22
+
+The operator started a fresh whole-screen projection session on the API 37
+emulator and observed 56.5 seconds of capture with zero read errors. The package
+was then force-stopped while capture was active. After a three-second teardown
+observation, Android showed the launcher with no SoniMesh sharing indicator. A
+fresh app launch returned to `Ready to request playback capture consent` with
+zeroed duration and evidence counters; no consent result, service, notification,
+or MediaProjection session was restored. The redacted record is
+[`2026-11-22-android-17-process-recreation-record.json`](./2026-11-22-android-17-process-recreation-record.json).
+
+| Field | Before force-stop | After fresh relaunch |
+| --- | ---: | ---: |
+| Capture duration | 56.5 s | 0.0 s |
+| Captured frames | 2,704,384 | 0 |
+| Silent reads | 5,282 | 0 |
+| Read errors | 0 | 0 |
+| Notification / service / projection | present | absent |
+| UI state | No signal | Ready for a fresh capture session |
+
+The record retains the pre-destruction capture snapshots and the post-destruction
+absence observations; it does not serialize the post-relaunch zero counters as a
+third snapshot. This is an API 37 emulator process-recreation observation only.
+It does not inspect platform-private token storage or establish physical-device,
+OEM, power, thermal, memory, CPU, source-policy, quality, or latency behavior.
 
 ### Not Yet Measured
 

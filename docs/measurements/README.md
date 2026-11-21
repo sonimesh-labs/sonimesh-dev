@@ -11,6 +11,7 @@ runs. Read the environment and limitations in each record before generalizing.
 - [2026-11-22 Android 17 idle/silent capture record](./2026-11-22-android-17-idle-silent-capture-record.json) — API 37 emulator lifecycle and no-signal observation only.
 - [2026-11-22 Android 17 projection-revoked record](./2026-11-22-android-17-projection-revoked-record.json) — API 37 emulator teardown observation only.
 - [2026-11-22 Android 17 lock-screen record](./2026-11-22-android-17-lock-screen-record.json) — API 37 emulator background and screen-off continuity observation only.
+- [2026-11-22 Android 17 process-recreation record](./2026-11-22-android-17-process-recreation-record.json) — API 37 emulator force-stop and fresh-relaunch observation only.
 - [Android 17 local-network preflight, 2026-11-22](./2026-11-22-android-17-local-network-preflight.md) — API 37 emulator and permission-catalog check only; discovery remains unvalidated.
 - [Keystore protocol](./android-keystore-spike.md) and [2026-07-20 run](./2026-07-20-android-keystore-spike.md).
 - [Android host build verification, 2026-08-15](./2026-08-15-android-host-build-verification.md).
