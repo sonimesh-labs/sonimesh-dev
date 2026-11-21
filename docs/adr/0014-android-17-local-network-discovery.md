@@ -74,9 +74,10 @@ sender does not yet request discovery permissions. The separate
 adds emulator-only evidence: the picker request reaches a bounded `Stopped`
 callback with broad permission denied, and a same-device opt-in local-service
 probe observes registration, `onServiceFound`, and `onServiceLost` after an
-explicit permission grant. These observations still do not validate physical
-networking, OEM permission UX, cross-device discovery, or stale-candidate
-handling.
+explicit permission grant. A denied-permission probe also fails closed with a
+terminal failure callback (error code `7`) and no service callback on this
+emulator. These observations still do not validate physical networking, OEM
+permission UX, cross-device discovery, or stale-candidate handling.
 
 These are lifecycle and permission tests only. They do not qualify pairing,
 TLS exporter support, capture behavior, or physical latency.

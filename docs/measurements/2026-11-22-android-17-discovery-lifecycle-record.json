@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "recorded_at": "2026-11-22T07:33:18+08:00",
+  "recorded_at": "2026-11-22T07:42:32+08:00",
   "scenario": "android_17_discovery_lifecycle",
   "device": {
     "oem": "Google",
@@ -29,6 +29,13 @@
       "terminal_callback": true,
       "result": "passed"
     },
+    "denied_permission_probe": {
+      "permission_state": "denied",
+      "outcome": "callback_failed",
+      "error_code": 7,
+      "service_found_callback": "not_observed",
+      "result": "passed"
+    },
     "local_service_with_broad_permission": {
       "registration_callback": "observed",
       "service_found_callback": "observed",
@@ -39,7 +46,7 @@
   },
   "instrumentation": {
     "runner": "AndroidJUnitRunner",
-    "tests_in_class": 4,
+    "tests_in_class": 5,
     "result": "ok"
   },
   "limitations": [

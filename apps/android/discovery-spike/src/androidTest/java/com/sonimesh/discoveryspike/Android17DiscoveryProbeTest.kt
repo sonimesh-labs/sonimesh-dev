@@ -12,6 +12,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -113,7 +114,90 @@ class Android17DiscoveryProbeTest {
             state == android.content.pm.PackageManager.PERMISSION_GRANTED ||
                 state == android.content.pm.PackageManager.PERMISSION_DENIED,
         )
-        Log.i(TAG, "ACCESS_LOCAL_NETWORK state=$state")
+        Log.i(
+            TAG,
+            "ACCESS_LOCAL_NETWORK granted=${state == android.content.pm.PackageManager.PERMISSION_GRANTED}",
+        )
+    }
+
+    @Test
+    fun denied_permission_probe_fails_closed_without_service_callbacks() {
+        assumeTrue("Android 17 is required", Build.VERSION.SDK_INT >= 37)
+        val arguments = InstrumentationRegistry.getArguments()
+        assumeTrue(
+            "denied permission probe requires runDeniedDiscovery=true",
+            arguments.getString("runDeniedDiscovery") == "true",
+        )
+
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        assumeTrue(
+            "denied permission probe requires ACCESS_LOCAL_NETWORK to be denied",
+            context.checkSelfPermission(Manifest.permission.ACCESS_LOCAL_NETWORK) ==
+                android.content.pm.PackageManager.PERMISSION_DENIED,
+        )
+        val manager = requireNotNull(context.getSystemService(Context.NSD_SERVICE) as? NsdManager)
+        val executor = Executors.newSingleThreadExecutor()
+        val terminal = CountDownLatch(1)
+        val callbackOutcome = AtomicReference<CallbackOutcome>()
+        val serviceFound = AtomicBoolean(false)
+        val listener = object : NsdManager.DiscoveryListener {
+            override fun onDiscoveryStarted(serviceType: String) {
+                callbackOutcome.set(CallbackOutcome.Started)
+                runCatching { manager.stopServiceDiscovery(this) }
+            }
+
+            override fun onDiscoveryStopped(serviceType: String) {
+                callbackOutcome.set(CallbackOutcome.Stopped)
+                terminal.countDown()
+            }
+
+            override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
+                callbackOutcome.set(CallbackOutcome.Failed(errorCode))
+                terminal.countDown()
+            }
+
+            override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) {
+                callbackOutcome.set(CallbackOutcome.Failed(errorCode))
+                terminal.countDown()
+            }
+
+            override fun onServiceFound(serviceInfo: NsdServiceInfo) {
+                serviceFound.set(true)
+            }
+
+            override fun onServiceLost(serviceInfo: NsdServiceInfo) = Unit
+        }
+
+        try {
+            try {
+                manager.discoverServices(
+                    DiscoveryRequest.Builder(SERVICE_TYPE)
+                        .setFlags(DiscoveryRequest.FLAG_NO_PICKER)
+                        .build(),
+                    executor,
+                    listener,
+                )
+            } catch (error: SecurityException) {
+                callbackOutcome.set(CallbackOutcome.PermissionDenied)
+                terminal.countDown()
+                Log.i(TAG, "denied permission probe outcome=security_exception")
+            }
+            if (!terminal.await(TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                Log.w(TAG, "denied permission probe callback timed out; platform result is unsupported")
+                assumeTrue("denied permission callback was not delivered", false)
+            }
+            val finalOutcome = requireNotNull(callbackOutcome.get())
+            assertTrue(
+                "denied permission probe did not fail closed: $finalOutcome",
+                finalOutcome is CallbackOutcome.Failed ||
+                    finalOutcome is CallbackOutcome.PermissionDenied,
+            )
+            assertTrue("denied permission probe delivered a service", !serviceFound.get())
+            Log.i(TAG, "denied permission probe outcome=$finalOutcome")
+        } finally {
+            runCatching { manager.stopServiceDiscovery(listener) }
+            executor.shutdownNow()
+        }
     }
 
     @Test
@@ -232,6 +316,7 @@ class Android17DiscoveryProbeTest {
     private sealed interface CallbackOutcome {
         data object Started : CallbackOutcome
         data object Stopped : CallbackOutcome
+        data object PermissionDenied : CallbackOutcome
         data class Failed(val code: Int) : CallbackOutcome
     }
 

@@ -30,6 +30,16 @@ adb shell am instrument -w `
 adb shell pm revoke com.sonimesh.discoveryspike android.permission.ACCESS_LOCAL_NETWORK
 ```
 
+With the permission revoked, the denied-permission probe checks that discovery
+fails closed without delivering a service candidate:
+
+```powershell
+adb shell am instrument -w `
+  -e class com.sonimesh.discoveryspike.Android17DiscoveryProbeTest `
+  -e runDeniedDiscovery true `
+  com.sonimesh.discoveryspike.test/androidx.test.runner.AndroidJUnitRunner
+```
+
 The probe logs the permission state before running. A denied permission or a
 missing registration, discovery, or removal callback is recorded as an explicit
 JUnit assumption skip after cleanup; it is not treated as evidence that the
