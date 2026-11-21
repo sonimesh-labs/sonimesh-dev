@@ -29,6 +29,7 @@ runs. Read the environment and limitations in each record before generalizing.
 - [2026-08-13 output recheck](./2026-08-13-windows-output-recheck.md).
 - [2026-11-22 CPAL output smoke](./2026-11-22-windows-cpal-output-smoke.md) — current-host callback observation; no backend or latency claim.
 - [2026-11-22 output soak smoke](./2026-11-22-windows-output-soak-smoke.md) — five-second CPAL/direct-WASAPI transcript check; no long-duration or latency claim.
+- [2026-11-22 pinned output recovery smoke](./2026-11-22-windows-pinned-recovery-smoke.md) — bounded CPAL stop/re-probe/restart observation; no physical device-removal claim.
 
 ## Opus and UI
 
