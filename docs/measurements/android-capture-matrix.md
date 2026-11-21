@@ -341,6 +341,20 @@ PCM, or source information was retained. This verifies the pre-capture denial
 path on the emulator only; it does not qualify Android OEM behavior, playback
 capture, background execution, power, or latency.
 
+### Emulator cancelled-consent smoke, 2026-11-22
+
+With the same API 37 emulator and a fresh app state, `RECORD_AUDIO` and
+`POST_NOTIFICATIONS` were granted through the system package manager so the
+flow could reach MediaProjection consent. The operator pressed `Start capture`,
+then dismissed the system projection surface with Back. The UI reported the
+bounded failure text `Capture failed: Screen capture consent was not granted`
+and returned to the ready state. No `CaptureService` or
+`MediaProjection` entry for `com.sonimesh.sender` was present afterward.
+
+This is an emulator cancellation-path observation only. It does not establish
+projection behavior on a physical device, foreground-service policy across OEMs,
+or any capture capability.
+
 ### Not Yet Measured
 
 - CPU, memory, thermal behavior, and battery impact during an extended
