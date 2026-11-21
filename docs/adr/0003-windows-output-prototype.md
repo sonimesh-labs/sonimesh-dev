@@ -192,6 +192,12 @@ diagnostic state, not lifecycle synchronization.
 
 ## Required evidence before acceptance
 
+A 2026-11-22 same-host CPAL smoke opened the current default endpoint for two
+seconds with zero reported stream errors or oversized callbacks; it observed a
+1,056-frame callback against a fixed 480-frame request. The dated record is
+software scheduling evidence only and does not satisfy the comparison, lifecycle,
+power, Windows 11, or physical/acoustic latency requirements below.
+
 - enumerate the default and representative USB/Bluetooth output devices on the
   Windows 11 reference host;
 - record requested versus observed callback sizes, sample format, rate, and channel

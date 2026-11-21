@@ -25,6 +25,7 @@ runs. Read the environment and limitations in each record before generalizing.
 - [Backend comparison protocol](./windows-output-backend-comparison.md), [comparison](./2026-07-20-windows-output-backend-comparison.md), and [recheck](./2026-07-20-windows-output-backend-recheck.md).
 - CPAL [2026-07-17 smoke](./2026-07-17-windows-cpal-smoke.md), [2026-07-18 probe](./2026-07-18-windows-cpal-probe.md), and [2026-07-18 smoke](./2026-07-18-windows-cpal-smoke.md).
 - [2026-08-13 output recheck](./2026-08-13-windows-output-recheck.md).
+- [2026-11-22 CPAL output smoke](./2026-11-22-windows-cpal-output-smoke.md) — current-host callback observation; no backend or latency claim.
 
 ## Opus and UI
 
