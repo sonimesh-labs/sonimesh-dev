@@ -61,27 +61,24 @@ docs/
 
 ## Current status
 
-The repository now contains a buildable, dependency-light Rust foundation for
+The repository contains a buildable Rust foundation for
 bounded protocol parsing, ChaCha20-Poly1305 media protection, authenticated
 media ingress, jitter/PCM buffers, diagnostics, platform adapters, and desktop
 session lifecycle. A separately buildable Vue/Vite receiver control preview
 exercises only in-memory, low-rate state through its bridge boundary; it is not
 a Tauri or platform-audio integration. The project is still a feasibility
-project: Android capture, a
-qualified Windows output backend, Opus, TLS-backed pairing/root-secret
-provisioning, and measured end-to-end latency are not implemented or claimed.
+project: a capture-only Android prototype and isolated codec, TLS, and Windows
+output experiments exist, but an integrated sender, qualified output backend,
+end-to-end pairing and measured physical latency remain open.
 
 See [MVP implementation baseline](./docs/mvp-baseline.md) for implemented limits,
 explicit gaps, and the next platform-validation slices.
 
 ## Documentation
 
-- [Architecture](./docs/architecture.md) — scope, platform boundaries, data and control planes, lifecycle, audio pipeline, and operational requirements.
-- [Security model](./docs/security-model.md) — first pairing, identity storage, UDP AEAD, replay protection, privacy, and abuse controls.
-- [Testing and measurement](./docs/testing-and-measurement.md) — latency budget, hardware-in-the-loop measurement, simulation, fuzzing, and CI boundaries.
-- [Roadmap](./docs/roadmap.md) — feasibility phases, exit criteria, MVP scope, and later platform work.
-- [Architecture decisions](./docs/adr/README.md) — decisions that must be recorded before the implementation is considered stable.
-- [Development](./docs/development.md) — prerequisites, checks, dependency direction, and realtime review rules.
+- [Documentation map](./docs/README.md) — find design, implementation status,
+  development checks, decisions, protocol vectors, and measurement evidence.
+- [Development](./docs/development.md) — prerequisites and checks for contributors.
 
 ## Development principle
 

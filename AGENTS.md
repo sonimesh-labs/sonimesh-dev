@@ -5,9 +5,10 @@ It complements the repository-wide instructions supplied by the workspace.
 
 ## Project status
 
-SoniMesh is currently an architecture and feasibility project. The repository
-contains design documents but no production implementation yet. Do not turn an
-unverified platform assumption into a feature promise or a compatibility claim.
+SoniMesh is a feasibility project with a buildable foundation and platform
+prototypes, not a completed end-to-end product. See `docs/mvp-baseline.md` for
+implemented boundaries and remaining gates. Do not turn an unverified platform
+assumption into a feature promise or a compatibility claim.
 
 The authoritative design documents are:
 
@@ -15,14 +16,16 @@ The authoritative design documents are:
 - `docs/security-model.md` — pairing, identity, session keys, and packet security
 - `docs/testing-and-measurement.md` — latency, quality, soak, fuzz, and HIL tests
 - `docs/roadmap.md` — evidence-driven delivery phases and exit criteria
-- `docs/adr/README.md` — decisions required before implementation boundaries settle
+- `docs/mvp-baseline.md` — implementation snapshot, limits, and open gates
+- `docs/adr/README.md` — recorded decisions and their evidence gates
+- `docs/README.md` — documentation map and evidence conventions
 
 The root `README.md` is the public orientation document. Keep it concise and
 link to detailed documents instead of duplicating the full architecture there.
 
 ## Repository layout
 
-Use the intended layout when implementation begins:
+Use the existing layout and its intended responsibility boundaries:
 
 ```text
 apps/android/                 Kotlin sender and foreground service
@@ -120,8 +123,16 @@ Before implementation is considered complete:
 - run the smallest relevant check first, then broaden validation for shared
   protocol or realtime changes.
 
-There is no production test command until the implementation exists. Do not
-invent a passing test result; report unavailable checks clearly.
+Use `docs/development.md` for the existing checks and distinguish software
+results from hardware evidence. Do not invent a passing result; report
+unavailable checks clearly.
+
+## Local development notes
+
+Machine-local notes may be available at `.dev/INDEX.md`. Read them as optional
+context, not as a repository contract; tracked design documents and ADRs take
+precedence. Keep third-party reference checkouts under `.dev/refs/` for reading
+only, check their licenses, and independently implement any ideas adopted.
 
 ## Change discipline
 

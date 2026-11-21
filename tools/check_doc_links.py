@@ -24,6 +24,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SKIP_DIRECTORIES = frozenset(
     {
         ".agents",
+        ".dev",
         ".git",
         ".gradle-sandbox",
         ".playwright-cli",
@@ -158,6 +159,15 @@ class DocLinkTests(unittest.TestCase):
             (root / "target" / "x.md").write_text(
                 "[missing](./missing.md)", encoding="utf-8"
             )
+            (root / "a.md").write_text("ok", encoding="utf-8")
+            self.assertEqual(validate_documents(root), [])
+
+    def test_skips_machine_local_notes_and_reference_checkouts(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            local = root / ".dev" / "refs" / "example"
+            local.mkdir(parents=True)
+            (local / "README.md").write_text("[missing](./missing.md)", encoding="utf-8")
             (root / "a.md").write_text("ok", encoding="utf-8")
             self.assertEqual(validate_documents(root), [])
 
