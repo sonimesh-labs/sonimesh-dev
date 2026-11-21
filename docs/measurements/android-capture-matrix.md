@@ -413,6 +413,32 @@ notification, and MediaProjection entry were absent after revocation. This is an
 API 37 emulator teardown observation only; it does not establish physical-device
 or OEM projection behavior, power, quality, or latency.
 
+### Emulator lock-screen continuity, 2026-11-22
+
+The operator started a fresh whole-screen projection session on the API 37
+emulator, sent the activity to the launcher, and turned the screen off for
+approximately 20 seconds. The system sharing indicator remained present while
+the activity was out of the foreground and after the screen was turned back on.
+Reopening the app showed the same capture session still active; its counters had
+advanced and no read error was reported. The redacted active-observation record is
+[`2026-11-22-android-17-lock-screen-record.json`](./2026-11-22-android-17-lock-screen-record.json).
+
+| Field | Before screen-off | After wake and app reopen |
+| --- | ---: | ---: |
+| Capture duration | 32.4 s | 155.5 s |
+| Captured frames | 1,546,240 | 7,454,720 |
+| Silent frames | 1,546,240 | 7,454,720 |
+| Silent reads | 3,020 | 14,560 |
+| Read errors | 0 | 0 |
+| Notification / service / projection | present | present |
+
+The session was stopped separately through the system sharing control after the
+active observation; the UI reported `Capture stopped: projection revoked`, and
+the service, notification, and MediaProjection entry were absent afterward. This
+is an API 37 emulator continuity observation only. It does not establish
+physical-device or OEM lock-screen behavior, power, thermal, memory, CPU,
+source-policy, quality, or latency behavior.
+
 ### Not Yet Measured
 
 - CPU, memory, thermal behavior, and battery impact during an extended
