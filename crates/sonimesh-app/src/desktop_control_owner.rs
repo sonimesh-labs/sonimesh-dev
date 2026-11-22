@@ -225,6 +225,41 @@ where
             .map_err(|error| DesktopControlOwnerError::Mixer(ControlToMixerError::Control(error)))
     }
 
+    /// Executes a stream action returned by [`Self::accept_control`].
+    ///
+    /// Keeping this dispatch in the owner gives a shell or control transport one
+    /// completion entry point while preserving the bridge's tokenized lifecycle
+    /// checks. Negotiation, no-op, and ignored actions require no platform work.
+    ///
+    /// # Errors
+    ///
+    /// Returns a control or mixer error when a start, rotation, or stop cannot
+    /// commit through the bridge.
+    pub fn execute_control_action<P, const S: usize>(
+        &mut self,
+        action: ControlStreamAction,
+        counters: Option<Arc<StreamCounters>>,
+        pipeline: &mut P,
+    ) -> Result<(), DesktopControlOwnerError>
+    where
+        P: ReceiverPcmProducerInstaller<S>,
+    {
+        match action {
+            ControlStreamAction::Negotiated(_)
+            | ControlStreamAction::Noop
+            | ControlStreamAction::Ignored => Ok(()),
+            ControlStreamAction::Start { token, request } => {
+                self.execute_start(token, request, counters, pipeline)
+            }
+            ControlStreamAction::Rotate {
+                token,
+                previous,
+                next,
+            } => self.execute_rotation(token, previous, next),
+            ControlStreamAction::Stop { token, identity } => self.execute_stop(token, identity),
+        }
+    }
+
     /// Executes a prepared start action through the bridge and injected pipeline.
     ///
     /// # Errors
@@ -832,12 +867,9 @@ mod tests {
         let action = owner
             .accept_control(session, &start_envelope(identity))
             .unwrap();
-        let ControlStreamAction::Start { token, request } = action else {
-            panic!("expected a start action");
-        };
         let mut pipeline = TestPipeline::<480>::default();
         owner
-            .execute_start(token, request, None, &mut pipeline)
+            .execute_control_action(action, None, &mut pipeline)
             .unwrap();
 
         owner.set_gain(0.4).unwrap();
