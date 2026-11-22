@@ -46,6 +46,7 @@ class LabPairingTest {
                 assertEquals("10.0.2.2", udp.text.toString())
                 assertEquals("ab".repeat(32), pin.text.toString())
                 assertEquals("192.168.1.7", host.text.toString())
+                assertEquals("", invitation.text.toString())
             }
         }
     }

@@ -76,7 +76,6 @@ class LabActivity : Activity() {
             hint = "Paste INVITATION_HEX"
             contentDescription = "Lab invitation payload"
             setSingleLine(true)
-            setText(savedInstanceState?.getString("invitation") ?: "")
         }
         layout.addView(invitation)
         layout.addView(Button(this).apply {
@@ -147,7 +146,6 @@ class LabActivity : Activity() {
         outState.putString("pendingPin", pendingPin)
         outState.putString("pendingHost", pendingHost)
         outState.putString("address", address.text.toString())
-        outState.putString("invitation", invitation.text.toString())
         outState.putString("pin", pin.text.toString())
         outState.putString("host", host.text.toString())
         super.onSaveInstanceState(outState)
@@ -188,11 +186,18 @@ class LabActivity : Activity() {
     private fun applyInvitation() {
         try {
             val decoded = PairingQr.decode(labHexToBytes(invitation.text.toString()))
-            require(decoded.controlPort == 47610)
-            require(decoded.controlHost == "127.0.0.1" || parseLabAddress(decoded.controlHost) != null)
-            pin.setText(labHex(decoded.desktopTlsSpki))
-            host.setText(decoded.controlHost)
-            LabStatus.publish("Invitation applied. Enter the desktop IPv4 for UDP separately.")
+            try {
+                require(decoded.controlPort == 47610)
+                require(decoded.controlHost == "127.0.0.1" || parseLabAddress(decoded.controlHost) != null)
+                pin.setText(labHex(decoded.desktopTlsSpki))
+                host.setText(decoded.controlHost)
+                invitation.setText("")
+                LabStatus.publish("Invitation applied. Enter the desktop IPv4 for UDP separately.")
+            } finally {
+                decoded.pairingId.fill(0)
+                decoded.pairingSecret.fill(0)
+                decoded.desktopTlsSpki.fill(0)
+            }
         } catch (_: IllegalArgumentException) {
             LabStatus.publish("Paste a valid lab invitation payload.")
         }
