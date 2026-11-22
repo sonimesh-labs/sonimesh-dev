@@ -148,6 +148,14 @@ decoded 412 frames, had three empty ticks and no late packets or resynchronizati
 and reached a software-render peak of 0.096. This used an emulator and does not
 establish physical-device WLAN behavior.
 
+On 2026-11-22 an API 37 x86_64 emulator ran two successive UDP capture
+sessions against one `--check --repeat` desktop process, granting new screen
+capture consent for each. The sessions admitted 338 and 371 packets, decoded
+335 and 368 frames, and reached software-render peaks of 0.097 and 0.100;
+both reported zero late packets, resynchronizations, concealed frames, and empty
+ticks. The listener returned to waiting after each stop. This short ADB-assisted
+emulator run is not physical WLAN, listening, or latency evidence.
+
 When a local SDK is missing one of those components, install the same set the
 Android CI job installs before running the Gradle commands:
 `sdkmanager "platform-tools" "platforms;android-36" "platforms;android-37.0" "build-tools;35.0.0"`
