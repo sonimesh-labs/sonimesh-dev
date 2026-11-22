@@ -269,10 +269,9 @@ fn run<O: LabOutput>(
 }
 
 fn main() -> LabResult<()> {
-    let (mode, udp_bind) = parse_args(std::env::args().skip(1))?;
+    let (mode, udp_bind, repeat) = parse_args(std::env::args().skip(1))?;
     match mode {
         common::Mode::Check => {
-            let control = accept_control()?;
             let config = OutputConfig {
                 sample_rate_hz: 48_000,
                 channels: 2,
@@ -280,24 +279,23 @@ fn main() -> LabResult<()> {
                 requested_callback_frames: None,
                 maximum_callback_frames: 960,
             };
-            run(
-                control,
-                CheckOutput::default(),
-                OutputSelection {
-                    device: None,
-                    config,
-                },
-                udp_bind,
-            )
+            let selection = OutputSelection {
+                device: None,
+                config,
+            };
+            serve_control(repeat, |control| {
+                run(control, CheckOutput::default(), selection.clone(), udp_bind)
+            })
         }
-        common::Mode::Play { select_output } => play(select_output, udp_bind),
+        common::Mode::Play { select_output } => play(select_output, udp_bind, repeat),
     }
 }
 
-fn parse_args(args: impl IntoIterator<Item = String>) -> LabResult<(common::Mode, Ipv4Addr)> {
+fn parse_args(args: impl IntoIterator<Item = String>) -> LabResult<(common::Mode, Ipv4Addr, bool)> {
     let mut args = args.into_iter();
     let mut common_args = Vec::new();
     let mut bind = None;
+    let mut repeat = false;
     while let Some(arg) = args.next() {
         if arg == "--bind" {
             if bind.is_some() {
@@ -311,6 +309,11 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> LabResult<(common::Mode
                 return Err("--bind must be a local unicast or unspecified address".into());
             }
             bind = Some(address);
+        } else if arg == "--repeat" {
+            if repeat {
+                return Err("--repeat may only be supplied once".into());
+            }
+            repeat = true;
         } else {
             common_args.push(arg);
         }
@@ -318,23 +321,50 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> LabResult<(common::Mode
     Ok((
         common::parse_args(common_args)?,
         bind.unwrap_or(Ipv4Addr::LOCALHOST),
+        repeat,
     ))
 }
 
-fn accept_control() -> LabResult<TcpStream> {
+fn serve_control(repeat: bool, handler: impl FnMut(TcpStream) -> LabResult<()>) -> LabResult<()> {
     let listener = TcpListener::bind("127.0.0.1:39092")?;
     println!("Listening for ADB lab bootstrap on 127.0.0.1:39092; UDP uses port 39093.");
-    let (control, _) = listener.accept()?;
-    Ok(control)
+    serve_sessions(&listener, if repeat { None } else { Some(1) }, handler)
+}
+
+fn serve_sessions(
+    listener: &TcpListener,
+    limit: Option<usize>,
+    mut handler: impl FnMut(TcpStream) -> LabResult<()>,
+) -> LabResult<()> {
+    let mut count = 0;
+    loop {
+        let (control, _) = listener.accept()?;
+        let result = handler(control);
+        count += 1;
+        if limit == Some(count) {
+            return result;
+        }
+        if let Err(error) = result {
+            eprintln!("Lab session ended: {error}");
+        }
+        println!("Waiting for the next lab session.");
+    }
 }
 
 #[cfg(all(windows, feature = "playback"))]
-fn play(select_output: bool, udp_bind: Ipv4Addr) -> LabResult<()> {
-    let (output, selection) = common::prepare_output(select_output)?;
-    run(accept_control()?, output, selection, udp_bind)
+fn play(select_output: bool, udp_bind: Ipv4Addr, repeat: bool) -> LabResult<()> {
+    let (_, selection) = common::prepare_output(select_output)?;
+    serve_control(repeat, |control| {
+        run(
+            control,
+            sonimesh_platform::CpalOutput::new(),
+            selection.clone(),
+            udp_bind,
+        )
+    })
 }
 #[cfg(not(all(windows, feature = "playback")))]
-fn play(_: bool, _: Ipv4Addr) -> LabResult<()> {
+fn play(_: bool, _: Ipv4Addr, _: bool) -> LabResult<()> {
     Err("playback requires Windows and --features playback".into())
 }
 
@@ -364,6 +394,9 @@ mod tests {
         );
         assert!(parse_args(args(&["--check", "--bind", "example.com"])).is_err());
         assert!(parse_args(args(&["--check", "--bind", "224.0.0.1"])).is_err());
+        assert!(parse_args(args(&["--check", "--repeat"])).unwrap().2);
+        assert!(!parse_args(args(&["--check"])).unwrap().2);
+        assert!(parse_args(args(&["--check", "--repeat", "--repeat"])).is_err());
         assert!(
             parse_args(args(&[
                 "--check",
@@ -374,6 +407,33 @@ mod tests {
             ]))
             .is_err()
         );
+    }
+
+    #[test]
+    fn repeated_listener_accepts_another_session_after_failure() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let client = std::thread::spawn(move || {
+            for _ in 0..2 {
+                let mut stream = TcpStream::connect(address).unwrap();
+                stream.write_all(&[1]).unwrap();
+            }
+        });
+        let mut sessions = 0;
+        serve_sessions(&listener, Some(2), |mut stream| {
+            let mut data = [0];
+            stream.read_exact(&mut data)?;
+            assert_eq!(data, [1]);
+            sessions += 1;
+            if sessions == 1 {
+                Err("first session failed".into())
+            } else {
+                Ok(())
+            }
+        })
+        .unwrap();
+        client.join().unwrap();
+        assert_eq!(sessions, 2);
     }
 
     #[test]

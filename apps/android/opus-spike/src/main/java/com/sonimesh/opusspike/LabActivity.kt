@@ -55,7 +55,8 @@ class LabActivity : Activity() {
             contentDescription = "Desktop IPv4 address for UDP"
             keyListener = DigitsKeyListener.getInstance("0123456789.")
             setSingleLine(true)
-            setText(savedInstanceState?.getString("address") ?: DEFAULT_LAB_ADDRESS)
+            setText(savedInstanceState?.getString("address")
+                ?: getPreferences(MODE_PRIVATE).getString("desktopAddress", DEFAULT_LAB_ADDRESS))
         }
         layout.addView(address)
         layout.addView(Button(this).apply {
@@ -98,6 +99,7 @@ class LabActivity : Activity() {
                 return
             }
             pendingAddress = requireNotNull(parsed.hostAddress)
+            getPreferences(MODE_PRIVATE).edit().putString("desktopAddress", pendingAddress).apply()
         }
         udpMode = udp
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {

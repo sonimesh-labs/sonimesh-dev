@@ -108,6 +108,11 @@ interfaces. Without `--bind`, it listens on loopback only. The Android default
 `10.0.2.2` is the emulator host alias, not an address for a physical phone.
 Windows firewall rules and Android local-network access may need attention on a
 physical device. This ADB-assisted lab is not product discovery or pairing.
+The Android lab remembers the last valid UDP destination on this device. Add
+`--repeat` to the UDP command to wait for another session after a capture stops
+or fails; each session uses a fresh secret and requires new capture consent.
+Press Ctrl+C to stop the listener. In playback mode the output chosen at startup
+is reused for subsequent sessions; restart the command to choose another output.
 
 The lab screen shows connection and capture status, including a desktop
 connection failure or disconnect and a stopped projection. Status is kept in
