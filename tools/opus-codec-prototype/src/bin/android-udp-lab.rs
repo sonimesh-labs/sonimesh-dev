@@ -236,6 +236,32 @@ fn sync_gain(source: &GainControlHandle, target: &GainControlHandle) -> LabResul
     Ok(())
 }
 
+fn maintain_output<O: LabOutput>(
+    output: &mut ReceiverOutputController<O, SAMPLES>,
+    receiver: &mut LabReceiver,
+    retry_at: &mut Option<Instant>,
+    now: Instant,
+) -> bool {
+    if let Some(health) = output.monitor() {
+        eprintln!("Output failed ({health:?}); retrying the selected device.");
+        *retry_at = Some(now + Duration::from_secs(1));
+    }
+    if retry_at.is_some_and(|deadline| now >= deadline) {
+        match output.recover(receiver) {
+            Ok(()) => {
+                *retry_at = None;
+                println!("Output recovered; waiting for fresh audio.");
+                return true;
+            }
+            Err(error) => {
+                eprintln!("Output recovery failed: {error}");
+                *retry_at = Some(now + Duration::from_secs(1));
+            }
+        }
+    }
+    false
+}
+
 #[allow(clippy::too_many_lines)] // One lab session coordinates socket, playout, and output lifetimes.
 fn run<O: LabOutput>(
     mut control: TcpStream,
@@ -277,10 +303,15 @@ fn run<O: LabOutput>(
     let mut decoded = 0_u64;
     let mut concealed = 0_u64;
     let mut empty_ticks = 0_u64;
+    let mut retry_at = None;
     loop {
         sync_gain(gain, &output_gain)?;
         if control_closed(&mut control)? {
             break;
+        }
+        let recovered = maintain_output(&mut output, &mut receiver, &mut retry_at, Instant::now());
+        if recovered || retry_at.is_some() {
+            next_playout = None;
         }
         for _ in 0..32 {
             match poll_media(&mut receiver)? {
@@ -297,7 +328,7 @@ fn run<O: LabOutput>(
                         _ => return Err("unexpected media admission outcome".into()),
                     }
                     last_packet = Instant::now();
-                    if next_playout.is_none() {
+                    if next_playout.is_none() && retry_at.is_none() {
                         next_playout = Some(last_packet + Duration::from_millis(60));
                     }
                 }
@@ -317,9 +348,6 @@ fn run<O: LabOutput>(
                     _ => return Err("decoder produced an unexpected frame shape".into()),
                 }
                 output.output_mut().tick()?;
-                if output.monitor().is_some() {
-                    return Err("output device reported a fault".into());
-                }
                 next_playout = Some(
                     if now.duration_since(deadline) >= Duration::from_millis(20) {
                         now + Duration::from_millis(20)
@@ -337,6 +365,9 @@ fn run<O: LabOutput>(
     println!(
         "media packets admitted: {admitted}, late: {late}, resynchronized: {resynchronized}, decoded: {decoded}, concealed: {concealed}, empty ticks: {empty_ticks}"
     );
+    if retry_at.is_some() {
+        return Err("output device did not recover before the session ended".into());
+    }
     output.output_mut().finish()?;
     output.stop();
     if decoded == 0 {
@@ -468,6 +499,157 @@ mod tests {
     use super::*;
     use sonimesh_protocol::MediaSealer;
     use std::net::UdpSocket;
+
+    struct FaultOutput {
+        source: Option<Box<dyn RenderSource>>,
+        failed: bool,
+        reject_start: bool,
+    }
+
+    impl AudioOutput for FaultOutput {
+        fn devices(&self) -> Result<Vec<OutputDeviceInfo>, OutputError> {
+            Ok(Vec::new())
+        }
+        fn start(
+            &mut self,
+            _: Option<&OutputDeviceId>,
+            _: OutputConfig,
+            source: Box<dyn RenderSource>,
+        ) -> Result<(), OutputError> {
+            if self.reject_start {
+                return Err(OutputError::DeviceUnavailable);
+            }
+            self.failed = false;
+            self.source = Some(source);
+            Ok(())
+        }
+        fn stop(&mut self) {
+            self.source = None;
+        }
+        fn health(&self) -> OutputHealth {
+            if self.failed {
+                OutputHealth::StreamError
+            } else {
+                OutputHealth::Healthy
+            }
+        }
+    }
+    impl LabOutput for FaultOutput {
+        fn tick(&mut self) -> LabResult<()> {
+            Ok(())
+        }
+        fn finish(&mut self) -> LabResult<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)] // Exercises the complete fault, retry, and media-resumption sequence.
+    fn output_fault_retries_and_fresh_media_renders_after_recovery() {
+        let secret = SessionSecret::new([7; 32]);
+        let context = MediaKeyContext::new(1, 1, 0, MediaDirection::AndroidToDesktop).unwrap();
+        let counters = Arc::new(StreamCounters::default());
+        let (producer, _) = realtime_pcm_queue::<SAMPLES>(8).unwrap();
+        let worker = StreamDecodeWorker::new_for_opus(
+            Decoder(opus::Decoder::new(48_000, opus::Channels::Stereo).unwrap()),
+            producer,
+            0,
+            OpusFrameConfig::new(48_000, 2, 20).unwrap(),
+        )
+        .unwrap();
+        let mut receiver = LabReceiver::bind_with_worker(
+            "127.0.0.1:0".parse().unwrap(),
+            &secret,
+            context,
+            worker,
+            Arc::clone(&counters),
+        )
+        .unwrap();
+        let factory = ReceiverPcmEndpointFactory::new(
+            8,
+            SourcePcmFormat::new(48_000, 2).unwrap(),
+            Arc::clone(&counters),
+        );
+        let mut output = ReceiverOutputController::new(
+            FaultOutput {
+                source: None,
+                failed: false,
+                reject_start: false,
+            },
+            factory,
+        );
+        let selection = OutputSelection {
+            device: None,
+            config: OutputConfig {
+                sample_rate_hz: 48_000,
+                channels: 2,
+                sample_format: SampleFormat::Float32,
+                requested_callback_frames: None,
+                maximum_callback_frames: 960,
+            },
+        };
+        output.start(selection, &mut receiver).unwrap();
+        output.gain_handle().set_gain(0.5).unwrap();
+        output.output_mut().failed = true;
+        output.output_mut().reject_start = true;
+        let now = Instant::now();
+        let mut retry = None;
+        assert!(!maintain_output(
+            &mut output,
+            &mut receiver,
+            &mut retry,
+            now
+        ));
+        assert!(output.output().source.is_none());
+        assert!(!maintain_output(
+            &mut output,
+            &mut receiver,
+            &mut retry,
+            now + Duration::from_secs(1)
+        ));
+        assert!(retry.is_some());
+        let mut encoder =
+            opus::Encoder::new(48_000, opus::Channels::Stereo, opus::Application::Audio).unwrap();
+        let mut payload = [0_u8; 1_148];
+        let len = encoder.encode_float(&[0.2; SAMPLES], &mut payload).unwrap();
+        let mut sealer = MediaSealer::new(&secret, context).unwrap();
+        let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let before = sealer.seal(0, 0, &payload[..len]).unwrap();
+        socket
+            .send_to(&before.datagram, receiver.local_addr().unwrap())
+            .unwrap();
+        poll_packet(&mut receiver);
+        output.output_mut().reject_start = false;
+        assert!(maintain_output(
+            &mut output,
+            &mut receiver,
+            &mut retry,
+            now + Duration::from_secs(2)
+        ));
+        assert!(retry.is_none());
+        assert!((output.gain_handle().gain() - 0.5).abs() < f32::EPSILON);
+        assert!(matches!(
+            decode_buffered(&mut receiver, &counters).unwrap(),
+            DecodeStep::NotReady
+        ));
+        let frame = sealer.seal(0, 960, &payload[..len]).unwrap();
+        socket
+            .send_to(&frame.datagram, receiver.local_addr().unwrap())
+            .unwrap();
+        poll_packet(&mut receiver);
+        assert!(matches!(
+            decode_buffered(&mut receiver, &counters).unwrap(),
+            DecodeStep::Decoded { sequence: 1, .. }
+        ));
+        let mut samples = [0.0; SAMPLES];
+        output
+            .output_mut()
+            .source
+            .as_mut()
+            .unwrap()
+            .render(&mut samples);
+        assert!(samples.iter().any(|sample| sample.abs() > 0.001));
+    }
 
     #[test]
     fn bind_address_is_opt_in_and_validated() {

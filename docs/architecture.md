@@ -54,6 +54,9 @@ path rather than discovery, pairing, or the production control plane.
 The desktop UDP lab can accept optional console gain and mute commands and
 publish them to its existing per-stream output control. These controls are
 local to the lab and do not implement the desktop UI bridge.
+If its output reports a runtime fault, the UDP lab keeps the media session alive
+while it retries the selected output outside the realtime callback. A successful
+restart uses a fresh PCM endpoint and resumes from new media arrivals.
 
 The first product goal is not synchronized multi-device playback, recording of
 calls, remote desktop, or a universal Bluetooth receiver. It is a practical

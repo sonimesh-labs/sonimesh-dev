@@ -104,6 +104,8 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   The lab remembers the last valid destination and can keep its desktop listener
   available for successive independent sessions. Optional console commands
   adjust the receiver's local gain and mute during and across those sessions.
+  The UDP lab also retries its selected output after a reported runtime fault;
+  simulated recovery is tested, while physical device-removal behavior remains open.
   A seeded property walk and a byte-driven libFuzzer target drive in-order
   deliveries, duplicates, tampered ciphertext, retired-epoch packets, and
   rotations against an independent replay oracle and counter model,

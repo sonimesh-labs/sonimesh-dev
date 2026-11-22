@@ -89,8 +89,9 @@ cargo run -p opus-codec-prototype --features playback --bin android-udp-lab -- -
 Either playback command also accepts `--select-output` after `--play`. Choose
 an enumerated output before starting capture; pressing Enter selects the system
 default. The chosen device and its format are fixed for that lab session. An
-unavailable device or unsupported default format ends the command; automatic
-output recovery is not implemented in these lab commands.
+unavailable device or unsupported default format ends startup. The UDP lab
+retries the selected output after a reported runtime fault; the ADB TCP lab
+still ends on an output fault. This does not switch to a different device.
 
 Choose **Start UDP capture** and fresh capture consent. Use `--check`
 without `--features playback` for the software render check. Android generates
