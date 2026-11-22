@@ -1,7 +1,7 @@
 # MVP implementation baseline
 
 > Status: foundation implemented; platform feasibility remains open
-> Updated: 2026-11-22
+> Updated: 2026-11-23
 
 This baseline turns the architecture documents into a buildable core without
 claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
@@ -310,7 +310,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   `IncompatibleVersion` for a hello version mismatch, and `InvalidRequest`
   otherwise). Replies survive the untrusted TCP control framing in both
   directions; no TLS, pairing, or key material is involved.
-- a capture-only Kotlin/Compose Android phase 0A bootstrap with direct,
+- a capture-only Kotlin/Compose Android phase 0A bootstrap with a per-session
+  playback-usage selector for Media, Game, and Other (`USAGE_MEDIA`,
+  `USAGE_GAME`, and `USAGE_UNKNOWN`), plus direct,
   non-persisted MediaProjection consent transfer, a media-projection foreground
   service, a fixed PCM16 AudioRecord read buffer, low-rate state publication
   that rebases after a nonnegative clock regression, bounded evidence counters
