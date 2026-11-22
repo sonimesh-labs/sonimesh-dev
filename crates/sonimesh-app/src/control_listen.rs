@@ -122,7 +122,7 @@ impl core::fmt::Debug for ControlListenError {
                 .finish(),
             Self::Handshake(error) => formatter
                 .debug_struct("Handshake")
-                .field("category", &handshake_error_category(error))
+                .field("category", &handshake_error_category(*error))
                 .finish(),
             Self::ReplyWrite(error) => formatter
                 .debug_struct("ReplyWrite")
@@ -143,7 +143,7 @@ fn tls_error_category(error: &DesktopTlsError) -> &'static str {
     }
 }
 
-fn handshake_error_category(error: &PairingHandshakeError) -> &'static str {
+fn handshake_error_category(error: PairingHandshakeError) -> &'static str {
     match error {
         PairingHandshakeError::Qr(_) => "qr",
         PairingHandshakeError::InvitationMismatch => "invitation_mismatch",
