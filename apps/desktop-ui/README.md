@@ -4,8 +4,9 @@ Vue/Vite control surface for desktop lifecycle commands. `src/bridge.ts` is the
 only frontend integration point. `TauriDesktopBridge` now provides the low-rate
 IPC adapter for the future shell: it maps receiver commands to injected Tauri
 `invoke` calls and normalizes every returned snapshot as a live (`previewAdapter:
-false`) state. The application still selects `PreviewDesktopBridge` by default
-until the shell owns a real receiver session. The preview state is explicitly
+false`) state. `createDesktopBridge()` selects that adapter automatically when
+the Tauri v2 global `__TAURI__.core.invoke` is present; browser builds continue
+with `PreviewDesktopBridge` when it is absent. The preview state is explicitly
 labelled in the UI and must not be read as an active receiver, a transport
 measurement, or a hardware capability.
 Its initial ready state includes a synthetic consumed pairing record so the

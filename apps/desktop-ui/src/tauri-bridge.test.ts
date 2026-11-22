@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { TauriDesktopBridge } from './bridge'
+import { createDesktopBridge, PreviewDesktopBridge, TauriDesktopBridge } from './bridge'
 import type { DesktopBridgeInvoke } from './bridge'
 import type { DesktopSnapshot } from './types'
 
@@ -59,6 +59,16 @@ function snapshot(): DesktopSnapshot {
 }
 
 describe('TauriDesktopBridge', () => {
+  it('selects the preview bridge when no shell runtime is available', () => {
+    expect(createDesktopBridge()).toBeInstanceOf(PreviewDesktopBridge)
+  })
+
+  it('selects the production bridge when an invoke function is supplied', () => {
+    const invoke: DesktopBridgeInvoke = async <T>() => snapshot() as T
+
+    expect(createDesktopBridge(invoke)).toBeInstanceOf(TauriDesktopBridge)
+  })
+
   it('maps production commands to low-rate IPC and marks snapshots as live', async () => {
     const calls: Array<[string, Record<string, unknown> | undefined]> = []
     const invoke: DesktopBridgeInvoke = async <T>(command: string, args?: Record<string, unknown>) => {

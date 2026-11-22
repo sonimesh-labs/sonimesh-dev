@@ -149,6 +149,18 @@ export class TauriDesktopBridge implements DesktopBridge {
   }
 }
 
+interface TauriGlobalRuntime {
+  core: {
+    invoke: DesktopBridgeInvoke
+  }
+}
+
+declare global {
+  interface Window {
+    __TAURI__?: TauriGlobalRuntime
+  }
+}
+
 const previewOutput: OutputDevice[] = [
   { id: 'default', label: 'System default output', sampleRateHz: 48_000, channels: 2, isDefault: true },
   { id: 'usb', label: 'USB audio output', sampleRateHz: 48_000, channels: 2, isDefault: false },
@@ -587,7 +599,13 @@ const JITTER_MODE_PRESETS: Record<JitterMode, Pick<StreamMetrics, 'targetMinFram
   stable: { targetMinFrames: 4, targetMaxFrames: 6, targetFrames: 5, playoutDelayMs: 100 },
 }
 
-export const desktopBridge: DesktopBridge = new PreviewDesktopBridge()
+/** Selects the live shell bridge when Tauri exposes its global API. */
+export function createDesktopBridge(invoke?: DesktopBridgeInvoke): DesktopBridge {
+  const runtimeInvoke = invoke ?? (typeof window === 'undefined' ? undefined : window.__TAURI__?.core?.invoke)
+  return runtimeInvoke === undefined ? new PreviewDesktopBridge() : new TauriDesktopBridge(runtimeInvoke)
+}
+
+export const desktopBridge: DesktopBridge = createDesktopBridge()
 
 function addToCounter(counter: MetricCounter, delta: number): MetricCounter {
   if (!/^\d+$/.test(counter)) return counter
