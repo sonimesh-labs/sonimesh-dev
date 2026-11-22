@@ -36,7 +36,9 @@ current output inventory, retained selection, single-stream gain/mute state, and
 redacted active-stream metrics; it leaves multi-stream controls identity-addressed
 instead of guessing. A
 `DesktopControlOwner` also owns the low-rate control-session and stream-lifecycle
-delegation boundary, while receiver pipelines remain injected by the application
+delegation boundary. Its `execute_control_action` entry point dispatches the
+coordinator's negotiated/start/rotate/stop actions through one token-checked
+completion path, while receiver pipelines remain injected by the application
 composition layer. A
 future Tauri shell can delegate to this owner without moving UI code into the
 realtime path. The projection excludes pairing IDs,
