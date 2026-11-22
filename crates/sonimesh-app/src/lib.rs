@@ -7,6 +7,7 @@ mod control_snapshot;
 mod control_stream;
 mod control_to_mixer;
 mod desktop_control_owner;
+mod desktop_receiver_owner;
 mod diagnostic_export_action;
 mod export_store;
 mod format_adapted_render_source_factory;
@@ -49,6 +50,7 @@ pub use control_to_mixer::{BridgeSnapshot, ControlToMixerBridge, ControlToMixerE
 pub use desktop_control_owner::{
     DesktopControlOwner, DesktopControlOwnerError, DesktopControlView,
 };
+pub use desktop_receiver_owner::DesktopReceiverOwner;
 pub use diagnostic_export_action::{
     DEFAULT_MAX_RETAINED_EXPORT_BYTES, DEFAULT_MAX_RETAINED_EXPORTS, DiagnosticExportAction,
     DiagnosticExportActionError, ExportReceipt, ExportRetentionJournal, ExportRetentionPolicy,

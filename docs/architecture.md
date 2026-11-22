@@ -39,7 +39,9 @@ instead of guessing. A
 delegation boundary. Its `execute_control_action` entry point dispatches the
 coordinator's negotiated/start/rotate/stop actions through one token-checked
 completion path, while receiver pipelines remain injected by the application
-composition layer. A
+composition layer. `DesktopReceiverOwner` now composes that owner with one
+injected receiver pipeline and exposes an accept-and-execute boundary for the
+future shell; it still does not choose a decoder, socket, or output backend. A
 future Tauri shell can delegate to this owner without moving UI code into the
 realtime path. The projection excludes pairing IDs,
 proofs, addresses, session material, PCM,

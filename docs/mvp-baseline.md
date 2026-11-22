@@ -343,7 +343,10 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   and bounded diagnostic export for a future shell command layer. Its identity-free
   gain/mute commands resolve the unique active stream and reject zero or ambiguous
   stream state; multi-stream callers retain identity-addressed controls. It can also
-  persist an export through the existing bounded `ExportStore`. There
+  persist an export through the existing bounded `ExportStore`. A generic
+  `DesktopReceiverOwner` now keeps this control owner beside one injected receiver
+  pipeline and executes authenticated stream actions through the same completion
+  path. There
   is still no live Tauri shell, receiver-owner construction, audio, key, or
   realtime integration in the desktop UI process.
 - an isolated Tauri output-probe prototype that lists Windows CPAL devices and

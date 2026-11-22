@@ -713,6 +713,9 @@ low-rate command owner for lifecycle, output, stream, and diagnostics actions;
 a live Tauri shell and its command bindings remain pending platform integration.
 Control transports can use `execute_control_action` to route negotiated and
 tokenized stream actions without duplicating start/rotate/stop dispatch logic.
+`DesktopReceiverOwner` is the next composition boundary: it stores that owner,
+the injected receiver pipeline, and optional stream counters together, while
+leaving decoder, socket, and output construction to the application layer.
 The composable polls the same low-rate snapshot command once per second and clears
 that timer on unmount, so reconnect countdowns and asynchronous output faults do
 not depend on a user clicking Refresh.
