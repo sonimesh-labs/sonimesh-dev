@@ -109,6 +109,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   The paired lab also resumes after an authenticated Opus packet rejected as
   invalid: it resets the stream's decode state and waits for fresh media, and
   reports the decode error count. Other decoder failures still end the session.
+  Its Android service can cancel an in-progress paired connection before stream
+  startup; after startup, normal shutdown still attempts StopStream. Host tests
+  cover socket cancellation and ownership handoff, not Android device behavior.
   A seeded property walk and a byte-driven libFuzzer target drive in-order
   deliveries, duplicates, tampered ciphertext, retired-epoch packets, and
   rotations against an independent replay oracle and counter model,

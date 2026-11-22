@@ -135,6 +135,12 @@ behavior remain unverified.
 The lab activity presents the service's current connection and capture state,
 including a terminal reason on connection failure or projection revocation;
 this process-local status is not a production diagnostics interface.
+During paired-lab setup, the service tracks the connecting socket through TLS,
+Hello, and StartStream. Stopping the service closes the setup socket to interrupt
+pending I/O; after StartStream succeeds, ownership moves to the capture worker,
+which attempts the normal StopStream exchange on shutdown. A setup cancelled
+before this handoff cannot publish itself as an active capture session. This is
+host-tested coordination, not device lifecycle or network-interruption evidence.
 
 `tools/android_capture_preflight.py` is a separate, read-only lab helper. It
 requires an explicitly selected, printable single-line ADB serial but does not

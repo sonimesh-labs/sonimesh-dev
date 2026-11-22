@@ -102,9 +102,16 @@ class PairedConnection internal constructor(
 /** Establishes one Android-client pairing exchange from a binary QR payload. */
 object PairingClient {
     /** Call off the UI thread. The caller retains ownership of [payload]. */
-    fun connect(payload: ByteArray): PairedConnection {
-        val invitation = PairingQr.decode(payload)
-        val raw = Socket()
+    fun connect(payload: ByteArray): PairedConnection = connect(payload, Socket())
+
+    /** Takes ownership of [raw], which may be closed by the caller to cancel setup. */
+    fun connect(payload: ByteArray, raw: Socket): PairedConnection {
+        val invitation = try {
+            PairingQr.decode(payload)
+        } catch (error: Throwable) {
+            runCatching { raw.close() }
+            throw error
+        }
         try {
             val context = SSLContext.getInstance("TLS", Conscrypt.newProvider()).apply {
                 init(null, arrayOf(ExactSpkiTrustManager(invitation.desktopTlsSpki)), null)

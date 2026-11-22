@@ -42,6 +42,7 @@ class LabCaptureService : Service() {
     private val running = AtomicBoolean(false)
     private val socketLock = Any()
     private var socket: Socket? = null
+    private val setupSocket = SetupSocket()
     private var projection: MediaProjection? = null
     private val handler = Handler(Looper.getMainLooper())
     private var terminalStatus = false
@@ -98,8 +99,11 @@ class LabCaptureService : Service() {
         try {
             val packets = ArrayBlockingQueue<EncodedPacket>(8)
             if (invitation != null) {
-                val connection = PairingClient.connect(invitation)
+                val raw = Socket()
+                check(setupSocket.track(raw)) { "capture stopped before pairing" }
+                val connection = PairingClient.connect(invitation, raw)
                 paired = connection
+                check(setupSocket.track(connection.socket)) { "capture stopped during pairing" }
                 check(running.get()) { "capture stopped during pairing" }
                 connection.negotiateHello("android audio lab", listOf(2))
                 val random = SecureRandom()
@@ -109,6 +113,7 @@ class LabCaptureService : Service() {
                 val result = connection.startStream(StreamParameters(identity, 48_000, 2, 20))
                 check(result is StreamControlResult.Status && result.state == 2) { "desktop receiver not ready" }
                 pairedIdentity = identity
+                check(setupSocket.handoff()) { "capture stopped while starting stream" }
                 check(running.get()) { "capture stopped while starting stream" }
                 val sealer = LabMediaSealer(connection.mediaRoot, session, 1, 0)
                 Thread({ sendDatagrams(sealer, packets, requireNotNull(destination)) }, "audio-lab-sender").start()
@@ -303,6 +308,7 @@ class LabCaptureService : Service() {
 
     override fun onDestroy() {
         running.set(false)
+        setupSocket.cancel()
         if (!terminalStatus) LabStatus.publish("Capture stopped.")
         synchronized(socketLock) {
             try { socket?.close() } catch (_: java.io.IOException) { }
