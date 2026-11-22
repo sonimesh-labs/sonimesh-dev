@@ -12,6 +12,7 @@ class LabPairingTest {
         assertEquals("127.0.0.1", invitation.controlHost)
         assertEquals(47610, invitation.controlPort)
         assertEquals(32, invitation.desktopTlsSpki.size)
+        assertEquals("192.168.1.7", PairingQr.decode(labInvitation("AB".repeat(32), "192.168.1.7")).controlHost)
         assertThrows(IllegalArgumentException::class.java) { labInvitation("0".repeat(63)) }
         assertThrows(IllegalArgumentException::class.java) { labInvitation("GG".repeat(32)) }
         assertThrows(IllegalArgumentException::class.java) { labInvitation("aa".repeat(513)) }

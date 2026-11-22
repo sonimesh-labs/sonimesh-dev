@@ -6,6 +6,7 @@ mod common;
 mod lab_decoder;
 
 use std::fmt::Write;
+use std::net::{Ipv4Addr, SocketAddrV4};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
@@ -47,7 +48,7 @@ fn main() {
 fn run() -> LabResult<()> {
     let options = Options::parse(std::env::args().skip(1))?;
     let playback = Playback::prepare(options.play, options.select_output)?;
-    let listener = PairingListener::bind("127.0.0.1:47610")?;
+    let listener = PairingListener::bind(SocketAddrV4::new(options.bind, 47610))?;
     let address = listener.local_addr()?;
     let key = generate_simple_self_signed(vec!["localhost".to_owned()])?;
     let pin = key.key_pair.public_key_der();
@@ -70,7 +71,7 @@ fn run() -> LabResult<()> {
         PairingQrInvitation {
             id,
             pairing_secret: LAB_SECRET,
-            control_host: "127.0.0.1",
+            control_host: &options.host.to_string(),
             control_port: address.port(),
             desktop_tls_spki: &pin,
             expires_at_ms: 120_100,
@@ -84,6 +85,7 @@ fn run() -> LabResult<()> {
     }
     println!("SPKI_HEX {pin_hex}");
     println!("LISTENING {address}");
+    println!("INVITATION_HOST {}", options.host);
     println!("READY");
     let started = Instant::now();
     let stream = loop {
@@ -110,27 +112,64 @@ fn run() -> LabResult<()> {
         },
     )?;
     println!("RESULT pairing verified");
-    negotiate_hello(channel, session, root, options.require_tone, playback)
+    negotiate_hello(
+        channel,
+        session,
+        root,
+        options.require_tone,
+        playback,
+        options.bind,
+    )
 }
 
-#[derive(Default)]
 struct Options {
     require_tone: bool,
     play: bool,
     select_output: bool,
+    bind: Ipv4Addr,
+    host: Ipv4Addr,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            require_tone: false,
+            play: false,
+            select_output: false,
+            bind: Ipv4Addr::LOCALHOST,
+            host: Ipv4Addr::LOCALHOST,
+        }
+    }
 }
 
 impl Options {
     fn parse(args: impl IntoIterator<Item = String>) -> LabResult<Self> {
         let mut result = Self::default();
-        for arg in args {
+        let mut args = args.into_iter();
+        let mut bind_set = false;
+        let mut host_set = false;
+        while let Some(arg) = args.next() {
             match arg.as_str() {
                 "--require-tone" if !result.require_tone => result.require_tone = true,
                 "--play" if !result.play => result.play = true,
                 "--select-output" if !result.select_output => result.select_output = true,
+                "--bind" if !bind_set => {
+                    result.bind = args
+                        .next()
+                        .ok_or("--bind requires an IPv4 address")?
+                        .parse()?;
+                    bind_set = true;
+                }
+                "--host" if !host_set => {
+                    result.host = args
+                        .next()
+                        .ok_or("--host requires an IPv4 address")?
+                        .parse()?;
+                    host_set = true;
+                }
                 _ => {
                     return Err(
-                        "usage: paired-audio-lab [--require-tone] [--play [--select-output]]"
+                        "usage: paired-audio-lab [--require-tone] [--play [--select-output]] [--bind IPv4 --host IPv4]"
                             .into(),
                     );
                 }
@@ -138,6 +177,13 @@ impl Options {
         }
         if result.select_output && !result.play {
             return Err("--select-output requires --play".into());
+        }
+        if bind_set != host_set
+            || result.host.is_unspecified()
+            || result.host.is_multicast()
+            || result.host.is_broadcast()
+        {
+            return Err("provide both --bind and a unicast --host IPv4 address".into());
         }
         Ok(result)
     }
@@ -149,6 +195,7 @@ fn negotiate_hello(
     root: SessionSecret,
     require_tone: bool,
     playback: Playback,
+    bind: Ipv4Addr,
 ) -> LabResult<()> {
     let (channel, _exporter) = channel.into_parts();
     let socket = channel.sock.try_clone()?;
@@ -203,6 +250,7 @@ fn negotiate_hello(
         root,
         require_tone,
         playback,
+        bind,
     )
 }
 
@@ -383,6 +431,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
     root: SessionSecret,
     require_tone: bool,
     mut playback: Playback,
+    bind: Ipv4Addr,
 ) -> LabResult<()> {
     let mut allocator = MediaSessionAllocator::new(root);
     let mut receiver: Option<Receiver> = None;
@@ -442,7 +491,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                                 OpusFrameConfig::new(48_000, 2, 20)?,
                             )?;
                             let mut pipeline = Receiver::bind_with_worker(
-                                "127.0.0.1:39093".parse()?,
+                                SocketAddrV4::new(bind, 39093).into(),
                                 grant.root(),
                                 grant.context(),
                                 worker,
@@ -849,6 +898,11 @@ mod tests {
         assert!(playback.play && playback.require_tone && playback.select_output);
         assert!(Options::parse(args(&["--select-output"])).is_err());
         assert!(Options::parse(args(&["--play", "--play"])).is_err());
+        let network = Options::parse(args(&["--bind", "0.0.0.0", "--host", "10.0.2.2"])).unwrap();
+        assert_eq!(network.bind, Ipv4Addr::UNSPECIFIED);
+        assert_eq!(network.host, Ipv4Addr::new(10, 0, 2, 2));
+        assert!(Options::parse(args(&["--bind", "0.0.0.0"])).is_err());
+        assert!(Options::parse(args(&["--bind", "0.0.0.0", "--host", "0.0.0.0"])).is_err());
     }
 
     #[test]

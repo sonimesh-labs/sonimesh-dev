@@ -31,6 +31,9 @@ class PairedCaptureTest {
             scenario.onActivity { activity ->
                 val root = activity.window.decorView
                 (find(root) { it is EditText && it.contentDescription == "Paired lab desktop SPKI" } as EditText).setText(pin)
+                args.getString("pairingHost")?.let { host ->
+                    (find(root) { it is EditText && it.contentDescription == "Paired control IPv4 address" } as EditText).setText(host)
+                }
                 find(root) { it is Button && it.text.toString().equals("Toggle test tone", true) }.performClick()
                 find(root) { it is Button && it.text.toString().equals("Start paired UDP capture", true) }.performClick()
             }

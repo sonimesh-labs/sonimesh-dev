@@ -77,7 +77,8 @@ class LabCaptureService : Service() {
             val pairedMode = intent.getBooleanExtra("pairedMode", false)
             val destination = if (udpMode) parseLabAddress(intent.getStringExtra("udpAddress") ?: "")
                 ?: error("invalid desktop address") else null
-            val invitation = if (pairedMode) labInvitation(intent.getStringExtra("pairedPin") ?: "") else null
+            val invitation = if (pairedMode) labInvitation(intent.getStringExtra("pairedPin") ?: "",
+                intent.getStringExtra("pairedHost") ?: "127.0.0.1") else null
             Thread({ capture(current, udpMode, destination, invitation) }, "audio-lab-capture").start()
         } catch (error: Exception) {
             Log.e("SoniMeshLab", "Unable to start capture", error)
@@ -218,7 +219,7 @@ class LabCaptureService : Service() {
             if (running.get()) {
                 Log.e("SoniMeshLab", "Capture or encoding failed", error)
                 val message = if (connected) "Capture or encoding failed. Check device support and try again."
-                    else "Desktop connection failed. Start the listener and check ADB reverse."
+                    else "Desktop connection failed. Check the listener and control address."
                 handler.post { finishWith(message) }
             }
         } finally {

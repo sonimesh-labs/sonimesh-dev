@@ -24,9 +24,10 @@ requires the Android API 37.0 platform.
 
 The paired-audio interoperability lab exercises the real pairing, Hello and
 start/stop control messages together with protected UDP and software decoding.
-It uses a public fixed invitation and is restricted to an emulator and desktop
-loopback. From `apps/android`, build `:opus-spike:assembleDebug` and
-`:opus-spike:assembleDebugAndroidTest`, then install both APKs. Set up
+It uses a public fixed invitation and is intended only for a controlled lab
+network. Its default is emulator and desktop loopback. From `apps/android`, build
+`:opus-spike:assembleDebug` and `:opus-spike:assembleDebugAndroidTest`, then
+install both APKs. Set up
 `adb reverse tcp:47610 tcp:47610` and run from the repository root:
 
 ~~~powershell
@@ -58,6 +59,25 @@ not whether it was audible. Output callback counts are not a listening test.
 Silence can
 reflect the source or platform capture policy. Other audio-lab modes below use
 their separate ADB bootstrap. Remove the reverse mapping when no longer needed.
+
+For a manually addressed controlled network, run the desktop listener with
+`--bind <desktop-local-IPv4> --host <desktop-reachable-IPv4>` after `--`.
+The bind address applies to TCP port 47610 and UDP port 39093; the host is the
+exact address placed in the pairing invitation. Enter that same host in the
+Android **Paired control IPv4** field, and the reachable desktop IPv4 in the
+UDP address field. Configure the host firewall as needed for this lab. No ADB
+reverse is needed for this mode. The fixed public invitation is a test fixture,
+not persistent trust; do not expose this lab outside a controlled network.
+For an emulator, `--bind 0.0.0.0 --host 10.0.2.2` and `10.0.2.2` in both
+Android fields exercise its host routing. A wildcard bind listens on all local
+interfaces. This is not evidence of physical WLAN interoperability.
+
+On 2026-11-22, API 37 x86_64 emulator tests using that direct host route and no
+ADB reverse authenticated and decoded 100 synthetic frames (peak 0.250), then
+captured the test tone and decoded 155 frames (peak 0.099). A separate default
+loopback run injected a malformed UDP datagram during synthetic playback: the
+receiver rejected one datagram and decoded all 100 authenticated frames.
+These are software and emulator observations, not physical or listening results.
 On 2026-11-22 an API 37 x86_64 emulator completed the paired interactive
 capture flow using the app's test tone and system screen-capture consent. The
 desktop acknowledged start and stop and decoded 145 frames at a software peak

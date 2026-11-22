@@ -28,7 +28,7 @@ class PairedAudioInteropTest {
         val pin = requireNotNull(args.getString("pairingSpkiHex")).chunked(2).map { it.toInt(16).toByte() }.toByteArray()
         val invitation = ByteArray(PairingQr.MAX_PAYLOAD_BYTES)
         val size = PairingQr.encode(1, ByteArray(16) { 0x71 }, ByteArray(32) { 0x42 },
-            "127.0.0.1", 47610, pin, 120_100, invitation)
+            args.getString("pairingHost") ?: "127.0.0.1", 47610, pin, 120_100, invitation)
         val identity = StreamIdentity(0x12345678, 1, 0)
         PairingClient.connect(invitation.copyOf(size)).use { connection ->
             connection.negotiateHello("android audio lab", listOf(2))
@@ -37,7 +37,7 @@ class PairedAudioInteropTest {
             assertEquals(2, (start as StreamControlResult.Status).state)
             val sealer = LabMediaSealer(connection.mediaRoot, identity.sessionId, identity.streamId.toInt(), 0)
             try {
-                sendTone(sealer)
+                sendTone(sealer, args.getString("mediaHost") ?: "10.0.2.2")
             } finally {
                 sealer.clear()
             }
@@ -47,7 +47,7 @@ class PairedAudioInteropTest {
         }
     }
 
-    private fun sendTone(sealer: LabMediaSealer) {
+    private fun sendTone(sealer: LabMediaSealer, mediaHost: String) {
         val codec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_OPUS)
         try {
             val format = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_OPUS, 48_000, 2)
@@ -55,7 +55,7 @@ class PairedAudioInteropTest {
             codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             codec.start()
             DatagramSocket().use { socket ->
-                socket.connect(InetAddress.getByName("10.0.2.2"), 39093)
+                socket.connect(InetAddress.getByName(mediaHost), 39093)
                 val info = MediaCodec.BufferInfo()
                 var submitted = 0
                 var sent = 0L

@@ -26,8 +26,10 @@ class LabActivity : Activity() {
     private var pairedMode = false
     private var pendingAddress = DEFAULT_LAB_ADDRESS
     private var pendingPin = ""
+    private var pendingHost = "127.0.0.1"
     private lateinit var address: EditText
     private lateinit var pin: EditText
+    private lateinit var host: EditText
     private lateinit var status: TextView
     private val statusObserver: (String) -> Unit = { status.text = "Status: $it" }
 
@@ -37,6 +39,7 @@ class LabActivity : Activity() {
         pairedMode = savedInstanceState?.getBoolean("pairedMode") ?: false
         pendingAddress = savedInstanceState?.getString("pendingAddress") ?: DEFAULT_LAB_ADDRESS
         pendingPin = savedInstanceState?.getString("pendingPin") ?: ""
+        pendingHost = savedInstanceState?.getString("pendingHost") ?: "127.0.0.1"
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setOnApplyWindowInsetsListener { view, insets ->
@@ -46,7 +49,7 @@ class LabActivity : Activity() {
             }
         }
         layout.addView(TextView(this).apply {
-            text = "Audio lab: start the desktop listener and ADB reverse first. Capture can be silent if the source disallows it."
+            text = "Audio lab: start the desktop listener first. Capture can be silent if the source disallows it."
         })
         status = TextView(this).apply { accessibilityLiveRegion = android.view.View.ACCESSIBILITY_LIVE_REGION_POLITE }
         layout.addView(status)
@@ -76,6 +79,15 @@ class LabActivity : Activity() {
             setText(savedInstanceState?.getString("pin") ?: "")
         }
         layout.addView(pin)
+        layout.addView(TextView(this).apply { text = "Paired control IPv4 (ADB reverse: 127.0.0.1)" })
+        host = EditText(this).apply {
+            hint = "Desktop control IPv4 address"
+            contentDescription = "Paired control IPv4 address"
+            keyListener = DigitsKeyListener.getInstance("0123456789.")
+            setSingleLine(true)
+            setText(savedInstanceState?.getString("host") ?: "127.0.0.1")
+        }
+        layout.addView(host)
         layout.addView(Button(this).apply {
             text = "Start paired UDP capture"
             setOnClickListener { startCapture(true, paired = true) }
@@ -106,8 +118,10 @@ class LabActivity : Activity() {
         outState.putBoolean("pairedMode", pairedMode)
         outState.putString("pendingAddress", pendingAddress)
         outState.putString("pendingPin", pendingPin)
+        outState.putString("pendingHost", pendingHost)
         outState.putString("address", address.text.toString())
         outState.putString("pin", pin.text.toString())
+        outState.putString("host", host.text.toString())
         super.onSaveInstanceState(outState)
     }
 
@@ -122,12 +136,19 @@ class LabActivity : Activity() {
             getPreferences(MODE_PRIVATE).edit().putString("desktopAddress", pendingAddress).apply()
         }
         if (paired) {
+            val enteredHost = host.text.toString().trim()
+            val parsedHost = if (enteredHost == "127.0.0.1") enteredHost else parseLabAddress(enteredHost)?.hostAddress
+            if (parsedHost == null) {
+                LabStatus.publish("Enter a valid paired control IPv4 address.")
+                return
+            }
             val entered = pin.text.toString().trim()
-            if (runCatching { labInvitation(entered) }.isFailure) {
+            if (runCatching { labInvitation(entered, parsedHost) }.isFailure) {
                 LabStatus.publish("Paste the desktop listener's complete SPKI_HEX.")
                 return
             }
             pendingPin = entered
+            pendingHost = parsedHost
         }
         udpMode = udp
         pairedMode = paired
@@ -158,7 +179,10 @@ class LabActivity : Activity() {
                 putExtra("udpMode", udpMode)
                 putExtra("udpAddress", pendingAddress)
                 putExtra("pairedMode", pairedMode)
-                if (pairedMode) putExtra("pairedPin", pendingPin)
+                if (pairedMode) {
+                    putExtra("pairedPin", pendingPin)
+                    putExtra("pairedHost", pendingHost)
+                }
             })
         } else if (requestCode == 2) {
             LabStatus.publish("Screen capture consent was not granted.")

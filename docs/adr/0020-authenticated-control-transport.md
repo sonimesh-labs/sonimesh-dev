@@ -55,7 +55,12 @@ An isolated paired-audio lab composes this boundary with the existing UDP
 receiver: the desktop prepares the receiver from the pairing root and the
 authenticated StartStream identity before acknowledging Streaming, and retires
 it before acknowledging StopStream. Its fixed invitation and local ports are
-test fixtures, not a persistent trust or production discovery mechanism. The
+test fixtures, not a persistent trust or production discovery mechanism. By
+default the control and media listeners bind to loopback; explicit IPv4 bind and
+invitation-host arguments permit a manually addressed controlled-network lab.
+Both peers must use the same invitation host because it is transcript-bound.
+The public fixed invitation does not establish production device trust; do not
+expose this experiment outside a controlled lab network. The
 lab also offers an optional Windows CPAL output: it starts the output before
 acknowledging Streaming and stops it before acknowledging Stopped. If the output
 reports a fault during a session, the lab keeps the control and media session
@@ -71,7 +76,7 @@ Malformed, oversized, replayed, unauthenticated, wrong-stream, or wrong-source
 UDP datagrams are rejected individually by this lab while socket and internal
 failures still terminate it. Authenticated frames rejected by the bounded frame
 admission are likewise discarded without restarting the session.
-The Android audio-lab service can also use that same loopback fixture with
+The Android audio-lab service can also use that same test fixture with
 playback capture: it establishes pairing and starts a stream before sending,
 then sends StopStream when capture ends. During capture, the same worker polls
 the otherwise idle control connection and stops with a connection-ended status
