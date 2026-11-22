@@ -28,6 +28,12 @@ gate is met.
 
 ## Decision
 
+An isolated Android instrumentation spike may encode synthetic PCM with the
+platform MediaCodec Opus encoder and export bounded, length-prefixed packets for
+desktop libopus interoperability checks. This is a lab fixture, not a transport,
+production encoder selection, Android capture, or evidence of device coverage.
+The capture application's production boundary remains unchanged.
+
 Keep `sonimesh-audio::FrameDecoder` as the stable boundary. A future optional
 `opus-codec` feature may add a `FrameDecoder` implementation only after:
 

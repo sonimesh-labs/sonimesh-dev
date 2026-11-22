@@ -20,6 +20,30 @@ prototype requires the checked-in Gradle wrapper, Java 21, Android API 36, and
 Android Build Tools 35.0.0. The isolated Android 17 discovery spike additionally
 requires the Android API 37.0 platform.
 
+### Android Opus interoperability lab
+
+This isolated test encodes a synthetic 48 kHz stereo tone with Android
+MediaCodec. It writes only synthetic audio to the spike application's external
+files directory; it does not use capture or networking. With a single selected
+emulator or device, from `apps/android` build and install the test APKs, then
+run the instrumentation directly (the Gradle connected test removes its data):
+
+~~~powershell
+./gradlew.bat :opus-spike:assembleDebug :opus-spike:assembleDebugAndroidTest :opus-spike:lintDebug
+adb install -r opus-spike/build/outputs/apk/debug/opus-spike-debug.apk
+adb install -r opus-spike/build/outputs/apk/androidTest/debug/opus-spike-debug-androidTest.apk
+adb shell am instrument -w com.sonimesh.opusspike.test/androidx.test.runner.AndroidJUnitRunner
+adb pull /sdcard/Android/data/com.sonimesh.opusspike/files/tone.opusframes "$env:TEMP/sonimesh-tone.opusframes"
+~~~
+
+From the repository root, run `cargo run -p opus-codec-prototype --bin
+android-interop -- "$env:TEMP/sonimesh-tone.opusframes"`. The desktop checker
+requires 100 decodable 20 ms packets and a non-silent finite output. The fixture
+uses big-endian 32-bit packet lengths followed by raw Opus packets; it is not a
+product wire format. The API 37 x86_64 emulator produced 100 packets and 96,000
+samples per channel with peak 0.250 on 2026-11-22. Other devices and capture
+behavior remain unverified.
+
 When a local SDK is missing one of those components, install the same set the
 Android CI job installs before running the Gradle commands:
 `sdkmanager "platform-tools" "platforms;android-36" "platforms;android-37.0" "build-tools;35.0.0"`

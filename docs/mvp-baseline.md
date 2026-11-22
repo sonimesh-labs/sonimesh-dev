@@ -89,6 +89,10 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   that runs a generated tone through native Opus, encrypted UDP loopback, the
   receiver pipeline, and its render source. An explicit Windows playback mode
   opens the default CPAL output; it is not Android capture or WLAN evidence.
+  A separate Android MediaCodec spike generated 100 synthetic 20 ms Opus
+  packets on an API 37 x86_64 emulator and desktop libopus decoded them to
+  non-silent PCM. This is codec interoperability evidence, not capture, network,
+  physical-device, or playback evidence.
   A seeded property walk and a byte-driven libFuzzer target drive in-order
   deliveries, duplicates, tampered ciphertext, retired-epoch packets, and
   rotations against an independent replay oracle and counter model,

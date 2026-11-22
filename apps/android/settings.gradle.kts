@@ -20,3 +20,4 @@ rootProject.name = "sonimesh-android"
 include(":app")
 include(":discovery-spike")
 include(":tls-provider-spike")
+include(":opus-spike")
