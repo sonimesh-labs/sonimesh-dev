@@ -37,7 +37,6 @@ macro_rules! drive_handshake {
 }
 
 /// Failure while establishing or using a pinned desktop TLS channel.
-#[derive(Debug)]
 pub enum DesktopTlsError {
     /// The pinned bytes are not a plausible DER SubjectPublicKeyInfo.
     InvalidPin,
@@ -52,6 +51,22 @@ pub enum DesktopTlsError {
     NotTls13,
     /// A socket operation failed during the handshake.
     Io(std::io::Error),
+}
+
+impl fmt::Debug for DesktopTlsError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidPin => formatter.write_str("InvalidPin"),
+            Self::InvalidServerName => formatter.write_str("InvalidServerName"),
+            Self::Configuration(_) => formatter.write_str("Configuration([REDACTED])"),
+            Self::Handshake(_) => formatter.write_str("Handshake([REDACTED])"),
+            Self::NotTls13 => formatter.write_str("NotTls13"),
+            Self::Io(error) => formatter
+                .debug_struct("Io")
+                .field("kind", &error.kind())
+                .finish(),
+        }
+    }
 }
 
 impl fmt::Display for DesktopTlsError {
@@ -382,6 +397,22 @@ mod tests {
         let debug = format!("{config:?}");
         assert!(!debug.contains(&format!("{}{}", 0x55, 0x55)));
         assert!(!debug.contains("0x5555"));
+    }
+
+    #[test]
+    fn error_debug_redacts_backend_details() {
+        let error = DesktopTlsError::Io(std::io::Error::other(
+            "127.0.0.1:43123 private TLS endpoint",
+        ));
+        let debug = format!("{error:?}");
+
+        assert!(debug.contains("kind: Other"));
+        assert!(!debug.contains("43123"));
+        assert!(!debug.contains("private TLS endpoint"));
+        assert_eq!(
+            format!("{error}"),
+            "TLS channel I/O failed: 127.0.0.1:43123 private TLS endpoint"
+        );
     }
 
     #[test]
