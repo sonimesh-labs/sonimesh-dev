@@ -90,7 +90,6 @@ impl PairingListener {
 }
 
 /// Failure while accepting and verifying one pinned pairing connection.
-#[derive(Debug)]
 pub enum ControlListenError {
     /// Binding or accepting on the control socket failed.
     Socket(std::io::Error),
@@ -104,6 +103,56 @@ pub enum ControlListenError {
     /// Writing the reply frame failed after a trusted outcome; the session
     /// is already trusted but this channel is unusable.
     ReplyWrite(std::io::Error),
+}
+
+impl core::fmt::Debug for ControlListenError {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Socket(error) => formatter
+                .debug_struct("Socket")
+                .field("kind", &error.kind())
+                .finish(),
+            Self::Tls(error) => formatter
+                .debug_struct("Tls")
+                .field("category", &tls_error_category(error))
+                .finish(),
+            Self::PeerFrameIo(error) => formatter
+                .debug_struct("PeerFrameIo")
+                .field("kind", &error.kind())
+                .finish(),
+            Self::Handshake(error) => formatter
+                .debug_struct("Handshake")
+                .field("category", &handshake_error_category(error))
+                .finish(),
+            Self::ReplyWrite(error) => formatter
+                .debug_struct("ReplyWrite")
+                .field("kind", &error.kind())
+                .finish(),
+        }
+    }
+}
+
+fn tls_error_category(error: &DesktopTlsError) -> &'static str {
+    match error {
+        DesktopTlsError::InvalidPin => "invalid_pin",
+        DesktopTlsError::InvalidServerName => "invalid_server_name",
+        DesktopTlsError::Configuration(_) => "configuration",
+        DesktopTlsError::Handshake(_) => "handshake",
+        DesktopTlsError::NotTls13 => "not_tls13",
+        DesktopTlsError::Io(_) => "io",
+    }
+}
+
+fn handshake_error_category(error: &PairingHandshakeError) -> &'static str {
+    match error {
+        PairingHandshakeError::Qr(_) => "qr",
+        PairingHandshakeError::InvitationMismatch => "invitation_mismatch",
+        PairingHandshakeError::Binding(_) => "binding",
+        PairingHandshakeError::Invitation(_) => "invitation",
+        PairingHandshakeError::ProofRejected => "proof_rejected",
+        PairingHandshakeError::InvalidExporterLength => "invalid_exporter_length",
+        PairingHandshakeError::ProofFrame(_) => "proof_frame",
+    }
 }
 
 impl core::fmt::Display for ControlListenError {
@@ -341,6 +390,29 @@ mod tests {
         PairingListener, PairingSource, SessionState, accept_pairing_stream_with_timeout,
     };
     use sonimesh_network::{DesktopTlsError, client_config, connect_pinned_client, server_config};
+
+    #[test]
+    fn control_listen_debug_redacts_backend_and_pairing_details() {
+        let socket =
+            ControlListenError::Socket(std::io::Error::other("127.0.0.1:43123 private-endpoint"));
+        let tls = ControlListenError::Tls(DesktopTlsError::Io(std::io::Error::other(
+            "certificate-private-key-material",
+        )));
+        let handshake = ControlListenError::Handshake(super::PairingHandshakeError::ProofRejected);
+
+        let socket_debug = format!("{socket:?}");
+        let tls_debug = format!("{tls:?}");
+        let handshake_debug = format!("{handshake:?}");
+
+        assert!(socket_debug.contains("kind: Other"));
+        assert!(tls_debug.contains("category: \"io\""));
+        assert!(handshake_debug.contains("category: \"proof_rejected\""));
+        for debug in [socket_debug, tls_debug, handshake_debug] {
+            assert!(!debug.contains("43123"));
+            assert!(!debug.contains("private-endpoint"));
+            assert!(!debug.contains("certificate-private-key-material"));
+        }
+    }
 
     #[test]
     fn nonblocking_pairing_listener_reports_empty_then_accepts() {
