@@ -305,11 +305,18 @@ private fun CaptureEvidenceCard(
                 EvidenceItem("Silent reads", formatCount(evidence.silentReads), Modifier.weight(1f))
                 EvidenceItem("Read errors", formatCount(evidence.readErrors), Modifier.weight(1f))
             }
-            EvidenceItem(
-                "Latest read",
-                evidence.lastReadCompletionOffsetMillis?.let { "+${formatDuration(it)}" } ?: "Unavailable",
-                Modifier.fillMaxWidth(),
-            )
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                EvidenceItem(
+                    "Requested usage",
+                    evidence.captureSource?.label() ?: "Unavailable",
+                    Modifier.weight(1f),
+                )
+                EvidenceItem(
+                    "Latest read",
+                    evidence.lastReadCompletionOffsetMillis?.let { "+${formatDuration(it)}" } ?: "Unavailable",
+                    Modifier.weight(1f),
+                )
+            }
             OutlinedButton(
                 modifier = Modifier
                     .fillMaxWidth()
