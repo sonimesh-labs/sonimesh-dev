@@ -124,12 +124,14 @@ instrumentation spike proves a production capability.
 The separate `:opus-spike` may exercise playback capture, MediaCodec encoding,
 and a loopback-only ADB-reversed stream for an interactive lab. Its foreground
 service owns projection and capture; consent is requested afresh by its activity.
-The lab endpoint binds only to desktop loopback and the Android app connects only
-to its own loopback. Its length-prefixed packets are not the product protocol,
+The lab's TCP endpoint binds only to desktop loopback and the Android app connects
+to its own loopback through ADB reverse. Its length-prefixed packets are not the product protocol,
 and the lab is not a WLAN, pairing, or production security implementation. The
 production capture app and its boundary checks remain separate. An additional
-emulator-only mode sends protected media datagrams via the emulator's host
-loopback alias after an ADB-reversed lab bootstrap, as scoped in ADR 0005.
+mode sends protected media datagrams to a manually entered IPv4 address after
+an ADB-reversed lab bootstrap, as scoped in ADR 0005. The default destination is
+the emulator host alias; physical WLAN and Android local-network permission
+behavior remain unverified.
 The lab activity presents the service's current connection and capture state,
 including a terminal reason on connection failure or projection revocation;
 this process-local status is not a production diagnostics interface.

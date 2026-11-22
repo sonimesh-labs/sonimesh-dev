@@ -51,11 +51,12 @@ on authentication failure. Replay admission remains in `sonimesh-network` and
 occurs only after this successful authentication.
 
 The isolated Android audio lab may exercise this packet format over the Android
-emulator's host-loopback route. For that experiment only, Android generates a
+emulator's host-loopback route or a controlled local network. For that experiment only, Android generates a
 fresh random secret and passes it over an ADB-reversed loopback TCP connection;
 the connection remains open for the session lifetime. This bootstrap is not
-authenticated pairing or a product control plane, and neither endpoint exposes a
-LAN listener. Each encoded frame gets its sequence before bounded-queue admission
+authenticated pairing or a product control plane. The desktop UDP receiver binds
+to loopback by default; a LAN bind must be explicitly selected for the lab.
+Each encoded frame gets its sequence before bounded-queue admission
 so a dropped frame remains a visible gap. The desktop uses the existing protected
 UDP receiver and per-stream decoder, not a bypass around authentication.
 

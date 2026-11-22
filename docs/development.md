@@ -79,7 +79,7 @@ run produced non-silent decoded audio and 8,964 output callbacks with no stream
 errors. No human listening confirmation or physical latency measurement was
 recorded, and these runs do not establish physical-device or WLAN behavior.
 
-For the emulator-only protected UDP path, use a separate ADB reverse mapping:
+For the protected UDP lab, use a separate ADB reverse mapping:
 
 ~~~powershell
 adb reverse tcp:39092 tcp:39092
@@ -92,14 +92,22 @@ default. The chosen device and its format are fixed for that lab session. An
 unavailable device or unsupported default format ends the command; automatic
 output recovery is not implemented in these lab commands.
 
-Choose **Start UDP capture (emulator)** and fresh capture consent. Use `--check`
+Choose **Start UDP capture** and fresh capture consent. Use `--check`
 without `--features playback` for the software render check. Android generates
 a new random lab secret and sends it over the ADB connection; the media packets
 use ADR 0005 and the emulator's host alias to reach desktop UDP loopback port
 39093. The desktop uses its protected receiver, jitter buffer, decoder worker,
-and PCM output endpoint. The bootstrap is not authenticated pairing and neither
-listener is a LAN endpoint. Remove the mapping with `adb reverse --remove
+and PCM output endpoint. The bootstrap is not authenticated pairing. Remove the mapping with `adb reverse --remove
 tcp:39092` when finished.
+
+For a controlled physical-device network experiment, keep ADB connected for the
+bootstrap and choose the desktop's IPv4 address in the Android lab. Pass the
+same local address to the desktop command with `--bind <desktop-ipv4>`; the UDP
+listener uses port 39093. `--bind 0.0.0.0` explicitly listens on all IPv4
+interfaces. Without `--bind`, it listens on loopback only. The Android default
+`10.0.2.2` is the emulator host alias, not an address for a physical phone.
+Windows firewall rules and Android local-network access may need attention on a
+physical device. This ADB-assisted lab is not product discovery or pairing.
 
 The lab screen shows connection and capture status, including a desktop
 connection failure or disconnect and a stopped projection. Status is kept in
@@ -128,6 +136,12 @@ and 38 empty ticks, and recorded 1,150 callbacks with no stream errors. A
 separate ADB TCP run on that endpoint decoded 394 frames with a 0.117 peak and
 recorded 919 callbacks with no stream errors. Neither run included a human
 listening assessment or a physical latency measurement.
+
+A subsequent API 37 emulator run entered the desktop's network-interface IPv4
+address and bound the UDP receiver to that address. It admitted 417 packets,
+decoded 412 frames, had three empty ticks and no late packets or resynchronizations,
+and reached a software-render peak of 0.096. This used an emulator and does not
+establish physical-device WLAN behavior.
 
 When a local SDK is missing one of those components, install the same set the
 Android CI job installs before running the Gradle commands:

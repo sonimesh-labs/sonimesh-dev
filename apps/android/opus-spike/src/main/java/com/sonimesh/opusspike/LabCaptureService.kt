@@ -23,7 +23,6 @@ import android.util.Log
 import java.io.DataOutputStream
 import java.net.DatagramPacket
 import java.net.DatagramSocket
-import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.nio.ByteOrder
@@ -68,7 +67,9 @@ class LabCaptureService : Service() {
                 override fun onStop() { finishWith("Screen capture ended. Grant consent again to restart.") }
             }, handler)
             val udpMode = intent.getBooleanExtra("udpMode", false)
-            Thread({ capture(current, udpMode) }, "audio-lab-capture").start()
+            val destination = if (udpMode) parseLabAddress(intent.getStringExtra("udpAddress") ?: "")
+                ?: error("invalid desktop address") else null
+            Thread({ capture(current, udpMode, destination) }, "audio-lab-capture").start()
         } catch (error: Exception) {
             Log.e("SoniMeshLab", "Unable to start capture", error)
             finishWith("Unable to start capture. Check permissions and try again.")
@@ -77,7 +78,7 @@ class LabCaptureService : Service() {
     }
 
     @SuppressLint("MissingPermission")
-    private fun capture(projection: MediaProjection, udpMode: Boolean) {
+    private fun capture(projection: MediaProjection, udpMode: Boolean, destination: java.net.Inet4Address?) {
         var record: AudioRecord? = null
         var codec: MediaCodec? = null
         var connected = false
@@ -102,7 +103,7 @@ class LabCaptureService : Service() {
                 }
                 connection.soTimeout = 0
                 Thread({ watchControl(connection) }, "audio-lab-control").start()
-                Thread({ sendDatagrams(sealer, packets) }, "audio-lab-sender").start()
+                Thread({ sendDatagrams(sealer, packets, requireNotNull(destination)) }, "audio-lab-sender").start()
             } else {
                 Thread({ writePackets(connection, packets) }, "audio-lab-sender").start()
             }
@@ -203,10 +204,10 @@ class LabCaptureService : Service() {
         }
     }
 
-    private fun sendDatagrams(sealer: LabMediaSealer, packets: ArrayBlockingQueue<EncodedPacket>) {
+    private fun sendDatagrams(sealer: LabMediaSealer, packets: ArrayBlockingQueue<EncodedPacket>, destination: java.net.Inet4Address) {
         try {
             DatagramSocket().use { udp ->
-                udp.connect(InetAddress.getByName("10.0.2.2"), 39093)
+                udp.connect(destination, 39093)
                 while (running.get()) {
                     val packet = packets.poll(100, TimeUnit.MILLISECONDS) ?: continue
                     val datagram = sealer.seal(packet.sequence, packet.sequence * 960, 0, packet.bytes)

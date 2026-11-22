@@ -47,6 +47,11 @@ The system has two planes:
 - The data plane carries encrypted Opus packets over UDP. It must remain
   independent from the UI and must use bounded memory.
 
+The separate Android audio lab may exercise the protected media plane on a
+controlled local network using a manually entered desktop IPv4 address and an
+ADB-reversed connection for its temporary session secret. This is a development
+path rather than discovery, pairing, or the production control plane.
+
 The first product goal is not synchronized multi-device playback, recording of
 calls, remote desktop, or a universal Bluetooth receiver. It is a practical
 local audio bridge for a PC user who wants to listen to permitted Android media

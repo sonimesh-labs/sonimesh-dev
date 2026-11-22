@@ -1,23 +1,24 @@
-//! Emulator-only UDP lab. ADB bootstrap is not authenticated pairing.
+//! Controlled-network UDP lab. ADB bootstrap is not authenticated pairing.
 mod common;
 
 use std::{
     error::Error,
     io::{self, Read, Write},
-    net::{TcpListener, TcpStream},
+    net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener, TcpStream},
     sync::Arc,
     time::{Duration, Instant},
 };
 
 use sonimesh_app::{
-    OutputSelection, ReceiverOutputController, ReceiverPcmEndpointFactory, SourcePcmFormat,
-    UdpPollOutcome, UdpReceiverPipeline,
+    OutputSelection, ReceiverOutputController, ReceiverPcmEndpointFactory, ReceiverPipelineError,
+    SourcePcmFormat, UdpPollOutcome, UdpReceiverError, UdpReceiverPipeline,
 };
 use sonimesh_audio::{
     DecodeStep, DecodeWorkerError, FrameDecoder, InsertOutcome, OpusFrameConfig,
     StreamDecodeWorker, realtime_pcm_queue,
 };
 use sonimesh_diagnostics::StreamCounters;
+use sonimesh_network::{IngressError, UdpReceiveError};
 use sonimesh_platform::{
     AudioOutput, OutputConfig, OutputDeviceId, OutputDeviceInfo, OutputError, OutputHealth,
     RenderSource, SampleFormat,
@@ -145,11 +146,29 @@ fn decode_buffered(
     }
 }
 
+fn poll_media(receiver: &mut LabReceiver) -> LabResult<Option<UdpPollOutcome>> {
+    match receiver.poll() {
+        Ok(outcome) => Ok(Some(outcome)),
+        Err(
+            UdpReceiverError::Socket(UdpReceiveError::DatagramTooLarge)
+            | UdpReceiverError::SourceEndpointChanged
+            | UdpReceiverError::Pipeline(ReceiverPipelineError::Ingress(
+                IngressError::Parse(_)
+                | IngressError::UnknownStream
+                | IngressError::Authentication(_)
+                | IngressError::Replay(_),
+            )),
+        ) => Ok(None),
+        Err(error) => Err(error.into()),
+    }
+}
+
 #[allow(clippy::too_many_lines)] // One lab session coordinates socket, playout, and output lifetimes.
 fn run<O: LabOutput>(
     mut control: TcpStream,
     output: O,
     selection: OutputSelection,
+    udp_bind: Ipv4Addr,
 ) -> LabResult<()> {
     let secret = read_secret(&mut control)?;
     let context = MediaKeyContext::new(1, 1, 0, MediaDirection::AndroidToDesktop)?;
@@ -162,7 +181,7 @@ fn run<O: LabOutput>(
         OpusFrameConfig::new(48_000, 2, 20)?,
     )?;
     let mut receiver = UdpReceiverPipeline::bind_with_worker(
-        "127.0.0.1:39093".parse()?,
+        SocketAddr::V4(SocketAddrV4::new(udp_bind, 39093)),
         &secret,
         context,
         worker,
@@ -187,9 +206,10 @@ fn run<O: LabOutput>(
             break;
         }
         for _ in 0..32 {
-            match receiver.poll()? {
-                UdpPollOutcome::Empty => break,
-                UdpPollOutcome::Processed { admission, .. } => {
+            match poll_media(&mut receiver)? {
+                None => continue,
+                Some(UdpPollOutcome::Empty) => break,
+                Some(UdpPollOutcome::Processed { admission, .. }) => {
                     match admission {
                         InsertOutcome::Inserted | InsertOutcome::Reordered => admitted += 1,
                         InsertOutcome::Resynchronized { .. } => {
@@ -249,7 +269,8 @@ fn run<O: LabOutput>(
 }
 
 fn main() -> LabResult<()> {
-    match common::parse_args(std::env::args().skip(1))? {
+    let (mode, udp_bind) = parse_args(std::env::args().skip(1))?;
+    match mode {
         common::Mode::Check => {
             let control = accept_control()?;
             let config = OutputConfig {
@@ -266,26 +287,54 @@ fn main() -> LabResult<()> {
                     device: None,
                     config,
                 },
+                udp_bind,
             )
         }
-        common::Mode::Play { select_output } => play(select_output),
+        common::Mode::Play { select_output } => play(select_output, udp_bind),
     }
+}
+
+fn parse_args(args: impl IntoIterator<Item = String>) -> LabResult<(common::Mode, Ipv4Addr)> {
+    let mut args = args.into_iter();
+    let mut common_args = Vec::new();
+    let mut bind = None;
+    while let Some(arg) = args.next() {
+        if arg == "--bind" {
+            if bind.is_some() {
+                return Err("--bind may only be supplied once".into());
+            }
+            let address: Ipv4Addr = args
+                .next()
+                .ok_or("--bind requires an IPv4 address")?
+                .parse()?;
+            if address.is_multicast() || address.is_broadcast() {
+                return Err("--bind must be a local unicast or unspecified address".into());
+            }
+            bind = Some(address);
+        } else {
+            common_args.push(arg);
+        }
+    }
+    Ok((
+        common::parse_args(common_args)?,
+        bind.unwrap_or(Ipv4Addr::LOCALHOST),
+    ))
 }
 
 fn accept_control() -> LabResult<TcpStream> {
     let listener = TcpListener::bind("127.0.0.1:39092")?;
-    println!("Listening for ADB lab bootstrap on 127.0.0.1:39092; UDP uses 127.0.0.1:39093.");
+    println!("Listening for ADB lab bootstrap on 127.0.0.1:39092; UDP uses port 39093.");
     let (control, _) = listener.accept()?;
     Ok(control)
 }
 
 #[cfg(all(windows, feature = "playback"))]
-fn play(select_output: bool) -> LabResult<()> {
+fn play(select_output: bool, udp_bind: Ipv4Addr) -> LabResult<()> {
     let (output, selection) = common::prepare_output(select_output)?;
-    run(accept_control()?, output, selection)
+    run(accept_control()?, output, selection, udp_bind)
 }
 #[cfg(not(all(windows, feature = "playback")))]
-fn play(_: bool) -> LabResult<()> {
+fn play(_: bool, _: Ipv4Addr) -> LabResult<()> {
     Err("playback requires Windows and --features playback".into())
 }
 
@@ -294,6 +343,38 @@ mod tests {
     use super::*;
     use sonimesh_protocol::MediaSealer;
     use std::net::UdpSocket;
+
+    #[test]
+    fn bind_address_is_opt_in_and_validated() {
+        let args = |items: &[&str]| {
+            items
+                .iter()
+                .map(|item| (*item).to_owned())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            parse_args(args(&["--check"])).unwrap().1,
+            Ipv4Addr::LOCALHOST
+        );
+        assert_eq!(
+            parse_args(args(&["--play", "--bind", "0.0.0.0", "--select-output"]))
+                .unwrap()
+                .1,
+            Ipv4Addr::UNSPECIFIED
+        );
+        assert!(parse_args(args(&["--check", "--bind", "example.com"])).is_err());
+        assert!(parse_args(args(&["--check", "--bind", "224.0.0.1"])).is_err());
+        assert!(
+            parse_args(args(&[
+                "--check",
+                "--bind",
+                "0.0.0.0",
+                "--bind",
+                "127.0.0.1"
+            ]))
+            .is_err()
+        );
+    }
 
     #[test]
     fn empty_jitter_waits_without_losing_future_frames_and_real_gap_uses_plc() {
@@ -324,6 +405,19 @@ mod tests {
         let len = encoder
             .encode_float(&[0.05; SAMPLES], &mut payload)
             .unwrap();
+        socket
+            .send_to(b"invalid", receiver.local_addr().unwrap())
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(1);
+        loop {
+            match poll_media(&mut receiver).unwrap() {
+                None => break,
+                Some(UdpPollOutcome::Empty) if Instant::now() < deadline => {
+                    std::thread::yield_now();
+                }
+                _ => panic!("invalid datagram was not rejected"),
+            }
+        }
         let first = sealer.seal(0, 0, &payload[..len]).unwrap();
         socket
             .send_to(&first.datagram, receiver.local_addr().unwrap())
@@ -358,10 +452,12 @@ mod tests {
     fn poll_packet(receiver: &mut LabReceiver) {
         let deadline = Instant::now() + Duration::from_secs(1);
         loop {
-            match receiver.poll().unwrap() {
-                UdpPollOutcome::Processed { .. } => return,
-                UdpPollOutcome::Empty if Instant::now() < deadline => std::thread::yield_now(),
-                UdpPollOutcome::Empty => panic!("loopback packet timed out"),
+            match poll_media(receiver).unwrap() {
+                Some(UdpPollOutcome::Processed { .. }) => return,
+                None | Some(UdpPollOutcome::Empty) if Instant::now() < deadline => {
+                    std::thread::yield_now();
+                }
+                None | Some(UdpPollOutcome::Empty) => panic!("loopback packet timed out"),
             }
         }
     }

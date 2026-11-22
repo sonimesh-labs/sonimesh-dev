@@ -9,9 +9,12 @@ import android.media.AudioFormat
 import android.media.AudioTrack
 import android.media.projection.MediaProjectionManager
 import android.os.Bundle
+import android.text.method.DigitsKeyListener
 import android.view.WindowInsets
 import android.widget.Button
+import android.widget.EditText
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import kotlin.math.PI
 import kotlin.math.sin
@@ -20,12 +23,15 @@ import kotlin.math.sin
 class LabActivity : Activity() {
     private var tone: AudioTrack? = null
     private var udpMode = false
+    private var pendingAddress = DEFAULT_LAB_ADDRESS
+    private lateinit var address: EditText
     private lateinit var status: TextView
     private val statusObserver: (String) -> Unit = { status.text = "Status: $it" }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         udpMode = savedInstanceState?.getBoolean("udpMode") ?: false
+        pendingAddress = savedInstanceState?.getString("pendingAddress") ?: DEFAULT_LAB_ADDRESS
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setOnApplyWindowInsetsListener { view, insets ->
@@ -43,8 +49,17 @@ class LabActivity : Activity() {
             text = "Start ADB capture"
             setOnClickListener { startCapture(false) }
         })
+        layout.addView(TextView(this).apply { text = "Desktop IPv4 for UDP (emulator: 10.0.2.2)" })
+        address = EditText(this).apply {
+            hint = "Desktop IPv4 address (10.0.2.2 for emulator)"
+            contentDescription = "Desktop IPv4 address for UDP"
+            keyListener = DigitsKeyListener.getInstance("0123456789.")
+            setSingleLine(true)
+            setText(savedInstanceState?.getString("address") ?: DEFAULT_LAB_ADDRESS)
+        }
+        layout.addView(address)
         layout.addView(Button(this).apply {
-            text = "Start UDP capture (emulator)"
+            text = "Start UDP capture"
             setOnClickListener { startCapture(true) }
         })
         layout.addView(Button(this).apply {
@@ -55,7 +70,7 @@ class LabActivity : Activity() {
             text = "Toggle test tone"
             setOnClickListener { toggleTone() }
         })
-        setContentView(layout)
+        setContentView(ScrollView(this).apply { addView(layout) })
     }
 
     override fun onStart() {
@@ -70,10 +85,20 @@ class LabActivity : Activity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putBoolean("udpMode", udpMode)
+        outState.putString("pendingAddress", pendingAddress)
+        outState.putString("address", address.text.toString())
         super.onSaveInstanceState(outState)
     }
 
     private fun startCapture(udp: Boolean) {
+        if (udp) {
+            val parsed = parseLabAddress(address.text.toString())
+            if (parsed == null) {
+                LabStatus.publish("Enter a valid desktop IPv4 address for UDP.")
+                return
+            }
+            pendingAddress = requireNotNull(parsed.hostAddress)
+        }
         udpMode = udp
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 1)
@@ -100,6 +125,7 @@ class LabActivity : Activity() {
                 putExtra("resultCode", resultCode)
                 putExtra("resultData", data)
                 putExtra("udpMode", udpMode)
+                putExtra("udpAddress", pendingAddress)
             })
         } else if (requestCode == 2) {
             LabStatus.publish("Screen capture consent was not granted.")
