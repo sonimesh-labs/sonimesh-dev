@@ -1,10 +1,13 @@
 # Desktop UI
 
 Vue/Vite control surface for desktop lifecycle commands. `src/bridge.ts` is the
-only frontend integration point: it currently provides a preview adapter and is
-intended to be replaced by low-rate Tauri commands after the desktop shell is
-introduced. The preview state is explicitly labelled in the UI and must not be
-read as an active receiver, a transport measurement, or a hardware capability.
+only frontend integration point. `TauriDesktopBridge` now provides the low-rate
+IPC adapter for the future shell: it maps receiver commands to injected Tauri
+`invoke` calls and normalizes every returned snapshot as a live (`previewAdapter:
+false`) state. The application still selects `PreviewDesktopBridge` by default
+until the shell owns a real receiver session. The preview state is explicitly
+labelled in the UI and must not be read as an active receiver, a transport
+measurement, or a hardware capability.
 Its initial ready state includes a synthetic consumed pairing record so the
 session controls can be exercised without falsely presenting an inactive
 invitation as authenticated. The bridge mirrors the Rust pairing owner's
@@ -58,6 +61,15 @@ Metrics remain separate `StreamCounters` snapshots, and device lists stay on
 their own low-rate API. Cumulative counters cross this preview contract as
 unsigned decimal strings, including distinct PCM underflow and callback
 refill-budget exhaustion counts.
+
+The production adapter uses these command names and payloads: `desktop_snapshot`,
+`desktop_start_stream`, `desktop_stop_stream`, `desktop_select_output` with
+`{ deviceId }`, `desktop_set_gain` with `{ gain }`, `desktop_set_muted` with
+`{ muted }`, `desktop_set_jitter_mode` with `{ mode }`,
+`desktop_export_diagnostics`, `desktop_create_pairing`, `desktop_expire_pairing`,
+and `desktop_revoke_pairing`. Preview simulation commands intentionally reject
+through this adapter so the UI cannot mistake test controls for receiver
+operations.
 
 ```powershell
 npm install
