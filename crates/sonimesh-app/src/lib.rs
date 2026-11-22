@@ -46,7 +46,9 @@ pub use control_stream::{
     StreamStartRequest,
 };
 pub use control_to_mixer::{BridgeSnapshot, ControlToMixerBridge, ControlToMixerError};
-pub use desktop_control_owner::{DesktopControlOwner, DesktopControlOwnerError};
+pub use desktop_control_owner::{
+    DesktopControlOwner, DesktopControlOwnerError, DesktopControlView,
+};
 pub use diagnostic_export_action::{
     DEFAULT_MAX_RETAINED_EXPORT_BYTES, DEFAULT_MAX_RETAINED_EXPORTS, DiagnosticExportAction,
     DiagnosticExportActionError, ExportReceipt, ExportRetentionJournal, ExportRetentionPolicy,

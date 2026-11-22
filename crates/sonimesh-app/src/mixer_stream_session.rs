@@ -24,7 +24,9 @@
 use core::fmt;
 use std::sync::Arc;
 
-use sonimesh_audio::{MAX_PCM_QUEUE_BLOCKS, RealtimeQueueConfigError, ResamplerError};
+use sonimesh_audio::{
+    GainControlState, MAX_PCM_QUEUE_BLOCKS, RealtimeQueueConfigError, ResamplerError,
+};
 use sonimesh_diagnostics::{StreamCounters, StreamMetricsSnapshot};
 use sonimesh_platform::{AudioOutput, OutputHealth};
 
@@ -522,6 +524,18 @@ where
             return Err(MixerStreamSessionError::UnknownStream(identity));
         };
         Ok(record.gain.clone())
+    }
+
+    /// Returns the gain state when exactly one stream is admitted.
+    ///
+    /// A desktop single-source control surface can use this projection without
+    /// exposing stream identities. Multi-stream owners receive `None` and must
+    /// address a stream explicitly through [`Self::gain`].
+    #[must_use]
+    pub fn single_stream_gain(&self) -> Option<GainControlState> {
+        let mut records = self.records.iter().flatten();
+        let record = records.next()?;
+        records.next().is_none().then(|| record.gain.snapshot())
     }
 
     /// Approximate source-format blocks waiting for conversion for one stream.

@@ -12,7 +12,7 @@ use sonimesh_platform::{AudioOutput, OutputDeviceId, OutputDeviceInfo, OutputErr
 
 use crate::{
     ControlToMixerBridge, ControlToMixerError, DesktopControlSnapshot, DiagnosticExportAction,
-    DiagnosticExportActionError, ExportRetentionPolicy, IssuedDiagnosticExport,
+    DiagnosticExportActionError, ExportRetentionPolicy, GainControlState, IssuedDiagnosticExport,
     MediaStreamIdentity, PairingAttemptOutcome, PairingId, PairingInvitationController,
     PairingInvitationError, PairingProofVerification, PairingSource,
 };
@@ -28,6 +28,46 @@ pub enum DesktopControlOwnerError {
     Mixer(ControlToMixerError),
     /// Output enumeration failed in the platform adapter.
     Output(OutputError),
+}
+
+/// Shell-neutral low-rate desktop view assembled from one control owner.
+///
+/// The lifecycle snapshot remains redacted, while output inventory and the
+/// retained selection are supplied by the platform adapter. `stream_control`
+/// is present only for a single admitted stream; multi-stream owners must use
+/// identity-addressed controls instead of guessing which stream the UI means.
+#[derive(Debug)]
+pub struct DesktopControlView {
+    lifecycle: DesktopControlSnapshot,
+    output_devices: Vec<OutputDeviceInfo>,
+    selected_output: Option<OutputDeviceId>,
+    stream_control: Option<GainControlState>,
+}
+
+impl DesktopControlView {
+    /// Returns the synchronized lifecycle projection.
+    #[must_use]
+    pub const fn lifecycle(&self) -> DesktopControlSnapshot {
+        self.lifecycle
+    }
+
+    /// Returns the latest platform output inventory.
+    #[must_use]
+    pub fn output_devices(&self) -> &[OutputDeviceInfo] {
+        &self.output_devices
+    }
+
+    /// Returns the output retained for the next output lifetime.
+    #[must_use]
+    pub fn selected_output(&self) -> Option<&OutputDeviceId> {
+        self.selected_output.as_ref()
+    }
+
+    /// Returns single-stream gain/mute state, when the owner can project it.
+    #[must_use]
+    pub const fn stream_control(&self) -> Option<GainControlState> {
+        self.stream_control
+    }
 }
 
 impl core::fmt::Display for DesktopControlOwnerError {
@@ -116,6 +156,23 @@ where
         self.bridge
             .desktop_snapshot_at(&mut self.pairing, now_ms)
             .map_err(DesktopControlOwnerError::Pairing)
+    }
+
+    /// Builds one low-rate view for a shell command or control surface.
+    ///
+    /// # Errors
+    ///
+    /// Returns a pairing error when lifecycle clock observation fails or an
+    /// output error when the platform inventory cannot be read.
+    pub fn view_at(&mut self, now_ms: u64) -> Result<DesktopControlView, DesktopControlOwnerError> {
+        let lifecycle = self.snapshot_at(now_ms)?;
+        let output_devices = self.output_devices()?;
+        Ok(DesktopControlView {
+            lifecycle,
+            output_devices,
+            selected_output: self.selected_output_device(),
+            stream_control: self.bridge.single_stream_gain(),
+        })
     }
 
     /// Starts a bounded pairing invitation through the shared lifecycle owner.
@@ -407,6 +464,17 @@ mod tests {
             ))
         ));
         assert!(owner.selected_output_device().is_none());
+    }
+
+    #[test]
+    fn owner_view_combines_lifecycle_inventory_and_single_stream_projection() {
+        let mut owner = owner();
+        let view = owner.view_at(100).unwrap();
+
+        assert_eq!(view.lifecycle().session(), SessionPhase::Idle);
+        assert!(view.output_devices().is_empty());
+        assert!(view.selected_output().is_none());
+        assert!(view.stream_control().is_none());
     }
 
     #[test]

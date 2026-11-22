@@ -296,6 +296,12 @@ where
         Ok(())
     }
 
+    /// Returns the local gain/mute state when exactly one stream is admitted.
+    #[must_use]
+    pub fn single_stream_gain(&self) -> Option<crate::GainControlState> {
+        self.mixer.single_stream_gain()
+    }
+
     /// Enumerates output endpoints outside the realtime callback.
     ///
     /// # Errors

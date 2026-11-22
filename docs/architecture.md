@@ -31,6 +31,9 @@ controller and diagnostic export action for low-rate commands such as snapshot
 polling, invitation lifecycle, output inventory/selection, stream-local
 gain/mute, and bounded export. Output selection is retained for the next output
 lifetime and cannot mutate an active callback stream. A
+shell-neutral `DesktopControlView` combines that lifecycle projection with the
+current output inventory, retained selection, and single-stream gain/mute state;
+it leaves multi-stream controls identity-addressed instead of guessing. A
 future Tauri shell can delegate to this owner without moving UI code into the
 realtime path. The projection excludes pairing IDs,
 proofs, addresses, session material, PCM,
