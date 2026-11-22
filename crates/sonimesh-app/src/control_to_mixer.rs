@@ -18,7 +18,7 @@ use sonimesh_diagnostics::{
     ExportPlatformFormat, ExportSessionPhase, ExportSessionSnapshot, StreamCounters,
     StreamMetricsSnapshot,
 };
-use sonimesh_platform::{AudioOutput, OutputHealth};
+use sonimesh_platform::{AudioOutput, OutputDeviceId, OutputDeviceInfo, OutputError, OutputHealth};
 use sonimesh_protocol::{Capability, Envelope};
 
 use crate::{
@@ -39,6 +39,8 @@ pub enum ControlToMixerError {
     Mixer(MixerStreamSessionError),
     /// The requested local gain was outside the bounded control range.
     Gain(crate::GainControlError),
+    /// Output selection cannot change while the platform stream is active.
+    OutputSelectionActive,
 }
 
 impl core::fmt::Display for ControlToMixerError {
@@ -47,6 +49,9 @@ impl core::fmt::Display for ControlToMixerError {
             Self::Control(error) => write!(formatter, "control-to-mixer control failure: {error}"),
             Self::Mixer(error) => write!(formatter, "control-to-mixer mixer failure: {error}"),
             Self::Gain(error) => write!(formatter, "control-to-mixer gain failure: {error}"),
+            Self::OutputSelectionActive => {
+                formatter.write_str("control-to-mixer output selection is active")
+            }
         }
     }
 }
@@ -57,6 +62,7 @@ impl std::error::Error for ControlToMixerError {
             Self::Control(error) => Some(error),
             Self::Mixer(error) => Some(error),
             Self::Gain(error) => Some(error),
+            Self::OutputSelectionActive => None,
         }
     }
 }
@@ -287,6 +293,42 @@ where
             .gain(identity)
             .map_err(ControlToMixerError::Mixer)?
             .set_muted(muted);
+        Ok(())
+    }
+
+    /// Enumerates output endpoints outside the realtime callback.
+    ///
+    /// # Errors
+    ///
+    /// Returns the platform enumeration error without changing bridge state.
+    pub fn output_devices(&self) -> Result<Vec<OutputDeviceInfo>, OutputError> {
+        self.mixer.output().devices()
+    }
+
+    /// Returns the currently retained output device, or `None` for the default role.
+    #[must_use]
+    pub fn selected_output_device(&self) -> Option<OutputDeviceId> {
+        self.selection.device.clone()
+    }
+
+    /// Retains a new output device for the next output lifetime.
+    ///
+    /// The current output is never stopped or recreated by this setter. A
+    /// caller must select the device while stopped, then start or recover the
+    /// output through the normal lifecycle path.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ControlToMixerError::OutputSelectionActive`] when an output
+    /// stream is currently active.
+    pub fn set_output_device(
+        &mut self,
+        device: Option<OutputDeviceId>,
+    ) -> Result<(), ControlToMixerError> {
+        if self.output_active {
+            return Err(ControlToMixerError::OutputSelectionActive);
+        }
+        self.selection.device = device;
         Ok(())
     }
 

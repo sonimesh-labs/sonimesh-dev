@@ -8,7 +8,7 @@
 
 use std::net::SocketAddr;
 
-use sonimesh_platform::AudioOutput;
+use sonimesh_platform::{AudioOutput, OutputDeviceId, OutputDeviceInfo, OutputError};
 
 use crate::{
     ControlToMixerBridge, ControlToMixerError, DesktopControlSnapshot, DiagnosticExportAction,
@@ -26,6 +26,8 @@ pub enum DesktopControlOwnerError {
     Diagnostics(DiagnosticExportActionError),
     /// Stream control failed because the bridge or mixer rejected it.
     Mixer(ControlToMixerError),
+    /// Output enumeration failed in the platform adapter.
+    Output(OutputError),
 }
 
 impl core::fmt::Display for DesktopControlOwnerError {
@@ -36,6 +38,7 @@ impl core::fmt::Display for DesktopControlOwnerError {
                 write!(formatter, "desktop control diagnostics failure: {error}")
             }
             Self::Mixer(error) => write!(formatter, "desktop control mixer failure: {error}"),
+            Self::Output(error) => write!(formatter, "desktop control output failure: {error}"),
         }
     }
 }
@@ -46,6 +49,7 @@ impl std::error::Error for DesktopControlOwnerError {
             Self::Pairing(error) => Some(error),
             Self::Diagnostics(error) => Some(error),
             Self::Mixer(error) => Some(error),
+            Self::Output(error) => Some(error),
         }
     }
 }
@@ -214,6 +218,50 @@ where
             .map_err(DesktopControlOwnerError::Mixer)
     }
 
+    /// Enumerates output endpoints for the desktop control surface.
+    ///
+    /// # Errors
+    ///
+    /// Returns an output error when the platform cannot enumerate endpoints.
+    pub fn output_devices(&self) -> Result<Vec<OutputDeviceInfo>, DesktopControlOwnerError> {
+        self.bridge
+            .output_devices()
+            .map_err(DesktopControlOwnerError::Output)
+    }
+
+    /// Retains an output device for the next output lifetime.
+    ///
+    /// Passing `None` selects the operating system's default output role. A
+    /// concrete device is checked against the current platform inventory before
+    /// it is retained, so a stale UI selection fails without mutating state.
+    ///
+    /// # Errors
+    ///
+    /// Returns an output error when the device is not present or enumeration
+    /// fails, or a mixer error when the output is currently active.
+    pub fn select_output_device(
+        &mut self,
+        device: Option<OutputDeviceId>,
+    ) -> Result<(), DesktopControlOwnerError> {
+        if let Some(device) = device.as_ref() {
+            let available = self.output_devices()?;
+            if !available.iter().any(|candidate| candidate.id == *device) {
+                return Err(DesktopControlOwnerError::Output(
+                    OutputError::DeviceUnavailable,
+                ));
+            }
+        }
+        self.bridge
+            .set_output_device(device)
+            .map_err(DesktopControlOwnerError::Mixer)
+    }
+
+    /// Returns the output device retained for the next output lifetime.
+    #[must_use]
+    pub fn selected_output_device(&self) -> Option<OutputDeviceId> {
+        self.bridge.selected_output_device()
+    }
+
     /// Issues one bounded diagnostic export after synchronizing lifecycle clocks.
     ///
     /// # Errors
@@ -342,6 +390,23 @@ mod tests {
         assert_eq!(issued.receipt.bytes, issued.bundle.len());
         assert!(issued.bundle.contains("\"software_version\":\"test\""));
         assert_eq!(owner.retained_diagnostic_exports(), 1);
+    }
+
+    #[test]
+    fn owner_keeps_default_selection_and_rejects_stale_device_ids() {
+        let mut owner = owner();
+        assert!(owner.output_devices().unwrap().is_empty());
+        owner.select_output_device(None).unwrap();
+        assert!(owner.selected_output_device().is_none());
+
+        let result = owner.select_output_device(Some(OutputDeviceId::new("missing")));
+        assert!(matches!(
+            result,
+            Err(DesktopControlOwnerError::Output(
+                OutputError::DeviceUnavailable
+            ))
+        ));
+        assert!(owner.selected_output_device().is_none());
     }
 
     #[test]
