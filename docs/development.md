@@ -307,7 +307,10 @@ This separate prototype uses Rust 1.98.1 for its locked Tauri dependencies; the
 shared workspace remains on Rust 1.85.0. Windows WebView2 is required. The window
 is not the receiver control UI and does not verify playback, latency, or pairing.
 Its application icon uses the Feather `headphones` icon (MIT license).
-The window and its IPC path have not yet been verified end to end on Windows.
+On 2026-11-22, a Windows desktop debug build opened this window and displayed
+five CPAL output endpoints, their formats, and the default marker through the
+Tauri IPC path; a refresh retained the five listed endpoints. This is a
+read-only enumeration check, not playback evidence.
 
 ## Core checks
 

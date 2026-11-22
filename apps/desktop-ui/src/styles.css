@@ -357,6 +357,9 @@ button:focus-visible, select:focus-visible, a:focus-visible { outline: 3px solid
 .probe-list {
   display: grid;
   gap: 12px;
+  margin: 22px 0 0;
   padding: 0;
   list-style: none;
 }
+
+.probe-list .selected-device { margin: 0; }
