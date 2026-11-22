@@ -1,4 +1,7 @@
 //! Loopback-only Opus-to-output lab. The fixed test key is not a pairing key.
+mod lab_decoder;
+
+use lab_decoder::Decoder;
 
 use std::error::Error;
 use std::sync::Arc;
@@ -8,9 +11,7 @@ use sonimesh_app::{
     OutputSelection, ReceiverOutputController, ReceiverPcmEndpointFactory, SourcePcmFormat,
     UdpPollOutcome, UdpReceiverPipeline,
 };
-use sonimesh_audio::{
-    DecodeStep, FrameDecoder, OpusFrameConfig, StreamDecodeWorker, realtime_pcm_queue,
-};
+use sonimesh_audio::{DecodeStep, OpusFrameConfig, StreamDecodeWorker, realtime_pcm_queue};
 use sonimesh_diagnostics::StreamCounters;
 use sonimesh_network::{MediaSessionSendOutcome, MediaSessionSender};
 use sonimesh_platform::{
@@ -22,20 +23,6 @@ use sonimesh_protocol::{MediaDirection, MediaKeyContext, SessionSecret};
 const SAMPLES: usize = 1_920;
 const FRAMES: u32 = 100;
 type LabResult<T> = Result<T, Box<dyn Error>>;
-
-struct Decoder(opus::Decoder);
-
-impl FrameDecoder for Decoder {
-    type Error = opus::Error;
-
-    fn decode(&mut self, encoded: &[u8], output: &mut [f32]) -> Result<usize, Self::Error> {
-        self.0.decode_float(encoded, output, false).map(|n| n * 2)
-    }
-
-    fn decode_plc(&mut self, output: &mut [f32]) -> Result<usize, Self::Error> {
-        self.0.decode_float(&[], output, false).map(|n| n * 2)
-    }
-}
 
 trait LabOutput: AudioOutput {
     fn tick(&mut self) -> LabResult<()>;
@@ -122,7 +109,7 @@ fn run<O: LabOutput>(output: O, config: OutputConfig) -> LabResult<()> {
     let context = MediaKeyContext::new(1, 1, 0, MediaDirection::AndroidToDesktop)?;
     let counters = Arc::new(StreamCounters::default());
     let (producer, _unused_consumer) = realtime_pcm_queue::<SAMPLES>(8)?;
-    let decoder = Decoder(opus::Decoder::new(48_000, opus::Channels::Stereo)?);
+    let decoder = Decoder::new()?;
     let worker =
         StreamDecodeWorker::<_, 8, 1_148, SAMPLES>::new_for_opus(decoder, producer, 0, frame)?;
     let mut receiver = UdpReceiverPipeline::bind_with_worker(

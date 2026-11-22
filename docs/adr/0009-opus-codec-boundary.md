@@ -72,6 +72,9 @@ The receiver and UDP receiver compositions can accept a preconstructed worker,
 so an isolated lab can use that validated worker with protected UDP ingress
 and an output endpoint. The codec binding itself remains confined to the
 existing prototype until the production gate is met.
+The UDP and local audio labs reset native decoder state when the worker retires a
+playout epoch, including output recovery. A reset failure is surfaced on the
+next decode or PLC operation; it is not silently treated as a successful reset.
 
 ## Reliability and security implications
 

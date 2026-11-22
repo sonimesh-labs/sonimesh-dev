@@ -1,5 +1,8 @@
 //! Controlled-network UDP lab. ADB bootstrap is not authenticated pairing.
 mod common;
+mod lab_decoder;
+
+use lab_decoder::Decoder;
 
 use std::{
     error::Error,
@@ -14,7 +17,7 @@ use sonimesh_app::{
     SourcePcmFormat, UdpPollOutcome, UdpReceiverError, UdpReceiverPipeline,
 };
 use sonimesh_audio::{
-    DecodeStep, DecodeWorkerError, FrameDecoder, GainControlHandle, InsertOutcome, OpusFrameConfig,
+    DecodeStep, DecodeWorkerError, GainControlHandle, InsertOutcome, OpusFrameConfig,
     StreamDecodeWorker, realtime_pcm_queue,
 };
 use sonimesh_diagnostics::StreamCounters;
@@ -28,17 +31,6 @@ use sonimesh_protocol::{MediaDirection, MediaKeyContext, SessionSecret};
 const SAMPLES: usize = 1_920;
 type LabResult<T> = Result<T, Box<dyn Error>>;
 type LabReceiver = UdpReceiverPipeline<Decoder, 8, 1_148, SAMPLES>;
-
-struct Decoder(opus::Decoder);
-impl FrameDecoder for Decoder {
-    type Error = opus::Error;
-    fn decode(&mut self, input: &[u8], output: &mut [f32]) -> Result<usize, Self::Error> {
-        self.0.decode_float(input, output, false).map(|n| n * 2)
-    }
-    fn decode_plc(&mut self, output: &mut [f32]) -> Result<usize, Self::Error> {
-        self.0.decode_float(&[], output, false).map(|n| n * 2)
-    }
-}
 
 trait LabOutput: AudioOutput {
     fn tick(&mut self) -> LabResult<()>;
@@ -275,7 +267,7 @@ fn run<O: LabOutput>(
     let counters = Arc::new(StreamCounters::default());
     let (producer, _unused) = realtime_pcm_queue::<SAMPLES>(8)?;
     let worker = StreamDecodeWorker::<_, 8, 1_148, SAMPLES>::new_for_opus(
-        Decoder(opus::Decoder::new(48_000, opus::Channels::Stereo)?),
+        Decoder::new()?,
         producer,
         0,
         OpusFrameConfig::new(48_000, 2, 20)?,
@@ -497,6 +489,7 @@ fn play(_: bool, _: Ipv4Addr, _: bool, _: bool) -> LabResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sonimesh_audio::FrameDecoder;
     use sonimesh_protocol::MediaSealer;
     use std::net::UdpSocket;
 
@@ -544,6 +537,42 @@ mod tests {
     }
 
     #[test]
+    fn decoder_reset_discards_opus_history() {
+        let mut encoder =
+            opus::Encoder::new(48_000, opus::Channels::Stereo, opus::Application::Audio).unwrap();
+        let mut warm_packet = [0_u8; 1_148];
+        let warm_len = encoder
+            .encode_float(&[0.3; SAMPLES], &mut warm_packet)
+            .unwrap();
+        let mut probe_packet = [0_u8; 1_148];
+        let probe_len = encoder
+            .encode_float(&[-0.2; SAMPLES], &mut probe_packet)
+            .unwrap();
+        let probe = &probe_packet[..probe_len];
+        let mut used = Decoder::new().unwrap();
+        let mut fresh = Decoder::new().unwrap();
+        let mut scratch = [0.0; SAMPLES];
+        let mut expected = [0.0; SAMPLES];
+        used.decode(&warm_packet[..warm_len], &mut scratch).unwrap();
+        used.decode(probe, &mut scratch).unwrap();
+        fresh.decode(probe, &mut expected).unwrap();
+        assert!(
+            scratch
+                .iter()
+                .zip(expected)
+                .any(|(a, b)| (a - b).abs() > 0.000_001)
+        );
+        used.reset();
+        used.decode(probe, &mut scratch).unwrap();
+        assert!(
+            scratch
+                .iter()
+                .zip(expected)
+                .all(|(a, b)| (a - b).abs() < 0.000_001)
+        );
+    }
+
+    #[test]
     #[allow(clippy::too_many_lines)] // Exercises the complete fault, retry, and media-resumption sequence.
     fn output_fault_retries_and_fresh_media_renders_after_recovery() {
         let secret = SessionSecret::new([7; 32]);
@@ -551,7 +580,7 @@ mod tests {
         let counters = Arc::new(StreamCounters::default());
         let (producer, _) = realtime_pcm_queue::<SAMPLES>(8).unwrap();
         let worker = StreamDecodeWorker::new_for_opus(
-            Decoder(opus::Decoder::new(48_000, opus::Channels::Stereo).unwrap()),
+            Decoder::new().unwrap(),
             producer,
             0,
             OpusFrameConfig::new(48_000, 2, 20).unwrap(),
@@ -761,7 +790,7 @@ mod tests {
         let counters = Arc::new(StreamCounters::default());
         let (producer, _consumer) = realtime_pcm_queue::<SAMPLES>(8).unwrap();
         let worker = StreamDecodeWorker::new_for_opus(
-            Decoder(opus::Decoder::new(48_000, opus::Channels::Stereo).unwrap()),
+            Decoder::new().unwrap(),
             producer,
             0,
             OpusFrameConfig::new(48_000, 2, 20).unwrap(),
