@@ -145,6 +145,12 @@ The application must handle the platform returning silence after authorization
 loss or when the source is not capturable. MediaProjection.Callback.onStop() is
 the authoritative signal for projection-session invalidation.
 
+The capture-only prototype lets the operator select one usage group before each
+session: `USAGE_MEDIA`, `USAGE_GAME`, or `USAGE_UNKNOWN`. This narrows the
+playback-capture request for that session; it does not identify the source
+application or override the source application's capture policy. The observed
+`AudioRecord` format remains the authoritative local measurement.
+
 Android 14 and later require the mediaProjection foreground-service type and
 single-session consent handling. Android 17 makes local-network protection
 mandatory for applications targeting SDK 37 or later. The discovery design must
