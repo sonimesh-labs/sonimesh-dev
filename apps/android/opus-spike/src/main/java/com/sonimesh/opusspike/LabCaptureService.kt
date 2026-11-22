@@ -19,6 +19,7 @@ import android.media.projection.MediaProjectionManager
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import com.sonimesh.sender.pairing.PairedConnection
 import com.sonimesh.sender.pairing.PairingClient
@@ -30,6 +31,7 @@ import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.net.SocketTimeoutException
 import java.nio.ByteOrder
 import java.security.SecureRandom
 import java.util.concurrent.ArrayBlockingQueue
@@ -91,6 +93,7 @@ class LabCaptureService : Service() {
         var paired: PairedConnection? = null
         var pairedIdentity: StreamIdentity? = null
         var connected = false
+        var pairedControlFailed = false
         try {
             val packets = ArrayBlockingQueue<EncodedPacket>(8)
             if (invitation != null) {
@@ -161,7 +164,23 @@ class LabCaptureService : Service() {
             var filled = 0
             var frame = 0L
             var outputSequence = 0L
+            paired?.socket?.soTimeout = 1
+            var nextControlPoll = SystemClock.elapsedRealtime()
             while (running.get()) {
+                if (paired != null && SystemClock.elapsedRealtime() >= nextControlPoll) {
+                    try {
+                        val value = paired.socket.inputStream.read()
+                        error(if (value == -1) "desktop closed control connection" else "unexpected control data")
+                    } catch (_: SocketTimeoutException) {
+                        // The control channel has no messages while capture is running.
+                    } catch (error: Exception) {
+                        pairedControlFailed = true
+                        Log.e("SoniMeshLab", "Paired control connection ended", error)
+                        handler.post { finishWith("Desktop connection ended. Restart the listener to reconnect.") }
+                        break
+                    }
+                    nextControlPoll = SystemClock.elapsedRealtime() + 250
+                }
                 if (filled < pcm.size) {
                     val read = activeRecord.read(pcm, filled, pcm.size - filled, AudioRecord.READ_NON_BLOCKING)
                     check(read >= 0 && read % 2 == 0)
@@ -208,7 +227,7 @@ class LabCaptureService : Service() {
             codec?.release()
             if (paired != null) {
                 try {
-                    pairedIdentity?.let { identity ->
+                    pairedIdentity?.takeUnless { pairedControlFailed }?.let { identity ->
                         val stopped = paired.stopStream(identity)
                         check(stopped is StreamControlResult.Status && stopped.state == 4) { "desktop did not stop stream" }
                     }

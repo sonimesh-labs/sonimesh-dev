@@ -62,7 +62,11 @@ session if the output fails. Its software checks and callback counts do not
 establish audible playback or latency on hardware.
 The Android audio-lab service can also use that same loopback fixture with
 playback capture: it establishes pairing and starts a stream before sending,
-then sends StopStream when capture ends. The user supplies the lab's public
+then sends StopStream when capture ends. During capture, the same worker polls
+the otherwise idle control connection and stops with a connection-ended status
+when it closes; this poll and StopStream never read the TLS stream concurrently.
+This detects an observed close or read failure, not a silent network partition.
+The user supplies the lab's public
 desktop pin manually; this is not QR scanning or persistent device pairing.
 
 The application-domain invitation listener exposes two explicit boundaries:

@@ -66,6 +66,14 @@ With the optional Windows output enabled, the same emulator capture test on
 2026-11-22 decoded 138 frames at a decoded peak of 0.093 and recorded 458 CPAL
 callbacks, zero stream errors, and zero oversized callbacks. Audible output was
 not independently checked; this is not a physical-device or latency result.
+On the same date, the capture test also passed after adding control-connection
+polling: a normal stop released the capture service and the desktop decoded 142
+frames. A separate test used a local TCP proxy to close only the Android side
+of the control connection while leaving the desktop UDP receiver running; the
+app displayed the connection-ended status and released its capture service.
+Stopping the desktop outright can instead surface a UDP send error first. A
+silent network partition remains undetected until an operation reports failure;
+these emulator checks do not establish physical-network behavior.
 
 This isolated test encodes a synthetic 48 kHz stereo tone with Android
 MediaCodec. It writes only synthetic audio to the spike application's external

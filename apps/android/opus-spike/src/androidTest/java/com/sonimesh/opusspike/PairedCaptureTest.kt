@@ -1,5 +1,7 @@
 package com.sonimesh.opusspike
 
+import android.app.ActivityManager
+import android.os.Bundle
 import android.os.SystemClock
 import android.view.View
 import android.view.ViewGroup
@@ -15,7 +17,12 @@ import org.junit.Test
 
 class PairedCaptureTest {
     @Test
-    fun captures_tone_after_pairing_and_stops() {
+    fun captures_tone_after_pairing_and_stops() = runCapture(expectDisconnect = false)
+
+    @Test
+    fun stops_capture_when_desktop_disconnects() = runCapture(expectDisconnect = true)
+
+    private fun runCapture(expectDisconnect: Boolean) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val args = InstrumentationRegistry.getArguments()
         assumeTrue("paired audio lab requires pairingSpkiHex", args.containsKey("pairingSpkiHex"))
@@ -40,11 +47,34 @@ class PairedCaptureTest {
                 if (!capturing) SystemClock.sleep(100)
             }
             assertTrue("capture did not start", capturing)
-            SystemClock.sleep(3_000)
-            scenario.onActivity { activity ->
-                find(activity.window.decorView) { it is Button && it.text.toString().equals("Stop capture", true) }.performClick()
+            if (expectDisconnect) {
+                instrumentation.sendStatus(1, Bundle().apply { putString("pairedCapture", "ready") })
+                var disconnected = false
+                val disconnectDeadline = SystemClock.elapsedRealtime() + 20_000
+                while (!disconnected && SystemClock.elapsedRealtime() < disconnectDeadline) {
+                    scenario.onActivity { activity ->
+                        disconnected = containsStatus(activity.window.decorView, "Status: Desktop connection ended.")
+                    }
+                    if (!disconnected) SystemClock.sleep(100)
+                }
+                assertTrue("desktop disconnect was not reported", disconnected)
+            } else {
+                SystemClock.sleep(3_000)
+                scenario.onActivity { activity ->
+                    find(activity.window.decorView) { it is Button && it.text.toString().equals("Stop capture", true) }.performClick()
+                }
             }
-            SystemClock.sleep(1_000)
+            var stopped = false
+            val stopDeadline = SystemClock.elapsedRealtime() + 10_000
+            while (!stopped && SystemClock.elapsedRealtime() < stopDeadline) {
+                scenario.onActivity { activity ->
+                    @Suppress("DEPRECATION")
+                    stopped = activity.getSystemService(ActivityManager::class.java).getRunningServices(Int.MAX_VALUE)
+                        .none { it.service.className == LabCaptureService::class.java.name }
+                }
+                if (!stopped) SystemClock.sleep(100)
+            }
+            assertTrue("capture service did not stop", stopped)
         }
     }
 
