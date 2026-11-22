@@ -47,7 +47,7 @@ fn main() {
 
 fn run() -> LabResult<()> {
     let options = Options::parse(std::env::args().skip(1))?;
-    let playback = Playback::prepare(options.play, options.select_output)?;
+    let mut playback = Playback::prepare(options.play, options.select_output)?;
     let listener = PairingListener::bind(SocketAddrV4::new(options.bind, 47610))?;
     let address = listener.local_addr()?;
     let key = generate_simple_self_signed(vec!["localhost".to_owned()])?;
@@ -58,6 +58,44 @@ fn run() -> LabResult<()> {
         PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(private.to_vec())),
     )?);
     private.zeroize();
+    let mut pin_hex = String::with_capacity(pin.len() * 2);
+    for byte in &pin {
+        write!(pin_hex, "{byte:02x}")?;
+    }
+    println!("SPKI_HEX {pin_hex}");
+    println!("LISTENING {address}");
+    println!("INVITATION_HOST {}", options.host);
+    loop {
+        println!("READY");
+        let started = Instant::now();
+        let stream = loop {
+            if let Some(stream) = listener.try_accept()? {
+                break stream;
+            }
+            if !options.keep_listening && started.elapsed() >= Duration::from_secs(90) {
+                return Err("client connection timed out".into());
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        let result = run_session(stream, Arc::clone(&tls), &pin, &options, &mut playback);
+        playback.abort();
+        if !options.keep_listening {
+            return result;
+        }
+        match result {
+            Ok(()) => println!("RESULT session complete"),
+            Err(error) => eprintln!("Session ended: {error}"),
+        }
+    }
+}
+
+fn run_session(
+    stream: std::net::TcpStream,
+    tls: Arc<rustls::ServerConfig>,
+    pin: &[u8],
+    options: &Options,
+    playback: &mut Playback,
+) -> LabResult<()> {
     let id = PairingId::new(LAB_ID);
     let mut pairing = PairingInvitationController::<4>::new();
     let mut session = SessionState::IDLE;
@@ -72,38 +110,19 @@ fn run() -> LabResult<()> {
             id,
             pairing_secret: LAB_SECRET,
             control_host: &options.host.to_string(),
-            control_port: address.port(),
-            desktop_tls_spki: &pin,
+            control_port: 47610,
+            desktop_tls_spki: pin,
             expires_at_ms: 120_100,
         },
         &mut payload,
     )?;
     payload.truncate(length);
-    let mut pin_hex = String::with_capacity(pin.len() * 2);
-    for byte in &pin {
-        write!(pin_hex, "{byte:02x}")?;
-    }
-    println!("SPKI_HEX {pin_hex}");
-    println!("LISTENING {address}");
-    println!("INVITATION_HOST {}", options.host);
-    println!("READY");
-    let started = Instant::now();
-    let stream = loop {
-        if let Some(stream) = listener.try_accept()? {
-            break stream;
-        }
-        if started.elapsed() >= Duration::from_secs(90) {
-            return Err("client connection timed out".into());
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    };
-    let elapsed = u64::try_from(started.elapsed().as_millis())?;
     let (channel, root) = accept_pairing_stream(
         stream,
         tls,
         &mut pairing,
         &mut session,
-        100 + elapsed,
+        100,
         PairingSource::new([0x72; 16]),
         &InvitationInputs {
             invitation: id,
@@ -122,10 +141,12 @@ fn run() -> LabResult<()> {
     )
 }
 
+#[allow(clippy::struct_excessive_bools)] // Independent command-line switches.
 struct Options {
     require_tone: bool,
     play: bool,
     select_output: bool,
+    keep_listening: bool,
     bind: Ipv4Addr,
     host: Ipv4Addr,
 }
@@ -136,6 +157,7 @@ impl Default for Options {
             require_tone: false,
             play: false,
             select_output: false,
+            keep_listening: false,
             bind: Ipv4Addr::LOCALHOST,
             host: Ipv4Addr::LOCALHOST,
         }
@@ -153,6 +175,7 @@ impl Options {
                 "--require-tone" if !result.require_tone => result.require_tone = true,
                 "--play" if !result.play => result.play = true,
                 "--select-output" if !result.select_output => result.select_output = true,
+                "--keep-listening" if !result.keep_listening => result.keep_listening = true,
                 "--bind" if !bind_set => {
                     result.bind = args
                         .next()
@@ -169,7 +192,7 @@ impl Options {
                 }
                 _ => {
                     return Err(
-                        "usage: paired-audio-lab [--require-tone] [--play [--select-output]] [--bind IPv4 --host IPv4]"
+                        "usage: paired-audio-lab [--require-tone] [--play [--select-output]] [--keep-listening] [--bind IPv4 --host IPv4]"
                             .into(),
                     );
                 }
@@ -194,7 +217,7 @@ fn negotiate_hello(
     session: SessionState,
     root: SessionSecret,
     require_tone: bool,
-    playback: Playback,
+    playback: &mut Playback,
     bind: Ipv4Addr,
 ) -> LabResult<()> {
     let (channel, _exporter) = channel.into_parts();
@@ -329,6 +352,13 @@ struct Playback;
     allow(clippy::unused_self, clippy::unnecessary_wraps)
 )]
 impl Playback {
+    fn abort(&mut self) {
+        #[cfg(all(windows, feature = "playback"))]
+        if let Some((controller, _)) = &mut self.0 {
+            controller.stop();
+        }
+    }
+
     fn prepare(play: bool, select: bool) -> LabResult<Self> {
         #[cfg(all(windows, feature = "playback"))]
         {
@@ -430,7 +460,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
     control_token: sonimesh_app::ControlSessionToken,
     root: SessionSecret,
     require_tone: bool,
-    mut playback: Playback,
+    playback: &mut Playback,
     bind: Ipv4Addr,
 ) -> LabResult<()> {
     let mut allocator = MediaSessionAllocator::new(root);
@@ -898,6 +928,12 @@ mod tests {
         assert!(playback.play && playback.require_tone && playback.select_output);
         assert!(Options::parse(args(&["--select-output"])).is_err());
         assert!(Options::parse(args(&["--play", "--play"])).is_err());
+        assert!(
+            Options::parse(args(&["--keep-listening"]))
+                .unwrap()
+                .keep_listening
+        );
+        assert!(Options::parse(args(&["--keep-listening", "--keep-listening"])).is_err());
         let network = Options::parse(args(&["--bind", "0.0.0.0", "--host", "10.0.2.2"])).unwrap();
         assert_eq!(network.bind, Ipv4Addr::UNSPECIFIED);
         assert_eq!(network.host, Ipv4Addr::new(10, 0, 2, 2));

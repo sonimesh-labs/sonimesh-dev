@@ -72,6 +72,22 @@ For an emulator, `--bind 0.0.0.0 --host 10.0.2.2` and `10.0.2.2` in both
 Android fields exercise its host routing. A wildcard bind listens on all local
 interfaces. This is not evidence of physical WLAN interoperability.
 
+Add `--keep-listening` to accept successive sessions without restarting the
+desktop listener or changing its displayed pin. It handles one client at a time;
+each connection uses a fresh pairing exchange and media session. An unsuccessful
+session returns to listening. Stop the listener with Ctrl+C. To exercise two
+successive synthetic sessions, run the instrumentation method
+`PairedAudioInteropTest#pairs_twice_with_continuous_listener` with the listener
+in this mode and the same `pairingSpkiHex` and optional `pairingHost` arguments.
+
+On 2026-11-22, a malformed TLS handshake was followed by two successful API 37
+emulator sessions against one continuously running Windows listener using CPAL.
+Both authenticated 100 packets; the first decoded 92 after eight jitter
+resynchronization drops, and the second decoded 100. They recorded 593 and 261
+output callbacks respectively, with no reported stream errors or oversized
+callbacks. This verifies software recovery and callback activity, not listening
+quality or physical-device recovery.
+
 On 2026-11-22, API 37 x86_64 emulator tests using that direct host route and no
 ADB reverse authenticated and decoded 100 synthetic frames (peak 0.250), then
 captured the test tone and decoded 155 frames (peak 0.099). A separate default

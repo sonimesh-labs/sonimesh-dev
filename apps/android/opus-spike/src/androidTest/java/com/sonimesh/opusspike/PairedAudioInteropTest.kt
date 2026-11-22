@@ -22,6 +22,12 @@ import kotlin.math.sin
 
 class PairedAudioInteropTest {
     @Test
+    fun pairs_twice_with_continuous_listener() {
+        pairs_starts_sends_opus_and_stops()
+        pairs_starts_sends_opus_and_stops()
+    }
+
+    @Test
     fun pairs_starts_sends_opus_and_stops() {
         val args = InstrumentationRegistry.getArguments()
         assumeTrue("paired audio lab requires pairingSpkiHex", args.containsKey("pairingSpkiHex"))

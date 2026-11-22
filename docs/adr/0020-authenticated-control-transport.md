@@ -60,8 +60,13 @@ default the control and media listeners bind to loopback; explicit IPv4 bind and
 invitation-host arguments permit a manually addressed controlled-network lab.
 Both peers must use the same invitation host because it is transcript-bound.
 The public fixed invitation does not establish production device trust; do not
-expose this experiment outside a controlled lab network. The
-lab also offers an optional Windows CPAL output: it starts the output before
+expose this experiment outside a controlled lab network. The optional
+continuous-listener mode handles one client at a time and starts a
+fresh invitation owner, control coordinator, and media session for each accepted
+connection. The process keeps its temporary TLS identity until it exits; a
+finished or failed session releases its output and returns to listening. This
+is a lab convenience, not persistent pairing or automatic reconnection.
+The lab also offers an optional Windows CPAL output: it starts the output before
 acknowledging Streaming and stops it before acknowledging Stopped. If the output
 reports a fault during a session, the lab keeps the control and media session
 alive and retries the selected output once per second. It suspends playout until
