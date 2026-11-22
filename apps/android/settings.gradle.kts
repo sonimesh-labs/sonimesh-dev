@@ -19,6 +19,7 @@ dependencyResolutionManagement {
 rootProject.name = "sonimesh-android"
 include(":app")
 include(":pairing-protocol")
+include(":pairing-client")
 include(":discovery-spike")
 include(":tls-provider-spike")
 include(":opus-spike")

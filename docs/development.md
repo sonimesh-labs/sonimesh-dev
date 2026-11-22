@@ -206,6 +206,7 @@ python tools/check_ci_wiring.py
 Push-Location apps/android
 .\gradlew.bat lintDebug testDebugUnitTest assembleDebug --no-daemon
 .\gradlew.bat :pairing-protocol:lint :pairing-protocol:assemble --no-daemon
+.\gradlew.bat :pairing-client:lint :pairing-client:testDebugUnitTest --no-daemon
 .\gradlew.bat :discovery-spike:lintDebug :discovery-spike:assembleDebugAndroidTest --no-daemon
 .\gradlew.bat :tls-provider-spike:assembleDebugAndroidTest --no-daemon
 Pop-Location
@@ -220,6 +221,31 @@ vector and copy-ownership tests with
 `./gradlew.bat :pairing-protocol:connectedDebugAndroidTest` from `apps/android`.
 The library provides codecs only; the capture-only app does not use them at
 runtime and this check does not exercise scanning or a pairing connection.
+
+To exercise the Android pairing client with the desktop invitation listener on
+an emulator, build and install the TLS spike APKs from `apps/android`:
+
+~~~powershell
+.\gradlew.bat :tls-provider-spike:assembleDebug :tls-provider-spike:assembleDebugAndroidTest --no-daemon
+adb install -r tls-provider-spike/build/outputs/apk/debug/tls-provider-spike-debug.apk
+adb install -r tls-provider-spike/build/outputs/apk/androidTest/debug/tls-provider-spike-debug-androidTest.apk
+adb reverse tcp:47610 tcp:47610
+~~~
+
+Start `cargo run -p windows-tls-provider-prototype --bin pairing-lab` from the
+repository root. In another terminal, set `$pin` to the printed public
+`SPKI_HEX` and run one instrumentation method (restart the one-shot desktop
+listener for each method):
+
+~~~powershell
+adb shell am instrument -w -r -e class 'com.sonimesh.tlsproviderspike.security.PairingClientInteropTest#pairs_with_desktop_invitation_listener' -e pairingSpkiHex $pin com.sonimesh.tlsproviderspike.test/androidx.test.runner.AndroidJUnitRunner
+~~~
+
+The `rejects_a_changed_desktop_pin` method expects the desktop to exit with a
+TLS error. This lab uses a fixed public secret and ADB loopback; it does not
+implement camera scanning, persistent trust, control negotiation or physical
+WLAN validation. The QR expiry is interpreted by the desktop invitation owner,
+whose monotonic clock is not comparable to the Android device clock.
 
 The vector pin checkers (`check_pairing_vectors.py`, `check_control_frame_vectors.py`,
 `check_media_header_vectors.py`, `check_media_key_vectors.py`,

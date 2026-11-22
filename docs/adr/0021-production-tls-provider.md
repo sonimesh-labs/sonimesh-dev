@@ -78,6 +78,14 @@ packets remain AEAD-over-UDP under [ADR 0005](./0005-udp-media-protection.md)
 and never touch TLS. Discovery stays unauthenticated per the architecture
 documents.
 
+The isolated Android `pairing-client` library decodes an invitation's binary
+QR payload, exchanges ADR 0019 proof frames and returns the verified media
+root with the open TLS socket. Its caller owns the socket and root after success;
+it performs no scanning, trust persistence, control negotiation or capture.
+The capture-only app does not depend on this library at runtime. A separate
+lab listener exercises this client against the desktop invitation owner using
+public test credentials, rather than the older raw-proof interop protocol.
+
 ## Security implications
 
 The trust anchor is the QR-carried SPKI, so a relay cannot substitute a
@@ -111,6 +119,11 @@ inputs remain zeroized/redacted per ADR 0008 logging rules.
   using the explicit Conscrypt context leaves the global security-provider list
   unchanged. This is cross-implementation evidence, but not a physical WLAN or
   OEM result.
+- A separate API 37 emulator run through ADB reverse completed the Android
+  `pairing-client` exchange with the desktop's invitation-gated listener and
+  canonical proof frames; changing the SPKI pin rejected the handshake. The
+  published media-root vector also passes on the host. This lab does not verify
+  scanning, stored identity, subsequent control messages, or physical WLAN.
 - The desktop selection is implemented as
   `sonimesh-network::desktop_tls` (pinned client verifier, TLS 1.3-only
   server config, exporter extraction into zeroized storage). Loopback

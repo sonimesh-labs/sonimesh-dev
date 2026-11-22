@@ -29,7 +29,9 @@ android {
 
 dependencies {
     implementation("org.conscrypt:conscrypt-android:2.6.1")
+    implementation(project(":pairing-client"))
 
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation(project(":pairing-protocol"))
 }

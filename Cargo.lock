@@ -1766,6 +1766,7 @@ dependencies = [
  "rcgen",
  "rustls",
  "sonimesh-app",
+ "sonimesh-network",
  "sonimesh-protocol",
  "x509-parser",
  "zeroize",
