@@ -12,7 +12,7 @@ export function useDesktopState() {
   const error = ref<string | null>(null)
   let snapshotPollTimer: ReturnType<typeof setInterval> | undefined
 
-  async function run(command: () => Promise<DesktopSnapshot>) {
+  async function run(command: () => Promise<DesktopSnapshot | undefined>) {
     if (busy.value) return
 
     busy.value = true

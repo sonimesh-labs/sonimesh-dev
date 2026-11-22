@@ -132,6 +132,21 @@ describe('useDesktopState', () => {
     vi.useRealTimers()
   })
 
+  it('keeps the last snapshot when a background poll has no response', async () => {
+    vi.useFakeTimers()
+    desktopBridgeMock.snapshot.mockResolvedValueOnce(receiverSnapshot('ready'))
+    const wrapper = mount(StateHarness)
+    await flushPromises()
+
+    desktopBridgeMock.snapshot.mockResolvedValueOnce(undefined)
+    vi.advanceTimersByTime(1_000)
+    await flushPromises()
+
+    expect(wrapper.vm.snapshot?.session).toBe('ready')
+    wrapper.unmount()
+    vi.useRealTimers()
+  })
+
   it('accepts only one bridge command while a prior command is pending', async () => {
     desktopBridgeMock.snapshot.mockResolvedValueOnce(receiverSnapshot('ready'))
     const wrapper = mount(StateHarness)
