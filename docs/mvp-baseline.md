@@ -335,6 +335,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   pairing-invitation state, and diagnostics presentation for packet,
   PCM-queue/refill, and resampling state; it uses in-memory preview data and
   has no Tauri, audio, key, or realtime integration.
+- an isolated Tauri output-probe prototype that lists Windows CPAL devices and
+  their default formats in a separate read-only window. It does not own a
+  receiver session, select an output, or start audio.
 - a dependency-free `tools/latency-measurement` crate that generates a
   deterministic MLS reference WAVE (PCM 16/24/32 or IEEE float 32/64), reads
   and reports the declared properties of WAVE recordings (PCM 16/24/32, IEEE

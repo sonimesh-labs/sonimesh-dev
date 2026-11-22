@@ -28,6 +28,13 @@ their adapter or tool boundary. The Android and desktop UI projects remain gated
 until their platform ADRs have enough prototype evidence to select build/runtime
 dependencies.
 
+An isolated desktop output-probe shell may use Tauri 2 outside the shared Rust
+workspace to exercise the existing CPAL read-only enumeration adapter. Its one
+command returns device names and default formats to a separate probe view; it
+does not claim a receiver, change output selection, or start audio. The main
+desktop preview remains synthetic until a real session owner exists. Tauri and
+webview dependencies remain outside the six shared crates.
+
 The repository enforces the current direct Rust dependency graph with
 `tools/check_workspace_boundaries.py`, which reads `cargo metadata --no-deps`.
 It allows only the documented internal edges among the six `sonimesh-*` crates

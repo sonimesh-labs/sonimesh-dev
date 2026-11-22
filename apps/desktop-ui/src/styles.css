@@ -348,3 +348,15 @@ button:focus-visible, select:focus-visible, a:focus-visible { outline: 3px solid
   .health-card { min-height: 118px; }
   .diagnostics { padding: 20px 16px; }
 }
+.probe-shell {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 32px 24px;
+}
+
+.probe-list {
+  display: grid;
+  gap: 12px;
+  padding: 0;
+  list-style: none;
+}

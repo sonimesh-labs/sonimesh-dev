@@ -1,4 +1,6 @@
 /target/
+/tools/tauri-output-prototype/target/
+/tools/tauri-output-prototype/gen/
 /.idea/
 /.vscode/
 *.iml

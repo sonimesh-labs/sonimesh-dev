@@ -289,6 +289,26 @@ Android CI job installs before running the Gradle commands:
 Tools 35.0.0, so a missing local build-tools component fails the build even
 when the platforms packages are present.
 
+### Windows desktop output probe
+
+The isolated Tauri prototype displays the Windows output endpoints and default
+formats returned by the CPAL adapter. It does not start audio or control a
+receiver. Build the web assets and run the prototype from the repository root:
+
+~~~powershell
+Push-Location apps/desktop-ui
+npm ci
+npm run build
+Pop-Location
+cargo +1.98.1 run --manifest-path tools/tauri-output-prototype/Cargo.toml --locked
+~~~
+
+This separate prototype uses Rust 1.98.1 for its locked Tauri dependencies; the
+shared workspace remains on Rust 1.85.0. Windows WebView2 is required. The window
+is not the receiver control UI and does not verify playback, latency, or pairing.
+Its application icon uses the Feather `headphones` icon (MIT license).
+The window and its IPC path have not yet been verified end to end on Windows.
+
 ## Core checks
 
 ~~~powershell

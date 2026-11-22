@@ -61,6 +61,10 @@ The paired audio lab can optionally report low-rate packet, decode, and output
 recovery state while a session is active. These diagnostics are sampled outside
 the output callback and do not prove audible playback or identify why capture
 is silent.
+An isolated Tauri desktop probe can also display Windows output devices and
+their default formats through the existing CPAL adapter. It is a read-only
+platform experiment, separate from the synthetic receiver preview and from a
+desktop session or output selection.
 
 The first product goal is not synchronized multi-device playback, recording of
 calls, remote desktop, or a universal Bluetooth receiver. It is a practical
