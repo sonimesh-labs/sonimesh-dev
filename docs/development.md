@@ -72,7 +72,9 @@ For a manually addressed controlled network, run the desktop listener with
 The bind address applies to TCP port 47610 and UDP port 39093; the host is the
 exact address placed in the pairing invitation. Enter that same host in the
 Android **Paired control IPv4** field, and the reachable desktop IPv4 in the
-UDP address field. Configure the host firewall as needed for this lab. No ADB
+UDP address field. When both addresses are the same, use **Use UDP address for
+control** in the lab app to copy it; the fields remain independent for ADB
+reverse. Configure the host firewall as needed for this lab. No ADB
 reverse is needed for this mode. The fixed public invitation is a test fixture,
 not persistent trust; do not expose this lab outside a controlled network.
 For an emulator, `--bind 0.0.0.0 --host 10.0.2.2` and `10.0.2.2` in both

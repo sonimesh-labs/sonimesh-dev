@@ -89,6 +89,17 @@ class LabActivity : Activity() {
         }
         layout.addView(host)
         layout.addView(Button(this).apply {
+            text = "Use UDP address for control"
+            setOnClickListener {
+                val parsed = parseLabAddress(address.text.toString())
+                if (parsed == null) {
+                    LabStatus.publish("Enter a valid desktop IPv4 address for UDP.")
+                } else {
+                    host.setText(parsed.hostAddress)
+                }
+            }
+        })
+        layout.addView(Button(this).apply {
             text = "Start paired UDP capture"
             setOnClickListener { startCapture(true, paired = true) }
         })

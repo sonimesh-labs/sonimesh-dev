@@ -61,6 +61,31 @@ class LabAddressTest {
         }
     }
 
+    @Test
+    fun udpAddressCanBeCopiedToControlWithoutChangingIndependentFields() {
+        ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                val root = activity.window.decorView
+                val udp = requireNotNull(findField(root))
+                val control = requireNotNull(findField(root, "Paired control IPv4 address"))
+                val copy = requireNotNull(findButton(root, "Use UDP address for control"))
+                udp.setText("192.168.1.7")
+                assertEquals("127.0.0.1", control.text.toString())
+                copy.performClick()
+                assertEquals("192.168.1.7", control.text.toString())
+                udp.setText("192.168.1.8")
+                assertEquals("192.168.1.7", control.text.toString())
+                udp.setText("")
+                copy.performClick()
+                assertEquals("192.168.1.7", control.text.toString())
+            }
+            scenario.recreate()
+            scenario.onActivity { activity ->
+                assertEquals("192.168.1.7", requireNotNull(findField(activity.window.decorView, "Paired control IPv4 address")).text.toString())
+            }
+        }
+    }
+
     private fun findButton(view: View, text: String): Button? {
         if (view is Button && view.text == text) return view
         if (view is ViewGroup) for (index in 0 until view.childCount) {
@@ -69,10 +94,10 @@ class LabAddressTest {
         return null
     }
 
-    private fun findField(view: View): EditText? {
-        if (view is EditText) return view
+    private fun findField(view: View, description: String? = null): EditText? {
+        if (view is EditText && (description == null || view.contentDescription == description)) return view
         if (view is ViewGroup) for (index in 0 until view.childCount) {
-            findField(view.getChildAt(index))?.let { return it }
+            findField(view.getChildAt(index), description)?.let { return it }
         }
         return null
     }
