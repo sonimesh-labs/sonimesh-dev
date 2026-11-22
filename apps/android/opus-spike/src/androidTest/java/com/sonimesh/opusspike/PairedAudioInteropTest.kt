@@ -61,7 +61,7 @@ class PairedAudioInteropTest {
                 var sent = 0L
                 var finished = false
                 val deadline = SystemClock.elapsedRealtime() + 20_000
-                var nextSend = SystemClock.elapsedRealtime()
+                var nextSend: Long? = null
                 while (!finished && SystemClock.elapsedRealtime() < deadline) {
                     if (submitted <= 100) {
                         val index = codec.dequeueInputBuffer(10_000)
@@ -83,12 +83,13 @@ class PairedAudioInteropTest {
                         if (info.size > 0 && info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0) {
                             val encoded = ByteArray(info.size)
                             requireNotNull(codec.getOutputBuffer(index)).apply { position(info.offset); get(encoded) }
-                            val delay = nextSend - SystemClock.elapsedRealtime()
+                            val due = nextSend ?: SystemClock.elapsedRealtime()
+                            val delay = due - SystemClock.elapsedRealtime()
                             if (delay > 0) Thread.sleep(delay)
                             val packet = sealer.seal(sent, sent * 960, 0, encoded)
                             socket.send(DatagramPacket(packet, packet.size))
                             sent++
-                            nextSend += 20
+                            nextSend = nextSendDeadline(due, SystemClock.elapsedRealtime())
                         }
                         finished = info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
                         codec.releaseOutputBuffer(index, false)
@@ -102,4 +103,14 @@ class PairedAudioInteropTest {
             codec.release()
         }
     }
+
+    @Test
+    fun sender_pacing_preserves_cadence_and_rebases_after_a_stall() {
+        assertEquals(1_020L, nextSendDeadline(1_000, 1_002))
+        assertEquals(1_040L, nextSendDeadline(1_000, 1_020))
+        assertEquals(1_520L, nextSendDeadline(1_000, 1_500))
+    }
 }
+
+private fun nextSendDeadline(due: Long, now: Long): Long =
+    (if (now - due >= 20) now else due) + 20

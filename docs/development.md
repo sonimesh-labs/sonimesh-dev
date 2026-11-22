@@ -85,6 +85,17 @@ playback-capture run decoded 156 of 156 authenticated packets, recorded 486 CPAL
 callbacks and no stream errors or oversized callbacks. These results are not
 evidence of audible quality, physical-network performance, or latency.
 
+The synthetic sender schedules its first packet when the encoder actually
+produces it, then targets a 20 ms cadence. After falling a full
+frame behind, it rebases instead of emitting a catch-up burst. This keeps the
+fixture's pacing representative of a live source; it does not simulate network
+jitter or prove a physical sender's timing.
+After this adjustment, three API 37 emulator/desktop loopback runs each
+authenticated and decoded 100 packets with zero late packets and zero jitter
+resynchronization drops; each reported peak 0.250. This small sample supports
+the fixture change but does not establish the cause of earlier drops or qualify
+long-running behavior.
+
 This isolated test encodes a synthetic 48 kHz stereo tone with Android
 MediaCodec. It writes only synthetic audio to the spike application's external
 files directory; it does not use capture or networking. With a single selected
