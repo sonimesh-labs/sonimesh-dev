@@ -54,6 +54,15 @@ variable rather than recording it in logs:
 adb shell am instrument -w -e pairingInvitationHex $invitationHex -e mediaHost 10.0.2.2 -e class 'com.sonimesh.opusspike.PairedAudioInteropTest#pairs_starts_sends_opus_and_stops' com.sonimesh.opusspike.test/androidx.test.runner.AndroidJUnitRunner
 ~~~
 
+The same payload can drive the interactive capture service. Grant
+`RECORD_AUDIO` on the test emulator first when the permission dialog is not part
+of the run, then select the entire-screen capture option when prompted:
+
+~~~powershell
+adb shell pm grant com.sonimesh.opusspike android.permission.RECORD_AUDIO
+adb shell am instrument -w -e pairingInvitationHex $invitationHex -e mediaHost 10.0.2.2 -e class 'com.sonimesh.opusspike.PairedCaptureTest#captures_tone_after_pairing_and_stops' com.sonimesh.opusspike.test/androidx.test.runner.AndroidJUnitRunner
+~~~
+
 The test synthesizes and encodes a tone; the desktop acknowledges start only
 after binding its UDP receiver with the pairing-derived root and acknowledges
 stop after retiring it. Successful runs report the decoded frame count and
@@ -161,6 +170,13 @@ packets, zero rejected packets, and zero decode errors. The same payload then
 completed two successive sessions against one `--keep-listening` listener with
 the same counters. This verifies the imported-payload and continuous-listener
 lab path; it is not production pairing or physical-network evidence.
+
+On 2026-11-23, the same imported payload drove the Android capture service
+through screen-capture consent, paired startup, synthetic test-tone capture,
+and normal stop. The listener authenticated and decoded 151 packets with zero
+rejections, late packets, resynchronization drops, or decode errors, at a
+software peak of 0.095. This is emulator loopback evidence and does not qualify
+physical capture or audible output.
 
 This isolated test encodes a synthetic 48 kHz stereo tone with Android
 MediaCodec. It writes only synthetic audio to the spike application's external

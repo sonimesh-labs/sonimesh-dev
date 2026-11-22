@@ -25,14 +25,28 @@ class PairedCaptureTest {
     private fun runCapture(expectDisconnect: Boolean) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val args = InstrumentationRegistry.getArguments()
-        assumeTrue("paired audio lab requires pairingSpkiHex", args.containsKey("pairingSpkiHex"))
-        val pin = requireNotNull(args.getString("pairingSpkiHex"))
+        assumeTrue(
+            "paired audio lab requires pairingInvitationHex or pairingSpkiHex",
+            args.containsKey("pairingInvitationHex") || args.containsKey("pairingSpkiHex"),
+        )
+        val pin = args.getString("pairingSpkiHex")
         ActivityScenario.launch(LabActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
                 val root = activity.window.decorView
-                (find(root) { it is EditText && it.contentDescription == "Paired lab desktop SPKI" } as EditText).setText(pin)
-                args.getString("pairingHost")?.let { host ->
-                    (find(root) { it is EditText && it.contentDescription == "Paired control IPv4 address" } as EditText).setText(host)
+                args.getString("mediaHost")?.let { mediaHost ->
+                    (find(root) { it is EditText && it.contentDescription == "Desktop IPv4 address for UDP" } as EditText)
+                        .setText(mediaHost)
+                }
+                args.getString("pairingInvitationHex")?.let { payload ->
+                    (find(root) { it is EditText && it.contentDescription == "Lab invitation payload" } as EditText)
+                        .setText(payload)
+                    find(root) { it is Button && it.text.toString().equals("Apply invitation payload", true) }.performClick()
+                } ?: run {
+                    (find(root) { it is EditText && it.contentDescription == "Paired lab desktop SPKI" } as EditText)
+                        .setText(requireNotNull(pin))
+                    args.getString("pairingHost")?.let { host ->
+                        (find(root) { it is EditText && it.contentDescription == "Paired control IPv4 address" } as EditText).setText(host)
+                    }
                 }
                 find(root) { it is Button && it.text.toString().equals("Toggle test tone", true) }.performClick()
                 find(root) { it is Button && it.text.toString().equals("Start paired UDP capture", true) }.performClick()
