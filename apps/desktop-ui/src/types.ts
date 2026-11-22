@@ -1,5 +1,7 @@
 export type SessionState = 'idle' | 'pairing' | 'ready' | 'streaming' | 'reconnecting' | 'outputUnavailable'
 
+export type JitterMode = 'lowLatency' | 'balanced' | 'stable'
+
 export interface OutputDevice {
   id: string
   label: string

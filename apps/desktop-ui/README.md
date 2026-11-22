@@ -31,7 +31,10 @@ or output unavailable) retires to `idle` while the consumed pairing record stays
 retained for audit, so the revoke path remains reachable. The
 diagnostics panel can simulate a burst of transport and recovery activity
 (`Simulate metrics burst`), so the cumulative-counter formatting and health
-cards can be exercised without live audio. An
+cards can be exercised without live audio. Its adaptive jitter target selector
+exposes the documented `Low latency`, `Balanced`, and `Stable` presets and
+updates the preview target window and playout delay together. This remains a
+preview control until the Tauri bridge owns a real receiver session. An
 `Export diagnostics` action issues one bounded diagnostic-export receipt
 (monotonic sequence and 16 KiB bundle size) into a most-recent-first receipt
 log capped at eight, mirroring the Rust ADR 0011 export journal, so the

@@ -433,6 +433,22 @@ describe('PreviewDesktopBridge', () => {
     expect(reset.muted).toBe(false)
   })
 
+  it('switches between bounded jitter target presets', async () => {
+    const bridge = new PreviewDesktopBridge()
+
+    const lowLatency = await bridge.setJitterMode('lowLatency')
+    expect(lowLatency.metrics.targetMinFrames).toBe(1)
+    expect(lowLatency.metrics.targetMaxFrames).toBe(2)
+    expect(lowLatency.metrics.targetFrames).toBe(2)
+    expect(lowLatency.metrics.playoutDelayMs).toBe(40)
+
+    const stable = await bridge.setJitterMode('stable')
+    expect(stable.metrics.targetMinFrames).toBe(4)
+    expect(stable.metrics.targetMaxFrames).toBe(6)
+    expect(stable.metrics.targetFrames).toBe(5)
+    expect(stable.metrics.playoutDelayMs).toBe(100)
+  })
+
   it('records a stream-status reply after a successful start and stop', async () => {
     const bridge = new PreviewDesktopBridge()
 

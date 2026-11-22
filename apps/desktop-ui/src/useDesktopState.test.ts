@@ -12,6 +12,7 @@ const desktopBridgeMock = vi.hoisted(() => ({
   resetPreview: vi.fn(),
   selectOutput: vi.fn(),
   setGain: vi.fn(),
+  setJitterMode: vi.fn(),
   setMuted: vi.fn(),
   simulateCommandRejection: vi.fn(),
   simulateConnectionLost: vi.fn(),
@@ -287,6 +288,22 @@ describe('useDesktopState', () => {
 
     expect(desktopBridgeMock.setMuted).toHaveBeenCalledWith(true)
     expect(wrapper.vm.snapshot?.muted).toBe(true)
+  })
+
+  it('forwards the jitter mode command and projects the returned snapshot', async () => {
+    desktopBridgeMock.snapshot.mockResolvedValueOnce(receiverSnapshot('ready'))
+    const wrapper = mount(StateHarness)
+    await flushPromises()
+
+    desktopBridgeMock.setJitterMode.mockResolvedValueOnce({
+      ...receiverSnapshot('ready'),
+      metrics: { ...receiverSnapshot('ready').metrics, targetMinFrames: 4, targetMaxFrames: 6, targetFrames: 5 },
+    })
+
+    await wrapper.vm.setJitterMode('stable')
+
+    expect(desktopBridgeMock.setJitterMode).toHaveBeenCalledWith('stable')
+    expect(wrapper.vm.snapshot?.metrics.targetFrames).toBe(5)
   })
 
 })

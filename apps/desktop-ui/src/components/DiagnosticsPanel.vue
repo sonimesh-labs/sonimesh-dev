@@ -1,7 +1,8 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { Activity, FileDown, Gauge, Layers, RefreshCcwDot, ShieldCheck, Target, Waves } from '@lucide/vue'
 
-import type { DiagnosticExportReceipt, StreamMetrics } from '../types'
+import type { DiagnosticExportReceipt, JitterMode, StreamMetrics } from '../types'
 
 const props = withDefaults(defineProps<{
   metrics: StreamMetrics
@@ -13,6 +14,7 @@ const props = withDefaults(defineProps<{
 })
 
 const emit = defineEmits<{
+  setJitterMode: [mode: JitterMode]
   simulateMetricsBurst: []
   exportDiagnostics: []
 }>()
@@ -43,6 +45,14 @@ function formatBytes(bytes: string) {
   if (value >= 1024) return `${(value / 1024).toFixed(1)} KiB`
   return `${value} B`
 }
+
+function modeForMetrics(metrics: StreamMetrics): JitterMode {
+  if (metrics.targetMinFrames === 1 && metrics.targetMaxFrames === 2) return 'lowLatency'
+  if (metrics.targetMinFrames === 4 && metrics.targetMaxFrames === 6) return 'stable'
+  return 'balanced'
+}
+
+const jitterMode = computed(() => modeForMetrics(props.metrics))
 </script>
 
 <template>
@@ -135,6 +145,19 @@ function formatBytes(bytes: string) {
       <div><Gauge :size="17" aria-hidden="true" /><span>Resampling</span><strong>{{ formatRate(metrics.nominalInputSampleRateHz) }} → {{ formatRate(metrics.nominalOutputSampleRateHz) }}</strong></div>
       <div><RefreshCcwDot :size="17" aria-hidden="true" /><span>Effective ratio</span><strong>{{ formatRatio() }}</strong></div>
       <div><Layers :size="17" aria-hidden="true" /><span>Queue policy</span><strong>Bounded</strong></div>
+    </div>
+
+    <div class="jitter-mode-control" aria-label="Latency target mode">
+      <div>
+        <span class="field-label">Latency target</span>
+        <strong>{{ jitterMode === 'lowLatency' ? 'Low latency · 20–40 ms' : jitterMode === 'stable' ? 'Stable · 80–120 ms' : 'Balanced · 40–70 ms' }}</strong>
+      </div>
+      <label class="field-label" for="jitter-mode">Mode</label>
+      <select id="jitter-mode" class="device-select" :value="jitterMode" :disabled="busy" @change="emit('setJitterMode', ($event.target as HTMLSelectElement).value as JitterMode)">
+        <option value="lowLatency">Low latency · 20–40 ms</option>
+        <option value="balanced">Balanced · 40–70 ms</option>
+        <option value="stable">Stable · 80–120 ms</option>
+      </select>
     </div>
 
     <div v-if="preview" class="export-section" aria-label="Preview diagnostic export">

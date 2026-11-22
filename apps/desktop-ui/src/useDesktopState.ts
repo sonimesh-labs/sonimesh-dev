@@ -2,6 +2,7 @@ import { onMounted, ref } from 'vue'
 
 import { desktopBridge } from './bridge'
 import type { DesktopSnapshot } from './types'
+import type { JitterMode } from './types'
 
 export function useDesktopState() {
   const snapshot = ref<DesktopSnapshot | null>(null)
@@ -28,6 +29,7 @@ export function useDesktopState() {
   const selectOutput = (id: string) => run(() => desktopBridge.selectOutput(id))
   const setGain = (gain: number) => run(() => desktopBridge.setGain(gain))
   const setMuted = (muted: boolean) => run(() => desktopBridge.setMuted(muted))
+  const setJitterMode = (mode: JitterMode) => run(() => desktopBridge.setJitterMode(mode))
   const exportDiagnostics = () => run(() => desktopBridge.exportDiagnostics())
   const createPairing = () => run(() => desktopBridge.createPairing())
   const expirePairing = () => run(() => desktopBridge.expirePairing())
@@ -54,6 +56,7 @@ export function useDesktopState() {
     selectOutput,
     setGain,
     setMuted,
+    setJitterMode,
     exportDiagnostics,
     createPairing,
     expirePairing,

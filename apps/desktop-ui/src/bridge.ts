@@ -4,8 +4,10 @@ import type {
   DesktopSnapshot,
   DiagnosticExportReceipt,
   MetricCounter,
+  JitterMode,
   OutputDevice,
   SessionState,
+  StreamMetrics,
 } from './types'
 
 export interface DesktopBridge {
@@ -17,6 +19,8 @@ export interface DesktopBridge {
   setGain(gain: number): Promise<DesktopSnapshot>
   /** Publishes the per-stream mute flag. */
   setMuted(muted: boolean): Promise<DesktopSnapshot>
+  /** Selects the bounded latency/jitter target preset. */
+  setJitterMode(mode: JitterMode): Promise<DesktopSnapshot>
   /** Issues one bounded diagnostic export and returns the updated snapshot. */
   exportDiagnostics(): Promise<DesktopSnapshot>
   createPairing(): Promise<DesktopSnapshot>
@@ -166,6 +170,13 @@ export class PreviewDesktopBridge implements DesktopBridge {
 
   async setMuted(muted: boolean): Promise<DesktopSnapshot> {
     this.snapshotState.muted = muted
+    return this.copy()
+  }
+
+  async setJitterMode(mode: JitterMode): Promise<DesktopSnapshot> {
+    const preset = JITTER_MODE_PRESETS[mode]
+    if (preset === undefined) return this.copy()
+    Object.assign(this.snapshotState.metrics, preset)
     return this.copy()
   }
 
@@ -466,6 +477,12 @@ const PREVIEW_EXPORT_BYTES = 16 * 1024
 
 /** Fixed preview retention bound mirroring the Rust DEFAULT_MAX_RETAINED_EXPORTS. */
 const MAX_PREVIEW_DIAGNOSTIC_EXPORTS = 8
+
+const JITTER_MODE_PRESETS: Record<JitterMode, Pick<StreamMetrics, 'targetMinFrames' | 'targetMaxFrames' | 'targetFrames' | 'playoutDelayMs'>> = {
+  lowLatency: { targetMinFrames: 1, targetMaxFrames: 2, targetFrames: 2, playoutDelayMs: 40 },
+  balanced: { targetMinFrames: 2, targetMaxFrames: 4, targetFrames: 3, playoutDelayMs: 60 },
+  stable: { targetMinFrames: 4, targetMaxFrames: 6, targetFrames: 5, playoutDelayMs: 100 },
+}
 
 export const desktopBridge: DesktopBridge = new PreviewDesktopBridge()
 

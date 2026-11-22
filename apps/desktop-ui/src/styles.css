@@ -268,6 +268,10 @@ button:focus-visible, select:focus-visible, a:focus-visible { outline: 3px solid
 .resampling-bar svg { grid-row: span 2; color: var(--signal); }
 .resampling-bar span { color: var(--muted); font-size: 9.5px; font-weight: 710; text-transform: uppercase; letter-spacing: 0.05em; }
 .resampling-bar strong { min-width: 0; color: var(--ink-soft); font-size: 10.5px; font-weight: 670; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.jitter-mode-control { display: grid; grid-template-columns: minmax(0, 1fr) minmax(170px, 260px); align-items: end; gap: 14px; margin-top: 12px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 17px; background: var(--surface-soft); }
+.jitter-mode-control > div { min-width: 0; }
+.jitter-mode-control strong { display: block; color: var(--ink-soft); font-size: 12px; font-weight: 720; }
+.jitter-mode-control .field-label { margin-bottom: 5px; }
 
 .command-error { margin: 0 0 18px; padding: 13px 15px; border: 1px solid rgba(191, 64, 83, 0.22); border-radius: 14px; color: #8d2636; background: var(--rose-soft); font-size: 12px; }
 .loading-state { min-height: 420px; display: grid; place-items: center; align-content: center; gap: 18px; color: var(--muted); font-size: 12px; }
@@ -341,6 +345,7 @@ button:focus-visible, select:focus-visible, a:focus-visible { outline: 3px solid
   .metric-list div:last-child { border-bottom: 0; }
   .resampling-bar { grid-template-columns: 1fr; }
   .resampling-bar div + div { border-left: 0; border-top: 1px solid var(--line); }
+  .jitter-mode-control { grid-template-columns: 1fr; align-items: stretch; }
 }
 @media (max-width: 390px) {
   .session-details dd { font-size: 11px; }

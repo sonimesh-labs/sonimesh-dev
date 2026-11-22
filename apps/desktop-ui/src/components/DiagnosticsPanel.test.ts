@@ -133,6 +133,20 @@ describe('DiagnosticsPanel', () => {
     expect(value('Forced playouts')).toBe('3')
   })
 
+  it('emits a latency target change from the jitter mode control', async () => {
+    const wrapper = mount(DiagnosticsPanel, {
+      props: {
+        metrics: metrics({ targetMinFrames: 2, targetMaxFrames: 4 }),
+        busy: false,
+      },
+    })
+
+    await wrapper.get('#jitter-mode').setValue('stable')
+
+    expect(wrapper.emitted('setJitterMode')).toEqual([['stable']])
+    expect((wrapper.get('#jitter-mode').element as HTMLSelectElement).value).toBe('stable')
+  })
+
   it('emits a diagnostic-export request from the preview-only action', async () => {
     const wrapper = mount(DiagnosticsPanel, {
       props: {
