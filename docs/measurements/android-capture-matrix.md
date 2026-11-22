@@ -1,7 +1,7 @@
 # Android capture feasibility matrix
 
 > Status: partial physical-device evidence; remaining lifecycle matrix required
-> Updated: 2026-11-22
+> Updated: 2026-11-23
 
 This document is the evidence boundary for the capture-only Android bootstrap.
 A successful Gradle build proves only that the application and its bounded
