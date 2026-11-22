@@ -68,8 +68,11 @@ canonical generator, opening the store scans regular files only, removes stale
 pending files, ignores foreign or non-regular entries, and retention evicts the
 oldest file first
 until the count and byte bounds hold. A bundle that cannot fit the byte
-bound is rejected before any file is written. The UI or Tauri command
-that triggers an export remains open.
+bound is rejected before any file is written.
+`DesktopControlOwner::export_diagnostics_to_store` now composes the bounded
+collector with `ExportStore`, so a future UI/Tauri command can trigger one
+atomic export without reimplementing serialization or retention. The shell
+still owns the user-facing file picker/download policy.
 
 ## Validation evidence
 

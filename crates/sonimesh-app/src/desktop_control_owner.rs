@@ -12,9 +12,10 @@ use sonimesh_platform::{AudioOutput, OutputDeviceId, OutputDeviceInfo, OutputErr
 
 use crate::{
     ControlToMixerBridge, ControlToMixerError, DesktopControlSnapshot, DiagnosticExportAction,
-    DiagnosticExportActionError, ExportRetentionPolicy, GainControlState, IssuedDiagnosticExport,
-    MediaStreamIdentity, PairingAttemptOutcome, PairingId, PairingInvitationController,
-    PairingInvitationError, PairingProofVerification, PairingSource,
+    DiagnosticExportActionError, ExportReceipt, ExportRetentionPolicy, ExportStore,
+    ExportStoreError, GainControlState, IssuedDiagnosticExport, MediaStreamIdentity,
+    PairingAttemptOutcome, PairingId, PairingInvitationController, PairingInvitationError,
+    PairingProofVerification, PairingSource,
 };
 
 /// Failure returned by a low-rate desktop command owner.
@@ -28,6 +29,8 @@ pub enum DesktopControlOwnerError {
     Mixer(ControlToMixerError),
     /// Output enumeration failed in the platform adapter.
     Output(OutputError),
+    /// Diagnostic export persistence failed.
+    ExportStore(ExportStoreError),
 }
 
 /// Shell-neutral low-rate desktop view assembled from one control owner.
@@ -79,6 +82,9 @@ impl core::fmt::Display for DesktopControlOwnerError {
             }
             Self::Mixer(error) => write!(formatter, "desktop control mixer failure: {error}"),
             Self::Output(error) => write!(formatter, "desktop control output failure: {error}"),
+            Self::ExportStore(error) => {
+                write!(formatter, "desktop control export store failure: {error}")
+            }
         }
     }
 }
@@ -90,6 +96,7 @@ impl std::error::Error for DesktopControlOwnerError {
             Self::Diagnostics(error) => Some(error),
             Self::Mixer(error) => Some(error),
             Self::Output(error) => Some(error),
+            Self::ExportStore(error) => Some(error),
         }
     }
 }
@@ -338,6 +345,31 @@ where
             .map_err(DesktopControlOwnerError::Diagnostics)
     }
 
+    /// Generates one bounded diagnostic bundle and persists it atomically.
+    ///
+    /// The in-memory action still records its bounded receipt, while the store
+    /// owns the on-disk sequence and retention policy. The returned receipt is
+    /// the persisted file's receipt and can be mapped directly to a UI export
+    /// entry.
+    ///
+    /// # Errors
+    ///
+    /// Returns a pairing or serialization error before any file write, or an
+    /// export-store error when the atomic write or retention step fails.
+    pub fn export_diagnostics_to_store(
+        &mut self,
+        now_ms: u64,
+        software_version: &str,
+        endpoint: Option<SocketAddr>,
+        buffer_policy: Option<&str>,
+        store: &mut ExportStore,
+    ) -> Result<ExportReceipt, DesktopControlOwnerError> {
+        let issued = self.export_diagnostics(now_ms, software_version, endpoint, buffer_policy)?;
+        store
+            .store(&issued.bundle)
+            .map_err(DesktopControlOwnerError::ExportStore)
+    }
+
     /// Borrows the bridge for stream lifecycle execution and platform pumping.
     #[must_use]
     pub const fn bridge(&self) -> &ControlToMixerBridge<O, SLOTS, OUTPUT_SAMPLES_PER_BLOCK> {
@@ -358,6 +390,10 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
     use sonimesh_platform::{
         AudioOutput, OutputConfig, OutputDeviceId, OutputDeviceInfo, OutputError, OutputHealth,
         RenderSource,
@@ -369,8 +405,29 @@ mod tests {
 
     const SLOTS: usize = 2;
     const OUTPUT_SAMPLES: usize = 256;
+    static NEXT_TEMP_DIR: AtomicU64 = AtomicU64::new(0);
 
     struct TestOutput;
+
+    struct TempDir(PathBuf);
+
+    impl TempDir {
+        fn new() -> Self {
+            let id = NEXT_TEMP_DIR.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir()
+                .join("sonimesh-desktop-control-owner-tests")
+                .join(format!("{}-{id}", std::process::id()));
+            let _ = fs::remove_dir_all(&path);
+            fs::create_dir_all(&path).expect("create temporary directory");
+            Self(path)
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
 
     impl AudioOutput for TestOutput {
         fn devices(&self) -> Result<Vec<OutputDeviceInfo>, OutputError> {
@@ -475,6 +532,26 @@ mod tests {
         assert!(view.output_devices().is_empty());
         assert!(view.selected_output().is_none());
         assert!(view.stream_control().is_none());
+    }
+
+    #[test]
+    fn owner_persists_diagnostics_through_the_bounded_store() {
+        let temp_dir = TempDir::new();
+        let mut owner = owner();
+        let mut store = ExportStore::open(&temp_dir.0, ExportRetentionPolicy::default()).unwrap();
+
+        let receipt = owner
+            .export_diagnostics_to_store(100, "test", None, Some("bounded"), &mut store)
+            .unwrap();
+
+        assert_eq!(receipt.sequence, 0);
+        assert_eq!(store.receipts(), vec![receipt]);
+        assert!(
+            store
+                .read(receipt.sequence)
+                .unwrap()
+                .contains("\"software_version\":\"test\"")
+        );
     }
 
     #[test]
