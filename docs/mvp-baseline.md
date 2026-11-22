@@ -438,7 +438,10 @@ jitter, and output-backend ADRs using measured 10/20 ms and device results.
   verifies the peer proof through the real pairing owner over the live
   exporter, writes the reply frame back, and the trusted channel negotiates
   hello through the coordinator in a loopback test. This polling boundary does
-  not claim a concurrent accept/server loop. A 2026-11-22 emulator/ADB
+  not claim a concurrent accept/server loop. The receiver scheduler drains a
+  pending nonblocking control reply before polling another command, so temporary
+  socket backpressure pauses intake without discarding the session. A 2026-11-22
+  emulator/ADB
   reverse-loopback run now records Conscrypt against this desktop stack, but
   physical WLAN/OEM interoperability remains open and ADR 0021 stays
   Provisional. A separate target-SDK 37 discovery spike now records emulator

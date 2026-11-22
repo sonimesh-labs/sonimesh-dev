@@ -732,6 +732,9 @@ boundary, not a live Tauri shell or a proof of Windows audio output.
 `DesktopReceiverScheduler` now owns that receiver owner plus an optional control
 channel, automatically retires a closed/error channel, and exposes the UDP
 `tick_media` operation through the same scheduling boundary.
+Before each control poll it flushes any reply left by a previous nonblocking
+write; a full socket therefore pauses command intake for one tick instead of
+turning a recoverable `Pending` write into a dropped session.
 The composable polls the same low-rate snapshot command once per second and clears
 that timer on unmount, so reconnect countdowns and asynchronous output faults do
 not depend on a user clicking Refresh.

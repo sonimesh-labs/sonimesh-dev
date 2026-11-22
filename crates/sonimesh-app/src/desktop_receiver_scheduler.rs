@@ -8,6 +8,7 @@ use std::io::{Read, Write};
 
 use sonimesh_audio::FrameDecoder;
 use sonimesh_network::PinnedServerChannel;
+use sonimesh_network::UntrustedControlWrite;
 use sonimesh_platform::AudioOutput;
 
 use crate::{
@@ -166,6 +167,19 @@ where
             return Ok(None);
         };
         let mut control = DesktopControlSession::new(&mut self.receiver, session, channel);
+
+        // Finish a previously queued reply before accepting another command.
+        // This keeps a transiently full socket from turning into WritePending.
+        match control.flush()? {
+            UntrustedControlWrite::Complete => {}
+            UntrustedControlWrite::Pending => {
+                let channel = control.into_inner();
+                self.control = Some((session, channel));
+                return Ok(Some(ControlSessionPoll::Empty));
+            }
+            UntrustedControlWrite::Closed => return Ok(Some(ControlSessionPoll::Closed)),
+        }
+
         let result = control.poll_once();
         let channel = control.into_inner();
         match result {
@@ -182,6 +196,7 @@ where
 #[allow(clippy::items_after_test_module)]
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
     use std::io;
 
     use sonimesh_audio::RealtimePcmProducer;
@@ -189,7 +204,10 @@ mod tests {
         AudioOutput, OutputConfig, OutputDeviceId, OutputDeviceInfo, OutputError, OutputHealth,
         RenderSource, SampleFormat,
     };
-    use sonimesh_protocol::Capability;
+    use sonimesh_protocol::{
+        CONTROL_PROTOCOL_VERSION, Capability, Envelope, Hello, StartStream, encode_control_frame,
+        envelope,
+    };
 
     use super::{DesktopReceiverScheduler, DesktopReceiverSchedulerError};
     use crate::{
@@ -250,15 +268,42 @@ mod tests {
         }
     }
 
-    fn scheduler() -> DesktopReceiverScheduler<
-        TestOutput,
-        TestPipeline,
-        SLOTS,
-        OUTPUT_SAMPLES,
-        1,
-        SOURCE_SAMPLES,
-        IdleIo,
-    > {
+    struct PartialWriteIo {
+        input: VecDeque<u8>,
+        writes: usize,
+    }
+
+    impl io::Read for PartialWriteIo {
+        fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+            if self.input.is_empty() {
+                return Err(io::ErrorKind::WouldBlock.into());
+            }
+            let count = buffer.len().min(self.input.len());
+            for slot in &mut buffer[..count] {
+                *slot = self.input.pop_front().expect("count is bounded by input");
+            }
+            Ok(count)
+        }
+    }
+
+    impl io::Write for PartialWriteIo {
+        fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+            self.writes += 1;
+            if self.writes == 1 {
+                Ok(1.min(buffer.len()))
+            } else {
+                Ok(buffer.len())
+            }
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn receiver()
+    -> DesktopReceiverOwner<TestOutput, TestPipeline, SLOTS, OUTPUT_SAMPLES, 1, SOURCE_SAMPLES>
+    {
         let bridge = ControlToMixerBridge::new(
             SessionState::READY,
             &[Capability::FrameDuration10Ms],
@@ -277,11 +322,23 @@ mod tests {
             8,
         )
         .unwrap();
-        DesktopReceiverScheduler::new(DesktopReceiverOwner::new(
+        DesktopReceiverOwner::new(
             DesktopControlOwner::new(bridge).unwrap(),
             TestPipeline,
             None,
-        ))
+        )
+    }
+
+    fn scheduler() -> DesktopReceiverScheduler<
+        TestOutput,
+        TestPipeline,
+        SLOTS,
+        OUTPUT_SAMPLES,
+        1,
+        SOURCE_SAMPLES,
+        IdleIo,
+    > {
+        DesktopReceiverScheduler::new(receiver())
     }
 
     #[test]
@@ -304,6 +361,63 @@ mod tests {
         ));
         assert!(scheduler.detach_control().is_some());
         assert_eq!(scheduler.poll_control_once().unwrap(), None);
+    }
+
+    #[test]
+    fn scheduler_flushes_a_partial_reply_before_polling_the_next_command() {
+        let mut scheduler = DesktopReceiverScheduler::new(receiver());
+        let session = scheduler
+            .receiver_mut()
+            .owner_mut()
+            .install_authenticated_control_session()
+            .unwrap();
+
+        let hello = Envelope {
+            protocol_version: CONTROL_PROTOCOL_VERSION,
+            request_id: 1,
+            payload: Some(envelope::Payload::Hello(Hello {
+                supported_versions: vec![CONTROL_PROTOCOL_VERSION],
+                capabilities: vec![Capability::FrameDuration10Ms as i32],
+                display_name: "test sender".to_owned(),
+            })),
+        };
+        let start = Envelope {
+            protocol_version: CONTROL_PROTOCOL_VERSION,
+            request_id: 2,
+            payload: Some(envelope::Payload::StartStream(StartStream {
+                media_session_id: 7,
+                stream_id: 1,
+                sample_rate_hz: 48_000,
+                channels: 1,
+                frame_duration_ms: 10,
+                media_key_epoch: 0,
+            })),
+        };
+        let mut input = VecDeque::new();
+        input.extend(encode_control_frame(&hello).unwrap());
+        input.extend(encode_control_frame(&start).unwrap());
+        scheduler
+            .attach_control(session, PartialWriteIo { input, writes: 0 })
+            .unwrap();
+        assert!(matches!(
+            scheduler.poll_control_once().unwrap(),
+            Some(crate::ControlSessionPoll::Processed {
+                replied: false,
+                write: None,
+            })
+        ));
+        assert!(matches!(
+            scheduler.poll_control_once().unwrap(),
+            Some(crate::ControlSessionPoll::Processed {
+                replied: true,
+                write: Some(sonimesh_network::UntrustedControlWrite::Pending),
+            })
+        ));
+        assert!(matches!(
+            scheduler.poll_control_once().unwrap(),
+            Some(crate::ControlSessionPoll::Empty)
+        ));
+        assert!(scheduler.detach_control().is_some());
     }
 }
 
