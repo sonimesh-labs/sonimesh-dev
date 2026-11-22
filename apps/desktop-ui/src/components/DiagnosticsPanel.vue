@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { Activity, FileDown, Gauge, Layers, RefreshCcwDot, ShieldCheck, Target, Waves } from '@lucide/vue'
 
 import type { DiagnosticExportReceipt, JitterMode, StreamMetrics } from '../types'
@@ -18,6 +18,8 @@ const emit = defineEmits<{
   simulateMetricsBurst: []
   exportDiagnostics: []
 }>()
+
+const downloadMessage = ref<string | null>(null)
 
 function formatRate(sampleRateHz: number) {
   return `${(sampleRateHz / 1_000).toFixed(sampleRateHz % 1_000 === 0 ? 0 : 1)} kHz`
@@ -53,6 +55,28 @@ function modeForMetrics(metrics: StreamMetrics): JitterMode {
 }
 
 const jitterMode = computed(() => modeForMetrics(props.metrics))
+
+function downloadPreviewDiagnostics() {
+  const createObjectUrl = URL.createObjectURL
+  if (typeof createObjectUrl !== 'function') {
+    downloadMessage.value = 'Downloads are unavailable in this preview.'
+    return
+  }
+
+  const bundle = JSON.stringify({
+    format: 'sonimesh-preview-diagnostics/v1',
+    metrics: props.metrics,
+    exports: props.diagnosticExports,
+  }, null, 2)
+  const url = createObjectUrl.call(URL, new Blob([bundle], { type: 'application/json' }))
+  const link = document.createElement('a')
+  link.href = url
+  link.download = 'sonimesh-preview-diagnostics.json'
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+  downloadMessage.value = 'Preview diagnostics downloaded.'
+}
 </script>
 
 <template>
@@ -165,6 +189,11 @@ const jitterMode = computed(() => modeForMetrics(props.metrics))
         <FileDown :size="17" aria-hidden="true" />
         Export diagnostics
       </button>
+      <button class="preview-action" :disabled="busy" @click="downloadPreviewDiagnostics">
+        <FileDown :size="17" aria-hidden="true" />
+        Download preview JSON
+      </button>
+      <p v-if="downloadMessage" role="status">{{ downloadMessage }}</p>
       <ul v-if="diagnosticExports.length > 0" class="export-receipts">
         <li v-for="receipt in diagnosticExports" :key="receipt.sequence">
           <span>Export #{{ receipt.sequence }} · {{ formatBytes(receipt.bytes) }}</span>

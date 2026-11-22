@@ -39,7 +39,9 @@ preview control until the Tauri bridge owns a real receiver session. An
 (monotonic sequence and 16 KiB bundle size) into a most-recent-first receipt
 log capped at eight, mirroring the Rust ADR 0011 export journal, so the
 retention bound and receipt formatting can be exercised without writing
-files. A preview
+files. `Download preview JSON` writes the allowlisted synthetic metrics and
+receipt list to a browser download for local inspection; it is explicitly a
+preview artifact, not a live diagnostic bundle. A preview
 `Simulate command rejection` action rejects like a real bridge command so the
 control error banner and its recovery can be exercised. A
 `Reset preview` action restores the initial synthetic session and counters so

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 
 import DiagnosticsPanel from './DiagnosticsPanel.vue'
@@ -42,6 +42,35 @@ function metrics(overrides: Partial<StreamMetrics> = {}): StreamMetrics {
 }
 
 describe('DiagnosticsPanel', () => {
+  it('downloads an allowlisted preview diagnostics bundle', async () => {
+    const createObjectUrl = vi.fn(() => 'blob:preview-diagnostics')
+    const revokeObjectUrl = vi.fn()
+    vi.stubGlobal('URL', { createObjectURL: createObjectUrl, revokeObjectURL: revokeObjectUrl })
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+
+    const wrapper = mount(DiagnosticsPanel, {
+      props: {
+        metrics: metrics({ authenticatedPackets: '42' }),
+        preview: true,
+        diagnosticExports: [{ sequence: '3', bytes: '16384' }],
+      },
+    })
+
+    await wrapper.findAll('.export-section button')[1].trigger('click')
+
+    expect(createObjectUrl).toHaveBeenCalledTimes(1)
+    const blob = (createObjectUrl.mock.calls[0] as unknown as [Blob])[0]
+    const payload = JSON.parse(await blob.text()) as { format: string; metrics: StreamMetrics }
+    expect(payload.format).toBe('sonimesh-preview-diagnostics/v1')
+    expect(payload.metrics.authenticatedPackets).toBe('42')
+    expect(click).toHaveBeenCalledTimes(1)
+    expect(wrapper.text()).toContain('Preview diagnostics downloaded.')
+    expect(revokeObjectUrl).toHaveBeenCalledWith('blob:preview-diagnostics')
+
+    click.mockRestore()
+    vi.unstubAllGlobals()
+  })
+
   it('labels synthetic metrics as preview values instead of measurements', () => {
     const wrapper = mount(DiagnosticsPanel, {
       props: {
