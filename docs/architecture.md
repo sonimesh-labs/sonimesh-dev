@@ -51,6 +51,9 @@ The separate Android audio lab may exercise the protected media plane on a
 controlled local network using a manually entered desktop IPv4 address and an
 ADB-reversed connection for its temporary session secret. This is a development
 path rather than discovery, pairing, or the production control plane.
+The desktop UDP lab can accept optional console gain and mute commands and
+publish them to its existing per-stream output control. These controls are
+local to the lab and do not implement the desktop UI bridge.
 
 The first product goal is not synchronized multi-device playback, recording of
 calls, remote desktop, or a universal Bluetooth receiver. It is a practical

@@ -14,7 +14,7 @@ use sonimesh_app::{
     SourcePcmFormat, UdpPollOutcome, UdpReceiverError, UdpReceiverPipeline,
 };
 use sonimesh_audio::{
-    DecodeStep, DecodeWorkerError, FrameDecoder, InsertOutcome, OpusFrameConfig,
+    DecodeStep, DecodeWorkerError, FrameDecoder, GainControlHandle, InsertOutcome, OpusFrameConfig,
     StreamDecodeWorker, realtime_pcm_queue,
 };
 use sonimesh_diagnostics::StreamCounters;
@@ -88,7 +88,9 @@ impl LabOutput for CheckOutput {
     fn finish(&mut self) -> LabResult<()> {
         println!("software render peak: {:.3}", self.peak);
         if self.peak < 0.001 {
-            println!("No capturable audio detected; the source may be silent or capture-limited.");
+            println!(
+                "No audible output detected; the source may be silent or capture-limited, or the output may be muted or attenuated."
+            );
         }
         Ok(())
     }
@@ -163,12 +165,84 @@ fn poll_media(receiver: &mut LabReceiver) -> LabResult<Option<UdpPollOutcome>> {
     }
 }
 
+fn apply_control(input: &str, gain: &GainControlHandle) -> Result<(), &'static str> {
+    let mut words = input.split_whitespace();
+    match (words.next(), words.next(), words.next()) {
+        (Some("mute"), None, None) => gain.set_muted(true),
+        (Some("unmute"), None, None) => gain.set_muted(false),
+        (Some("volume"), Some(value), None) => {
+            let percent: u8 = value.parse().map_err(|_| "volume must be 0 to 100")?;
+            if percent > 100 {
+                return Err("volume must be 0 to 100");
+            }
+            gain.set_gain(f32::from(percent) / 100.0)
+                .map_err(|_| "invalid volume")?;
+        }
+        _ => return Err("use: volume 0-100 | mute | unmute"),
+    }
+    Ok(())
+}
+
+fn start_console_control(enabled: bool) -> GainControlHandle {
+    let gain = GainControlHandle::new();
+    if enabled {
+        let control = gain.clone();
+        std::thread::spawn(move || {
+            println!("Audio controls: volume 0-100 | mute | unmute");
+            let mut input = io::stdin().lock();
+            let mut buffer = [0_u8; 64];
+            let mut length = 0;
+            let mut overflow = false;
+            loop {
+                let mut byte = [0_u8; 1];
+                match input.read(&mut byte) {
+                    Ok(0) => break,
+                    Ok(_) if byte[0] == b'\n' => {
+                        let result = if overflow {
+                            Err("command too long")
+                        } else {
+                            std::str::from_utf8(&buffer[..length])
+                                .map_err(|_| "invalid command")
+                                .and_then(|line| apply_control(line, &control))
+                        };
+                        match result {
+                            Ok(()) => println!("Audio control updated."),
+                            Err(error) => eprintln!("{error}"),
+                        }
+                        length = 0;
+                        overflow = false;
+                    }
+                    Ok(_) if length < buffer.len() && !overflow => {
+                        buffer[length] = byte[0];
+                        length += 1;
+                    }
+                    Ok(_) => overflow = true,
+                    Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                    Err(error) => {
+                        eprintln!("Audio controls unavailable: {error}");
+                        break;
+                    }
+                }
+            }
+        });
+    }
+    gain
+}
+
+fn sync_gain(source: &GainControlHandle, target: &GainControlHandle) -> LabResult<()> {
+    let state = source.snapshot();
+    target.set_gain(state.gain)?;
+    target.set_muted(state.muted);
+    Ok(())
+}
+
 #[allow(clippy::too_many_lines)] // One lab session coordinates socket, playout, and output lifetimes.
 fn run<O: LabOutput>(
     mut control: TcpStream,
     output: O,
     selection: OutputSelection,
     udp_bind: Ipv4Addr,
+    gain: &GainControlHandle,
 ) -> LabResult<()> {
     let secret = read_secret(&mut control)?;
     let context = MediaKeyContext::new(1, 1, 0, MediaDirection::AndroidToDesktop)?;
@@ -190,6 +264,8 @@ fn run<O: LabOutput>(
     let factory =
         ReceiverPcmEndpointFactory::new(8, SourcePcmFormat::new(48_000, 2)?, Arc::clone(&counters));
     let mut output = ReceiverOutputController::new(output, factory);
+    let output_gain = output.gain_handle();
+    sync_gain(gain, &output_gain)?;
     output.start(selection, &mut receiver)?;
     control.write_all(&[1])?;
     control.set_nonblocking(true)?;
@@ -202,6 +278,7 @@ fn run<O: LabOutput>(
     let mut concealed = 0_u64;
     let mut empty_ticks = 0_u64;
     loop {
+        sync_gain(gain, &output_gain)?;
         if control_closed(&mut control)? {
             break;
         }
@@ -269,7 +346,7 @@ fn run<O: LabOutput>(
 }
 
 fn main() -> LabResult<()> {
-    let (mode, udp_bind, repeat) = parse_args(std::env::args().skip(1))?;
+    let (mode, udp_bind, repeat, control) = parse_args(std::env::args().skip(1))?;
     match mode {
         common::Mode::Check => {
             let config = OutputConfig {
@@ -283,19 +360,29 @@ fn main() -> LabResult<()> {
                 device: None,
                 config,
             };
+            let gain = start_console_control(control);
             serve_control(repeat, |control| {
-                run(control, CheckOutput::default(), selection.clone(), udp_bind)
+                run(
+                    control,
+                    CheckOutput::default(),
+                    selection.clone(),
+                    udp_bind,
+                    &gain,
+                )
             })
         }
-        common::Mode::Play { select_output } => play(select_output, udp_bind, repeat),
+        common::Mode::Play { select_output } => play(select_output, udp_bind, repeat, control),
     }
 }
 
-fn parse_args(args: impl IntoIterator<Item = String>) -> LabResult<(common::Mode, Ipv4Addr, bool)> {
+fn parse_args(
+    args: impl IntoIterator<Item = String>,
+) -> LabResult<(common::Mode, Ipv4Addr, bool, bool)> {
     let mut args = args.into_iter();
     let mut common_args = Vec::new();
     let mut bind = None;
     let mut repeat = false;
+    let mut control = false;
     while let Some(arg) = args.next() {
         if arg == "--bind" {
             if bind.is_some() {
@@ -314,6 +401,11 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> LabResult<(common::Mode
                 return Err("--repeat may only be supplied once".into());
             }
             repeat = true;
+        } else if arg == "--control" {
+            if control {
+                return Err("--control may only be supplied once".into());
+            }
+            control = true;
         } else {
             common_args.push(arg);
         }
@@ -322,6 +414,7 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> LabResult<(common::Mode
         common::parse_args(common_args)?,
         bind.unwrap_or(Ipv4Addr::LOCALHOST),
         repeat,
+        control,
     ))
 }
 
@@ -352,19 +445,21 @@ fn serve_sessions(
 }
 
 #[cfg(all(windows, feature = "playback"))]
-fn play(select_output: bool, udp_bind: Ipv4Addr, repeat: bool) -> LabResult<()> {
+fn play(select_output: bool, udp_bind: Ipv4Addr, repeat: bool, control: bool) -> LabResult<()> {
     let (_, selection) = common::prepare_output(select_output)?;
+    let gain = start_console_control(control);
     serve_control(repeat, |control| {
         run(
             control,
             sonimesh_platform::CpalOutput::new(),
             selection.clone(),
             udp_bind,
+            &gain,
         )
     })
 }
 #[cfg(not(all(windows, feature = "playback")))]
-fn play(_: bool, _: Ipv4Addr, _: bool) -> LabResult<()> {
+fn play(_: bool, _: Ipv4Addr, _: bool, _: bool) -> LabResult<()> {
     Err("playback requires Windows and --features playback".into())
 }
 
@@ -397,6 +492,8 @@ mod tests {
         assert!(parse_args(args(&["--check", "--repeat"])).unwrap().2);
         assert!(!parse_args(args(&["--check"])).unwrap().2);
         assert!(parse_args(args(&["--check", "--repeat", "--repeat"])).is_err());
+        assert!(parse_args(args(&["--check", "--control"])).unwrap().3);
+        assert!(parse_args(args(&["--check", "--control", "--control"])).is_err());
         assert!(
             parse_args(args(&[
                 "--check",
@@ -407,6 +504,45 @@ mod tests {
             ]))
             .is_err()
         );
+    }
+
+    #[test]
+    fn console_controls_change_rendered_audio_and_carry_to_a_fresh_session() {
+        let control = GainControlHandle::new();
+        assert!(apply_control("volume 101", &control).is_err());
+        assert!(apply_control("volume NaN", &control).is_err());
+        assert!(apply_control("mute extra", &control).is_err());
+        apply_control("volume 50", &control).unwrap();
+        let config = OutputConfig {
+            sample_rate_hz: 48_000,
+            channels: 2,
+            sample_format: SampleFormat::Float32,
+            requested_callback_frames: None,
+            maximum_callback_frames: 960,
+        };
+        for session in 0..2 {
+            let factory = ReceiverPcmEndpointFactory::<SAMPLES>::new(
+                8,
+                SourcePcmFormat::new(48_000, 2).unwrap(),
+                Arc::new(StreamCounters::default()),
+            );
+            let endpoint = factory.create(&config).unwrap();
+            let output_gain = endpoint.gain_handle();
+            sync_gain(&control, &output_gain).unwrap();
+            let (mut producer, mut source) = endpoint.into_parts();
+            producer.push(&[0.5; SAMPLES]);
+            let mut samples = [0.0; SAMPLES];
+            source.render(&mut samples);
+            assert!((samples[SAMPLES - 1] - 0.25).abs() < 0.001);
+            if session == 0 {
+                apply_control("mute", &control).unwrap();
+                sync_gain(&control, &output_gain).unwrap();
+                producer.push(&[0.5; SAMPLES]);
+                source.render(&mut samples);
+                assert!(samples[SAMPLES - 1].abs() < 0.001);
+                apply_control("unmute", &control).unwrap();
+            }
+        }
     }
 
     #[test]

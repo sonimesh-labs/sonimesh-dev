@@ -102,7 +102,8 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   secret, not authenticated pairing. A manually addressed controlled-network
   path is available for testing; physical WLAN behavior remains unverified.
   The lab remembers the last valid destination and can keep its desktop listener
-  available for successive independent sessions.
+  available for successive independent sessions. Optional console commands
+  adjust the receiver's local gain and mute during and across those sessions.
   A seeded property walk and a byte-driven libFuzzer target drive in-order
   deliveries, duplicates, tampered ciphertext, retired-epoch packets, and
   rotations against an independent replay oracle and counter model,

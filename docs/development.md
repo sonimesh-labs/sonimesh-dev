@@ -113,6 +113,11 @@ The Android lab remembers the last valid UDP destination on this device. Add
 or fails; each session uses a fresh secret and requires new capture consent.
 Press Ctrl+C to stop the listener. In playback mode the output chosen at startup
 is reused for subsequent sessions; restart the command to choose another output.
+Add `--control` to accept `volume 0` through `volume 100`, `mute`, and `unmute`
+on standard input while the UDP lab runs. Volume is a linear attenuation
+percentage. Changes also apply to subsequent `--repeat` sessions; EOF stops
+accepting commands without stopping audio. In `--check` mode the setting affects
+the software render check. Select an output before entering control commands.
 
 The lab screen shows connection and capture status, including a desktop
 connection failure or disconnect and a stopped projection. Status is kept in
