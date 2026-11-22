@@ -340,7 +340,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   The Rust app crate now also exposes a Tauri-independent `DesktopControlOwner`
   that composes synchronized snapshots, pairing lifecycle, output inventory and
   stopped-state selection, stream-local gain/mute, redacted active-stream metrics,
-  and bounded diagnostic export for a future shell command layer; it can also
+  and bounded diagnostic export for a future shell command layer. Its identity-free
+  gain/mute commands resolve the unique active stream and reject zero or ambiguous
+  stream state; multi-stream callers retain identity-addressed controls. It can also
   persist an export through the existing bounded `ExportStore`. There
   is still no live Tauri shell, receiver-owner construction, audio, key, or
   realtime integration in the desktop UI process.

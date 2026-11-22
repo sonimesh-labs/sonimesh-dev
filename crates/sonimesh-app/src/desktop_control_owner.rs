@@ -840,9 +840,14 @@ mod tests {
             .execute_start(token, request, None, &mut pipeline)
             .unwrap();
 
+        owner.set_gain(0.4).unwrap();
+        owner.set_muted(true).unwrap();
+
         let view = owner.view_at(1).unwrap();
         assert_eq!(view.lifecycle().session(), SessionPhase::Streaming);
-        assert!(view.stream_control().is_some());
+        let control = view.stream_control().unwrap();
+        assert!((control.gain - 0.4).abs() < 1e-6);
+        assert!(control.muted);
         assert_eq!(view.stream_metrics().len(), 1);
     }
 
