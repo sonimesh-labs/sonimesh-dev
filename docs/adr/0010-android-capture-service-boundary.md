@@ -121,6 +121,14 @@ capture app's UID. The guard is a direct-boundary check, not proof that the
 capture implementation cannot reach every indirect dependency or that an
 instrumentation spike proves a production capability.
 
+The separate `:opus-spike` may exercise playback capture, MediaCodec encoding,
+and a loopback-only ADB-reversed stream for an interactive lab. Its foreground
+service owns projection and capture; consent is requested afresh by its activity.
+The lab endpoint binds only to desktop loopback and the Android app connects only
+to its own loopback. Its length-prefixed packets are not the product protocol,
+and the lab is not a WLAN, pairing, or production security implementation. The
+production capture app and its boundary checks remain separate.
+
 `tools/android_capture_preflight.py` is a separate, read-only lab helper. It
 requires an explicitly selected, printable single-line ADB serial but does not
 print that serial. It collects the connected device's manufacturer/model, Android

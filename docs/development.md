@@ -44,6 +44,41 @@ product wire format. The API 37 x86_64 emulator produced 100 packets and 96,000
 samples per channel with peak 0.250 on 2026-11-22. Other devices and capture
 behavior remain unverified.
 
+For the interactive capture-to-desktop lab, build and install `:opus-spike`'s
+debug APK, connect one device through ADB, and run from the repository root:
+
+~~~powershell
+adb reverse tcp:39091 tcp:39091
+cargo run -p opus-codec-prototype --features playback --bin android-live -- --play
+~~~
+
+Alternatively use `--check` without the playback feature to render into a
+software check. Open **SoniMesh audio lab**, select **Start capture**, grant
+audio permission and fresh screen-capture consent, and play an eligible media
+source. **Toggle test tone** provides a local synthetic source; **Stop capture**
+or the notification action ends the stream. Restart the desktop listener for
+each session. Remove the ADB mapping afterwards with `adb reverse --remove
+tcp:39091`. Select the device with `adb -s SERIAL` if several are connected.
+
+The service captures 48 kHz stereo PCM, encodes with MediaCodec, and sends
+length-prefixed Opus packets through an eight-packet queue (dropping the oldest
+when full). Android connects to its own loopback and ADB forwards to a listener
+bound to desktop loopback. The desktop decodes off the output callback and uses
+the existing bounded PCM output source. A five-second read timeout ends a stalled
+session. This is an unauthenticated ADB lab transport, not the product media
+protocol or a WLAN receiver. Do not expose its port through a network tunnel.
+Silent output can reflect source silence or platform capture policy; it does not
+identify the cause. The lab currently lacks reconnection and device switching.
+
+On 2026-11-22 an API 37 x86_64 emulator captured the lab tone and sent 588 frames
+to a Windows software render check, with decoded and rendered peaks of 0.093;
+stopping capture ended the stream and removed the service. After the lab UI was
+adjusted for system insets, a repeat produced 448 frames with decoded and
+software-render peaks of 0.095. A separate playback
+run produced non-silent decoded audio and 8,964 output callbacks with no stream
+errors. No human listening confirmation or physical latency measurement was
+recorded, and these runs do not establish physical-device or WLAN behavior.
+
 When a local SDK is missing one of those components, install the same set the
 Android CI job installs before running the Gradle commands:
 `sdkmanager "platform-tools" "platforms;android-36" "platforms;android-37.0" "build-tools;35.0.0"`

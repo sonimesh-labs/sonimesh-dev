@@ -1,0 +1,98 @@
+package com.sonimesh.opusspike
+
+import android.Manifest
+import android.app.Activity
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioTrack
+import android.media.projection.MediaProjectionManager
+import android.os.Bundle
+import android.view.WindowInsets
+import android.widget.Button
+import android.widget.LinearLayout
+import android.widget.TextView
+import kotlin.math.PI
+import kotlin.math.sin
+
+@Suppress("DEPRECATION")
+class LabActivity : Activity() {
+    private var tone: AudioTrack? = null
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setOnApplyWindowInsetsListener { view, insets ->
+                val bars = insets.getInsets(WindowInsets.Type.systemBars())
+                view.setPadding(24 + bars.left, 24 + bars.top, 24 + bars.right, 24 + bars.bottom)
+                insets
+            }
+        }
+        layout.addView(TextView(this).apply {
+            text = "Audio lab: start the desktop listener and ADB reverse first. Capture can be silent if the source disallows it."
+        })
+        layout.addView(Button(this).apply {
+            text = "Start capture"
+            setOnClickListener {
+                if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                    requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 1)
+                } else requestProjection()
+            }
+        })
+        layout.addView(Button(this).apply {
+            text = "Stop capture"
+            setOnClickListener { stopService(Intent(this@LabActivity, LabCaptureService::class.java)) }
+        })
+        layout.addView(Button(this).apply {
+            text = "Toggle test tone"
+            setOnClickListener { toggleTone() }
+        })
+        setContentView(layout)
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 1 && grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) requestProjection()
+    }
+
+    private fun requestProjection() {
+        val manager = getSystemService(MediaProjectionManager::class.java)
+        startActivityForResult(manager.createScreenCaptureIntent(), 2)
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == 2 && resultCode == RESULT_OK && data != null) {
+            startForegroundService(Intent(this, LabCaptureService::class.java).apply {
+                putExtra("resultCode", resultCode)
+                putExtra("resultData", data)
+            })
+        }
+    }
+
+    private fun toggleTone() {
+        tone?.let { it.stop(); it.release(); tone = null; return }
+        val samples = ShortArray(48_000 * 2) { index ->
+            (sin(2.0 * PI * (index / 2 % 48) / 48.0) * 3_000).toInt().toShort()
+        }
+        val track = AudioTrack.Builder()
+            .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).build())
+            .setAudioFormat(AudioFormat.Builder().setSampleRate(48_000)
+                .setEncoding(AudioFormat.ENCODING_PCM_16BIT).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build())
+            .setTransferMode(AudioTrack.MODE_STATIC)
+            .setBufferSizeInBytes(samples.size * Short.SIZE_BYTES)
+            .build()
+        track.write(samples, 0, samples.size)
+        track.setLoopPoints(0, 48_000, -1)
+        track.play()
+        tone = track
+    }
+
+    override fun onDestroy() {
+        tone?.let { it.stop(); it.release() }
+        tone = null
+        super.onDestroy()
+    }
+}
