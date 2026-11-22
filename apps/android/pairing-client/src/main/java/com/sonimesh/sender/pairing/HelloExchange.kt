@@ -42,7 +42,7 @@ internal fun exchangeHello(
     return NegotiatedHello(1, (1..4).filter { it in capabilities && it in peer.capabilities }, peer.name)
 }
 
-private fun encodeMessage(write: (CodedOutputStream) -> Unit): ByteArray {
+internal fun encodeMessage(write: (CodedOutputStream) -> Unit): ByteArray {
     val buffer = ByteArrayOutputStream()
     val coded = CodedOutputStream.newInstance(buffer)
     write(coded)

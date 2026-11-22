@@ -21,6 +21,8 @@ class PairedConnection internal constructor(
     val mediaRoot: ByteArray,
 ) : AutoCloseable {
     private var helloStarted = false
+    @Volatile private var negotiated: NegotiatedHello? = null
+    private var nextRequestId = 2L
 
     /** Exchanges Hello messages after pairing; call off the UI thread. */
     @Synchronized
@@ -30,6 +32,7 @@ class PairedConnection internal constructor(
         try {
             socket.soTimeout = 30_000
             val result = exchangeHello(socket.inputStream, socket.outputStream, displayName, capabilities)
+            negotiated = result
             socket.soTimeout = 0
             return result
         } catch (error: Throwable) {
@@ -38,7 +41,56 @@ class PairedConnection internal constructor(
         }
     }
 
+    /** Sends a stream command and waits for the desktop's reply; call off the UI thread. */
+    @Synchronized
+    fun startStream(stream: StreamParameters): StreamControlResult {
+        val hello = checkNotNull(negotiated) { "hello has not completed" }
+        stream.validate()
+        require((if (stream.frameDurationMs == 10) 1 else 2) in hello.capabilities) {
+            "frame duration was not negotiated"
+        }
+        return command(stream.identity, 11) { coded ->
+            coded.writeUInt64(1, stream.identity.sessionId)
+            coded.writeUInt32(2, stream.identity.streamId.toInt())
+            coded.writeUInt32(3, stream.sampleRateHz)
+            coded.writeUInt32(4, stream.channels)
+            coded.writeUInt32(5, stream.frameDurationMs)
+            coded.writeUInt32(6, stream.identity.keyEpoch)
+        }
+    }
+
+    /** Requests a stop for an exact media identity; call off the UI thread. */
+    @Synchronized
+    fun stopStream(identity: StreamIdentity): StreamControlResult {
+        checkNotNull(negotiated) { "hello has not completed" }
+        identity.validate()
+        return command(identity, 12) { coded ->
+            coded.writeUInt64(1, identity.sessionId)
+            coded.writeUInt32(2, identity.streamId.toInt())
+            coded.writeUInt32(3, identity.keyEpoch)
+        }
+    }
+
+    private fun command(
+        identity: StreamIdentity,
+        field: Int,
+        write: (com.google.protobuf.CodedOutputStream) -> Unit,
+    ): StreamControlResult {
+        check(nextRequestId > 0) { "control request IDs exhausted" }
+        val requestId = nextRequestId++
+        try {
+            socket.soTimeout = 30_000
+            return exchangeStreamCommand(socket.inputStream, socket.outputStream, requestId, identity, field, write)
+        } catch (error: Throwable) {
+            runCatching { close() }
+            throw error
+        } finally {
+            if (!socket.isClosed) socket.soTimeout = 0
+        }
+    }
+
     override fun close() {
+        negotiated = null
         try {
             socket.close()
         } finally {

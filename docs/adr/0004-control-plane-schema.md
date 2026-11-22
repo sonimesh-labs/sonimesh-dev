@@ -80,6 +80,13 @@ connected over ADB reverse completed the exchange with the Rust desktop
 coordinator and both selected the 20 ms capability. This is not physical WLAN
 or product integration evidence.
 
+The isolated Android pairing client also exposes synchronous start and stop
+requests after Hello, correlating the response by request ID, session ID and
+stream ID. The status schema does not echo the key epoch.
+These commands do not create a media pipeline: a streaming status is meaningful
+only when the desktop has actually prepared that pipeline. Structured command
+rejections remain available to the caller without closing the connection.
+
 When the authenticated control session expires, the receiver retires its
 negotiation, active stream identities, pending operation, and local transport token
 together. A later paired session must install a fresh authenticated transport and
