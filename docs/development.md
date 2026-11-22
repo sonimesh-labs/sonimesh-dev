@@ -56,6 +56,9 @@ desktop defaults to a software PCM check. On Windows, add `--features playback`
 before `--` and pass `--play` after it to use the default output device; add
 `--select-output` to choose a device. `--require-tone` checks decoded audio,
 not whether it was audible. Output callback counts are not a listening test.
+Add `--control` alongside `--play` to adjust playback from the listener console:
+enter `volume 0` through `volume 100`, `mute`, or `unmute`. These local settings
+survive output recovery and successive sessions while the listener is running.
 Silence can
 reflect the source or platform capture policy. Other audio-lab modes below use
 their separate ADB bootstrap. Remove the reverse mapping when no longer needed.

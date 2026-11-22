@@ -73,6 +73,9 @@ alive and retries the selected output once per second. It suspends playout until
 the output is recreated with a fresh PCM queue, then waits for new media before
 resuming. Its software checks and callback counts do not
 establish audible playback or latency on hardware.
+With explicit console control enabled, local volume and mute changes use the
+output's existing gain handle and persist across sequential sessions and output
+recovery. They do not alter the control-plane wire protocol.
 Its fixed 20 ms lab playout schedule advances from the previous deadline to
 avoid accumulating ordinary polling delay; if a whole period is missed, it
 rebases from the current time rather than issuing a burst of catch-up decodes.

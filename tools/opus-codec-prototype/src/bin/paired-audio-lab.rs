@@ -3,6 +3,8 @@
 #[cfg(all(windows, feature = "playback"))]
 #[allow(dead_code)]
 mod common;
+#[cfg(any(test, all(windows, feature = "playback")))]
+mod lab_control;
 mod lab_decoder;
 
 use std::fmt::Write;
@@ -48,6 +50,9 @@ fn main() {
 fn run() -> LabResult<()> {
     let options = Options::parse(std::env::args().skip(1))?;
     let mut playback = Playback::prepare(options.play, options.select_output)?;
+    if options.control {
+        playback.start_controls()?;
+    }
     let listener = PairingListener::bind(SocketAddrV4::new(options.bind, 47610))?;
     let address = listener.local_addr()?;
     let key = generate_simple_self_signed(vec!["localhost".to_owned()])?;
@@ -147,6 +152,7 @@ struct Options {
     play: bool,
     select_output: bool,
     keep_listening: bool,
+    control: bool,
     bind: Ipv4Addr,
     host: Ipv4Addr,
 }
@@ -158,6 +164,7 @@ impl Default for Options {
             play: false,
             select_output: false,
             keep_listening: false,
+            control: false,
             bind: Ipv4Addr::LOCALHOST,
             host: Ipv4Addr::LOCALHOST,
         }
@@ -176,6 +183,7 @@ impl Options {
                 "--play" if !result.play => result.play = true,
                 "--select-output" if !result.select_output => result.select_output = true,
                 "--keep-listening" if !result.keep_listening => result.keep_listening = true,
+                "--control" if !result.control => result.control = true,
                 "--bind" if !bind_set => {
                     result.bind = args
                         .next()
@@ -192,7 +200,7 @@ impl Options {
                 }
                 _ => {
                     return Err(
-                        "usage: paired-audio-lab [--require-tone] [--play [--select-output]] [--keep-listening] [--bind IPv4 --host IPv4]"
+                        "usage: paired-audio-lab [--require-tone] [--play [--select-output] [--control]] [--keep-listening] [--bind IPv4 --host IPv4]"
                             .into(),
                     );
                 }
@@ -200,6 +208,9 @@ impl Options {
         }
         if result.select_output && !result.play {
             return Err("--select-output requires --play".into());
+        }
+        if result.control && !result.play {
+            return Err("--control requires --play".into());
         }
         if bind_set != host_set
             || result.host.is_unspecified()
@@ -352,6 +363,15 @@ struct Playback;
     allow(clippy::unused_self, clippy::unnecessary_wraps)
 )]
 impl Playback {
+    fn start_controls(&self) -> LabResult<()> {
+        #[cfg(all(windows, feature = "playback"))]
+        if let Some((controller, _)) = &self.0 {
+            lab_control::start_console_control(controller.gain_handle());
+            return Ok(());
+        }
+        Err("console control requires Windows playback".into())
+    }
+
     fn abort(&mut self) {
         #[cfg(all(windows, feature = "playback"))]
         if let Some((controller, _)) = &mut self.0 {
@@ -763,6 +783,9 @@ mod tests {
                 &mut receiver,
             )
             .unwrap();
+        let controls = output.gain_handle();
+        lab_control::apply_control("volume 50", &controls).unwrap();
+        lab_control::apply_control("mute", &controls).unwrap();
         output.output_mut().failed = true;
         output.output_mut().reject_start = true;
         let now = Instant::now();
@@ -807,6 +830,7 @@ mod tests {
             now + Duration::from_secs(2)
         ));
         assert!(retry.is_none());
+        assert_eq!(output.gain_handle().snapshot(), controls.snapshot());
         assert_eq!(metrics.snapshot().jitter_frames, 0);
         assert!(matches!(
             receiver.decode_next().unwrap(),
@@ -829,7 +853,60 @@ mod tests {
             .as_mut()
             .unwrap()
             .render(&mut samples);
+        assert!(samples.iter().all(|sample| sample.abs() < 0.001));
+        lab_control::apply_control("unmute", &controls).unwrap();
+        let third = sealer.seal(0, 1_920, &payload[..length]).unwrap();
+        sender.send_to(&third.datagram, address).unwrap();
+        let until = Instant::now() + Duration::from_secs(2);
+        while metrics.snapshot().authenticated_packets < 3 && Instant::now() < until {
+            poll_media(&mut receiver).unwrap();
+        }
+        assert!(matches!(
+            receiver.decode_next().unwrap(),
+            DecodeStep::Decoded { sequence: 2, .. }
+        ));
+        output
+            .output_mut()
+            .source
+            .as_mut()
+            .unwrap()
+            .render(&mut samples);
         assert!(samples.iter().any(|sample| sample.abs() > 0.001));
+        lab_control::apply_control("mute", &controls).unwrap();
+        output.stop();
+        output
+            .start(
+                sonimesh_app::OutputSelection {
+                    device: None,
+                    config: OutputConfig {
+                        sample_rate_hz: 48_000,
+                        channels: 2,
+                        sample_format: SampleFormat::Float32,
+                        requested_callback_frames: None,
+                        maximum_callback_frames: 960,
+                    },
+                },
+                &mut receiver,
+            )
+            .unwrap();
+        assert_eq!(output.gain_handle().snapshot(), controls.snapshot());
+        let fourth = sealer.seal(0, 2_880, &payload[..length]).unwrap();
+        sender.send_to(&fourth.datagram, address).unwrap();
+        let until = Instant::now() + Duration::from_secs(2);
+        while metrics.snapshot().authenticated_packets < 4 && Instant::now() < until {
+            poll_media(&mut receiver).unwrap();
+        }
+        assert!(matches!(
+            receiver.decode_next().unwrap(),
+            DecodeStep::Decoded { sequence: 3, .. }
+        ));
+        output
+            .output_mut()
+            .source
+            .as_mut()
+            .unwrap()
+            .render(&mut samples);
+        assert!(samples.iter().all(|sample| sample.abs() < 0.001));
     }
 
     #[test]
@@ -927,6 +1004,12 @@ mod tests {
             Options::parse(args(&["--require-tone", "--play", "--select-output"])).unwrap();
         assert!(playback.play && playback.require_tone && playback.select_output);
         assert!(Options::parse(args(&["--select-output"])).is_err());
+        assert!(Options::parse(args(&["--control"])).is_err());
+        assert!(
+            Options::parse(args(&["--play", "--control"]))
+                .unwrap()
+                .control
+        );
         assert!(Options::parse(args(&["--play", "--play"])).is_err());
         assert!(
             Options::parse(args(&["--keep-listening"]))
