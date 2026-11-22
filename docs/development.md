@@ -223,6 +223,19 @@ environment variable; the Windows CI step sets that variable. This run is
 native-build and basic decode/PLC evidence for ADR 0009 only; it is not a
 quality, power, latency, Android ABI, or malformed-payload fuzz result.
 
+For a local end-to-end media-path exercise, the `local-audio` binary in the
+same prototype sends a generated tone through native Opus, encrypted UDP
+loopback, the receiver and its render source. `--check` runs without audio
+hardware. On Windows, `--play` opens the default output device:
+
+~~~powershell
+cargo run -p opus-codec-prototype --bin local-audio -- --check
+cargo run -p opus-codec-prototype --features playback --bin local-audio -- --play
+~~~
+
+This is a single-process lab with a public fixed test key and loopback sockets;
+it is not phone capture, pairing, physical WLAN or a production session.
+
 CI runs formatting, linting, and tests on Linux and Windows, and builds the
 capture-only Android bootstrap with Java 21, API 36, and Build Tools 35.0.0.
 The Android job proves a reproducible host build only; none of these checks

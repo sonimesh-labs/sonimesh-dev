@@ -6,10 +6,19 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
+default-run = "opus-codec-prototype"
+
+[features]
+playback = ["sonimesh-platform/cpal-output"]
 
 [dependencies]
 opus = "0.3.1"
 sonimesh-audio = { path = "../../crates/sonimesh-audio" }
+sonimesh-app = { path = "../../crates/sonimesh-app" }
+sonimesh-diagnostics = { path = "../../crates/sonimesh-diagnostics" }
+sonimesh-network = { path = "../../crates/sonimesh-network" }
+sonimesh-platform = { path = "../../crates/sonimesh-platform" }
+sonimesh-protocol = { path = "../../crates/sonimesh-protocol" }
 
 [lints]
 workspace = true

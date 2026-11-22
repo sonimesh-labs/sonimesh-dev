@@ -6,6 +6,7 @@ use std::sync::Arc;
 use sonimesh_audio::TargetGatedPlayoutConfig;
 use sonimesh_audio::{
     DecodeStep, DecodeWorkerError, FrameDecoder, InsertOutcome, RealtimePcmProducer,
+    StreamDecodeWorker,
 };
 use sonimesh_diagnostics::{StreamCounters, redact_endpoint};
 use sonimesh_network::{
@@ -178,16 +179,30 @@ where
         counters: Arc<StreamCounters>,
         initial_sequence: u32,
     ) -> Result<Self, UdpReceiverSetupError> {
-        let receiver = UdpMediaReceiver::bind(address).map_err(UdpReceiverSetupError::Socket)?;
-        let pipeline = ReceiverStreamPipeline::new(
+        Self::bind_with_worker(
+            address,
             secret,
             context,
-            decoder,
-            producer,
+            StreamDecodeWorker::new(decoder, producer, initial_sequence),
             counters,
-            initial_sequence,
         )
-        .map_err(UdpReceiverSetupError::Pipeline)?;
+    }
+
+    /// Binds a UDP receiver around a preconfigured stream decode worker.
+    ///
+    /// # Errors
+    ///
+    /// Returns a socket or media opener setup error.
+    pub fn bind_with_worker(
+        address: SocketAddr,
+        secret: &SessionSecret,
+        context: MediaKeyContext,
+        worker: StreamDecodeWorker<D, JITTER_CAPACITY, MAX_ENCODED_BYTES, PCM_SAMPLES_PER_BLOCK>,
+        counters: Arc<StreamCounters>,
+    ) -> Result<Self, UdpReceiverSetupError> {
+        let receiver = UdpMediaReceiver::bind(address).map_err(UdpReceiverSetupError::Socket)?;
+        let pipeline = ReceiverStreamPipeline::with_worker(secret, context, worker, counters)
+            .map_err(UdpReceiverSetupError::Pipeline)?;
         Ok(Self {
             receiver,
             pipeline,

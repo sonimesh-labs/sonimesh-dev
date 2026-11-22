@@ -85,6 +85,10 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
 - a cross-crate protected pipeline covering AEAD parse/authentication, replay
   rejection, jitter/PLC decisions, non-realtime decode scheduling, and realtime
   PCM transfer without claiming an Opus backend or physical audio result.
+  The separate `opus-codec-prototype` now also has a local-audio lab command
+  that runs a generated tone through native Opus, encrypted UDP loopback, the
+  receiver pipeline, and its render source. An explicit Windows playback mode
+  opens the default CPAL output; it is not Android capture or WLAN evidence.
   A seeded property walk and a byte-driven libFuzzer target drive in-order
   deliveries, duplicates, tampered ciphertext, retired-epoch packets, and
   rotations against an independent replay oracle and counter model,

@@ -235,9 +235,31 @@ where
         counters: Arc<StreamCounters>,
         initial_sequence: u32,
     ) -> Result<Self, ProtectedIngressError> {
+        Self::with_worker(
+            secret,
+            context,
+            StreamDecodeWorker::new(decoder, producer, initial_sequence),
+            counters,
+        )
+    }
+
+    /// Creates a protected pipeline around an already configured decode worker.
+    ///
+    /// This lets a codec adapter validate its frame policy before ingress is
+    /// installed, while preserving the same protected packet and queue path.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ProtectedIngressError`] if the media opener cannot be derived.
+    pub fn with_worker(
+        secret: &SessionSecret,
+        context: MediaKeyContext,
+        worker: StreamDecodeWorker<D, JITTER_CAPACITY, MAX_ENCODED_BYTES, PCM_SAMPLES_PER_BLOCK>,
+        counters: Arc<StreamCounters>,
+    ) -> Result<Self, ProtectedIngressError> {
         Ok(Self {
             ingress: ProtectedMediaIngress::new(secret, context)?,
-            decode: StreamDecodeWorker::new(decoder, producer, initial_sequence),
+            decode: worker,
             counters,
             adaptive_target: None,
         })

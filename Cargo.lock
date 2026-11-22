@@ -876,7 +876,12 @@ name = "opus-codec-prototype"
 version = "0.1.0"
 dependencies = [
  "opus",
+ "sonimesh-app",
  "sonimesh-audio",
+ "sonimesh-diagnostics",
+ "sonimesh-network",
+ "sonimesh-platform",
+ "sonimesh-protocol",
 ]
 
 [[package]]

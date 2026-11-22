@@ -62,6 +62,10 @@ latency result.
 A native initial-path implementation must construct its stream worker through
 `StreamDecodeWorker::new_for_opus`, so insufficient fixed PCM capacity fails in
 the control/per-stream creation domain before decoder work is scheduled.
+The receiver and UDP receiver compositions can accept a preconstructed worker,
+so an isolated lab can use that validated worker with protected UDP ingress
+and an output endpoint. The codec binding itself remains confined to the
+existing prototype until the production gate is met.
 
 ## Reliability and security implications
 
