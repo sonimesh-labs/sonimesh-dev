@@ -719,6 +719,13 @@ leaving decoder, socket, and output construction to the application layer. Its
 UDP specialization exposes one nonblocking packet poll and one decode/PLC step
 per scheduler tick so the future shell can drive media work outside the output
 callback.
+After pairing, `DesktopControlSession` is the shell-neutral transport adapter:
+construct it with the `TrustedControlChannel` parts and the installed owner
+session token, call `poll_once` from the control loop, and call `flush` when a
+nonblocking write reports `Pending`. It executes one bounded envelope per tick,
+returns correlated lifecycle statuses for start/rotate/stop, and returns a
+correlated wire error for an owner rejection. It is still a composition
+boundary, not a live Tauri shell or a proof of Windows audio output.
 The composable polls the same low-rate snapshot command once per second and clears
 that timer on unmount, so reconnect countdowns and asynchronous output faults do
 not depend on a user clicking Refresh.

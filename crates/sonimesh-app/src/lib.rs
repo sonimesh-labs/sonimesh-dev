@@ -3,6 +3,7 @@
 mod arrival_clock;
 mod channel_mapped_render_source;
 mod control_listen;
+mod control_session;
 mod control_snapshot;
 mod control_stream;
 mod control_to_mixer;
@@ -38,6 +39,7 @@ pub use control_listen::{
     ControlListenError, DEFAULT_PAIRING_IO_TIMEOUT, InvitationInputs, PairingListener,
     TrustedControlChannel, accept_pairing_connection, accept_pairing_stream,
 };
+pub use control_session::{ControlSessionError, ControlSessionPoll, DesktopControlSession};
 pub use control_snapshot::{
     DesktopControlSnapshot, OutputSnapshot, OutputSnapshotSource, PairingSnapshotState,
 };

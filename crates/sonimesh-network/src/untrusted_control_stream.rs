@@ -199,6 +199,12 @@ impl<S: Read + Write> UntrustedControlStream<S> {
         }
     }
 
+    /// Returns the wrapped byte stream after the framing owner is dropped.
+    #[must_use]
+    pub fn into_inner(self) -> S {
+        self.stream
+    }
+
     /// Queues and advances one semantically validated control frame.
     ///
     /// The frame is copied into one bounded write buffer. A second frame cannot
