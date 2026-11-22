@@ -53,7 +53,7 @@ cargo run -p opus-codec-prototype --features playback --bin android-live -- --pl
 ~~~
 
 Alternatively use `--check` without the playback feature to render into a
-software check. Open **SoniMesh audio lab**, select **Start capture**, grant
+software check. Open **SoniMesh audio lab**, select **Start ADB capture**, grant
 audio permission and fresh screen-capture consent, and play an eligible media
 source. **Toggle test tone** provides a local synthetic source; **Stop capture**
 or the notification action ends the stream. Restart the desktop listener for
@@ -78,6 +78,39 @@ software-render peaks of 0.095. A separate playback
 run produced non-silent decoded audio and 8,964 output callbacks with no stream
 errors. No human listening confirmation or physical latency measurement was
 recorded, and these runs do not establish physical-device or WLAN behavior.
+
+For the emulator-only protected UDP path, use a separate ADB reverse mapping:
+
+~~~powershell
+adb reverse tcp:39092 tcp:39092
+cargo run -p opus-codec-prototype --features playback --bin android-udp-lab -- --play
+~~~
+
+Choose **Start UDP capture (emulator)** and fresh capture consent. Use `--check`
+without `--features playback` for the software render check. Android generates
+a new random lab secret and sends it over the ADB connection; the media packets
+use ADR 0005 and the emulator's host alias to reach desktop UDP loopback port
+39093. The desktop uses its protected receiver, jitter buffer, decoder worker,
+and PCM output endpoint. The bootstrap is not authenticated pairing and neither
+listener is a LAN endpoint. Remove the mapping with `adb reverse --remove
+tcp:39092` when finished.
+
+On 2026-11-22 the API 37 x86_64 emulator passed the published Android-to-desktop
+media crypto vector. In a capture run the desktop processed 502 authenticated
+packets, decoded 499 frames, concealed one frame, and rendered a peak of 0.094.
+In a separate playback run it processed 519 packets, decoded 491 frames,
+concealed 28 frames, and recorded 1,112 output callbacks with no stream errors.
+The processed counts in those runs include any packets later rejected by jitter
+admission; the updated command reports late packets separately. These short runs
+do not establish audio quality, stable scheduling, physical WLAN, or listening
+results. The laboratory's fixed 20 ms scheduler and clock drift still need work.
+
+The original scheduler advanced through an empty jitter buffer and could then
+classify subsequent packets as late. After changing it to wait for buffered
+data, a further software run admitted 602 packets, decoded 600 frames, reported
+zero late packets and zero concealed frames, and had 13 empty ticks. The render
+peak was 0.093. A real sequence gap still invokes concealment in the regression
+test. This single short run does not establish long-term clock stability.
 
 When a local SDK is missing one of those components, install the same set the
 Android CI job installs before running the Gradle commands:

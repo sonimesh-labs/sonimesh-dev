@@ -50,6 +50,15 @@ decryption. They write plaintext only to caller-owned storage and return no byte
 on authentication failure. Replay admission remains in `sonimesh-network` and
 occurs only after this successful authentication.
 
+The isolated Android audio lab may exercise this packet format over the Android
+emulator's host-loopback route. For that experiment only, Android generates a
+fresh random secret and passes it over an ADB-reversed loopback TCP connection;
+the connection remains open for the session lifetime. This bootstrap is not
+authenticated pairing or a product control plane, and neither endpoint exposes a
+LAN listener. Each encoded frame gets its sequence before bounded-queue admission
+so a dropped frame remains a visible gap. The desktop uses the existing protected
+UDP receiver and per-stream decoder, not a bypass around authentication.
+
 The UDP receiver composition starts without a trusted source endpoint. The first
 packet that completes authentication, replay admission, and a bounded jitter
 decision pins its observed source address and port. An unauthenticated or
@@ -96,11 +105,12 @@ and one-byte header/ciphertext/tag mutations while asserting that rejection
 clears plaintext. Linux CI is configured for a finite AddressSanitizer smoke
 run.
 
-Android-runtime provider verification, authenticated control-plane session
-replacement, key rotation control messages, sustained fuzzing, and future native
-Opus-decoder fuzzing remain required before a build leaves the lab network. The
-loopback, finite fuzz, and host JVM results are not physical WLAN, Android device,
-or production key-handling evidence.
+The Android-to-desktop vector also passes on an API 37 x86_64 emulator using the
+Android runtime provider. Physical-device provider coverage, authenticated
+control-plane session replacement, key rotation control messages, sustained
+fuzzing, and future native Opus-decoder fuzzing remain open. Emulator, loopback,
+finite fuzz, and host JVM results are not physical WLAN or production
+key-handling evidence.
 
 ## Rollback plan
 

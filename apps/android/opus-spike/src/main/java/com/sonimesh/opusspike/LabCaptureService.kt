@@ -21,9 +21,13 @@ import android.os.IBinder
 import android.os.Looper
 import android.util.Log
 import java.io.DataOutputStream
+import java.net.DatagramPacket
+import java.net.DatagramSocket
+import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.nio.ByteOrder
+import java.security.SecureRandom
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -61,7 +65,8 @@ class LabCaptureService : Service() {
             current.registerCallback(object : MediaProjection.Callback() {
                 override fun onStop() { stopSelf() }
             }, handler)
-            Thread({ capture(current) }, "audio-lab-capture").start()
+            val udpMode = intent.getBooleanExtra("udpMode", false)
+            Thread({ capture(current, udpMode) }, "audio-lab-capture").start()
         } catch (error: Exception) {
             Log.e("SoniMeshLab", "Unable to start capture", error)
             stopSelf()
@@ -70,7 +75,7 @@ class LabCaptureService : Service() {
     }
 
     @SuppressLint("MissingPermission")
-    private fun capture(projection: MediaProjection) {
+    private fun capture(projection: MediaProjection, udpMode: Boolean) {
         var record: AudioRecord? = null
         var codec: MediaCodec? = null
         try {
@@ -79,9 +84,25 @@ class LabCaptureService : Service() {
                 if (!running.get()) { connection.close(); return }
                 socket = connection
             }
-            connection.connect(InetSocketAddress("127.0.0.1", 39091), 2_000)
-            val packets = ArrayBlockingQueue<ByteArray>(8)
-            Thread({ writePackets(connection, packets) }, "audio-lab-sender").start()
+            connection.connect(InetSocketAddress("127.0.0.1", if (udpMode) 39092 else 39091), 2_000)
+            val packets = ArrayBlockingQueue<EncodedPacket>(8)
+            if (udpMode) {
+                val secret = ByteArray(32)
+                SecureRandom().nextBytes(secret)
+                val sealer = try {
+                    connection.soTimeout = 5_000
+                    connection.getOutputStream().write(secret)
+                    check(connection.getInputStream().read() == 1) { "desktop receiver not ready" }
+                    LabMediaSealer(secret, 1, 1, 0)
+                } finally {
+                    secret.fill(0)
+                }
+                connection.soTimeout = 0
+                Thread({ watchControl(connection) }, "audio-lab-control").start()
+                Thread({ sendDatagrams(sealer, packets) }, "audio-lab-sender").start()
+            } else {
+                Thread({ writePackets(connection, packets) }, "audio-lab-sender").start()
+            }
             val captureConfig = AudioPlaybackCaptureConfiguration.Builder(projection)
                 .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
                 .addMatchingUsage(AudioAttributes.USAGE_GAME)
@@ -105,6 +126,7 @@ class LabCaptureService : Service() {
             val info = MediaCodec.BufferInfo()
             var filled = 0
             var frame = 0L
+            var outputSequence = 0L
             while (running.get()) {
                 if (filled < pcm.size) {
                     val read = activeRecord.read(pcm, filled, pcm.size - filled, AudioRecord.READ_NON_BLOCKING)
@@ -129,9 +151,11 @@ class LabCaptureService : Service() {
                         require(info.size <= 1_148)
                         val packet = ByteArray(info.size)
                         requireNotNull(activeCodec.getOutputBuffer(index)).apply { position(info.offset); get(packet) }
-                        if (!packets.offer(packet)) {
+                        check(outputSequence <= 0xffff_ffffL) { "media sequence exhausted" }
+                        val encoded = EncodedPacket(outputSequence++, packet)
+                        if (!packets.offer(encoded)) {
                             packets.poll()
-                            packets.offer(packet)
+                            packets.offer(encoded)
                         }
                     }
                     activeCodec.releaseOutputBuffer(index, false)
@@ -147,16 +171,46 @@ class LabCaptureService : Service() {
         }
     }
 
-    private fun writePackets(connection: Socket, packets: ArrayBlockingQueue<ByteArray>) {
+    private data class EncodedPacket(val sequence: Long, val bytes: ByteArray)
+
+    private fun writePackets(connection: Socket, packets: ArrayBlockingQueue<EncodedPacket>) {
         try {
             val output = DataOutputStream(connection.getOutputStream())
             while (running.get()) {
                 val packet = packets.poll(100, TimeUnit.MILLISECONDS) ?: continue
-                output.writeInt(packet.size)
-                output.write(packet)
+                output.writeInt(packet.bytes.size)
+                output.write(packet.bytes)
             }
         } catch (error: Exception) {
             if (running.get()) Log.e("SoniMeshLab", "Desktop connection failed", error)
+        } finally {
+            handler.post { stopSelf() }
+        }
+    }
+
+    private fun sendDatagrams(sealer: LabMediaSealer, packets: ArrayBlockingQueue<EncodedPacket>) {
+        try {
+            DatagramSocket().use { udp ->
+                udp.connect(InetAddress.getByName("10.0.2.2"), 39093)
+                while (running.get()) {
+                    val packet = packets.poll(100, TimeUnit.MILLISECONDS) ?: continue
+                    val datagram = sealer.seal(packet.sequence, packet.sequence * 960, 0, packet.bytes)
+                    udp.send(DatagramPacket(datagram, datagram.size))
+                }
+            }
+        } catch (error: Exception) {
+            if (running.get()) Log.e("SoniMeshLab", "UDP sender failed", error)
+        } finally {
+            sealer.clear()
+            handler.post { stopSelf() }
+        }
+    }
+
+    private fun watchControl(connection: Socket) {
+        try {
+            check(connection.getInputStream().read() == -1) { "unexpected lab control data" }
+        } catch (error: Exception) {
+            if (running.get()) Log.e("SoniMeshLab", "Lab control connection ended", error)
         } finally {
             handler.post { stopSelf() }
         }

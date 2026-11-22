@@ -97,6 +97,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   with MediaCodec, and decodes it on Windows into a software render check or
   CPAL output. This is a loopback lab, not the product's pairing or UDP path;
   physical-device capture, human listening, and physical latency remain open.
+  The emulator lab can additionally send ADR 0005-protected UDP packets through
+  the existing desktop receiver and decode pipeline. ADB supplies the temporary
+  lab secret, not authenticated pairing; this remains a loopback experiment.
   A seeded property walk and a byte-driven libFuzzer target drive in-order
   deliveries, duplicates, tampered ciphertext, retired-epoch packets, and
   rotations against an independent replay oracle and counter model,

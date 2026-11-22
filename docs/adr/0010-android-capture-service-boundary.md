@@ -127,7 +127,9 @@ service owns projection and capture; consent is requested afresh by its activity
 The lab endpoint binds only to desktop loopback and the Android app connects only
 to its own loopback. Its length-prefixed packets are not the product protocol,
 and the lab is not a WLAN, pairing, or production security implementation. The
-production capture app and its boundary checks remain separate.
+production capture app and its boundary checks remain separate. An additional
+emulator-only mode sends protected media datagrams via the emulator's host
+loopback alias after an ADB-reversed lab bootstrap, as scoped in ADR 0005.
 
 `tools/android_capture_preflight.py` is a separate, read-only lab helper. It
 requires an explicitly selected, printable single-line ADB serial but does not

@@ -19,9 +19,11 @@ import kotlin.math.sin
 @Suppress("DEPRECATION")
 class LabActivity : Activity() {
     private var tone: AudioTrack? = null
+    private var udpMode = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        udpMode = savedInstanceState?.getBoolean("udpMode") ?: false
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setOnApplyWindowInsetsListener { view, insets ->
@@ -34,12 +36,12 @@ class LabActivity : Activity() {
             text = "Audio lab: start the desktop listener and ADB reverse first. Capture can be silent if the source disallows it."
         })
         layout.addView(Button(this).apply {
-            text = "Start capture"
-            setOnClickListener {
-                if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-                    requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 1)
-                } else requestProjection()
-            }
+            text = "Start ADB capture"
+            setOnClickListener { startCapture(false) }
+        })
+        layout.addView(Button(this).apply {
+            text = "Start UDP capture (emulator)"
+            setOnClickListener { startCapture(true) }
         })
         layout.addView(Button(this).apply {
             text = "Stop capture"
@@ -50,6 +52,18 @@ class LabActivity : Activity() {
             setOnClickListener { toggleTone() }
         })
         setContentView(layout)
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean("udpMode", udpMode)
+        super.onSaveInstanceState(outState)
+    }
+
+    private fun startCapture(udp: Boolean) {
+        udpMode = udp
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 1)
+        } else requestProjection()
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
@@ -68,6 +82,7 @@ class LabActivity : Activity() {
             startForegroundService(Intent(this, LabCaptureService::class.java).apply {
                 putExtra("resultCode", resultCode)
                 putExtra("resultData", data)
+                putExtra("udpMode", udpMode)
             })
         }
     }

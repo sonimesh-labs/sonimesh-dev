@@ -1,0 +1,359 @@
+//! Emulator-only UDP lab. ADB bootstrap is not authenticated pairing.
+use std::{
+    error::Error,
+    io::{self, Read, Write},
+    net::{TcpListener, TcpStream},
+    sync::Arc,
+    time::{Duration, Instant},
+};
+
+use sonimesh_app::{
+    OutputSelection, ReceiverOutputController, ReceiverPcmEndpointFactory, SourcePcmFormat,
+    UdpPollOutcome, UdpReceiverPipeline,
+};
+use sonimesh_audio::{
+    DecodeStep, DecodeWorkerError, FrameDecoder, InsertOutcome, OpusFrameConfig,
+    StreamDecodeWorker, realtime_pcm_queue,
+};
+use sonimesh_diagnostics::StreamCounters;
+use sonimesh_platform::{
+    AudioOutput, OutputConfig, OutputDeviceId, OutputDeviceInfo, OutputError, OutputHealth,
+    RenderSource, SampleFormat,
+};
+use sonimesh_protocol::{MediaDirection, MediaKeyContext, SessionSecret};
+
+const SAMPLES: usize = 1_920;
+type LabResult<T> = Result<T, Box<dyn Error>>;
+type LabReceiver = UdpReceiverPipeline<Decoder, 8, 1_148, SAMPLES>;
+
+struct Decoder(opus::Decoder);
+impl FrameDecoder for Decoder {
+    type Error = opus::Error;
+    fn decode(&mut self, input: &[u8], output: &mut [f32]) -> Result<usize, Self::Error> {
+        self.0.decode_float(input, output, false).map(|n| n * 2)
+    }
+    fn decode_plc(&mut self, output: &mut [f32]) -> Result<usize, Self::Error> {
+        self.0.decode_float(&[], output, false).map(|n| n * 2)
+    }
+}
+
+trait LabOutput: AudioOutput {
+    fn tick(&mut self) -> LabResult<()>;
+    fn finish(&mut self) -> LabResult<()>;
+}
+
+#[derive(Default)]
+struct CheckOutput {
+    source: Option<Box<dyn RenderSource>>,
+    peak: f32,
+}
+impl AudioOutput for CheckOutput {
+    fn devices(&self) -> Result<Vec<OutputDeviceInfo>, OutputError> {
+        Ok(Vec::new())
+    }
+    fn start(
+        &mut self,
+        _: Option<&OutputDeviceId>,
+        _: OutputConfig,
+        source: Box<dyn RenderSource>,
+    ) -> Result<(), OutputError> {
+        self.source = Some(source);
+        Ok(())
+    }
+    fn stop(&mut self) {
+        self.source = None;
+    }
+    fn health(&self) -> OutputHealth {
+        OutputHealth::Healthy
+    }
+}
+impl LabOutput for CheckOutput {
+    fn tick(&mut self) -> LabResult<()> {
+        let mut samples = [0_f32; SAMPLES];
+        self.source
+            .as_mut()
+            .ok_or("output not started")?
+            .render(&mut samples);
+        for value in samples {
+            if !value.is_finite() {
+                return Err("non-finite render sample".into());
+            }
+            self.peak = self.peak.max(value.abs());
+        }
+        Ok(())
+    }
+    fn finish(&mut self) -> LabResult<()> {
+        println!("software render peak: {:.3}", self.peak);
+        if self.peak < 0.001 {
+            println!("No capturable audio detected; the source may be silent or capture-limited.");
+        }
+        Ok(())
+    }
+}
+
+#[cfg(all(windows, feature = "playback"))]
+impl LabOutput for sonimesh_platform::CpalOutput {
+    fn tick(&mut self) -> LabResult<()> {
+        Ok(())
+    }
+    fn finish(&mut self) -> LabResult<()> {
+        std::thread::sleep(Duration::from_millis(160));
+        let status = self.status();
+        println!(
+            "output callbacks: {}, stream errors: {}",
+            status.callback_count, status.stream_errors
+        );
+        if status.callback_count == 0
+            || status.stream_errors != 0
+            || status.oversized_callbacks != 0
+        {
+            return Err("output did not render cleanly".into());
+        }
+        Ok(())
+    }
+}
+
+fn read_secret(control: &mut TcpStream) -> LabResult<SessionSecret> {
+    control.set_read_timeout(Some(Duration::from_secs(5)))?;
+    let mut bytes = [0_u8; 32];
+    control.read_exact(&mut bytes)?;
+    let secret = SessionSecret::new(bytes);
+    bytes.fill(0);
+    Ok(secret)
+}
+
+fn control_closed(control: &mut TcpStream) -> LabResult<bool> {
+    let mut byte = [0_u8; 1];
+    match control.read(&mut byte) {
+        Ok(0) => Ok(true),
+        Ok(_) => Err("unexpected lab control data".into()),
+        Err(error) if error.kind() == io::ErrorKind::WouldBlock => Ok(false),
+        Err(error) => Err(error.into()),
+    }
+}
+
+fn decode_buffered(
+    receiver: &mut LabReceiver,
+    counters: &StreamCounters,
+) -> Result<DecodeStep, DecodeWorkerError<opus::Error>> {
+    if counters.snapshot().jitter_frames == 0 {
+        Ok(DecodeStep::NotReady)
+    } else {
+        receiver.decode_next()
+    }
+}
+
+#[allow(clippy::too_many_lines)] // One lab session coordinates socket, playout, and output lifetimes.
+fn run<O: LabOutput>(mut control: TcpStream, output: O, config: OutputConfig) -> LabResult<()> {
+    let secret = read_secret(&mut control)?;
+    let context = MediaKeyContext::new(1, 1, 0, MediaDirection::AndroidToDesktop)?;
+    let counters = Arc::new(StreamCounters::default());
+    let (producer, _unused) = realtime_pcm_queue::<SAMPLES>(8)?;
+    let worker = StreamDecodeWorker::<_, 8, 1_148, SAMPLES>::new_for_opus(
+        Decoder(opus::Decoder::new(48_000, opus::Channels::Stereo)?),
+        producer,
+        0,
+        OpusFrameConfig::new(48_000, 2, 20)?,
+    )?;
+    let mut receiver = UdpReceiverPipeline::bind_with_worker(
+        "127.0.0.1:39093".parse()?,
+        &secret,
+        context,
+        worker,
+        Arc::clone(&counters),
+    )?;
+    let factory =
+        ReceiverPcmEndpointFactory::new(8, SourcePcmFormat::new(48_000, 2)?, Arc::clone(&counters));
+    let mut output = ReceiverOutputController::new(output, factory);
+    output.start(
+        OutputSelection {
+            device: None,
+            config,
+        },
+        &mut receiver,
+    )?;
+    control.write_all(&[1])?;
+    control.set_nonblocking(true)?;
+    let mut last_packet = Instant::now();
+    let mut next_playout: Option<Instant> = None;
+    let mut admitted = 0_u64;
+    let mut late = 0_u64;
+    let mut resynchronized = 0_u64;
+    let mut decoded = 0_u64;
+    let mut concealed = 0_u64;
+    let mut empty_ticks = 0_u64;
+    loop {
+        if control_closed(&mut control)? {
+            break;
+        }
+        for _ in 0..32 {
+            match receiver.poll()? {
+                UdpPollOutcome::Empty => break,
+                UdpPollOutcome::Processed { admission, .. } => {
+                    match admission {
+                        InsertOutcome::Inserted | InsertOutcome::Reordered => admitted += 1,
+                        InsertOutcome::Resynchronized { .. } => {
+                            admitted += 1;
+                            resynchronized += 1;
+                        }
+                        InsertOutcome::Late => late += 1,
+                        _ => return Err("unexpected media admission outcome".into()),
+                    }
+                    last_packet = Instant::now();
+                    if next_playout.is_none() {
+                        next_playout = Some(last_packet + Duration::from_millis(60));
+                    }
+                }
+            }
+        }
+        let now = Instant::now();
+        if let Some(deadline) = next_playout {
+            if now >= deadline {
+                match decode_buffered(&mut receiver, &counters)? {
+                    DecodeStep::Decoded {
+                        samples: SAMPLES, ..
+                    } => decoded += 1,
+                    DecodeStep::Concealed {
+                        samples: SAMPLES, ..
+                    } => concealed += 1,
+                    DecodeStep::NotReady => empty_ticks += 1,
+                    _ => return Err("decoder produced an unexpected frame shape".into()),
+                }
+                output.output_mut().tick()?;
+                if output.monitor().is_some() {
+                    return Err("output device reported a fault".into());
+                }
+                next_playout = Some(
+                    if now.duration_since(deadline) >= Duration::from_millis(20) {
+                        now + Duration::from_millis(20)
+                    } else {
+                        deadline + Duration::from_millis(20)
+                    },
+                );
+            }
+        }
+        if last_packet.elapsed() > Duration::from_secs(5) {
+            return Err("media receiver timed out".into());
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    println!(
+        "media packets admitted: {admitted}, late: {late}, resynchronized: {resynchronized}, decoded: {decoded}, concealed: {concealed}, empty ticks: {empty_ticks}"
+    );
+    output.output_mut().finish()?;
+    output.stop();
+    if decoded == 0 {
+        return Err("no media frames decoded".into());
+    }
+    Ok(())
+}
+
+fn main() -> LabResult<()> {
+    let mode = std::env::args().nth(1).unwrap_or_default();
+    if mode != "--check" && mode != "--play" {
+        return Err("usage: android-udp-lab --check | --play".into());
+    }
+    let listener = TcpListener::bind("127.0.0.1:39092")?;
+    println!("Listening for ADB lab bootstrap on 127.0.0.1:39092; UDP uses 127.0.0.1:39093.");
+    let (control, _) = listener.accept()?;
+    if mode == "--check" {
+        let config = OutputConfig {
+            sample_rate_hz: 48_000,
+            channels: 2,
+            sample_format: SampleFormat::Float32,
+            requested_callback_frames: None,
+            maximum_callback_frames: 960,
+        };
+        return run(control, CheckOutput::default(), config);
+    }
+    play(control)
+}
+
+#[cfg(all(windows, feature = "playback"))]
+fn play(control: TcpStream) -> LabResult<()> {
+    let output = sonimesh_platform::CpalOutput::new();
+    let config = output.default_device_probe()?.output_config(None, 8_192)?;
+    run(control, output, config)
+}
+#[cfg(not(all(windows, feature = "playback")))]
+fn play(_: TcpStream) -> LabResult<()> {
+    Err("playback requires Windows and --features playback".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sonimesh_protocol::MediaSealer;
+    use std::net::UdpSocket;
+
+    #[test]
+    fn empty_jitter_waits_without_losing_future_frames_and_real_gap_uses_plc() {
+        let secret = SessionSecret::new([7; 32]);
+        let context = MediaKeyContext::new(1, 1, 0, MediaDirection::AndroidToDesktop).unwrap();
+        let counters = Arc::new(StreamCounters::default());
+        let (producer, _consumer) = realtime_pcm_queue::<SAMPLES>(8).unwrap();
+        let worker = StreamDecodeWorker::new_for_opus(
+            Decoder(opus::Decoder::new(48_000, opus::Channels::Stereo).unwrap()),
+            producer,
+            0,
+            OpusFrameConfig::new(48_000, 2, 20).unwrap(),
+        )
+        .unwrap();
+        let mut receiver = LabReceiver::bind_with_worker(
+            "127.0.0.1:0".parse().unwrap(),
+            &secret,
+            context,
+            worker,
+            Arc::clone(&counters),
+        )
+        .unwrap();
+        let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let mut sealer = MediaSealer::new(&secret, context).unwrap();
+        let mut encoder =
+            opus::Encoder::new(48_000, opus::Channels::Stereo, opus::Application::Audio).unwrap();
+        let mut payload = [0_u8; 1_148];
+        let len = encoder
+            .encode_float(&[0.05; SAMPLES], &mut payload)
+            .unwrap();
+        let first = sealer.seal(0, 0, &payload[..len]).unwrap();
+        socket
+            .send_to(&first.datagram, receiver.local_addr().unwrap())
+            .unwrap();
+        poll_packet(&mut receiver);
+        assert!(matches!(
+            decode_buffered(&mut receiver, &counters).unwrap(),
+            DecodeStep::Decoded { sequence: 0, .. }
+        ));
+        for _ in 0..20 {
+            assert!(matches!(
+                decode_buffered(&mut receiver, &counters).unwrap(),
+                DecodeStep::NotReady
+            ));
+        }
+        let _dropped = sealer.seal(0, 960, &payload[..len]).unwrap();
+        let third = sealer.seal(0, 1_920, &payload[..len]).unwrap();
+        socket
+            .send_to(&third.datagram, receiver.local_addr().unwrap())
+            .unwrap();
+        poll_packet(&mut receiver);
+        assert!(matches!(
+            decode_buffered(&mut receiver, &counters).unwrap(),
+            DecodeStep::Concealed { sequence: 1, .. }
+        ));
+        assert!(matches!(
+            decode_buffered(&mut receiver, &counters).unwrap(),
+            DecodeStep::Decoded { sequence: 2, .. }
+        ));
+    }
+
+    fn poll_packet(receiver: &mut LabReceiver) {
+        let deadline = Instant::now() + Duration::from_secs(1);
+        loop {
+            match receiver.poll().unwrap() {
+                UdpPollOutcome::Processed { .. } => return,
+                UdpPollOutcome::Empty if Instant::now() < deadline => std::thread::yield_now(),
+                UdpPollOutcome::Empty => panic!("loopback packet timed out"),
+            }
+        }
+    }
+}
