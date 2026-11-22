@@ -236,6 +236,9 @@ the software render check. Select an output before entering control commands.
 The lab screen shows connection and capture status, including a desktop
 connection failure or disconnect and a stopped projection. Status is kept in
 memory while the lab process remains alive; it is not a persistent session log.
+After two seconds of silent captured frames it also reports that no capturable
+audio was detected, with possible causes; a later non-silent read restores the
+capturing status. This reflects capture input, not delivery or audible playback.
 
 On 2026-11-22 the API 37 x86_64 emulator passed the published Android-to-desktop
 media crypto vector. In a capture run the desktop processed 502 authenticated

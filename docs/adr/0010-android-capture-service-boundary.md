@@ -135,6 +135,10 @@ behavior remain unverified.
 The lab activity presents the service's current connection and capture state,
 including a terminal reason on connection failure or projection revocation;
 this process-local status is not a production diagnostics interface.
+The lab reports no capturable audio after two seconds of completed silent
+capture frames and restores the capturing status when a non-silent read arrives.
+Partial reads count by frames rather than calls; this observation does not identify
+the source of silence or establish whether media reached the desktop.
 During paired-lab setup, the service tracks the connecting socket through TLS,
 Hello, and StartStream. Stopping the service closes the setup socket to interrupt
 pending I/O; after StartStream succeeds, ownership moves to the capture worker,

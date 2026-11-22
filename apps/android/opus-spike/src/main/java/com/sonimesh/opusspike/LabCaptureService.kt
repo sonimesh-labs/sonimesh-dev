@@ -166,6 +166,7 @@ class LabCaptureService : Service() {
                 if (running.get() && !terminalStatus) LabStatus.publish("Capturing audio and sending to desktop.")
             }
             val pcm = ShortArray(1_920)
+            val signalMonitor = LabSignalMonitor()
             val info = MediaCodec.BufferInfo()
             var filled = 0
             var frame = 0L
@@ -189,7 +190,19 @@ class LabCaptureService : Service() {
                 }
                 if (filled < pcm.size) {
                     val read = activeRecord.read(pcm, filled, pcm.size - filled, AudioRecord.READ_NON_BLOCKING)
-                    check(read >= 0 && read % 2 == 0)
+                    check(read >= 0 && read <= pcm.size - filled && read % 2 == 0)
+                    if (read > 0) {
+                        val transition = signalMonitor.observe(pcm, filled, read)
+                        if (transition != null) handler.post {
+                            if (running.get() && !terminalStatus) {
+                                LabStatus.publish(when (transition) {
+                                    LabSignalTransition.NoCapturableAudio ->
+                                        "No capturable audio detected. The source may be silent or capture-limited."
+                                    LabSignalTransition.SignalDetected -> "Capturing audio and sending to desktop."
+                                })
+                            }
+                        }
+                    }
                     filled += read
                     if (read == 0) Thread.sleep(2)
                 }

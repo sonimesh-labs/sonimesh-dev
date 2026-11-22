@@ -112,6 +112,8 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   Its Android service can cancel an in-progress paired connection before stream
   startup; after startup, normal shutdown still attempts StopStream. Host tests
   cover socket cancellation and ownership handoff, not Android device behavior.
+  The Android lab also reports sustained silent capture and returns to its
+  capturing status when signal resumes; this does not establish desktop delivery.
   A seeded property walk and a byte-driven libFuzzer target drive in-order
   deliveries, duplicates, tampered ciphertext, retired-epoch packets, and
   rotations against an independent replay oracle and counter model,
