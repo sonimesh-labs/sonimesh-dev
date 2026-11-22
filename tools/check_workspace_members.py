@@ -21,9 +21,11 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # Generated, vendored, or tool-owned directories that never host member crates.
+# `.dev` also contains read-only reference checkouts used for implementation study.
 SKIP_DIRECTORIES = frozenset(
     {
         ".agents",
+        ".dev",
         ".git",
         ".gradle-sandbox",
         ".playwright-cli",
@@ -193,6 +195,15 @@ class WorkspaceMemberTests(unittest.TestCase):
         vendored.mkdir(parents=True, exist_ok=True)
         (vendored / "Cargo.toml").write_text(
             "[package]\nname = \"dep\"\n", encoding="utf-8"
+        )
+        self.assertEqual(validate_workspace(self.root), [])
+
+    def test_read_only_reference_directories_are_skipped(self) -> None:
+        self.write_root_manifest([])
+        reference = self.root / ".dev" / "refs" / "example"
+        reference.mkdir(parents=True, exist_ok=True)
+        (reference / "Cargo.toml").write_text(
+            "[package]\nname = \"example\"\n", encoding="utf-8"
         )
         self.assertEqual(validate_workspace(self.root), [])
 
