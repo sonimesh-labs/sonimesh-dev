@@ -130,6 +130,9 @@ and the lab is not a WLAN, pairing, or production security implementation. The
 production capture app and its boundary checks remain separate. An additional
 emulator-only mode sends protected media datagrams via the emulator's host
 loopback alias after an ADB-reversed lab bootstrap, as scoped in ADR 0005.
+The lab activity presents the service's current connection and capture state,
+including a terminal reason on connection failure or projection revocation;
+this process-local status is not a production diagnostics interface.
 
 `tools/android_capture_preflight.py` is a separate, read-only lab helper. It
 requires an explicitly selected, printable single-line ADB serial but does not

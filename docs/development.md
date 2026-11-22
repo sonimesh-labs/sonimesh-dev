@@ -95,6 +95,10 @@ and PCM output endpoint. The bootstrap is not authenticated pairing and neither
 listener is a LAN endpoint. Remove the mapping with `adb reverse --remove
 tcp:39092` when finished.
 
+The lab screen shows connection and capture status, including a desktop
+connection failure or disconnect and a stopped projection. Status is kept in
+memory while the lab process remains alive; it is not a persistent session log.
+
 On 2026-11-22 the API 37 x86_64 emulator passed the published Android-to-desktop
 media crypto vector. In a capture run the desktop processed 502 authenticated
 packets, decoded 499 frames, concealed one frame, and rendered a peak of 0.094.

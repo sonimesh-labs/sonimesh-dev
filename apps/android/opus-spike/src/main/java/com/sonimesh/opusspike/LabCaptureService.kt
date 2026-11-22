@@ -38,6 +38,7 @@ class LabCaptureService : Service() {
     private var socket: Socket? = null
     private var projection: MediaProjection? = null
     private val handler = Handler(Looper.getMainLooper())
+    private var terminalStatus = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -48,6 +49,7 @@ class LabCaptureService : Service() {
             return START_NOT_STICKY
         }
         if (!running.compareAndSet(false, true)) return START_NOT_STICKY
+        LabStatus.publish("Connecting to the desktop listener…")
         try {
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(NotificationChannel("lab", "Audio lab", NotificationManager.IMPORTANCE_LOW))
@@ -63,13 +65,13 @@ class LabCaptureService : Service() {
                 ?: error("projection unavailable")
             projection = current
             current.registerCallback(object : MediaProjection.Callback() {
-                override fun onStop() { stopSelf() }
+                override fun onStop() { finishWith("Screen capture ended. Grant consent again to restart.") }
             }, handler)
             val udpMode = intent.getBooleanExtra("udpMode", false)
             Thread({ capture(current, udpMode) }, "audio-lab-capture").start()
         } catch (error: Exception) {
             Log.e("SoniMeshLab", "Unable to start capture", error)
-            stopSelf()
+            finishWith("Unable to start capture. Check permissions and try again.")
         }
         return START_NOT_STICKY
     }
@@ -78,6 +80,7 @@ class LabCaptureService : Service() {
     private fun capture(projection: MediaProjection, udpMode: Boolean) {
         var record: AudioRecord? = null
         var codec: MediaCodec? = null
+        var connected = false
         try {
             val connection = Socket()
             synchronized(socketLock) {
@@ -103,6 +106,7 @@ class LabCaptureService : Service() {
             } else {
                 Thread({ writePackets(connection, packets) }, "audio-lab-sender").start()
             }
+            connected = true
             val captureConfig = AudioPlaybackCaptureConfiguration.Builder(projection)
                 .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
                 .addMatchingUsage(AudioAttributes.USAGE_GAME)
@@ -122,6 +126,9 @@ class LabCaptureService : Service() {
             activeCodec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             activeCodec.start()
             activeRecord.startRecording()
+            handler.post {
+                if (running.get() && !terminalStatus) LabStatus.publish("Capturing audio and sending to desktop.")
+            }
             val pcm = ShortArray(1_920)
             val info = MediaCodec.BufferInfo()
             var filled = 0
@@ -162,7 +169,12 @@ class LabCaptureService : Service() {
                 }
             }
         } catch (error: Exception) {
-            if (running.get()) Log.e("SoniMeshLab", "Capture or encoding failed", error)
+            if (running.get()) {
+                Log.e("SoniMeshLab", "Capture or encoding failed", error)
+                val message = if (connected) "Capture or encoding failed. Check device support and try again."
+                    else "Desktop connection failed. Start the listener and check ADB reverse."
+                handler.post { finishWith(message) }
+            }
         } finally {
             try { record?.stop() } catch (_: IllegalStateException) { }
             record?.release()
@@ -182,7 +194,10 @@ class LabCaptureService : Service() {
                 output.write(packet.bytes)
             }
         } catch (error: Exception) {
-            if (running.get()) Log.e("SoniMeshLab", "Desktop connection failed", error)
+            if (running.get()) {
+                Log.e("SoniMeshLab", "Desktop connection failed", error)
+                handler.post { finishWith("Desktop connection ended. Restart the listener to reconnect.") }
+            }
         } finally {
             handler.post { stopSelf() }
         }
@@ -199,7 +214,10 @@ class LabCaptureService : Service() {
                 }
             }
         } catch (error: Exception) {
-            if (running.get()) Log.e("SoniMeshLab", "UDP sender failed", error)
+            if (running.get()) {
+                Log.e("SoniMeshLab", "UDP sender failed", error)
+                handler.post { finishWith("UDP sending failed. Restart the lab session.") }
+            }
         } finally {
             sealer.clear()
             handler.post { stopSelf() }
@@ -212,12 +230,21 @@ class LabCaptureService : Service() {
         } catch (error: Exception) {
             if (running.get()) Log.e("SoniMeshLab", "Lab control connection ended", error)
         } finally {
+            if (running.get()) handler.post { finishWith("Desktop connection ended. Restart the listener to reconnect.") }
             handler.post { stopSelf() }
         }
     }
 
+    private fun finishWith(message: String) {
+        if (!running.get() || terminalStatus) return
+        terminalStatus = true
+        LabStatus.publish(message)
+        stopSelf()
+    }
+
     override fun onDestroy() {
         running.set(false)
+        if (!terminalStatus) LabStatus.publish("Capture stopped.")
         synchronized(socketLock) {
             try { socket?.close() } catch (_: java.io.IOException) { }
             socket = null

@@ -20,6 +20,8 @@ import kotlin.math.sin
 class LabActivity : Activity() {
     private var tone: AudioTrack? = null
     private var udpMode = false
+    private lateinit var status: TextView
+    private val statusObserver: (String) -> Unit = { status.text = "Status: $it" }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -35,6 +37,8 @@ class LabActivity : Activity() {
         layout.addView(TextView(this).apply {
             text = "Audio lab: start the desktop listener and ADB reverse first. Capture can be silent if the source disallows it."
         })
+        status = TextView(this).apply { accessibilityLiveRegion = android.view.View.ACCESSIBILITY_LIVE_REGION_POLITE }
+        layout.addView(status)
         layout.addView(Button(this).apply {
             text = "Start ADB capture"
             setOnClickListener { startCapture(false) }
@@ -54,6 +58,16 @@ class LabActivity : Activity() {
         setContentView(layout)
     }
 
+    override fun onStart() {
+        super.onStart()
+        LabStatus.observe(statusObserver)
+    }
+
+    override fun onStop() {
+        LabStatus.remove(statusObserver)
+        super.onStop()
+    }
+
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putBoolean("udpMode", udpMode)
         super.onSaveInstanceState(outState)
@@ -68,7 +82,10 @@ class LabActivity : Activity() {
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == 1 && grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) requestProjection()
+        if (requestCode == 1) {
+            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) requestProjection()
+            else LabStatus.publish("Microphone permission is required for playback capture.")
+        }
     }
 
     private fun requestProjection() {
@@ -84,6 +101,8 @@ class LabActivity : Activity() {
                 putExtra("resultData", data)
                 putExtra("udpMode", udpMode)
             })
+        } else if (requestCode == 2) {
+            LabStatus.publish("Screen capture consent was not granted.")
         }
     }
 
