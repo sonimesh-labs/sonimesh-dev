@@ -9,6 +9,7 @@ mod control_stream;
 mod control_to_mixer;
 mod desktop_control_owner;
 mod desktop_receiver_owner;
+mod desktop_receiver_scheduler;
 mod diagnostic_export_action;
 mod export_store;
 mod format_adapted_render_source_factory;
@@ -54,6 +55,7 @@ pub use desktop_control_owner::{
 };
 pub use desktop_receiver_owner::DesktopReceiverOwner;
 pub use desktop_receiver_owner::UdpMediaTick;
+pub use desktop_receiver_scheduler::{DesktopReceiverScheduler, DesktopReceiverSchedulerError};
 pub use diagnostic_export_action::{
     DEFAULT_MAX_RETAINED_EXPORT_BYTES, DEFAULT_MAX_RETAINED_EXPORTS, DiagnosticExportAction,
     DiagnosticExportActionError, ExportReceipt, ExportRetentionJournal, ExportRetentionPolicy,

@@ -729,6 +729,9 @@ envelope per tick,
 returns correlated lifecycle statuses for start/rotate/stop, and returns a
 correlated wire error for an owner rejection. It is still a composition
 boundary, not a live Tauri shell or a proof of Windows audio output.
+`DesktopReceiverScheduler` now owns that receiver owner plus an optional control
+channel, automatically retires a closed/error channel, and exposes the UDP
+`tick_media` operation through the same scheduling boundary.
 The composable polls the same low-rate snapshot command once per second and clears
 that timer on unmount, so reconnect countdowns and asynchronous output faults do
 not depend on a user clicking Refresh.
