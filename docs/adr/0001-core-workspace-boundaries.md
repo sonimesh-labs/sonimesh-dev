@@ -29,9 +29,9 @@ until their platform ADRs have enough prototype evidence to select build/runtime
 dependencies.
 
 An isolated desktop output-probe shell may use Tauri 2 outside the shared Rust
-workspace to exercise the existing CPAL read-only enumeration adapter. Its one
-command returns device names and default formats to a separate probe view; it
-does not claim a receiver, change output selection, or start audio. The main
+workspace to exercise CPAL enumeration and an explicitly requested short test
+tone on a selected endpoint. It does not claim a receiver or change the system
+default output. The main
 desktop preview remains synthetic until a real session owner exists. Tauri and
 webview dependencies remain outside the six shared crates.
 

@@ -292,8 +292,9 @@ when the platforms packages are present.
 ### Windows desktop output probe
 
 The isolated Tauri prototype displays the Windows output endpoints and default
-formats returned by the CPAL adapter. It does not start audio or control a
-receiver. If one endpoint's format cannot be read, it remains listed with an
+formats returned by the CPAL adapter, and can play a short test tone after the
+operator selects an endpoint. It does not control a receiver or change the
+system default output. If one endpoint's format cannot be read, it remains listed with an
 unavailable-format indication. Build the web assets and run the prototype from
 the repository root:
 
@@ -307,12 +308,15 @@ cargo +1.98.1 run --manifest-path tools/tauri-output-prototype/Cargo.toml --lock
 
 This separate prototype uses Rust 1.98.1 for its locked Tauri dependencies; the
 shared workspace remains on Rust 1.85.0. Windows WebView2 is required. The window
-is not the receiver control UI and does not verify playback, latency, or pairing.
+is not the receiver control UI and does not verify receiver playback, latency, or pairing.
 Its application icon uses the Feather `headphones` icon (MIT license).
 On 2026-11-22, a Windows desktop debug build opened this window and displayed
 five CPAL output endpoints, their formats, and the default marker through the
 Tauri IPC path; a refresh retained the five listed endpoints. This is a
 read-only enumeration check, not playback evidence.
+On the same date, a test tone was requested through the window on a virtual
+Windows output endpoint; the CPAL stream reported callbacks without errors and
+the UI reported completion. Audibility was not assessed.
 
 ## Core checks
 

@@ -363,3 +363,5 @@ button:focus-visible, select:focus-visible, a:focus-visible { outline: 3px solid
 }
 
 .probe-list .selected-device { margin: 0; }
+.probe-list .selected-device > div { flex: 1; }
+.probe-play { flex-shrink: 0; }

@@ -65,7 +65,13 @@ The separate desktop output probe enumerates endpoint identities first and
 queries each default format independently. An endpoint whose format cannot be
 queried remains visible with its format marked unavailable; enumeration failure
 is still reported as a list-level error. This is a read-only snapshot and does
-not establish output support or device recovery.
+not establish output support or device recovery. The operator may explicitly
+request a two-second, low-amplitude test tone on a listed endpoint. The test
+re-probes that endpoint, owns the CPAL stream on a worker, and stops it after
+the test. It waits for samples to be generated and estimates drain time from the
+largest observed callback; this is not proof that the device played every sample.
+It does not alter the system default or establish a receiver session, audibility,
+latency, or device-recovery evidence.
 The UDP lab may retry the selected endpoint after a reported output fault while
 its media session remains connected. Recovery recreates the PCM endpoint outside
 the callback and preserves the local gain and mute settings. It does not follow a
