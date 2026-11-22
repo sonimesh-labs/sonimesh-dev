@@ -15,8 +15,30 @@ use sonimesh_protocol::Envelope;
 
 use crate::{
     ControlSessionToken, ControlStreamAction, DesktopControlOwner, DesktopControlOwnerError,
-    ReceiverPcmProducerInstaller, UdpPollOutcome, UdpReceiverError, UdpReceiverPipeline,
+    ReceiverPcmProducerInstaller, ReceiverPipelineError, UdpPollOutcome, UdpReceiverError,
+    UdpReceiverPipeline,
 };
+
+/// Result of one UDP media scheduler tick.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct UdpMediaTick {
+    poll: UdpPollOutcome,
+    decode: DecodeStep,
+}
+
+impl UdpMediaTick {
+    /// Returns the non-blocking packet poll outcome.
+    #[must_use]
+    pub const fn poll(&self) -> UdpPollOutcome {
+        self.poll
+    }
+
+    /// Returns the stream-local decode or PLC decision.
+    #[must_use]
+    pub const fn decode(&self) -> DecodeStep {
+        self.decode
+    }
+}
 
 /// Owns one shell-facing desktop control owner and its injected media pipeline.
 pub struct DesktopReceiverOwner<
@@ -150,6 +172,26 @@ where
     ) -> Result<DecodeStep, DecodeWorkerError<D::Error>> {
         self.pipeline
             .decode_next_with_arrivals_pending(arrivals_pending)
+    }
+
+    /// Polls one datagram and immediately runs one decode or PLC decision.
+    ///
+    /// The packet result controls the target-gated `arrivals_pending` input,
+    /// keeping the scheduling decision in one low-rate call outside the output
+    /// callback.
+    ///
+    /// # Errors
+    ///
+    /// Returns the UDP socket, protected-pipeline, or decoder error that stops
+    /// this tick.
+    pub fn tick_media(&mut self) -> Result<UdpMediaTick, UdpReceiverError<D::Error>> {
+        let poll = self.pipeline.poll()?;
+        let arrivals_pending = matches!(poll, UdpPollOutcome::Processed { .. });
+        let decode = self
+            .pipeline
+            .decode_next_with_arrivals_pending(arrivals_pending)
+            .map_err(|error| UdpReceiverError::Pipeline(ReceiverPipelineError::Decode(error)))?;
+        Ok(UdpMediaTick { poll, decode })
     }
 
     /// Returns the local UDP media endpoint assigned to the injected pipeline.
@@ -385,5 +427,8 @@ mod tests {
             Ok(crate::UdpPollOutcome::Empty)
         ));
         assert!(receiver.decode_media(false).is_ok());
+        let tick = receiver.tick_media().unwrap();
+        assert!(matches!(tick.poll(), crate::UdpPollOutcome::Empty));
+        let _decode = tick.decode();
     }
 }

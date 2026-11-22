@@ -718,7 +718,9 @@ the injected receiver pipeline, and optional stream counters together, while
 leaving decoder, socket, and output construction to the application layer. Its
 UDP specialization exposes one nonblocking packet poll and one decode/PLC step
 per scheduler tick so the future shell can drive media work outside the output
-callback.
+callback. `DesktopReceiverOwner::tick_media` now combines those two operations
+and returns both the packet admission and decode/PLC decision, so a scheduler
+does not need to reconstruct the `arrivals_pending` input itself.
 After pairing, `DesktopControlSession` is the shell-neutral transport adapter:
 construct it with the `TrustedControlChannel` parts and the installed owner
 session token, call `poll_once` from the control loop, and call `flush` when a

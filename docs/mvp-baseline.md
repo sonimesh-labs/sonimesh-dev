@@ -84,6 +84,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   envelope per poll, and returns correlated lifecycle status/error envelopes;
   hello acknowledgement, a live Tauri shell, and platform output evidence remain
   open;
+- a bounded `DesktopReceiverOwner::tick_media` operation that couples one UDP
+  poll with one decode/PLC decision and reports both outcomes to the low-rate
+  scheduler;
 - deterministic virtual-clock/network profiles for random and burst loss,
   jitter, duplication, reorder delay, byte-counted bandwidth serialization,
   capacity pressure, and Windows/Linux CI;
