@@ -26,8 +26,11 @@ owner. The `ControlToMixerBridge` composition object exposes the same
 projection through `desktop_snapshot_at(pairing, now_ms)`, observing the
 pairing clock and the reconnect-grace clock and reading the output lifecycle
 from the bridge's own mixer
-session, so the future control-surface command layer can consume a
-synchronized view from one object. The projection excludes pairing IDs,
+session. `DesktopControlOwner` now composes that bridge with the pairing
+controller and diagnostic export action for low-rate commands such as snapshot
+polling, invitation lifecycle, stream-local gain/mute, and bounded export. A
+future Tauri shell can delegate to this owner without moving UI code into the
+realtime path. The projection excludes pairing IDs,
 proofs, addresses, session material, PCM,
 encoded media, realtime callbacks, platform output handles, and device-selection
 metadata. Within its redacted output value, `stream_active` and

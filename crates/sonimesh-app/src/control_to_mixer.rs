@@ -37,6 +37,8 @@ pub enum ControlToMixerError {
     Control(ControlStreamError),
     /// The mixer session rejected the operation.
     Mixer(MixerStreamSessionError),
+    /// The requested local gain was outside the bounded control range.
+    Gain(crate::GainControlError),
 }
 
 impl core::fmt::Display for ControlToMixerError {
@@ -44,6 +46,7 @@ impl core::fmt::Display for ControlToMixerError {
         match self {
             Self::Control(error) => write!(formatter, "control-to-mixer control failure: {error}"),
             Self::Mixer(error) => write!(formatter, "control-to-mixer mixer failure: {error}"),
+            Self::Gain(error) => write!(formatter, "control-to-mixer gain failure: {error}"),
         }
     }
 }
@@ -53,6 +56,7 @@ impl std::error::Error for ControlToMixerError {
         match self {
             Self::Control(error) => Some(error),
             Self::Mixer(error) => Some(error),
+            Self::Gain(error) => Some(error),
         }
     }
 }
@@ -245,6 +249,45 @@ where
     /// Mutably borrows the mixer session for pump and drift control.
     pub fn mixer_mut(&mut self) -> &mut MixerStreamSession<O, SLOTS, OUTPUT_SAMPLES_PER_BLOCK> {
         &mut self.mixer
+    }
+
+    /// Publishes one stream's bounded local gain target.
+    ///
+    /// This is a control-domain operation. The returned handle is shared with
+    /// the preallocated realtime render source, so the callback observes the
+    /// new target without receiving a command or crossing the UI boundary.
+    ///
+    /// # Errors
+    ///
+    /// Returns a mixer error for an unknown stream and a gain error for an
+    /// invalid target.
+    pub fn set_stream_gain(
+        &self,
+        identity: MediaStreamIdentity,
+        gain: f32,
+    ) -> Result<(), ControlToMixerError> {
+        self.mixer
+            .gain(identity)
+            .map_err(ControlToMixerError::Mixer)?
+            .set_gain(gain)
+            .map_err(ControlToMixerError::Gain)
+    }
+
+    /// Publishes one stream's local mute flag.
+    ///
+    /// # Errors
+    ///
+    /// Returns a mixer error when the stream identity is not admitted.
+    pub fn set_stream_muted(
+        &self,
+        identity: MediaStreamIdentity,
+        muted: bool,
+    ) -> Result<(), ControlToMixerError> {
+        self.mixer
+            .gain(identity)
+            .map_err(ControlToMixerError::Mixer)?
+            .set_muted(muted);
+        Ok(())
     }
 
     /// Installs one freshly authenticated control transport.
