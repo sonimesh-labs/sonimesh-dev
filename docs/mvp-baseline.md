@@ -335,8 +335,10 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
 - a buildable Vue/Vite receiver-control preview with a single low-rate bridge
   boundary, session controls, output selection, per-stream volume and mute,
   pairing-invitation state, and diagnostics presentation for packet,
-  PCM-queue/refill, and resampling state; it uses in-memory preview data and
-  has no Tauri, audio, key, or realtime integration.
+  PCM-queue/refill, and resampling state; it uses in-memory preview data by
+  default and also contains an injectable Tauri IPC adapter for the future shell.
+  There is still no receiver-owner, audio, key, or realtime integration in the
+  desktop UI process.
 - an isolated Tauri output-probe prototype that lists Windows CPAL devices and
   their default formats and can play a short test tone on a selected endpoint.
   It does not own a receiver session or change the system default output.

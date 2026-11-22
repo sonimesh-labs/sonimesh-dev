@@ -628,7 +628,7 @@ sonimesh-audio          -> diagnostics per-slot counters; crossbeam-queue behind
 sonimesh-platform       -> platform contracts; optional Windows CPAL feasibility adapter
 sonimesh-diagnostics    -> standard library only
 sonimesh-protocol       -> Prost-generated bounded control schemas
-desktop UI              -> Vue/Vite control preview; Tauri bridge remains gated
+desktop UI              -> Vue/Vite control preview plus injectable low-rate Tauri adapter
 Android                 -> capture-only phase 0A prototype; sender transport remains gated
 ~~~
 
@@ -701,12 +701,14 @@ CI runs `npm ci`, `npm test`, and `npm run build` on current Ubuntu and
 Windows runners with Node.js 22.22.2. `npm test` and `npm run build` are the
 enforced gates repeated in the Core checks pre-CI contract; `npm install` and
 `npm run dev` are local-dev conveniences only. This validates the deterministic
-preview UI tests and production bundle only; it does not validate a Tauri
-integration or any audio, pairing, or platform capability.
+preview UI tests and production bundle only; it does not validate a live Tauri
+shell, receiver owner, audio, pairing, or platform capability.
 
-The bundled preview bridge is intentionally not a Tauri implementation. It
-exists to validate the control surface without turning pending Windows output,
-pairing, or packaging work into a platform claim.
+The bundled preview bridge remains the default browser implementation. The
+injectable `TauriDesktopBridge` only maps low-rate commands to a shell-provided
+`invoke` function; it does not create a receiver owner or carry audio, keys, or
+realtime callbacks. A live shell and command owner are still pending platform
+integration work.
 
 ## File and module size
 
