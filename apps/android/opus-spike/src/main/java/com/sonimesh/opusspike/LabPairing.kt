@@ -15,3 +15,19 @@ internal fun labInvitation(pinText: String, controlHost: String = "127.0.0.1"): 
         controlHost, 47610, pin, 120_100, output)
     return output.copyOf(size)
 }
+
+internal fun labHexToBytes(text: String): ByteArray {
+    val normalized = text.trim()
+    require(normalized.isNotEmpty() && normalized.length % 2 == 0)
+    require(normalized.length <= PairingQr.MAX_PAYLOAD_BYTES * 2)
+    return ByteArray(normalized.length / 2) { index ->
+        val high = normalized[index * 2].digitToIntOrNull(16)
+        val low = normalized[index * 2 + 1].digitToIntOrNull(16)
+        require(high != null && low != null)
+        ((high shl 4) or low).toByte()
+    }
+}
+
+internal fun labHex(bytes: ByteArray): String = buildString(bytes.size * 2) {
+    bytes.forEach { append("%02x".format(it.toInt() and 0xff)) }
+}

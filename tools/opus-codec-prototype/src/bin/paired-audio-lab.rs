@@ -31,8 +31,8 @@ use sonimesh_network::{
     UntrustedControlWrite, server_config,
 };
 use sonimesh_protocol::{
-    Capability, Envelope, Hello, MAX_QR_PAYLOAD_LEN, MediaDirection, SessionSecret, StreamState,
-    envelope,
+    Capability, Envelope, Hello, MAX_QR_PAYLOAD_LEN, MediaDirection, PairingQrPayload,
+    SessionSecret, StreamState, envelope,
 };
 use zeroize::{Zeroize, Zeroizing};
 
@@ -67,7 +67,9 @@ fn run() -> LabResult<()> {
     for byte in &pin {
         write!(pin_hex, "{byte:02x}")?;
     }
+    let invitation = render_lab_invitation(pin.as_ref(), options.host)?;
     println!("SPKI_HEX {pin_hex}");
+    println!("INVITATION_HEX {}", bytes_to_hex(&invitation));
     println!("LISTENING {address}");
     println!("INVITATION_HOST {}", options.host);
     loop {
@@ -92,6 +94,31 @@ fn run() -> LabResult<()> {
             Err(error) => eprintln!("Session ended: {error}"),
         }
     }
+}
+
+fn render_lab_invitation(pin: &[u8], host: Ipv4Addr) -> LabResult<Vec<u8>> {
+    let host = host.to_string();
+    let payload = PairingQrPayload {
+        protocol_version: u8::try_from(sonimesh_protocol::CONTROL_PROTOCOL_VERSION)?,
+        pairing_id: LAB_ID,
+        pairing_secret: LAB_SECRET,
+        control_host: &host,
+        control_port: 47610,
+        desktop_tls_spki: pin,
+        expires_at_ms: 120_100,
+    };
+    let mut encoded = vec![0_u8; MAX_QR_PAYLOAD_LEN];
+    let length = payload.encode_into(&mut encoded)?;
+    encoded.truncate(length);
+    Ok(encoded)
+}
+
+fn bytes_to_hex(bytes: &[u8]) -> String {
+    let mut hex = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        write!(hex, "{byte:02x}").expect("writing to a String cannot fail");
+    }
+    hex
 }
 
 fn run_session(
@@ -1145,6 +1172,19 @@ mod tests {
         assert_eq!(network.host, Ipv4Addr::new(10, 0, 2, 2));
         assert!(Options::parse(args(&["--bind", "0.0.0.0"])).is_err());
         assert!(Options::parse(args(&["--bind", "0.0.0.0", "--host", "0.0.0.0"])).is_err());
+    }
+
+    #[test]
+    fn rendered_lab_invitation_is_bounded_and_decodes_to_the_listener_host() {
+        let payload = render_lab_invitation(&[0xAB; 32], Ipv4Addr::new(10, 0, 2, 2)).unwrap();
+        assert_eq!(payload.len(), 67 + "10.0.2.2".len() + 32);
+        let decoded = sonimesh_protocol::parse_pairing_qr_payload(&payload).unwrap();
+        assert_eq!(decoded.pairing_id, LAB_ID);
+        assert_eq!(decoded.pairing_secret, LAB_SECRET);
+        assert_eq!(decoded.control_host, "10.0.2.2");
+        assert_eq!(decoded.control_port, 47610);
+        assert_eq!(decoded.desktop_tls_spki, &[0xAB; 32]);
+        assert_eq!(bytes_to_hex(&payload).len(), payload.len() * 2);
     }
 
     #[test]

@@ -34,7 +34,13 @@ install both APKs. Set up
 cargo run -p opus-codec-prototype --bin paired-audio-lab -- --require-tone
 ~~~
 
-In another terminal, copy the printed public `SPKI_HEX` into `$pin` and run:
+The listener prints `SPKI_HEX` and a complete lab-only `INVITATION_HEX`. In the
+Android lab activity, paste `INVITATION_HEX` into **Lab invitation payload** and
+tap **Apply invitation payload** to fill the SPKI and paired control address.
+Enter the UDP address separately; the payload does not replace it. The payload
+contains the fixed public lab fixture secret and is not a production QR or a
+persistent trust record. If using the older manual setup, copy the printed
+`SPKI_HEX` into `$pin` and run:
 
 ~~~powershell
 adb shell am instrument -w -e pairingSpkiHex $pin -e class 'com.sonimesh.opusspike.PairedAudioInteropTest#pairs_starts_sends_opus_and_stops' com.sonimesh.opusspike.test/androidx.test.runner.AndroidJUnitRunner

@@ -16,6 +16,7 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import com.sonimesh.sender.protocol.PairingQr
 import kotlin.math.PI
 import kotlin.math.sin
 
@@ -28,6 +29,7 @@ class LabActivity : Activity() {
     private var pendingPin = ""
     private var pendingHost = "127.0.0.1"
     private lateinit var address: EditText
+    private lateinit var invitation: EditText
     private lateinit var pin: EditText
     private lateinit var host: EditText
     private lateinit var status: TextView
@@ -67,6 +69,20 @@ class LabActivity : Activity() {
                 ?: getPreferences(MODE_PRIVATE).getString("desktopAddress", DEFAULT_LAB_ADDRESS))
         }
         layout.addView(address)
+        layout.addView(TextView(this).apply {
+            text = "Lab invitation payload hex (optional; from the desktop listener)"
+        })
+        invitation = EditText(this).apply {
+            hint = "Paste INVITATION_HEX"
+            contentDescription = "Lab invitation payload"
+            setSingleLine(true)
+            setText(savedInstanceState?.getString("invitation") ?: "")
+        }
+        layout.addView(invitation)
+        layout.addView(Button(this).apply {
+            text = "Apply invitation payload"
+            setOnClickListener { applyInvitation() }
+        })
         layout.addView(Button(this).apply {
             text = "Start UDP capture"
             setOnClickListener { startCapture(true) }
@@ -131,6 +147,7 @@ class LabActivity : Activity() {
         outState.putString("pendingPin", pendingPin)
         outState.putString("pendingHost", pendingHost)
         outState.putString("address", address.text.toString())
+        outState.putString("invitation", invitation.text.toString())
         outState.putString("pin", pin.text.toString())
         outState.putString("host", host.text.toString())
         super.onSaveInstanceState(outState)
@@ -166,6 +183,19 @@ class LabActivity : Activity() {
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 1)
         } else requestProjection()
+    }
+
+    private fun applyInvitation() {
+        try {
+            val decoded = PairingQr.decode(labHexToBytes(invitation.text.toString()))
+            require(decoded.controlPort == 47610)
+            require(decoded.controlHost == "127.0.0.1" || parseLabAddress(decoded.controlHost) != null)
+            pin.setText(labHex(decoded.desktopTlsSpki))
+            host.setText(decoded.controlHost)
+            LabStatus.publish("Invitation applied. Enter the desktop IPv4 for UDP separately.")
+        } catch (_: IllegalArgumentException) {
+            LabStatus.publish("Paste a valid lab invitation payload.")
+        }
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
