@@ -722,9 +722,10 @@ callback. `DesktopReceiverOwner::tick_media` now combines those two operations
 and returns both the packet admission and decode/PLC decision, so a scheduler
 does not need to reconstruct the `arrivals_pending` input itself.
 After pairing, `DesktopControlSession` is the shell-neutral transport adapter:
-construct it with the `TrustedControlChannel` parts and the installed owner
-session token, call `poll_once` from the control loop, and call `flush` when a
-nonblocking write reports `Pending`. It executes one bounded envelope per tick,
+construct it with `DesktopControlSession::from_trusted_channel` and the
+installed owner session token, call `poll_once` from the control loop, and call
+`flush` when a nonblocking write reports `Pending`. It executes one bounded
+envelope per tick,
 returns correlated lifecycle statuses for start/rotate/stop, and returns a
 correlated wire error for an owner rejection. It is still a composition
 boundary, not a live Tauri shell or a proof of Windows audio output.

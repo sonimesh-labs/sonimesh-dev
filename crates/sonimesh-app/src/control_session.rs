@@ -8,13 +8,15 @@
 use std::io::{Read, Write};
 
 use sonimesh_network::{
-    UntrustedControlError, UntrustedControlPoll, UntrustedControlStream, UntrustedControlWrite,
+    PinnedServerChannel, UntrustedControlError, UntrustedControlPoll, UntrustedControlStream,
+    UntrustedControlWrite,
 };
 use sonimesh_protocol::{ControlFrameError, Envelope, ErrorCode, StreamState};
 
 use crate::{
     ControlReply, ControlSessionToken, ControlStreamAction, ControlToMixerError,
     DesktopControlOwnerError, DesktopReceiverOwner, ReceiverPcmProducerInstaller,
+    TrustedControlChannel,
 };
 use sonimesh_platform::AudioOutput;
 
@@ -39,6 +41,51 @@ pub enum ControlSessionPoll {
     },
     /// The peer closed the authenticated channel.
     Closed,
+}
+
+impl<
+    'a,
+    O,
+    P,
+    const SLOTS: usize,
+    const OUTPUT_SAMPLES_PER_BLOCK: usize,
+    const MAX_SOURCES: usize,
+    const PCM_SAMPLES_PER_BLOCK: usize,
+>
+    DesktopControlSession<
+        'a,
+        O,
+        P,
+        SLOTS,
+        OUTPUT_SAMPLES_PER_BLOCK,
+        MAX_SOURCES,
+        PCM_SAMPLES_PER_BLOCK,
+        PinnedServerChannel,
+    >
+where
+    O: AudioOutput,
+    P: ReceiverPcmProducerInstaller<PCM_SAMPLES_PER_BLOCK>,
+{
+    /// Builds a control session directly from a completed pairing exchange.
+    ///
+    /// The pairing exporter is no longer needed after proof verification and is
+    /// dropped here through its zeroizing wrapper.
+    #[must_use]
+    pub fn from_trusted_channel(
+        receiver: &'a mut DesktopReceiverOwner<
+            O,
+            P,
+            SLOTS,
+            OUTPUT_SAMPLES_PER_BLOCK,
+            MAX_SOURCES,
+            PCM_SAMPLES_PER_BLOCK,
+        >,
+        session: ControlSessionToken,
+        trusted: TrustedControlChannel,
+    ) -> Self {
+        let (channel, _exporter) = trusted.into_parts();
+        Self::new(receiver, session, channel)
+    }
 }
 
 /// Failure while polling, dispatching, or replying on one control session.

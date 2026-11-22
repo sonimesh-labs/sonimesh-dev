@@ -418,14 +418,15 @@ jitter, and output-backend ADRs using measured 10/20 ms and device results.
   a production provider, QR image transport, trust storage, or pairing. AEAD/HKDF
   media protection and bounded epoch rotation exist only after a caller supplies
   an authenticated control-session secret;
-- authenticated TLS control transport, discovery, and control-plane address
-  migration/reconnection. The UDP source pin can be reset by a fresh media
-  session, and the untrusted TCP framing reader still cannot authorize or
+- discovery, control-plane address migration/reconnection, and the live
+  concurrent accept/server loop. The UDP source pin can be reset by a fresh
+  media session, and the untrusted TCP framing reader still cannot authorize or
   supply one by itself. The ADR 0020 type-state wrapper now unlocks bounded
   control framing only after a verified pairing proof exchange over the
-  pinned channel, and loopback integration tests drive that framing into
-  hello negotiation, the coordinator transport token, a fresh allocator
-  identity, and a completed start. The desktop production provider now
+  pinned channel; `DesktopControlSession::from_trusted_channel` connects that
+  result to the receiver owner, while loopback integration tests drive the
+  framing into hello negotiation, the coordinator transport token, a fresh
+  allocator identity, and a completed start. The desktop production provider now
   exists behind [ADR 0021](./adr/0021-production-tls-provider.md):
   `sonimesh-network::desktop_tls` establishes pinned Rustls(`ring`) TLS 1.3
   channels, and an application-domain `PairingListener` exposes a non-blocking
