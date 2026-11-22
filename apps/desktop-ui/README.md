@@ -68,7 +68,10 @@ The production adapter uses these command names and payloads: `desktop_snapshot`
 `{ deviceId }`, `desktop_set_gain` with `{ gain }`, `desktop_set_muted` with
 `{ muted }`, `desktop_set_jitter_mode` with `{ mode }`,
 `desktop_export_diagnostics`, `desktop_create_pairing`, `desktop_expire_pairing`,
-and `desktop_revoke_pairing`. Preview simulation commands intentionally reject
+and `desktop_revoke_pairing`. The `desktop_set_gain` and `desktop_set_muted`
+commands address the unique active stream used by the single-source MVP. A
+future multi-stream shell must use identity-addressed owner methods instead of
+guessing which stream a global control targets. Preview simulation commands intentionally reject
 through this adapter so the UI cannot mistake test controls for receiver
 operations.
 

@@ -538,6 +538,30 @@ where
         records.next().is_none().then(|| record.gain.snapshot())
     }
 
+    /// Returns the gain handle when exactly one stream is admitted.
+    ///
+    /// This keeps the single-source desktop command surface identity-free while
+    /// preserving explicit identity addressing for multi-stream callers.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`MixerStreamSessionError::SingleStreamControlUnavailable`]
+    /// unless exactly one stream is admitted.
+    pub fn single_stream_gain_handle(&self) -> Result<GainControlHandle, MixerStreamSessionError> {
+        let mut records = self.records.iter().flatten();
+        let Some(record) = records.next() else {
+            return Err(MixerStreamSessionError::SingleStreamControlUnavailable {
+                stream_count: 0,
+            });
+        };
+        if records.next().is_some() {
+            return Err(MixerStreamSessionError::SingleStreamControlUnavailable {
+                stream_count: self.stream_count(),
+            });
+        }
+        Ok(record.gain.clone())
+    }
+
     /// Approximate source-format blocks waiting for conversion for one stream.
     ///
     /// # Errors
@@ -659,6 +683,11 @@ pub enum MixerStreamSessionError {
     DuplicateStream(MediaStreamIdentity),
     /// No admitted stream carries this identity.
     UnknownStream(MediaStreamIdentity),
+    /// A single-stream command was requested with zero or multiple streams.
+    SingleStreamControlUnavailable {
+        /// Number of currently admitted streams.
+        stream_count: usize,
+    },
     /// A stream operation was requested before the output started.
     OutputNotActive,
     /// The frame-duration and sample-rate budget cannot be represented.
@@ -699,6 +728,10 @@ impl fmt::Display for MixerStreamSessionError {
                     "mixer session stream {identity:?} is not admitted"
                 )
             }
+            Self::SingleStreamControlUnavailable { stream_count } => write!(
+                formatter,
+                "mixer session single-stream control requires exactly one admitted stream, found {stream_count}"
+            ),
             Self::OutputNotActive => formatter.write_str("mixer session output is not active"),
             Self::FrameBudgetOverflow => {
                 formatter.write_str("mixer session frame budget overflowed")
@@ -728,6 +761,7 @@ impl std::error::Error for MixerStreamSessionError {
             Self::SourceBlockMismatch { .. }
             | Self::DuplicateStream(_)
             | Self::UnknownStream(_)
+            | Self::SingleStreamControlUnavailable { .. }
             | Self::OutputNotActive
             | Self::FrameBudgetOverflow
             | Self::NonIntegralFrameBlock
@@ -1155,6 +1189,26 @@ mod tests {
         handle.set_gain(0.5).unwrap();
         let shared = session.gain(identity(1)).unwrap();
         assert!((shared.gain() - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn single_stream_gain_handle_requires_exactly_one_stream() {
+        let mut session = session(FakeOutput::default());
+        assert!(matches!(
+            session.single_stream_gain_handle(),
+            Err(MixerStreamSessionError::SingleStreamControlUnavailable { stream_count: 0 })
+        ));
+        session.start_output(selection(None)).unwrap();
+        let mut pipeline = FakePipeline::<SOURCE_SAMPLES>::default();
+        started(&mut session, identity(1), &mut pipeline);
+        let handle = session.single_stream_gain_handle().unwrap();
+        handle.set_gain(0.25).unwrap();
+        assert!((session.single_stream_gain().unwrap().gain - 0.25).abs() < 1e-6);
+        started(&mut session, identity(2), &mut pipeline);
+        assert!(matches!(
+            session.single_stream_gain_handle(),
+            Err(MixerStreamSessionError::SingleStreamControlUnavailable { stream_count: 2 })
+        ));
     }
 
     #[test]

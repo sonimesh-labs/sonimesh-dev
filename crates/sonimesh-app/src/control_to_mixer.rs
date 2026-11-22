@@ -296,6 +296,33 @@ where
         Ok(())
     }
 
+    /// Publishes the local gain target for the unique admitted stream.
+    ///
+    /// # Errors
+    ///
+    /// Returns a mixer error when zero or multiple streams are admitted, or a
+    /// gain error when the target is outside the bounded range.
+    pub fn set_single_stream_gain(&self, gain: f32) -> Result<(), ControlToMixerError> {
+        self.mixer
+            .single_stream_gain_handle()
+            .map_err(ControlToMixerError::Mixer)?
+            .set_gain(gain)
+            .map_err(ControlToMixerError::Gain)
+    }
+
+    /// Publishes the local mute flag for the unique admitted stream.
+    ///
+    /// # Errors
+    ///
+    /// Returns a mixer error when zero or multiple streams are admitted.
+    pub fn set_single_stream_muted(&self, muted: bool) -> Result<(), ControlToMixerError> {
+        self.mixer
+            .single_stream_gain_handle()
+            .map_err(ControlToMixerError::Mixer)?
+            .set_muted(muted);
+        Ok(())
+    }
+
     /// Returns the local gain/mute state when exactly one stream is admitted.
     #[must_use]
     pub fn single_stream_gain(&self) -> Option<crate::GainControlState> {
@@ -1561,6 +1588,37 @@ mod tests {
         assert!(!bridge.output_active());
         assert!(bridge.mixer().output().stopped);
         assert_eq!(bridge.state().phase(), SessionPhase::Reconnecting);
+    }
+
+    #[test]
+    fn single_stream_controls_update_unique_stream_and_reject_ambiguous_state() {
+        let mut bridge = bridge(FakeOutput::default());
+        assert!(matches!(
+            bridge.set_single_stream_gain(0.5),
+            Err(ControlToMixerError::Mixer(
+                MixerStreamSessionError::SingleStreamControlUnavailable { stream_count: 0 }
+            ))
+        ));
+
+        let session = bridge.install_authenticated_control_session().unwrap();
+        bridge.accept(session, &hello_envelope()).unwrap();
+        let mut pipeline = FakePipeline::<SOURCE_SAMPLES>::default();
+        start_one(&mut bridge, session, identity(1), &mut pipeline);
+        bridge.set_single_stream_gain(0.4).unwrap();
+        bridge.set_single_stream_muted(true).unwrap();
+        let state = bridge.single_stream_gain().unwrap();
+        assert!((state.gain - 0.4).abs() < 1e-6);
+        assert!(state.muted);
+
+        start_one(&mut bridge, session, identity(2), &mut pipeline);
+        assert!(matches!(
+            bridge.set_single_stream_muted(false),
+            Err(ControlToMixerError::Mixer(
+                MixerStreamSessionError::SingleStreamControlUnavailable { stream_count: 2 }
+            ))
+        ));
+        bridge.set_stream_muted(identity(1), false).unwrap();
+        assert!(!bridge.mixer().gain(identity(1)).unwrap().is_muted());
     }
 
     #[test]

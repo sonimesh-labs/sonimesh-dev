@@ -449,6 +449,29 @@ where
             .map_err(DesktopControlOwnerError::Mixer)
     }
 
+    /// Publishes a gain target for the unique active stream.
+    ///
+    /// # Errors
+    ///
+    /// Returns a mixer error when the stream count is not exactly one or the
+    /// target is invalid.
+    pub fn set_gain(&self, gain: f32) -> Result<(), DesktopControlOwnerError> {
+        self.bridge
+            .set_single_stream_gain(gain)
+            .map_err(DesktopControlOwnerError::Mixer)
+    }
+
+    /// Publishes a mute flag for the unique active stream.
+    ///
+    /// # Errors
+    ///
+    /// Returns a mixer error when the stream count is not exactly one.
+    pub fn set_muted(&self, muted: bool) -> Result<(), DesktopControlOwnerError> {
+        self.bridge
+            .set_single_stream_muted(muted)
+            .map_err(DesktopControlOwnerError::Mixer)
+    }
+
     /// Enumerates output endpoints for the desktop control surface.
     ///
     /// # Errors
