@@ -43,6 +43,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.stringResource
+import com.sonimesh.sender.R
 import com.sonimesh.sender.capture.CaptureEvidenceSnapshot
 import com.sonimesh.sender.capture.CaptureStatus
 import com.sonimesh.sender.capture.CaptureUiState
@@ -61,6 +63,7 @@ internal fun CaptureScreen(
     state: CaptureUiState,
     onStart: () -> Unit,
     onStop: () -> Unit,
+    onCopyEvidence: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -76,7 +79,10 @@ internal fun CaptureScreen(
         CaptureStatusCard(status = state.status)
         CaptureSummaryCard(status = state.status, evidence = state.evidence)
         if (state.evidence.hasObservations()) {
-            CaptureEvidenceCard(evidence = state.evidence)
+            CaptureEvidenceCard(
+                evidence = state.evidence,
+                onCopyEvidence = onCopyEvidence,
+            )
         }
         CaptureActionCard(
             active = state.status.isActive(),
@@ -268,7 +274,10 @@ private fun CaptureSummaryCard(
 }
 
 @Composable
-private fun CaptureEvidenceCard(evidence: CaptureEvidenceSnapshot) {
+private fun CaptureEvidenceCard(
+    evidence: CaptureEvidenceSnapshot,
+    onCopyEvidence: () -> Unit,
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -296,6 +305,15 @@ private fun CaptureEvidenceCard(evidence: CaptureEvidenceSnapshot) {
                 evidence.lastReadCompletionOffsetMillis?.let { "+${formatDuration(it)}" } ?: "Unavailable",
                 Modifier.fillMaxWidth(),
             )
+            OutlinedButton(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 50.dp),
+                onClick = onCopyEvidence,
+                shape = TileShape,
+            ) {
+                Text(stringResource(R.string.copy_capture_evidence), fontWeight = FontWeight.SemiBold)
+            }
         }
     }
 }

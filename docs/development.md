@@ -20,6 +20,13 @@ prototype requires the checked-in Gradle wrapper, Java 21, Android API 36, and
 Android Build Tools 35.0.0. The isolated Android 17 discovery spike additionally
 requires the Android API 37.0 platform.
 
+The capture-only app keeps a bounded, in-memory summary of the latest capture
+run. Once observations exist, **Copy capture evidence** places the current
+status, observed format, duration, frame counters, and read errors on the
+device clipboard for attaching to a local test report. The text is an operator
+summary, not a raw-audio export or a production diagnostic bundle; it is cleared
+when a new capture request begins.
+
 ### Android Opus interoperability lab
 
 The paired-audio interoperability lab exercises the real pairing, Hello and

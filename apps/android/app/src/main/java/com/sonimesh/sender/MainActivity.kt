@@ -2,11 +2,14 @@ package com.sonimesh.sender
 
 import android.Manifest
 import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -81,6 +84,7 @@ class MainActivity : ComponentActivity() {
                         state = state,
                         onStart = ::requestCapture,
                         onStop = { sendStopCommand() },
+                        onCopyEvidence = ::copyCaptureEvidence,
                     )
                 }
             }
@@ -129,6 +133,15 @@ class MainActivity : ComponentActivity() {
     private fun sendStopCommand() {
         startService(Intent(this, CaptureService::class.java).setAction(CaptureService.ACTION_STOP))
     }
+
+    private fun copyCaptureEvidence() {
+        val evidence = CaptureStateStore.state.value.copyableEvidence()
+        val clipboard = getSystemService(ClipboardManager::class.java)
+        clipboard.setPrimaryClip(
+            ClipData.newPlainText(getString(R.string.capture_evidence_clip_label), evidence),
+        )
+        Toast.makeText(this, R.string.capture_evidence_copied, Toast.LENGTH_SHORT).show()
+    }
 }
 
 
@@ -155,6 +168,9 @@ internal fun com.sonimesh.sender.capture.CaptureEvidenceSnapshot.description(): 
         "${silentFrames} silent frames across ${silentReads} reads, " +
         "${readErrors} read errors.$latestRead"
 }
+
+internal fun com.sonimesh.sender.capture.CaptureUiState.copyableEvidence(): String =
+    "SoniMesh capture evidence\nStatus: ${status.description()}\n${evidence.description()}"
 
 internal fun com.sonimesh.sender.capture.CaptureEvidenceSnapshot.hasObservations(): Boolean =
     captureDurationMillis != 0L || capturedFrames != 0L || silentFrames != 0L ||

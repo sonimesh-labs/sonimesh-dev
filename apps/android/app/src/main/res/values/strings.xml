@@ -5,4 +5,7 @@
     <string name="capture_notification_title">SoniMesh capture is active</string>
     <string name="capture_notification_text">Audio playback capture feasibility run</string>
     <string name="stop_capture">Stop capture</string>
+    <string name="copy_capture_evidence">Copy capture evidence</string>
+    <string name="capture_evidence_clip_label">SoniMesh capture evidence</string>
+    <string name="capture_evidence_copied">Capture evidence copied</string>
 </resources>
