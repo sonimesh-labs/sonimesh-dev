@@ -57,8 +57,11 @@ authenticated StartStream identity before acknowledging Streaming, and retires
 it before acknowledging StopStream. Its fixed invitation and local ports are
 test fixtures, not a persistent trust or production discovery mechanism. The
 lab also offers an optional Windows CPAL output: it starts the output before
-acknowledging Streaming, stops it before acknowledging Stopped, and ends the
-session if the output fails. Its software checks and callback counts do not
+acknowledging Streaming and stops it before acknowledging Stopped. If the output
+reports a fault during a session, the lab keeps the control and media session
+alive and retries the selected output once per second. It suspends playout until
+the output is recreated with a fresh PCM queue, then waits for new media before
+resuming. Its software checks and callback counts do not
 establish audible playback or latency on hardware.
 Its fixed 20 ms lab playout schedule advances from the previous deadline to
 avoid accumulating ordinary polling delay; if a whole period is missed, it
@@ -136,6 +139,10 @@ errors).
 - A second timeout test completes the pinned TLS handshake, then withholds the
   proof frame; the socket timeout expires during the proof read before invitation
   admission or session mutation.
+- The paired-audio lab's simulated output-fault test exercises a failed retry,
+  rate-limited recovery, stale jitter retirement, and fresh authenticated UDP
+  audio rendered through the recreated source. Physical device removal and
+  audible playback after recovery remain unverified.
 - Loopback tests trickle an incomplete TLS record and, separately, proof bytes
   after a completed TLS handshake. The receiver times out while the peer is
   attempting periodic writes, so progress cannot reset the exchange deadline.
