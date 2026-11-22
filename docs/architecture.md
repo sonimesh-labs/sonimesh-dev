@@ -32,8 +32,9 @@ polling, invitation lifecycle, output inventory/selection, stream-local
 gain/mute, and bounded export. Output selection is retained for the next output
 lifetime and cannot mutate an active callback stream. A
 shell-neutral `DesktopControlView` combines that lifecycle projection with the
-current output inventory, retained selection, and single-stream gain/mute state;
-it leaves multi-stream controls identity-addressed instead of guessing. A
+current output inventory, retained selection, single-stream gain/mute state, and
+redacted active-stream metrics; it leaves multi-stream controls identity-addressed
+instead of guessing. A
 `DesktopControlOwner` also owns the low-rate control-session and stream-lifecycle
 delegation boundary, while receiver pipelines remain injected by the application
 composition layer. A

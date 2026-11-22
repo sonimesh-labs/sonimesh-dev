@@ -339,9 +339,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   default and also contains an injectable Tauri IPC adapter for the future shell.
   The Rust app crate now also exposes a Tauri-independent `DesktopControlOwner`
   that composes synchronized snapshots, pairing lifecycle, output inventory and
-  stopped-state selection, stream-local gain/mute, and bounded diagnostic export
-  for a future shell command layer; it can also persist an export through the
-  existing bounded `ExportStore`. There
+  stopped-state selection, stream-local gain/mute, redacted active-stream metrics,
+  and bounded diagnostic export for a future shell command layer; it can also
+  persist an export through the existing bounded `ExportStore`. There
   is still no live Tauri shell, receiver-owner construction, audio, key, or
   realtime integration in the desktop UI process.
 - an isolated Tauri output-probe prototype that lists Windows CPAL devices and

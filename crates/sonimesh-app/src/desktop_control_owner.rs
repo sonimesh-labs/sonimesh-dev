@@ -9,7 +9,7 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use sonimesh_diagnostics::StreamCounters;
+use sonimesh_diagnostics::{StreamCounters, StreamMetricsSnapshot};
 use sonimesh_platform::{AudioOutput, OutputDeviceId, OutputDeviceInfo, OutputError};
 use sonimesh_protocol::Envelope;
 
@@ -50,6 +50,7 @@ pub struct DesktopControlView {
     output_devices: Vec<OutputDeviceInfo>,
     selected_output: Option<OutputDeviceId>,
     stream_control: Option<GainControlState>,
+    stream_metrics: Vec<StreamMetricsSnapshot>,
 }
 
 impl DesktopControlView {
@@ -75,6 +76,12 @@ impl DesktopControlView {
     #[must_use]
     pub const fn stream_control(&self) -> Option<GainControlState> {
         self.stream_control
+    }
+
+    /// Returns redacted metrics for active streams in stable mixer order.
+    #[must_use]
+    pub fn stream_metrics(&self) -> &[StreamMetricsSnapshot] {
+        &self.stream_metrics
     }
 }
 
@@ -184,6 +191,7 @@ where
             output_devices,
             selected_output: self.selected_output_device(),
             stream_control: self.bridge.single_stream_gain(),
+            stream_metrics: self.bridge.stream_metrics(),
         })
     }
 
@@ -731,6 +739,7 @@ mod tests {
         assert!(view.output_devices().is_empty());
         assert!(view.selected_output().is_none());
         assert!(view.stream_control().is_none());
+        assert!(view.stream_metrics().is_empty());
     }
 
     #[test]

@@ -727,6 +727,17 @@ where
             .map_err(ControlToMixerError::Mixer)
     }
 
+    /// Returns one redacted metrics snapshot per active mixer stream.
+    ///
+    /// The snapshots are copied from relaxed low-rate counters and remain
+    /// independent from the realtime output callback. Stream order follows the
+    /// mixer's stable record order so a shell can refresh metrics without
+    /// exposing media identities.
+    #[must_use]
+    pub fn stream_metrics(&self) -> Vec<StreamMetricsSnapshot> {
+        self.mixer.stream_metrics()
+    }
+
     /// Fills an allowlisted diagnostic export snapshot from live bridge state.
     ///
     /// The lifecycle phase maps onto the closed export phase set
@@ -1127,6 +1138,7 @@ mod tests {
         assert_eq!(streaming.active_streams(), 1);
         assert!(streaming.pending_mixer_commands() >= 1);
         assert!(streaming.output().stream_active());
+        assert_eq!(bridge.stream_metrics().len(), 1);
     }
 
     #[test]
