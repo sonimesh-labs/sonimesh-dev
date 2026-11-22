@@ -15,15 +15,17 @@ use rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
 use sonimesh_app::{
     ControlReply, ControlStreamAction, ControlStreamCoordinator, InvitationInputs,
     MediaSessionAllocator, PairingId, PairingInvitationController, PairingListener,
-    PairingQrInvitation, PairingSource, SessionState, UdpPollOutcome, UdpReceiverPipeline,
-    accept_pairing_stream, begin_from_rendered_payload,
+    PairingQrInvitation, PairingSource, ReceiverPipelineError, SessionState, UdpPollOutcome,
+    UdpReceiverError, UdpReceiverPipeline, accept_pairing_stream, begin_from_rendered_payload,
 };
 use sonimesh_audio::{
-    DecodeStep, FrameDecoder, OpusFrameConfig, StreamDecodeWorker, realtime_pcm_queue,
+    DecodeStep, DecodeWorkerError, FrameDecoder, OpusFrameConfig, StreamDecodeWorker,
+    realtime_pcm_queue,
 };
 use sonimesh_diagnostics::StreamCounters;
 use sonimesh_network::{
-    UntrustedControlPoll, UntrustedControlStream, UntrustedControlWrite, server_config,
+    IngressError, UdpReceiveError, UntrustedControlPoll, UntrustedControlStream,
+    UntrustedControlWrite, server_config,
 };
 use sonimesh_protocol::{
     Capability, Envelope, Hello, MAX_QR_PAYLOAD_LEN, MediaDirection, SessionSecret, StreamState,
@@ -207,6 +209,26 @@ fn negotiate_hello(
 const SAMPLES: usize = 1_920;
 const PLAYOUT_PERIOD: Duration = Duration::from_millis(20);
 type Receiver = UdpReceiverPipeline<ObservedDecoder, 8, 1_148, SAMPLES>;
+
+fn poll_media(receiver: &mut Receiver) -> LabResult<Option<UdpPollOutcome>> {
+    match receiver.poll() {
+        Ok(outcome) => Ok(Some(outcome)),
+        Err(
+            UdpReceiverError::Socket(UdpReceiveError::DatagramTooLarge)
+            | UdpReceiverError::SourceEndpointChanged
+            | UdpReceiverError::Pipeline(
+                ReceiverPipelineError::Ingress(
+                    IngressError::Parse(_)
+                    | IngressError::UnknownStream
+                    | IngressError::Authentication(_)
+                    | IngressError::Replay(_),
+                )
+                | ReceiverPipelineError::Decode(DecodeWorkerError::Frame(_)),
+            ),
+        ) => Ok(None),
+        Err(error) => Err(error.into()),
+    }
+}
 
 fn next_playout_deadline(deadline: Instant, now: Instant) -> Instant {
     if now.duration_since(deadline) >= PLAYOUT_PERIOD {
@@ -435,8 +457,9 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                         if let Some(metrics) = counters.take() {
                             let snapshot = metrics.snapshot();
                             println!(
-                                "RESULT packets {} late {} resync_dropped {} plc {} buffered {}",
+                                "RESULT packets {} rejected {} late {} resync_dropped {} plc {} buffered {}",
                                 snapshot.authenticated_packets,
+                                snapshot.rejected_packets,
                                 snapshot.late_packets,
                                 snapshot.jitter_resync_dropped_frames,
                                 snapshot.plc_frames,
@@ -480,9 +503,10 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
         playback.monitor()?;
         if let (Some(pipeline), Some(metrics)) = (&mut receiver, &counters) {
             for _ in 0..32 {
-                match pipeline.poll()? {
-                    UdpPollOutcome::Empty => break,
-                    UdpPollOutcome::Processed { .. } => {
+                match poll_media(pipeline)? {
+                    None => continue,
+                    Some(UdpPollOutcome::Empty) => break,
+                    Some(UdpPollOutcome::Processed { .. }) => {
                         if next_playout.is_none() {
                             next_playout = Some(Instant::now() + Duration::from_millis(60));
                         }
@@ -530,6 +554,64 @@ fn send_reply<S: std::io::Read + std::io::Write>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rejected_datagrams_do_not_end_the_receiver_or_advance_replay() {
+        use sonimesh_protocol::{MediaKeyContext, MediaSealer};
+        use std::net::UdpSocket;
+
+        let secret = SessionSecret::new([0x35; 32]);
+        let context = MediaKeyContext::new(7, 1, 0, MediaDirection::AndroidToDesktop).unwrap();
+        let metrics = Arc::new(StreamCounters::default());
+        let (producer, _consumer) = realtime_pcm_queue::<SAMPLES>(8).unwrap();
+        let worker = StreamDecodeWorker::new_for_opus(
+            ObservedDecoder {
+                decoder: lab_decoder::Decoder::new().unwrap(),
+                peak: Arc::new(AtomicU32::new(0)),
+            },
+            producer,
+            0,
+            OpusFrameConfig::new(48_000, 2, 20).unwrap(),
+        )
+        .unwrap();
+        let mut receiver = Receiver::bind_with_worker(
+            "127.0.0.1:0".parse().unwrap(),
+            &secret,
+            context,
+            worker,
+            Arc::clone(&metrics),
+        )
+        .unwrap();
+        let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let address = receiver.local_addr().unwrap();
+        let mut encoder =
+            opus::Encoder::new(48_000, opus::Channels::Stereo, opus::Application::Audio).unwrap();
+        let mut payload = [0_u8; 1_148];
+        let length = encoder
+            .encode_float(&[0.25_f32; SAMPLES], &mut payload)
+            .unwrap();
+        let mut sealer = MediaSealer::new(&secret, context).unwrap();
+        let valid = sealer.seal(0, 0, &payload[..length]).unwrap();
+        let mut tampered = valid.datagram.clone();
+        *tampered.last_mut().unwrap() ^= 1;
+        for packet in [&[0_u8][..], &[0_u8; 1_201][..], &tampered[..]] {
+            sender.send_to(packet, address).unwrap();
+        }
+        sender.send_to(&valid.datagram, address).unwrap();
+        sender.send_to(&valid.datagram, address).unwrap();
+        let until = Instant::now() + Duration::from_secs(2);
+        while metrics.snapshot().rejected_packets < 4 && Instant::now() < until {
+            poll_media(&mut receiver).unwrap();
+            std::thread::yield_now();
+        }
+        let snapshot = metrics.snapshot();
+        assert_eq!(snapshot.rejected_packets, 4);
+        assert_eq!(snapshot.jitter_frames, 1);
+        assert!(matches!(
+            receiver.decode_next().unwrap(),
+            DecodeStep::Decoded { sequence: 0, .. }
+        ));
+    }
 
     #[test]
     fn playout_deadline_does_not_accumulate_poll_delay() {

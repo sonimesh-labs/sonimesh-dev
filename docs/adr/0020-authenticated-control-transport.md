@@ -64,6 +64,10 @@ Its fixed 20 ms lab playout schedule advances from the previous deadline to
 avoid accumulating ordinary polling delay; if a whole period is missed, it
 rebases from the current time rather than issuing a burst of catch-up decodes.
 This is a lab scheduling policy, not a hardware-qualified drift controller.
+Malformed, oversized, replayed, unauthenticated, wrong-stream, or wrong-source
+UDP datagrams are rejected individually by this lab while socket and internal
+failures still terminate it. Authenticated frames rejected by the bounded frame
+admission are likewise discarded without restarting the session.
 The Android audio-lab service can also use that same loopback fixture with
 playback capture: it establishes pairing and starts a stream before sending,
 then sends StopStream when capture ends. During capture, the same worker polls
