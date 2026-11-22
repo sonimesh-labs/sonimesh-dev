@@ -57,10 +57,16 @@ queued peer with `try_accept`, while `accept_pairing_stream` performs the
 invitation-gated exchange on an already accepted stream. The split lets a
 caller own polling and scheduling without making the mutable pairing owner or
 session state concurrent. It is an admission boundary, not a concurrent
-pairing server loop. The exchange applies a fixed read/write deadline after
-accepting a TCP peer. The default is 30 seconds and covers the TLS handshake,
-the one proof frame, and the reply write; the implementation keeps the
-shorter-deadline injection private to tests. The blocking
+pairing server loop. The exchange currently applies a 30-second socket
+read/write timeout after accepting a TCP peer. This limits individual blocking
+operations, not the total elapsed exchange time; a peer making intermittent
+progress can hold the pairing owner longer. An absolute exchange deadline
+remains an implementation gate. Proof admission must account for monotonic
+time elapsed since the caller's immediately preceding monotonic time sample,
+including a blocking accept, and reject an invitation that expires during the
+exchange. Elapsed time is measured with `Instant` and truncated to milliseconds;
+the supplied clock must advance consistently with that clock. This estimate can
+lag the caller's millisecond clock by less than one millisecond. The blocking
 `accept_pairing_connection` compatibility helper remains available for one
 connection per call.
 
@@ -96,11 +102,13 @@ errors).
 - The Windows TLS provider spike remains the live-channel evidence for the
   same exchange shape; this module adds the type-state boundary around it.
 - The invitation listener's timeout test keeps a peer that sends no ClientHello
-  from occupying the pairing owner indefinitely; the deadline also covers the
-  fixed proof-frame read and reply write.
+  from occupying the pairing owner indefinitely; socket timeouts also apply to
+  the fixed proof-frame read and reply write.
 - A second timeout test completes the pinned TLS handshake, then withholds the
-  proof frame; the same deadline expires during the proof read before invitation
+  proof frame; the socket timeout expires during the proof read before invitation
   admission or session mutation.
+- A pinned TLS loopback test sends a valid proof after invitation expiry and
+  checks that admission fails, the invitation expires, and the session is idle.
 - The non-blocking listener unit test verifies an empty poll followed by
   loopback admission, while the stream-level timeout test verifies that the
   accepted-stream boundary preserves the serialized handshake owner.

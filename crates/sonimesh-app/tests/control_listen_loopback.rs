@@ -12,15 +12,16 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::sync::Arc;
 use std::thread;
+use std::time::Duration;
 
 use rcgen::generate_simple_self_signed;
 use rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
 use zeroize::{Zeroize, Zeroizing};
 
 use sonimesh_app::{
-    ControlStreamAction, ControlStreamCoordinator, InvitationInputs, PairingId,
-    PairingInvitationController, PairingListener, PairingQrInvitation, PairingSource, SessionState,
-    accept_pairing_stream, begin_from_rendered_payload,
+    ControlListenError, ControlStreamAction, ControlStreamCoordinator, InvitationInputs, PairingId,
+    PairingInvitationController, PairingListener, PairingQrInvitation, PairingRecordState,
+    PairingSource, SessionState, accept_pairing_stream, begin_from_rendered_payload,
 };
 use sonimesh_network::{
     UntrustedControlStream, client_config, connect_pinned_client, server_config,
@@ -35,6 +36,93 @@ const HOST: &str = "localhost";
 const LAB_PAIRING_SECRET: [u8; 32] = [0xC9_u8; 32];
 
 type TestResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
+
+#[test]
+fn valid_proof_received_after_invitation_expiry_is_rejected() -> TestResult<()> {
+    let listener = PairingListener::bind("127.0.0.1:0")?;
+    let address = listener.local_addr()?;
+    let invitation_id = PairingId::new([0x71; 16]);
+    let key = generate_simple_self_signed(vec![HOST.to_owned()])?;
+    let certificate = key.cert.der().clone();
+    let pin = key.key_pair.public_key_der();
+    let mut private = Zeroizing::new(key.key_pair.serialize_der());
+    let private_key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(private.to_vec()));
+    private.zeroize();
+    let tls = Arc::new(server_config(certificate, private_key)?);
+
+    let mut pairing = PairingInvitationController::<4>::new();
+    let mut session = SessionState::IDLE;
+    let mut payload = vec![0; MAX_QR_PAYLOAD_LEN];
+    let written = begin_from_rendered_payload(
+        &mut pairing,
+        &mut session,
+        100,
+        150,
+        2,
+        PairingQrInvitation {
+            id: invitation_id,
+            pairing_secret: LAB_PAIRING_SECRET,
+            control_host: HOST,
+            control_port: address.port(),
+            desktop_tls_spki: &pin,
+            expires_at_ms: 250,
+        },
+        &mut payload,
+    )?;
+    payload.truncate(written);
+
+    let desktop = thread::spawn(move || -> TestResult<()> {
+        let stream = loop {
+            if let Some(stream) = listener.try_accept()? {
+                break stream;
+            }
+            thread::yield_now();
+        };
+        let result = accept_pairing_stream(
+            stream,
+            tls,
+            &mut pairing,
+            &mut session,
+            100,
+            PairingSource::new([0x72; 16]),
+            &InvitationInputs {
+                invitation: invitation_id,
+                pairing_secret: LAB_PAIRING_SECRET,
+                scanned_payload: &payload,
+            },
+        );
+        assert!(matches!(result, Err(ControlListenError::Handshake(_))));
+        assert_eq!(pairing.state(), Some(PairingRecordState::Expired));
+        assert_eq!(session, SessionState::IDLE);
+        Ok(())
+    });
+
+    let (mut channel, exporter) = connect_pinned_client(
+        client_config(pin)?,
+        HOST,
+        &invitation_id.as_bytes(),
+        TcpStream::connect(address)?,
+    )?;
+    let binding = sonimesh_protocol::PairingBinding::new(
+        1,
+        invitation_id.as_bytes(),
+        LAB_PAIRING_SECRET,
+        exporter.as_ref(),
+    )?;
+    let frame = PairingProofFrame {
+        protocol_version: 1,
+        role: PairingRole::AndroidClient,
+        pairing_id: invitation_id.as_bytes(),
+        proof: binding.local_proof(PairingRole::AndroidClient)?,
+    };
+    let mut wire = [0; PROOF_FRAME_LEN];
+    frame.encode_into(&mut wire)?;
+    thread::sleep(Duration::from_millis(250));
+    channel.write_all(&wire)?;
+    channel.flush()?;
+    desktop.join().expect("desktop thread joins")?;
+    Ok(())
+}
 
 #[test]
 #[allow(clippy::too_many_lines)] // one end-to-end authenticated listener scenario

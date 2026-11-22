@@ -14,7 +14,7 @@
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream, ToSocketAddrs};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use zeroize::Zeroizing;
 
@@ -27,7 +27,7 @@ use crate::{
     PairingSource, ScannedProofAttempt, SessionState, verify_scanned_proof,
 };
 
-/// Bounds the TLS handshake, proof-frame read, and reply write for one invite.
+/// Socket timeout for blocking I/O during the pairing exchange.
 pub const DEFAULT_PAIRING_IO_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Non-blocking listener handle for a caller-owned pairing accept loop.
@@ -240,6 +240,8 @@ impl core::fmt::Debug for InvitationInputs<'_> {
 /// that rendered into the QR payload is used here. The function performs
 /// the full sequence: pinned TLS handshake, one bounded proof-frame read,
 /// attempt admission through the real owner, reply write.
+/// `now_ms` must be sampled immediately before this call from the same
+/// monotonic clock used to create the invitation.
 ///
 /// # Errors
 ///
@@ -257,6 +259,7 @@ pub fn accept_pairing_connection(
     source: PairingSource,
     inputs: &InvitationInputs<'_>,
 ) -> Result<(TrustedControlChannel, sonimesh_protocol::SessionSecret), ControlListenError> {
+    let started = Instant::now();
     let (stream, _) = listener.accept().map_err(ControlListenError::Socket)?;
     accept_pairing_stream_with_timeout(
         stream,
@@ -267,6 +270,7 @@ pub fn accept_pairing_connection(
         source,
         inputs,
         DEFAULT_PAIRING_IO_TIMEOUT,
+        started,
     )
 }
 
@@ -275,6 +279,8 @@ pub fn accept_pairing_connection(
 /// This is the handshake half of [`PairingListener`]. It is separate from
 /// accepting so a caller can poll or schedule socket admission without making
 /// the pairing owner or the accept loop concurrent.
+/// `now_ms` must be sampled immediately before this call from the same
+/// monotonic clock used to create the invitation.
 ///
 /// # Errors
 ///
@@ -298,6 +304,7 @@ pub fn accept_pairing_stream(
         source,
         inputs,
         DEFAULT_PAIRING_IO_TIMEOUT,
+        Instant::now(),
     )
 }
 
@@ -311,6 +318,7 @@ fn accept_pairing_stream_with_timeout(
     source: PairingSource,
     inputs: &InvitationInputs<'_>,
     io_timeout: Duration,
+    started: Instant,
 ) -> Result<(TrustedControlChannel, sonimesh_protocol::SessionSecret), ControlListenError> {
     // Accepted sockets may inherit the listener's non-blocking mode on some
     // platforms; normalize the handshake stream before applying deadlines.
@@ -331,7 +339,7 @@ fn accept_pairing_stream_with_timeout(
     let outcome = verify_scanned_proof(
         pairing,
         session,
-        now_ms,
+        admission_time_ms(now_ms, started),
         source,
         exporter.as_ref(),
         ScannedProofAttempt {
@@ -374,12 +382,20 @@ fn accept_pairing_stream_with_timeout(
     Ok((TrustedControlChannel { channel, exporter }, media_root))
 }
 
+fn admission_time_ms(now_ms: u64, started: Instant) -> u64 {
+    let Some(elapsed) = Instant::now().checked_duration_since(started) else {
+        return u64::MAX;
+    };
+    let millis = elapsed.as_millis();
+    now_ms.saturating_add(u64::try_from(millis).unwrap_or(u64::MAX))
+}
+
 #[cfg(test)]
 mod tests {
     use std::net::{TcpListener, TcpStream};
     use std::sync::Arc;
     use std::thread;
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     use rcgen::generate_simple_self_signed;
     use rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
@@ -470,6 +486,7 @@ mod tests {
                 PairingSource::new([0x33; 16]),
                 &inputs,
                 Duration::from_millis(100),
+                Instant::now(),
             )
         });
 
@@ -516,6 +533,7 @@ mod tests {
                 PairingSource::new([0x43; 16]),
                 &inputs,
                 Duration::from_millis(100),
+                Instant::now(),
             )
         });
 
