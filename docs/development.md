@@ -708,8 +708,9 @@ shell, receiver owner, audio, pairing, or platform capability.
 The bundled preview bridge remains the default browser implementation. The
 injectable `TauriDesktopBridge` only maps low-rate commands to a shell-provided
 `invoke` function; it does not create a receiver owner or carry audio, keys, or
-realtime callbacks. A live shell and command owner are still pending platform
-integration work.
+realtime callbacks. The shell-neutral `DesktopControlOwner` now provides the
+low-rate command owner for lifecycle, output, stream, and diagnostics actions;
+a live Tauri shell and its command bindings remain pending platform integration.
 
 ## File and module size
 

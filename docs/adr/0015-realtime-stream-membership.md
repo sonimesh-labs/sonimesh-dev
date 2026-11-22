@@ -193,10 +193,14 @@ The output stops and the lifecycle returns to `Ready` when the last stream
 stops. The bridge is
 control-domain code and is not part of the realtime scheduling path: the
 caller still advances adapter pumps and renders through the owned mixer
-session. The UI/Tauri command layer is not yet wired to the bridge. The Vue
-frontend now has an injectable `TauriDesktopBridge` contract that maps low-rate
-commands to Tauri `invoke` calls, but the default application still uses the
-synthetic preview until a real shell owns this bridge. The bridge also projects
+session. `DesktopControlOwner` now owns the shell-neutral delegation boundary for
+authenticated control-session installation, envelope acceptance, tokenized
+start/rotate/stop completion, output monitoring, and recovery; receiver
+pipelines remain injected by the application composition layer. The UI/Tauri
+command layer is not yet wired to this owner. The Vue frontend now has an
+injectable `TauriDesktopBridge` contract that maps low-rate commands to Tauri
+`invoke` calls, but the default application still uses the synthetic preview
+until a real shell owns this bridge. The bridge also projects
 a redacted low-rate snapshot for a future control-surface
 adapter — lifecycle phase, output lifecycle, output-active flag, active stream
 count, and pending membership commands — and implements `OutputSnapshotSource`

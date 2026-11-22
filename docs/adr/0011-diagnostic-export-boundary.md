@@ -38,8 +38,8 @@ The bundle writer lives in `sonimesh-diagnostics` (crate-private writer,
 public snapshot schema) and serializes exactly the allowlisted fields above
 to a bounded, deterministic, versioned JSON document. The desktop control
 domain owns the export action: it fills the snapshot from its low-rate state
-and is responsible for retention policy. The app-side export command and
-retention limits remain open.
+and is responsible for retention policy. The shell trigger and user-facing file
+picker remain platform integration work.
 
 The app-side collector now exists in `sonimesh-app`:
 `ControlToMixerBridge::export_snapshot` fills an allowlisted
@@ -49,8 +49,7 @@ redacted `StreamMetricsSnapshot` per active mixer stream in slot order — and
 `MixerStreamSession::stream_metrics` reads those counters from the session's
 retained per-stream endpoints. The bundle writer remains the single serializer
 in `sonimesh-diagnostics`; the desktop control domain still owns the export
-action, and the UI/Tauri command that triggers an export and the file
-retention policy remain open.
+action and its bounded in-memory retention policy.
 The app-side export action and retention limits are now implemented in
 `sonimesh-app` (`DiagnosticExportAction`): one action owns the reusable
 metrics buffer and a bounded `ExportRetentionJournal`. Issuing an export

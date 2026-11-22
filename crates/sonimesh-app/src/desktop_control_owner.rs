@@ -7,15 +7,20 @@
 //! operations and never touches the output callback.
 
 use std::net::SocketAddr;
+use std::sync::Arc;
 
+use sonimesh_diagnostics::StreamCounters;
 use sonimesh_platform::{AudioOutput, OutputDeviceId, OutputDeviceInfo, OutputError};
+use sonimesh_protocol::Envelope;
 
 use crate::{
-    ControlToMixerBridge, ControlToMixerError, DesktopControlSnapshot, DiagnosticExportAction,
+    ControlOperationToken, ControlSessionToken, ControlStreamAction, ControlToMixerBridge,
+    ControlToMixerError, DesktopControlSnapshot, DiagnosticExportAction,
     DiagnosticExportActionError, ExportReceipt, ExportRetentionPolicy, ExportStore,
     ExportStoreError, GainControlState, IssuedDiagnosticExport, MediaStreamIdentity,
     PairingAttemptOutcome, PairingId, PairingInvitationController, PairingInvitationError,
-    PairingProofVerification, PairingSource,
+    PairingProofVerification, PairingSource, ReceiverPcmProducerInstaller,
+    ReconnectGraceObservation, SessionEvent, StartedMixerStream, StreamStartRequest,
 };
 
 /// Failure returned by a low-rate desktop command owner.
@@ -180,6 +185,160 @@ where
             selected_output: self.selected_output_device(),
             stream_control: self.bridge.single_stream_gain(),
         })
+    }
+
+    /// Installs one authenticated control transport for the trusted session.
+    ///
+    /// # Errors
+    ///
+    /// Returns the coordinator lifecycle error when the session is not ready or
+    /// a transport is already installed.
+    pub fn install_authenticated_control_session(
+        &mut self,
+    ) -> Result<ControlSessionToken, DesktopControlOwnerError> {
+        self.bridge
+            .install_authenticated_control_session()
+            .map_err(|error| DesktopControlOwnerError::Mixer(ControlToMixerError::Control(error)))
+    }
+
+    /// Validates one control envelope and prepares its bounded lifecycle action.
+    ///
+    /// # Errors
+    ///
+    /// Returns the coordinator error for a stale transport, invalid envelope, or
+    /// conflicting stream operation.
+    pub fn accept_control(
+        &mut self,
+        session: ControlSessionToken,
+        envelope: &Envelope,
+    ) -> Result<ControlStreamAction, DesktopControlOwnerError> {
+        self.bridge
+            .accept(session, envelope)
+            .map_err(|error| DesktopControlOwnerError::Mixer(ControlToMixerError::Control(error)))
+    }
+
+    /// Executes a prepared start action through the bridge and injected pipeline.
+    ///
+    /// # Errors
+    ///
+    /// Returns a control or mixer error when preparation, output start, pipeline
+    /// admission, or tokenized completion fails.
+    pub fn execute_start<P, const S: usize>(
+        &mut self,
+        token: ControlOperationToken,
+        request: StreamStartRequest,
+        counters: Option<Arc<StreamCounters>>,
+        pipeline: &mut P,
+    ) -> Result<(), DesktopControlOwnerError>
+    where
+        P: ReceiverPcmProducerInstaller<S>,
+    {
+        self.bridge
+            .execute_start(token, request, counters, pipeline)
+            .map_err(DesktopControlOwnerError::Mixer)
+    }
+
+    /// Executes a prepared stream rotation through the bridge.
+    ///
+    /// # Errors
+    ///
+    /// Returns a control or mixer error when the rotation cannot commit.
+    pub fn execute_rotation(
+        &mut self,
+        token: ControlOperationToken,
+        previous: MediaStreamIdentity,
+        next: StreamStartRequest,
+    ) -> Result<(), DesktopControlOwnerError> {
+        self.bridge
+            .execute_rotation(token, previous, next)
+            .map_err(DesktopControlOwnerError::Mixer)
+    }
+
+    /// Executes a prepared stream stop through the bridge.
+    ///
+    /// # Errors
+    ///
+    /// Returns a control or mixer error when the stop cannot commit.
+    pub fn execute_stop(
+        &mut self,
+        token: ControlOperationToken,
+        identity: MediaStreamIdentity,
+    ) -> Result<(), DesktopControlOwnerError> {
+        self.bridge
+            .execute_stop(token, identity)
+            .map_err(DesktopControlOwnerError::Mixer)
+    }
+
+    /// Polls output health outside the realtime callback.
+    ///
+    /// # Errors
+    ///
+    /// Returns a control or mixer error when the lifecycle cannot represent a
+    /// reported output fault.
+    pub fn monitor(
+        &mut self,
+    ) -> Result<Option<sonimesh_platform::OutputHealth>, DesktopControlOwnerError> {
+        self.bridge
+            .monitor()
+            .map_err(DesktopControlOwnerError::Mixer)
+    }
+
+    /// Observes reconnect grace using the supplied monotonic clock.
+    ///
+    /// # Errors
+    ///
+    /// Returns a control error when the clock regresses or the lifecycle rejects
+    /// the observation.
+    pub fn observe_reconnect_grace(
+        &mut self,
+        now_ms: u64,
+    ) -> Result<ReconnectGraceObservation, DesktopControlOwnerError> {
+        self.bridge
+            .observe_reconnect_grace(now_ms)
+            .map_err(|error| DesktopControlOwnerError::Mixer(ControlToMixerError::Control(error)))
+    }
+
+    /// Applies a non-stream platform lifecycle event through the bridge.
+    ///
+    /// # Errors
+    ///
+    /// Returns a control error when the event is invalid for the current state.
+    pub fn acknowledge_platform_event(
+        &mut self,
+        event: SessionEvent,
+    ) -> Result<(), DesktopControlOwnerError> {
+        self.bridge
+            .acknowledge_platform_event(event)
+            .map_err(|error| DesktopControlOwnerError::Mixer(ControlToMixerError::Control(error)))
+    }
+
+    /// Recreates output and returns the persisted stream identities to re-admit.
+    ///
+    /// # Errors
+    ///
+    /// Returns a control or mixer error when output recovery fails.
+    pub fn recover_output(&mut self) -> Result<Vec<MediaStreamIdentity>, DesktopControlOwnerError> {
+        self.bridge
+            .recover_output()
+            .map_err(DesktopControlOwnerError::Mixer)
+    }
+
+    /// Re-admits one persisted stream after output recovery.
+    ///
+    /// # Errors
+    ///
+    /// Returns a mixer error when the identity or pipeline cannot be recovered.
+    pub fn recover_stream<P, const S: usize>(
+        &mut self,
+        identity: MediaStreamIdentity,
+        pipeline: &mut P,
+    ) -> Result<StartedMixerStream, DesktopControlOwnerError>
+    where
+        P: ReceiverPcmProducerInstaller<S>,
+    {
+        self.bridge
+            .recover_stream(identity, pipeline)
+            .map_err(DesktopControlOwnerError::Mixer)
     }
 
     /// Starts a bounded pairing invitation through the shared lifecycle owner.
@@ -398,10 +557,10 @@ mod tests {
         AudioOutput, OutputConfig, OutputDeviceId, OutputDeviceInfo, OutputError, OutputHealth,
         RenderSource,
     };
-    use sonimesh_protocol::Capability;
+    use sonimesh_protocol::{Capability, Envelope};
 
     use super::*;
-    use crate::{OutputSelection, SessionPhase, SessionState};
+    use crate::{ControlStreamError, OutputSelection, SessionPhase, SessionState};
 
     const SLOTS: usize = 2;
     const OUTPUT_SAMPLES: usize = 256;
@@ -450,9 +609,11 @@ mod tests {
         }
     }
 
-    fn owner() -> DesktopControlOwner<TestOutput, SLOTS, OUTPUT_SAMPLES, 1> {
+    fn owner_with_state(
+        state: SessionState,
+    ) -> DesktopControlOwner<TestOutput, SLOTS, OUTPUT_SAMPLES, 1> {
         let bridge = ControlToMixerBridge::new(
-            SessionState::IDLE,
+            state,
             &[Capability::FrameDuration10Ms],
             TestOutput,
             OutputSelection {
@@ -470,6 +631,44 @@ mod tests {
         )
         .expect("test bridge is valid");
         DesktopControlOwner::new(bridge).expect("default policy is valid")
+    }
+
+    fn owner() -> DesktopControlOwner<TestOutput, SLOTS, OUTPUT_SAMPLES, 1> {
+        owner_with_state(SessionState::IDLE)
+    }
+
+    #[test]
+    fn owner_install_requires_ready_and_maps_control_error() {
+        let mut owner = owner();
+
+        assert!(matches!(
+            owner.install_authenticated_control_session(),
+            Err(DesktopControlOwnerError::Mixer(
+                ControlToMixerError::Control(ControlStreamError::ControlSessionRequiresReady(
+                    SessionState::IDLE
+                ))
+            ))
+        ));
+    }
+
+    #[test]
+    fn owner_rejects_a_stale_control_token_before_envelope_validation() {
+        let mut first = owner_with_state(SessionState::READY);
+        let mut second = owner_with_state(SessionState::READY);
+        let _first_session = first.install_authenticated_control_session().unwrap();
+        let second_session = second.install_authenticated_control_session().unwrap();
+        let malformed = Envelope {
+            protocol_version: 0,
+            request_id: 0,
+            payload: None,
+        };
+
+        assert!(matches!(
+            first.accept_control(second_session, &malformed),
+            Err(DesktopControlOwnerError::Mixer(
+                ControlToMixerError::Control(ControlStreamError::StaleControlSession)
+            ))
+        ));
     }
 
     #[test]
