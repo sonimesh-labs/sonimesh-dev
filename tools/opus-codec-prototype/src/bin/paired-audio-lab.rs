@@ -1,9 +1,13 @@
-//! Paired Android-to-desktop UDP audio software-render lab.
+//! Paired Android-to-desktop UDP audio lab.
 //! The fixed ID and secret are public test data, never product credentials.
+#[cfg(all(windows, feature = "playback"))]
+#[allow(dead_code)]
+mod common;
 mod lab_decoder;
 
 use std::fmt::Write;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 
 use rcgen::generate_simple_self_signed;
@@ -14,7 +18,9 @@ use sonimesh_app::{
     PairingQrInvitation, PairingSource, SessionState, UdpPollOutcome, UdpReceiverPipeline,
     accept_pairing_stream, begin_from_rendered_payload,
 };
-use sonimesh_audio::{DecodeStep, OpusFrameConfig, StreamDecodeWorker, realtime_pcm_queue};
+use sonimesh_audio::{
+    DecodeStep, FrameDecoder, OpusFrameConfig, StreamDecodeWorker, realtime_pcm_queue,
+};
 use sonimesh_diagnostics::StreamCounters;
 use sonimesh_network::{
     UntrustedControlPoll, UntrustedControlStream, UntrustedControlWrite, server_config,
@@ -37,12 +43,8 @@ fn main() {
 }
 
 fn run() -> LabResult<()> {
-    let args: Vec<_> = std::env::args().skip(1).collect();
-    let require_tone = match args.as_slice() {
-        [] => false,
-        [arg] if arg == "--require-tone" => true,
-        _ => return Err("usage: paired-audio-lab [--require-tone]".into()),
-    };
+    let options = Options::parse(std::env::args().skip(1))?;
+    let playback = Playback::prepare(options.play, options.select_output)?;
     let listener = PairingListener::bind("127.0.0.1:47610")?;
     let address = listener.local_addr()?;
     let key = generate_simple_self_signed(vec!["localhost".to_owned()])?;
@@ -106,7 +108,37 @@ fn run() -> LabResult<()> {
         },
     )?;
     println!("RESULT pairing verified");
-    negotiate_hello(channel, session, root, require_tone)
+    negotiate_hello(channel, session, root, options.require_tone, playback)
+}
+
+#[derive(Default)]
+struct Options {
+    require_tone: bool,
+    play: bool,
+    select_output: bool,
+}
+
+impl Options {
+    fn parse(args: impl IntoIterator<Item = String>) -> LabResult<Self> {
+        let mut result = Self::default();
+        for arg in args {
+            match arg.as_str() {
+                "--require-tone" if !result.require_tone => result.require_tone = true,
+                "--play" if !result.play => result.play = true,
+                "--select-output" if !result.select_output => result.select_output = true,
+                _ => {
+                    return Err(
+                        "usage: paired-audio-lab [--require-tone] [--play [--select-output]]"
+                            .into(),
+                    );
+                }
+            }
+        }
+        if result.select_output && !result.play {
+            return Err("--select-output requires --play".into());
+        }
+        Ok(result)
+    }
 }
 
 fn negotiate_hello(
@@ -114,6 +146,7 @@ fn negotiate_hello(
     session: SessionState,
     root: SessionSecret,
     require_tone: bool,
+    playback: Playback,
 ) -> LabResult<()> {
     let (channel, _exporter) = channel.into_parts();
     let socket = channel.sock.try_clone()?;
@@ -161,11 +194,129 @@ fn negotiate_hello(
     socket.set_read_timeout(None)?;
     socket.set_write_timeout(None)?;
     socket.set_nonblocking(true)?;
-    receive_audio(&mut framed, &mut coordinator, token, root, require_tone)
+    receive_audio(
+        &mut framed,
+        &mut coordinator,
+        token,
+        root,
+        require_tone,
+        playback,
+    )
 }
 
 const SAMPLES: usize = 1_920;
-type Receiver = UdpReceiverPipeline<lab_decoder::Decoder, 8, 1_148, SAMPLES>;
+type Receiver = UdpReceiverPipeline<ObservedDecoder, 8, 1_148, SAMPLES>;
+
+struct ObservedDecoder {
+    decoder: lab_decoder::Decoder,
+    peak: Arc<AtomicU32>,
+}
+
+impl FrameDecoder for ObservedDecoder {
+    type Error = opus::Error;
+
+    fn decode(&mut self, input: &[u8], output: &mut [f32]) -> Result<usize, Self::Error> {
+        let count = self.decoder.decode(input, output)?;
+        let peak = output[..count]
+            .iter()
+            .filter(|sample| sample.is_finite())
+            .fold(0_f32, |peak, sample| peak.max(sample.abs()));
+        self.peak.fetch_max(peak.to_bits(), Ordering::Relaxed);
+        Ok(count)
+    }
+
+    fn decode_plc(&mut self, output: &mut [f32]) -> Result<usize, Self::Error> {
+        self.decoder.decode_plc(output)
+    }
+
+    fn reset(&mut self) {
+        self.decoder.reset();
+    }
+}
+
+#[cfg(all(windows, feature = "playback"))]
+struct Playback(
+    Option<(
+        sonimesh_app::ReceiverOutputController<sonimesh_platform::CpalOutput, SAMPLES>,
+        sonimesh_app::OutputSelection,
+    )>,
+);
+
+#[cfg(not(all(windows, feature = "playback")))]
+struct Playback;
+
+#[cfg_attr(
+    not(all(windows, feature = "playback")),
+    allow(clippy::unused_self, clippy::unnecessary_wraps)
+)]
+impl Playback {
+    fn prepare(play: bool, select: bool) -> LabResult<Self> {
+        #[cfg(all(windows, feature = "playback"))]
+        {
+            if play {
+                let (output, selection) =
+                    common::prepare_output(select).map_err(|e| e.to_string())?;
+                let factory = sonimesh_app::ReceiverPcmEndpointFactory::new(
+                    8,
+                    sonimesh_app::SourcePcmFormat::new(48_000, 2)?,
+                    Arc::new(StreamCounters::default()),
+                );
+                return Ok(Self(Some((
+                    sonimesh_app::ReceiverOutputController::new(output, factory),
+                    selection,
+                ))));
+            }
+            Ok(Self(None))
+        }
+        #[cfg(not(all(windows, feature = "playback")))]
+        {
+            let _ = select;
+            if play {
+                return Err("--play requires Windows and the playback feature".into());
+            }
+            Ok(Self)
+        }
+    }
+
+    fn start(&mut self, receiver: &mut Receiver) -> LabResult<bool> {
+        #[cfg(all(windows, feature = "playback"))]
+        if let Some((controller, selection)) = &mut self.0 {
+            controller.start(selection.clone(), receiver)?;
+            return Ok(true);
+        }
+        let _ = receiver;
+        Ok(false)
+    }
+
+    fn monitor(&mut self) -> LabResult<()> {
+        #[cfg(all(windows, feature = "playback"))]
+        if let Some((controller, _)) = &mut self.0 {
+            if let Some(health) = controller.monitor() {
+                return Err(format!("output failed: {health:?}").into());
+            }
+        }
+        Ok(())
+    }
+
+    fn stop(&mut self) -> LabResult<()> {
+        #[cfg(all(windows, feature = "playback"))]
+        if let Some((controller, _)) = &mut self.0 {
+            let status = controller.output().status();
+            controller.stop();
+            println!(
+                "RESULT output callbacks {} stream errors {} oversized {}",
+                status.callback_count, status.stream_errors, status.oversized_callbacks
+            );
+            if status.callback_count == 0
+                || status.stream_errors != 0
+                || status.oversized_callbacks != 0
+            {
+                return Err("output did not render cleanly".into());
+            }
+        }
+        Ok(())
+    }
+}
 
 #[allow(clippy::too_many_lines)] // This one-shot lab owns the control and media lifetimes together.
 fn receive_audio<S: std::io::Read + std::io::Write>(
@@ -174,6 +325,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
     control_token: sonimesh_app::ControlSessionToken,
     root: SessionSecret,
     require_tone: bool,
+    mut playback: Playback,
 ) -> LabResult<()> {
     let mut allocator = MediaSessionAllocator::new(root);
     let mut receiver: Option<Receiver> = None;
@@ -182,6 +334,8 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
     let mut next_playout = None;
     let mut decoded = 0_u64;
     let mut peak = 0_f32;
+    let mut playing = false;
+    let decoded_peak = Arc::new(AtomicU32::new(0));
     let deadline = Instant::now() + Duration::from_secs(40);
     while receiver.is_some() || Instant::now() < deadline {
         match framed.poll()? {
@@ -221,20 +375,40 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                             let metrics = Arc::new(StreamCounters::default());
                             let (producer, next_consumer) = realtime_pcm_queue::<SAMPLES>(8)?;
                             let worker = StreamDecodeWorker::new_for_opus(
-                                lab_decoder::Decoder::new()?,
+                                ObservedDecoder {
+                                    decoder: lab_decoder::Decoder::new()?,
+                                    peak: Arc::clone(&decoded_peak),
+                                },
                                 producer,
                                 0,
                                 OpusFrameConfig::new(48_000, 2, 20)?,
                             )?;
-                            let pipeline = Receiver::bind_with_worker(
+                            let mut pipeline = Receiver::bind_with_worker(
                                 "127.0.0.1:39093".parse()?,
                                 grant.root(),
                                 grant.context(),
                                 worker,
                                 Arc::clone(&metrics),
                             )?;
+                            playing = match playback.start(&mut pipeline) {
+                                Ok(playing) => playing,
+                                Err(error) => {
+                                    eprintln!("output start failed: {error}");
+                                    coordinator.abort_pending(token)?;
+                                    send_reply(
+                                        framed,
+                                        &ControlReply::error(
+                                            sonimesh_protocol::ErrorCode::RetryLater,
+                                            true,
+                                            "output unavailable",
+                                        )?
+                                        .into_envelope(frame.request_id)?,
+                                    )?;
+                                    continue;
+                                }
+                            };
                             receiver = Some(pipeline);
-                            consumer = Some(next_consumer);
+                            consumer = if playing { None } else { Some(next_consumer) };
                             counters = Some(metrics);
                             coordinator.complete_start(token, request)?;
                             println!("RESULT receiver started");
@@ -246,6 +420,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                         }
                     }
                     ControlStreamAction::Stop { token, identity } => {
+                        let output_result = playback.stop();
                         drop(receiver.take());
                         drop(consumer.take());
                         drop(counters.take());
@@ -257,6 +432,10 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                         )?
                         .into_envelope(frame.request_id)?;
                         send_reply(framed, &reply)?;
+                        output_result?;
+                        if playing {
+                            peak = f32::from_bits(decoded_peak.load(Ordering::Relaxed));
+                        }
                         println!("RESULT decoded {decoded} peak {peak:.3}");
                         if decoded == 0 || peak < 0.001 {
                             if require_tone {
@@ -279,9 +458,8 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
             UntrustedControlPoll::Closed => return Err("control channel closed".into()),
             UntrustedControlPoll::Empty => {}
         }
-        if let (Some(pipeline), Some(pcm), Some(metrics)) =
-            (&mut receiver, &mut consumer, &counters)
-        {
+        playback.monitor()?;
+        if let (Some(pipeline), Some(metrics)) = (&mut receiver, &counters) {
             for _ in 0..32 {
                 match pipeline.poll()? {
                     UdpPollOutcome::Empty => break,
@@ -299,10 +477,12 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                 {
                     decoded += 1;
                 }
-                let mut samples = [0_f32; SAMPLES];
-                pcm.pop_into(&mut samples);
-                for sample in samples {
-                    peak = peak.max(sample.abs());
+                if let Some(pcm) = &mut consumer {
+                    let mut samples = [0_f32; SAMPLES];
+                    pcm.pop_into(&mut samples);
+                    for sample in samples {
+                        peak = peak.max(sample.abs());
+                    }
                 }
                 next_playout = Some(now + Duration::from_millis(20));
             }
@@ -326,4 +506,48 @@ fn send_reply<S: std::io::Read + std::io::Write>(
         return Err("control reply failed".into());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn playback_arguments_preserve_default_and_require_explicit_selection() {
+        let args = |items: &[&str]| {
+            items
+                .iter()
+                .map(|item| (*item).to_owned())
+                .collect::<Vec<_>>()
+        };
+        let defaults = Options::parse(args(&[])).unwrap();
+        assert!(!defaults.play && !defaults.require_tone);
+        let playback =
+            Options::parse(args(&["--require-tone", "--play", "--select-output"])).unwrap();
+        assert!(playback.play && playback.require_tone && playback.select_output);
+        assert!(Options::parse(args(&["--select-output"])).is_err());
+        assert!(Options::parse(args(&["--play", "--play"])).is_err());
+    }
+
+    #[test]
+    fn decoder_observes_the_decoded_tone() {
+        let mut encoder =
+            opus::Encoder::new(48_000, opus::Channels::Stereo, opus::Application::Audio).unwrap();
+        let samples: Vec<f32> = (0..SAMPLES)
+            .map(|index| if (index / 48) % 2 == 0 { 0.25 } else { -0.25 })
+            .collect();
+        let mut packet = [0_u8; 1_148];
+        let length = encoder.encode_float(&samples, &mut packet).unwrap();
+        let peak = Arc::new(AtomicU32::new(0));
+        let mut decoder = ObservedDecoder {
+            decoder: lab_decoder::Decoder::new().unwrap(),
+            peak: Arc::clone(&peak),
+        };
+        let mut pcm = [0.0; SAMPLES];
+        assert_eq!(
+            decoder.decode(&packet[..length], &mut pcm).unwrap(),
+            SAMPLES
+        );
+        assert!(f32::from_bits(peak.load(Ordering::Relaxed)) > 0.001);
+    }
 }

@@ -51,13 +51,21 @@ also has a **Start paired UDP capture** mode: start `paired-audio-lab` without
 grant capture consent, and play a capturable source or use **Toggle test tone**.
 **Stop capture** requests the desktop to stop the stream. This mode uses the
 same fixed public lab invitation and ADB-reversed control connection; the
-desktop uses a software PCM check, not the Windows output device. Silence can
+desktop defaults to a software PCM check. On Windows, add `--features playback`
+before `--` and pass `--play` after it to use the default output device; add
+`--select-output` to choose a device. `--require-tone` checks decoded audio,
+not whether it was audible. Output callback counts are not a listening test.
+Silence can
 reflect the source or platform capture policy. Other audio-lab modes below use
 their separate ADB bootstrap. Remove the reverse mapping when no longer needed.
 On 2026-11-22 an API 37 x86_64 emulator completed the paired interactive
 capture flow using the app's test tone and system screen-capture consent. The
 desktop acknowledged start and stop and decoded 145 frames at a software peak
 of 0.095. No physical-device or hardware playback result was recorded.
+With the optional Windows output enabled, the same emulator capture test on
+2026-11-22 decoded 138 frames at a decoded peak of 0.093 and recorded 458 CPAL
+callbacks, zero stream errors, and zero oversized callbacks. Audible output was
+not independently checked; this is not a physical-device or latency result.
 
 This isolated test encodes a synthetic 48 kHz stereo tone with Android
 MediaCodec. It writes only synthetic audio to the spike application's external

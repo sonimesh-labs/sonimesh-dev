@@ -56,7 +56,10 @@ receiver: the desktop prepares the receiver from the pairing root and the
 authenticated StartStream identity before acknowledging Streaming, and retires
 it before acknowledging StopStream. Its fixed invitation and local ports are
 test fixtures, not a persistent trust or production discovery mechanism. The
-lab's software PCM check does not establish playback or latency on hardware.
+lab also offers an optional Windows CPAL output: it starts the output before
+acknowledging Streaming, stops it before acknowledging Stopped, and ends the
+session if the output fails. Its software checks and callback counts do not
+establish audible playback or latency on hardware.
 The Android audio-lab service can also use that same loopback fixture with
 playback capture: it establishes pairing and starts a stream before sending,
 then sends StopStream when capture ends. The user supplies the lab's public
