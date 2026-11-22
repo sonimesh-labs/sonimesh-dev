@@ -743,6 +743,11 @@ caller should invoke `mark_control_lost(now_ms, grace_duration_ms)` once. That
 retires pending control work, moves the lifecycle to `Reconnecting`, and arms
 the bounded reconnect window while leaving the UDP receiver available for the
 same scheduler loop.
+The UDP specialization also exposes `tick_at(now_ms)`, which observes reconnect
+grace before running that same control/media work and returns the lifecycle,
+control, and media results independently. A grace expiry therefore retires the
+output before the tick continues, while a clock error still does not suppress
+the media poll.
 The composable polls the same low-rate snapshot command once per second and clears
 that timer on unmount, so reconnect countdowns and asynchronous output faults do
 not depend on a user clicking Refresh.

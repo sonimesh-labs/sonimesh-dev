@@ -13,8 +13,9 @@ use sonimesh_platform::AudioOutput;
 
 use crate::{
     ControlSessionError, ControlSessionPoll, ControlSessionToken, DesktopControlOwnerError,
-    DesktopControlSession, DesktopReceiverOwner, ReceiverPcmProducerInstaller, SessionEvent,
-    TrustedControlChannel, UdpMediaTick, UdpReceiverError, UdpReceiverPipeline,
+    DesktopControlSession, DesktopReceiverOwner, ReceiverPcmProducerInstaller,
+    ReconnectGraceObservation, SessionEvent, TrustedControlChannel, UdpMediaTick, UdpReceiverError,
+    UdpReceiverPipeline,
 };
 
 /// Failure while attaching a control channel to a receiver scheduler.
@@ -69,6 +70,51 @@ impl<DecoderError> DesktopReceiverSchedulerTick<DecoderError> {
         Result<UdpMediaTick, UdpReceiverError<DecoderError>>,
     ) {
         (self.control, self.media)
+    }
+}
+
+/// Results from one scheduler tick that also services reconnect grace.
+#[derive(Debug)]
+pub struct DesktopReceiverSchedulerMaintenanceTick<DecoderError> {
+    control: Result<Option<ControlSessionPoll>, ControlSessionError>,
+    media: Result<UdpMediaTick, UdpReceiverError<DecoderError>>,
+    reconnect: Result<ReconnectGraceObservation, DesktopControlOwnerError>,
+}
+
+impl<DecoderError> DesktopReceiverSchedulerMaintenanceTick<DecoderError> {
+    /// Returns the control result for this tick.
+    #[must_use = "inspect the control result"]
+    pub const fn control(&self) -> &Result<Option<ControlSessionPoll>, ControlSessionError> {
+        &self.control
+    }
+
+    /// Returns the media result for this tick.
+    #[must_use = "inspect the media result"]
+    pub const fn media(&self) -> &Result<UdpMediaTick, UdpReceiverError<DecoderError>> {
+        &self.media
+    }
+
+    /// Returns the reconnect-grace observation for this tick.
+    #[must_use = "inspect the reconnect-grace result"]
+    pub const fn reconnect(&self) -> &Result<ReconnectGraceObservation, DesktopControlOwnerError> {
+        &self.reconnect
+    }
+
+    /// Splits the maintenance tick into the regular tick and grace result.
+    #[must_use = "handle all scheduler results"]
+    pub fn into_parts(
+        self,
+    ) -> (
+        DesktopReceiverSchedulerTick<DecoderError>,
+        Result<ReconnectGraceObservation, DesktopControlOwnerError>,
+    ) {
+        (
+            DesktopReceiverSchedulerTick {
+                control: self.control,
+                media: self.media,
+            },
+            self.reconnect,
+        )
     }
 }
 
@@ -593,6 +639,17 @@ mod tests {
             tick.media(),
             Ok(media) if matches!(media.poll(), crate::UdpPollOutcome::Empty)
         ));
+
+        scheduler.mark_control_lost(1_000, 10).unwrap();
+        let maintenance = scheduler.tick_at(1_010);
+        assert!(matches!(
+            maintenance.reconnect(),
+            Ok(crate::ReconnectGraceObservation::Expired)
+        ));
+        assert!(matches!(
+            maintenance.media(),
+            Ok(media) if matches!(media.poll(), crate::UdpPollOutcome::Empty)
+        ));
     }
 }
 
@@ -629,6 +686,22 @@ where
         let control = self.poll_control_once();
         let media = self.receiver.tick_media();
         DesktopReceiverSchedulerTick { control, media }
+    }
+
+    /// Runs one control/media tick and services reconnect grace at `now_ms`.
+    ///
+    /// Reconnect observation runs before control and media work, so expiry can
+    /// retire output and pending stream state before the rest of the tick. All
+    /// three results remain independent: a clock error does not suppress media
+    /// polling, and a transport error does not suppress grace observation.
+    pub fn tick_at(&mut self, now_ms: u64) -> DesktopReceiverSchedulerMaintenanceTick<D::Error> {
+        let reconnect = self.receiver.owner_mut().observe_reconnect_grace(now_ms);
+        let DesktopReceiverSchedulerTick { control, media } = self.tick();
+        DesktopReceiverSchedulerMaintenanceTick {
+            control,
+            media,
+            reconnect,
+        }
     }
 
     /// Runs one UDP poll/decode scheduler tick outside the output callback.

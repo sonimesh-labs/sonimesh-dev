@@ -93,7 +93,8 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   provides one combined control/media tick with independent results, so a
   control transport failure does not suppress media polling or decode;
   `mark_control_lost` centralizes the follow-up lifecycle transition and arms
-  reconnect grace after a closed or failed control poll;
+  reconnect grace after a closed or failed control poll. `tick_at(now_ms)` then
+  services grace observation in the same low-rate control/media loop;
 - deterministic virtual-clock/network profiles for random and burst loss,
   jitter, duplication, reorder delay, byte-counted bandwidth serialization,
   capacity pressure, and Windows/Linux CI;

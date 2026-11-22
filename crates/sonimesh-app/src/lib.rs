@@ -56,7 +56,8 @@ pub use desktop_control_owner::{
 pub use desktop_receiver_owner::DesktopReceiverOwner;
 pub use desktop_receiver_owner::UdpMediaTick;
 pub use desktop_receiver_scheduler::{
-    DesktopReceiverScheduler, DesktopReceiverSchedulerError, DesktopReceiverSchedulerTick,
+    DesktopReceiverScheduler, DesktopReceiverSchedulerError,
+    DesktopReceiverSchedulerMaintenanceTick, DesktopReceiverSchedulerTick,
 };
 pub use diagnostic_export_action::{
     DEFAULT_MAX_RETAINED_EXPORT_BYTES, DEFAULT_MAX_RETAINED_EXPORTS, DiagnosticExportAction,
