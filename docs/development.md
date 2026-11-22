@@ -715,7 +715,10 @@ Control transports can use `execute_control_action` to route negotiated and
 tokenized stream actions without duplicating start/rotate/stop dispatch logic.
 `DesktopReceiverOwner` is the next composition boundary: it stores that owner,
 the injected receiver pipeline, and optional stream counters together, while
-leaving decoder, socket, and output construction to the application layer.
+leaving decoder, socket, and output construction to the application layer. Its
+UDP specialization exposes one nonblocking packet poll and one decode/PLC step
+per scheduler tick so the future shell can drive media work outside the output
+callback.
 The composable polls the same low-rate snapshot command once per second and clears
 that timer on unmount, so reconnect countdowns and asynchronous output faults do
 not depend on a user clicking Refresh.
