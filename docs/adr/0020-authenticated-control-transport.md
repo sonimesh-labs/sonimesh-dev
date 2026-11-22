@@ -57,12 +57,15 @@ queued peer with `try_accept`, while `accept_pairing_stream` performs the
 invitation-gated exchange on an already accepted stream. The split lets a
 caller own polling and scheduling without making the mutable pairing owner or
 session state concurrent. It is an admission boundary, not a concurrent
-pairing server loop. The exchange currently applies a 30-second socket
-read/write timeout after accepting a TCP peer. This limits individual blocking
-operations, not the total elapsed exchange time; a peer making intermittent
-progress can hold the pairing owner longer. An absolute exchange deadline
-remains an implementation gate. Proof admission must account for monotonic
-time elapsed since the caller's immediately preceding monotonic time sample,
+pairing server loop. The exchange uses one absolute monotonic deadline, starting
+after accepting a TCP peer, for the TLS handshake, proof frame and reply write.
+The default is 30 seconds. Each underlying socket operation uses the remaining
+time, so intermittent progress does not restart the budget. Blocking accept
+itself remains outside this deadline. The checks cannot preempt CPU work or OS
+scheduling and therefore do not provide a hard real-time bound. A failed reply
+after proof admission leaves the session trusted but returns no usable channel,
+as before. Proof admission must account for monotonic time elapsed since the
+caller's immediately preceding monotonic time sample,
 including a blocking accept, and reject an invitation that expires during the
 exchange. Elapsed time is measured with `Instant` and truncated to milliseconds;
 the supplied clock must advance consistently with that clock. This estimate can
@@ -107,6 +110,9 @@ errors).
 - A second timeout test completes the pinned TLS handshake, then withholds the
   proof frame; the socket timeout expires during the proof read before invitation
   admission or session mutation.
+- Loopback tests trickle an incomplete TLS record and, separately, proof bytes
+  after a completed TLS handshake. The receiver times out while the peer is
+  attempting periodic writes, so progress cannot reset the exchange deadline.
 - A pinned TLS loopback test sends a valid proof after invitation expiry and
   checks that admission fails, the invitation expires, and the session is idle.
 - The non-blocking listener unit test verifies an empty poll followed by

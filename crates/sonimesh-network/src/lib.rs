@@ -18,8 +18,9 @@ pub use authenticated_control_stream::{
     VerifiedPeerProof, binding_for_channel,
 };
 pub use desktop_tls::{
-    DesktopTlsError, PinnedClientChannel, PinnedServerChannel, accept_pinned_server, client_config,
-    connect_pinned_client, server_config,
+    DesktopTlsError, PinnedClientChannel, PinnedServerChannel, accept_pinned_server,
+    accept_pinned_server_over_io, client_config, connect_pinned_client,
+    map_pinned_server_transport, server_config,
 };
 pub use ingress::{Authenticator, IngressError, MediaIngress, ReceivedFrame, StreamIdentity};
 pub use media_session_sender::{

@@ -290,12 +290,44 @@ pub fn accept_pinned_server(
     ),
     DesktopTlsError,
 > {
+    accept_pinned_server_over_io(config, context, stream)
+}
+
+/// Completes the server handshake over caller-managed blocking I/O.
+///
+/// The caller is responsible for bounding I/O and retaining the transport
+/// with the returned TLS state throughout the proof exchange.
+///
+/// # Errors
+///
+/// Returns the matching [`DesktopTlsError`] for configuration, handshake,
+/// transport, protocol version, or exporter failures.
+#[allow(clippy::type_complexity)] // The live channel and its exporter travel together.
+pub fn accept_pinned_server_over_io<S: std::io::Read + std::io::Write>(
+    config: Arc<ServerConfig>,
+    context: &[u8; 16],
+    stream: S,
+) -> Result<
+    (
+        StreamOwned<ServerConnection, S>,
+        Zeroizing<[u8; PAIRING_TLS_EXPORTER_LEN]>,
+    ),
+    DesktopTlsError,
+> {
     let connection = ServerConnection::new(config).map_err(DesktopTlsError::Configuration)?;
     let mut channel = StreamOwned::new(connection, stream);
     drive_handshake!(channel);
     confirm_tls13(channel.conn.protocol_version())?;
     let exporter = extract_exporter(&channel.conn, context)?;
     Ok((channel, exporter))
+}
+
+/// Unwraps a temporary transport wrapper while preserving the live TLS state.
+pub fn map_pinned_server_transport<S: std::io::Read + std::io::Write>(
+    channel: StreamOwned<ServerConnection, S>,
+    unwrap: impl FnOnce(S) -> std::net::TcpStream,
+) -> PinnedServerChannel {
+    StreamOwned::new(channel.conn, unwrap(channel.sock))
 }
 
 fn extract_exporter<C>(

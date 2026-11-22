@@ -19,7 +19,9 @@ use std::time::{Duration, Instant};
 use zeroize::Zeroizing;
 
 pub use sonimesh_network::ServerConfig as TlsServerConfig;
-use sonimesh_network::{DesktopTlsError, PinnedServerChannel, accept_pinned_server};
+use sonimesh_network::{
+    DesktopTlsError, PinnedServerChannel, accept_pinned_server_over_io, map_pinned_server_transport,
+};
 use sonimesh_protocol::{PAIRING_TLS_EXPORTER_LEN, PROOF_FRAME_LEN};
 
 use crate::{
@@ -27,8 +29,49 @@ use crate::{
     PairingSource, ScannedProofAttempt, SessionState, verify_scanned_proof,
 };
 
-/// Socket timeout for blocking I/O during the pairing exchange.
+/// Total time allowed for the pairing exchange after TCP acceptance.
 pub const DEFAULT_PAIRING_IO_TIMEOUT: Duration = Duration::from_secs(30);
+
+struct DeadlineStream {
+    stream: TcpStream,
+    deadline: Instant,
+}
+
+impl DeadlineStream {
+    fn remaining(&self) -> std::io::Result<Duration> {
+        self.deadline
+            .checked_duration_since(Instant::now())
+            .filter(|duration| !duration.is_zero())
+            .ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::TimedOut, "pairing deadline elapsed")
+            })
+    }
+}
+
+impl Read for DeadlineStream {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        self.stream.set_read_timeout(Some(self.remaining()?))?;
+        let count = self.stream.read(buffer)?;
+        self.remaining()?;
+        Ok(count)
+    }
+}
+
+impl Write for DeadlineStream {
+    fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+        self.stream.set_write_timeout(Some(self.remaining()?))?;
+        let count = self.stream.write(buffer)?;
+        self.remaining()?;
+        Ok(count)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.remaining()?;
+        self.stream.flush()?;
+        self.remaining()?;
+        Ok(())
+    }
+}
 
 /// Non-blocking listener handle for a caller-owned pairing accept loop.
 ///
@@ -320,20 +363,29 @@ fn accept_pairing_stream_with_timeout(
     io_timeout: Duration,
     started: Instant,
 ) -> Result<(TrustedControlChannel, sonimesh_protocol::SessionSecret), ControlListenError> {
-    // Accepted sockets may inherit the listener's non-blocking mode on some
-    // platforms; normalize the handshake stream before applying deadlines.
+    let deadline = Instant::now().checked_add(io_timeout).ok_or_else(|| {
+        ControlListenError::Socket(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "pairing deadline overflow",
+        ))
+    })?;
+    // Accepted sockets may inherit the listener's non-blocking mode.
     stream
         .set_nonblocking(false)
-        .and_then(|()| stream.set_read_timeout(Some(io_timeout)))
-        .and_then(|()| stream.set_write_timeout(Some(io_timeout)))
         .map_err(ControlListenError::Socket)?;
-    let (mut channel, exporter) = accept_pinned_server(tls, &inputs.invitation.as_bytes(), stream)
-        .map_err(ControlListenError::Tls)?;
+    let stream = DeadlineStream { stream, deadline };
+    let (mut channel, exporter) =
+        accept_pinned_server_over_io(tls, &inputs.invitation.as_bytes(), stream)
+            .map_err(ControlListenError::Tls)?;
 
     // Read exactly one canonical peer frame from the live channel.
     let mut wire = [0_u8; PROOF_FRAME_LEN];
     channel
         .read_exact(&mut wire)
+        .map_err(ControlListenError::PeerFrameIo)?;
+    channel
+        .sock
+        .remaining()
         .map_err(ControlListenError::PeerFrameIo)?;
 
     let outcome = verify_scanned_proof(
@@ -375,9 +427,11 @@ fn accept_pairing_stream_with_timeout(
     // the authenticated control stream owns its idle policy separately.
     channel
         .sock
+        .stream
         .set_read_timeout(None)
-        .and_then(|()| channel.sock.set_write_timeout(None))
+        .and_then(|()| channel.sock.stream.set_write_timeout(None))
         .map_err(ControlListenError::ReplyWrite)?;
+    let channel = map_pinned_server_transport(channel, |socket| socket.stream);
 
     Ok((TrustedControlChannel { channel, exporter }, media_root))
 }
@@ -392,8 +446,9 @@ fn admission_time_ms(now_ms: u64, started: Instant) -> u64 {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Write;
     use std::net::{TcpListener, TcpStream};
-    use std::sync::Arc;
+    use std::sync::{Arc, mpsc};
     use std::thread;
     use std::time::{Duration, Instant};
 
@@ -551,5 +606,132 @@ mod tests {
             Err(ControlListenError::PeerFrameIo(error))
                 if matches!(error.kind(), std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock)
         ));
+    }
+
+    #[test]
+    fn trickled_tls_record_cannot_extend_exchange_deadline() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("listener binds");
+        let address = listener.local_addr().expect("listener address");
+        let key = generate_simple_self_signed(vec!["localhost".to_owned()]).expect("certificate");
+        let certificate = key.cert.der().clone();
+        let mut private = Zeroizing::new(key.key_pair.serialize_der());
+        let private_key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(private.to_vec()));
+        private.zeroize();
+        let tls = Arc::new(server_config(certificate, private_key).expect("server config"));
+        let (result_sender, result_receiver) = mpsc::channel();
+        let server = thread::spawn(move || {
+            let mut pairing = PairingInvitationController::<4>::new();
+            let mut session = SessionState::IDLE;
+            let inputs = InvitationInputs {
+                invitation: PairingId::new([0x51; 16]),
+                pairing_secret: [0x52; 32],
+                scanned_payload: &[],
+            };
+            let (stream, _) = listener.accept().expect("peer connects");
+            let result = accept_pairing_stream_with_timeout(
+                stream,
+                tls,
+                &mut pairing,
+                &mut session,
+                0,
+                PairingSource::new([0x53; 16]),
+                &inputs,
+                Duration::from_millis(400),
+                Instant::now(),
+            );
+            result_sender
+                .send((result, session))
+                .expect("receiver remains");
+        });
+        let mut client = TcpStream::connect(address).expect("client connects");
+        // A TLS handshake record advertising 255 bytes, followed slowly by
+        // an incomplete handshake. Each write arrives within the old timeout.
+        client
+            .write_all(&[0x16, 0x03, 0x01, 0x00, 0xff])
+            .expect("header");
+        let writer = thread::spawn(move || {
+            for _ in 0..30 {
+                if client.write_all(&[0x01]).is_err() {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(60));
+            }
+        });
+        let (result, session) = result_receiver
+            .recv_timeout(Duration::from_millis(1100))
+            .expect("absolute deadline terminates a trickling peer");
+        assert!(
+            matches!(result, Err(ControlListenError::Tls(DesktopTlsError::Io(error)))
+            if matches!(error.kind(), std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock))
+        );
+        assert_eq!(session, SessionState::IDLE);
+        server.join().expect("server joins");
+        writer.join().expect("writer joins");
+    }
+
+    #[test]
+    fn trickled_proof_cannot_extend_exchange_deadline() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("listener binds");
+        let address = listener.local_addr().expect("listener address");
+        let invitation = PairingId::new([0x61; 16]);
+        let key = generate_simple_self_signed(vec!["localhost".to_owned()]).expect("certificate");
+        let certificate = key.cert.der().clone();
+        let pin = key.key_pair.public_key_der();
+        let mut private = Zeroizing::new(key.key_pair.serialize_der());
+        let private_key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(private.to_vec()));
+        private.zeroize();
+        let tls = Arc::new(server_config(certificate, private_key).expect("server config"));
+        let (result_sender, result_receiver) = mpsc::channel();
+        let server = thread::spawn(move || {
+            let mut pairing = PairingInvitationController::<4>::new();
+            let mut session = SessionState::IDLE;
+            let inputs = InvitationInputs {
+                invitation,
+                pairing_secret: [0x62; 32],
+                scanned_payload: &[],
+            };
+            let (stream, _) = listener.accept().expect("peer connects");
+            let result = accept_pairing_stream_with_timeout(
+                stream,
+                tls,
+                &mut pairing,
+                &mut session,
+                0,
+                PairingSource::new([0x63; 16]),
+                &inputs,
+                Duration::from_millis(400),
+                Instant::now(),
+            );
+            result_sender
+                .send((result, session))
+                .expect("receiver remains");
+        });
+        let (mut channel, _) = connect_pinned_client(
+            client_config(pin).expect("client config"),
+            "localhost",
+            &invitation.as_bytes(),
+            TcpStream::connect(address).expect("client connects"),
+        )
+        .expect("TLS handshake completes");
+        let writer = thread::spawn(move || {
+            for _ in 0..30 {
+                if channel
+                    .write_all(&[0x01])
+                    .and_then(|()| channel.flush())
+                    .is_err()
+                {
+                    break;
+                }
+                thread::sleep(Duration::from_millis(60));
+            }
+        });
+        let (result, session) = result_receiver
+            .recv_timeout(Duration::from_millis(1100))
+            .expect("absolute deadline terminates a trickling peer");
+        assert!(matches!(result, Err(ControlListenError::PeerFrameIo(error))
+            if matches!(error.kind(), std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock)));
+        assert_eq!(session, SessionState::IDLE);
+        server.join().expect("server joins");
+        writer.join().expect("writer joins");
     }
 }
