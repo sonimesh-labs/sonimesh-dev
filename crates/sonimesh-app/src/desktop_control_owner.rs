@@ -44,7 +44,7 @@ pub enum DesktopControlOwnerError {
 /// retained selection are supplied by the platform adapter. `stream_control`
 /// is present only for a single admitted stream; multi-stream owners must use
 /// identity-addressed controls instead of guessing which stream the UI means.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct DesktopControlView {
     lifecycle: DesktopControlSnapshot,
     output_devices: Vec<OutputDeviceInfo>,
@@ -561,11 +561,14 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
 
+    use sonimesh_audio::RealtimePcmProducer;
     use sonimesh_platform::{
         AudioOutput, OutputConfig, OutputDeviceId, OutputDeviceInfo, OutputError, OutputHealth,
         RenderSource,
     };
-    use sonimesh_protocol::{Capability, Envelope};
+    use sonimesh_protocol::{
+        CONTROL_PROTOCOL_VERSION, Capability, Envelope, Hello, StartStream, envelope,
+    };
 
     use super::*;
     use crate::{ControlStreamError, OutputSelection, SessionPhase, SessionState};
@@ -575,6 +578,22 @@ mod tests {
     static NEXT_TEMP_DIR: AtomicU64 = AtomicU64::new(0);
 
     struct TestOutput;
+
+    struct TestPipeline<const S: usize> {
+        producer: Option<RealtimePcmProducer<S>>,
+    }
+
+    impl<const S: usize> Default for TestPipeline<S> {
+        fn default() -> Self {
+            Self { producer: None }
+        }
+    }
+
+    impl<const S: usize> ReceiverPcmProducerInstaller<S> for TestPipeline<S> {
+        fn replace_pcm_producer(&mut self, producer: RealtimePcmProducer<S>) {
+            self.producer = Some(producer);
+        }
+    }
 
     struct TempDir(PathBuf);
 
@@ -643,6 +662,41 @@ mod tests {
 
     fn owner() -> DesktopControlOwner<TestOutput, SLOTS, OUTPUT_SAMPLES, 1> {
         owner_with_state(SessionState::IDLE)
+    }
+
+    fn hello_envelope() -> Envelope {
+        Envelope {
+            protocol_version: CONTROL_PROTOCOL_VERSION,
+            request_id: 1,
+            payload: Some(envelope::Payload::Hello(Hello {
+                supported_versions: vec![CONTROL_PROTOCOL_VERSION],
+                capabilities: vec![Capability::FrameDuration10Ms as i32],
+                display_name: "test sender".to_owned(),
+            })),
+        }
+    }
+
+    fn start_envelope(identity: MediaStreamIdentity) -> Envelope {
+        Envelope {
+            protocol_version: CONTROL_PROTOCOL_VERSION,
+            request_id: 2,
+            payload: Some(envelope::Payload::StartStream(StartStream {
+                media_session_id: identity.session_id,
+                stream_id: identity.stream_id,
+                sample_rate_hz: 48_000,
+                channels: 1,
+                frame_duration_ms: 10,
+                media_key_epoch: u32::from(identity.key_epoch),
+            })),
+        }
+    }
+
+    fn identity(stream_id: u32) -> MediaStreamIdentity {
+        MediaStreamIdentity {
+            session_id: 7,
+            stream_id,
+            key_epoch: 0,
+        }
     }
 
     #[test]
@@ -740,6 +794,33 @@ mod tests {
         assert!(view.selected_output().is_none());
         assert!(view.stream_control().is_none());
         assert!(view.stream_metrics().is_empty());
+    }
+
+    #[test]
+    fn owner_view_projects_active_stream_controls_and_metrics() {
+        let mut owner = owner_with_state(SessionState::READY);
+        let session = owner.install_authenticated_control_session().unwrap();
+        assert!(matches!(
+            owner.accept_control(session, &hello_envelope()),
+            Ok(ControlStreamAction::Negotiated(_))
+        ));
+
+        let identity = identity(1);
+        let action = owner
+            .accept_control(session, &start_envelope(identity))
+            .unwrap();
+        let ControlStreamAction::Start { token, request } = action else {
+            panic!("expected a start action");
+        };
+        let mut pipeline = TestPipeline::<480>::default();
+        owner
+            .execute_start(token, request, None, &mut pipeline)
+            .unwrap();
+
+        let view = owner.view_at(1).unwrap();
+        assert_eq!(view.lifecycle().session(), SessionPhase::Streaming);
+        assert!(view.stream_control().is_some());
+        assert_eq!(view.stream_metrics().len(), 1);
     }
 
     #[test]
