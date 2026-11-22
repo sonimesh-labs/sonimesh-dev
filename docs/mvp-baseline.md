@@ -89,7 +89,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   scheduler;
 - a shell-neutral `DesktopReceiverScheduler` that owns the receiver and one
   optional framed control channel, preserving channel ownership across ticks and
-  retiring it on closure or transport failure;
+  retiring it on closure or transport failure. Its UDP specialization also
+  provides one combined control/media tick with independent results, so a
+  control transport failure does not suppress media polling or decode;
 - deterministic virtual-clock/network profiles for random and burst loss,
   jitter, duplication, reorder delay, byte-counted bandwidth serialization,
   capacity pressure, and Windows/Linux CI;

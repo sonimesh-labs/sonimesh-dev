@@ -36,6 +36,42 @@ impl core::fmt::Display for DesktopReceiverSchedulerError {
 
 impl std::error::Error for DesktopReceiverSchedulerError {}
 
+/// Results from one combined control and UDP media scheduler tick.
+///
+/// Control and media are intentionally reported independently. A transport
+/// error retires only the control channel, while the media result still records
+/// the same tick's UDP poll/decode outcome.
+#[derive(Debug)]
+pub struct DesktopReceiverSchedulerTick<DecoderError> {
+    control: Result<Option<ControlSessionPoll>, ControlSessionError>,
+    media: Result<UdpMediaTick, UdpReceiverError<DecoderError>>,
+}
+
+impl<DecoderError> DesktopReceiverSchedulerTick<DecoderError> {
+    /// Returns the control result for this tick.
+    #[must_use = "inspect the control result"]
+    pub const fn control(&self) -> &Result<Option<ControlSessionPoll>, ControlSessionError> {
+        &self.control
+    }
+
+    /// Returns the media result for this tick.
+    #[must_use = "inspect the media result"]
+    pub const fn media(&self) -> &Result<UdpMediaTick, UdpReceiverError<DecoderError>> {
+        &self.media
+    }
+
+    /// Splits the tick into its independent control and media results.
+    #[must_use = "handle both scheduler results"]
+    pub fn into_parts(
+        self,
+    ) -> (
+        Result<Option<ControlSessionPoll>, ControlSessionError>,
+        Result<UdpMediaTick, UdpReceiverError<DecoderError>>,
+    ) {
+        (self.control, self.media)
+    }
+}
+
 /// Owns one receiver and optionally one trusted framed control channel.
 pub struct DesktopReceiverScheduler<
     O,
@@ -198,15 +234,18 @@ where
 mod tests {
     use std::collections::VecDeque;
     use std::io;
+    use std::net::SocketAddr;
+    use std::sync::Arc;
 
-    use sonimesh_audio::RealtimePcmProducer;
+    use sonimesh_audio::{FrameDecoder, RealtimePcmProducer, realtime_pcm_queue};
+    use sonimesh_diagnostics::StreamCounters;
     use sonimesh_platform::{
         AudioOutput, OutputConfig, OutputDeviceId, OutputDeviceInfo, OutputError, OutputHealth,
         RenderSource, SampleFormat,
     };
     use sonimesh_protocol::{
-        CONTROL_PROTOCOL_VERSION, Capability, Envelope, Hello, StartStream, encode_control_frame,
-        envelope,
+        CONTROL_PROTOCOL_VERSION, Capability, Envelope, Hello, MediaDirection, MediaKeyContext,
+        SessionSecret, StartStream, encode_control_frame, envelope,
     };
 
     use super::{DesktopReceiverScheduler, DesktopReceiverSchedulerError};
@@ -248,6 +287,22 @@ mod tests {
 
     impl ReceiverPcmProducerInstaller<SOURCE_SAMPLES> for TestPipeline {
         fn replace_pcm_producer(&mut self, _producer: RealtimePcmProducer<SOURCE_SAMPLES>) {}
+    }
+
+    struct ByteDecoder;
+
+    impl FrameDecoder for ByteDecoder {
+        type Error = std::convert::Infallible;
+
+        fn decode(&mut self, _encoded: &[u8], output: &mut [f32]) -> Result<usize, Self::Error> {
+            output.fill(0.25);
+            Ok(output.len())
+        }
+
+        fn decode_plc(&mut self, output: &mut [f32]) -> Result<usize, Self::Error> {
+            output.fill(0.0);
+            Ok(output.len())
+        }
     }
 
     struct IdleIo;
@@ -419,6 +474,81 @@ mod tests {
         ));
         assert!(scheduler.detach_control().is_some());
     }
+
+    #[test]
+    fn combined_tick_reports_control_and_media_results_together() {
+        const JITTER_CAPACITY: usize = 8;
+        const MAX_ENCODED_BYTES: usize = 256;
+        type UdpPipeline = crate::UdpReceiverPipeline<
+            ByteDecoder,
+            JITTER_CAPACITY,
+            MAX_ENCODED_BYTES,
+            SOURCE_SAMPLES,
+        >;
+
+        let (producer, _consumer) = realtime_pcm_queue::<SOURCE_SAMPLES>(8).unwrap();
+        let secret = SessionSecret::new([7; 32]);
+        let context = MediaKeyContext::new(7, 1, 0, MediaDirection::AndroidToDesktop).unwrap();
+        let counters = Arc::new(StreamCounters::default());
+        let pipeline = UdpPipeline::bind(
+            SocketAddr::from(([127, 0, 0, 1], 0)),
+            &secret,
+            context,
+            ByteDecoder,
+            producer,
+            Arc::clone(&counters),
+            0,
+        )
+        .unwrap();
+        let bridge = ControlToMixerBridge::new(
+            SessionState::READY,
+            &[Capability::FrameDuration10Ms],
+            TestOutput,
+            OutputSelection {
+                device: None,
+                config: OutputConfig {
+                    sample_rate_hz: 48_000,
+                    channels: 2,
+                    sample_format: SampleFormat::Float32,
+                    requested_callback_frames: Some(480),
+                    maximum_callback_frames: 1_024,
+                },
+            },
+            8,
+            8,
+        )
+        .unwrap();
+        let owner = DesktopControlOwner::new(bridge).unwrap();
+        let mut scheduler: DesktopReceiverScheduler<
+            TestOutput,
+            UdpPipeline,
+            SLOTS,
+            OUTPUT_SAMPLES,
+            1,
+            SOURCE_SAMPLES,
+            IdleIo,
+        > = DesktopReceiverScheduler::new(DesktopReceiverOwner::new(
+            owner,
+            pipeline,
+            Some(counters),
+        ));
+        let session = scheduler
+            .receiver_mut()
+            .owner_mut()
+            .install_authenticated_control_session()
+            .unwrap();
+        scheduler.attach_control(session, IdleIo).unwrap();
+
+        let tick = scheduler.tick();
+        assert!(matches!(
+            tick.control(),
+            Ok(Some(crate::ControlSessionPoll::Empty))
+        ));
+        assert!(matches!(
+            tick.media(),
+            Ok(media) if matches!(media.poll(), crate::UdpPollOutcome::Empty)
+        ));
+    }
 }
 
 impl<
@@ -446,6 +576,16 @@ where
     D: FrameDecoder,
     S: Read + Write,
 {
+    /// Runs one control and UDP media scheduler tick outside the output callback.
+    ///
+    /// Control and media results are independent; inspect both fields even when
+    /// one side reports an error.
+    pub fn tick(&mut self) -> DesktopReceiverSchedulerTick<D::Error> {
+        let control = self.poll_control_once();
+        let media = self.receiver.tick_media();
+        DesktopReceiverSchedulerTick { control, media }
+    }
+
     /// Runs one UDP poll/decode scheduler tick outside the output callback.
     ///
     /// # Errors

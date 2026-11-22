@@ -735,6 +735,9 @@ channel, automatically retires a closed/error channel, and exposes the UDP
 Before each control poll it flushes any reply left by a previous nonblocking
 write; a full socket therefore pauses command intake for one tick instead of
 turning a recoverable `Pending` write into a dropped session.
+The UDP specialization also exposes `tick`, which runs one control poll and one
+media poll/decode together while returning their results independently, so a
+control transport failure does not suppress the media tick.
 The composable polls the same low-rate snapshot command once per second and clears
 that timer on unmount, so reconnect countdowns and asynchronous output faults do
 not depend on a user clicking Refresh.
