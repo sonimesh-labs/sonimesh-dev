@@ -27,6 +27,12 @@ device clipboard for attaching to a local test report. The text is an operator
 summary, not a raw-audio export or a production diagnostic bundle; it is cleared
 when a new capture request begins.
 
+Before starting, the capture-only screen lets the operator choose one playback
+usage group: **Media**, **Game**, or **Other**. The choice is passed to the
+foreground service for that capture session only; it does not identify the
+source application, override Android capture policy, or change the observed
+format reported by the service. The default is **Media**.
+
 ### Android Opus interoperability lab
 
 The paired-audio interoperability lab exercises the real pairing, Hello and

@@ -46,6 +46,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.stringResource
 import com.sonimesh.sender.R
 import com.sonimesh.sender.capture.CaptureEvidenceSnapshot
+import com.sonimesh.sender.capture.CaptureSource
 import com.sonimesh.sender.capture.CaptureStatus
 import com.sonimesh.sender.capture.CaptureUiState
 import com.sonimesh.sender.capture.isActive
@@ -61,6 +62,8 @@ private val StatusMutedText = Color(0xFFB1BCBE)
 @Composable
 internal fun CaptureScreen(
     state: CaptureUiState,
+    selectedSource: CaptureSource,
+    onSourceSelected: (CaptureSource) -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit,
     onCopyEvidence: () -> Unit,
@@ -87,6 +90,8 @@ internal fun CaptureScreen(
         CaptureActionCard(
             active = state.status.isActive(),
             starting = state.status.isAwaitingAuthorization(),
+            selectedSource = selectedSource,
+            onSourceSelected = onSourceSelected,
             onStart = onStart,
             onStop = onStop,
         )
@@ -322,6 +327,8 @@ private fun CaptureEvidenceCard(
 private fun CaptureActionCard(
     active: Boolean,
     starting: Boolean,
+    selectedSource: CaptureSource,
+    onSourceSelected: (CaptureSource) -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit,
 ) {
@@ -346,6 +353,11 @@ private fun CaptureActionCard(
                     starting -> "Complete or dismiss the system permission request before starting another run."
                     else -> "Starting asks for permission and a fresh projection consent before capture begins."
                 },
+            )
+            CaptureSourceSelector(
+                enabled = !active && !starting,
+                selectedSource = selectedSource,
+                onSourceSelected = onSourceSelected,
             )
             if (active) {
                 OutlinedButton(
@@ -375,6 +387,44 @@ private fun CaptureActionCard(
                         if (starting) "Waiting for system consent" else "Start capture",
                         fontWeight = FontWeight.SemiBold,
                     )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CaptureSourceSelector(
+    enabled: Boolean,
+    selectedSource: CaptureSource,
+    onSourceSelected: (CaptureSource) -> Unit,
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            text = stringResource(R.string.capture_source_label),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.labelMedium,
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            CaptureSource.entries.forEach { source ->
+                OutlinedButton(
+                    modifier = Modifier.weight(1f),
+                    enabled = enabled,
+                    onClick = { onSourceSelected(source) },
+                    shape = TileShape,
+                    colors = if (source == selectedSource) {
+                        ButtonDefaults.outlinedButtonColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer,
+                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                        )
+                    } else {
+                        ButtonDefaults.outlinedButtonColors()
+                    },
+                ) {
+                    Text(source.label())
                 }
             }
         }
@@ -587,6 +637,13 @@ private fun CaptureStatus.signalLabel(): String = when (this) {
     is CaptureStatus.Capturing -> "Observed"
     is CaptureStatus.NoCapturableAudio -> "None"
     else -> "Waiting"
+}
+
+@Composable
+private fun CaptureSource.label(): String = when (this) {
+    CaptureSource.Media -> stringResource(R.string.capture_source_media)
+    CaptureSource.Game -> stringResource(R.string.capture_source_game)
+    CaptureSource.Unknown -> stringResource(R.string.capture_source_unknown)
 }
 
 private fun formatCount(value: Long): String = String.format(Locale.US, "%,d", value)

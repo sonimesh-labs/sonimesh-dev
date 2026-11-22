@@ -80,9 +80,12 @@ class CaptureService : Service() {
             return START_NOT_STICKY
         }
 
+        val captureSource = CaptureSource.fromWireValue(
+            intent?.getStringExtra(EXTRA_CAPTURE_SOURCE),
+        )
         try {
             startForegroundServiceNotification()
-            startCapture(resultCode, resultData)
+            startCapture(resultCode, resultData, captureSource)
         } catch (error: SecurityException) {
             teardown(TerminalOutcome.Failed("Foreground capture service permission was rejected"))
         } catch (error: IllegalStateException) {
@@ -98,7 +101,11 @@ class CaptureService : Service() {
         super.onDestroy()
     }
 
-    private fun startCapture(resultCode: Int, resultData: Intent) {
+    private fun startCapture(
+        resultCode: Int,
+        resultData: Intent,
+        captureSource: CaptureSource,
+    ) {
         var candidateRecord: AudioRecord? = null
         var deferredFailure: Throwable? = null
 
@@ -128,7 +135,7 @@ class CaptureService : Service() {
             projectionCallback = callback
             projection.registerCallback(callback, mainHandler)
 
-            val setup = createAudioRecord(projection)
+            val setup = createAudioRecord(projection, captureSource)
             val record = setup.record.also { candidateRecord = it }
             if (record.state != AudioRecord.STATE_INITIALIZED) {
                 throw CaptureSetupException("AudioRecord did not initialize")
@@ -174,12 +181,14 @@ class CaptureService : Service() {
     }
 
     @android.annotation.SuppressLint("MissingPermission")
-    private fun createAudioRecord(projection: MediaProjection): AudioRecordSetup {
-        val captureConfig = android.media.AudioPlaybackCaptureConfiguration.Builder(projection)
-            .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
-            .addMatchingUsage(AudioAttributes.USAGE_GAME)
-            .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
-            .build()
+    private fun createAudioRecord(
+        projection: MediaProjection,
+        captureSource: CaptureSource,
+    ): AudioRecordSetup {
+        val captureConfigBuilder =
+            android.media.AudioPlaybackCaptureConfiguration.Builder(projection)
+        captureSource.usages.forEach(captureConfigBuilder::addMatchingUsage)
+        val captureConfig = captureConfigBuilder.build()
         val minimumBuffer = AudioRecord.getMinBufferSize(
             REQUESTED_SAMPLE_RATE_HZ,
             AudioFormat.CHANNEL_IN_STEREO,
@@ -503,6 +512,7 @@ class CaptureService : Service() {
         const val ACTION_STOP = "com.sonimesh.sender.action.STOP_CAPTURE"
         const val EXTRA_RESULT_CODE = "com.sonimesh.sender.extra.RESULT_CODE"
         const val EXTRA_RESULT_DATA = "com.sonimesh.sender.extra.RESULT_DATA"
+        const val EXTRA_CAPTURE_SOURCE = "com.sonimesh.sender.extra.CAPTURE_SOURCE"
 
         private const val LOG_TAG = "SoniMeshCapture"
         private const val NOTIFICATION_CHANNEL_ID = "sonimesh-capture"

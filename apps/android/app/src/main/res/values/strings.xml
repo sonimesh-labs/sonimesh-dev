@@ -8,4 +8,8 @@
     <string name="copy_capture_evidence">Copy capture evidence</string>
     <string name="capture_evidence_clip_label">SoniMesh capture evidence</string>
     <string name="capture_evidence_copied">Capture evidence copied</string>
+    <string name="capture_source_label">Playback source</string>
+    <string name="capture_source_media">Media</string>
+    <string name="capture_source_game">Game</string>
+    <string name="capture_source_unknown">Other</string>
 </resources>

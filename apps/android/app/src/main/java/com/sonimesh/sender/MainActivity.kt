@@ -16,17 +16,55 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.Surface
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import com.sonimesh.sender.capture.CaptureService
+import com.sonimesh.sender.capture.CaptureSource
 import com.sonimesh.sender.capture.CaptureStateStore
 import com.sonimesh.sender.capture.CaptureStatus
 import com.sonimesh.sender.capture.canStart
 import com.sonimesh.sender.capture.isAwaitingAuthorization
 
 class MainActivity : ComponentActivity() {
+    private var pendingCaptureSource = CaptureSource.Media
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        pendingCaptureSource = CaptureSource.fromWireValue(
+            savedInstanceState?.getString(STATE_PENDING_CAPTURE_SOURCE),
+        )
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+        setContent {
+            val state by CaptureStateStore.state.collectAsState()
+            var selectedSourceWire by rememberSaveable {
+                mutableStateOf(CaptureSource.Media.wireValue)
+            }
+            val selectedSource = CaptureSource.fromWireValue(selectedSourceWire)
+            SoniMeshTheme {
+                Surface(modifier = Modifier.fillMaxSize()) {
+                    CaptureScreen(
+                        state = state,
+                        selectedSource = selectedSource,
+                        onSourceSelected = { selectedSourceWire = it.wireValue },
+                        onStart = { requestCapture(selectedSource) },
+                        onStop = { sendStopCommand() },
+                        onCopyEvidence = ::copyCaptureEvidence,
+                    )
+                }
+            }
+        }
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString(STATE_PENDING_CAPTURE_SOURCE, pendingCaptureSource.wireValue)
+        super.onSaveInstanceState(outState)
+    }
+
     private val audioPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             if (CaptureStateStore.state.value.status != CaptureStatus.AwaitingPermission) {
@@ -64,6 +102,7 @@ class MainActivity : ComponentActivity() {
             val serviceIntent = Intent(this, CaptureService::class.java)
                 .putExtra(CaptureService.EXTRA_RESULT_CODE, result.resultCode)
                 .putExtra(CaptureService.EXTRA_RESULT_DATA, result.data)
+                .putExtra(CaptureService.EXTRA_CAPTURE_SOURCE, pendingCaptureSource.wireValue)
             try {
                 ContextCompat.startForegroundService(this, serviceIntent)
             } catch (error: SecurityException) {
@@ -73,29 +112,12 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
-        setContent {
-            val state by CaptureStateStore.state.collectAsState()
-            SoniMeshTheme {
-                Surface(modifier = Modifier.fillMaxSize()) {
-                    CaptureScreen(
-                        state = state,
-                        onStart = ::requestCapture,
-                        onStop = { sendStopCommand() },
-                        onCopyEvidence = ::copyCaptureEvidence,
-                    )
-                }
-            }
-        }
-    }
-
-    private fun requestCapture() {
+    private fun requestCapture(source: CaptureSource) {
         if (!CaptureStateStore.state.value.status.canStart()) {
             return
         }
 
+        pendingCaptureSource = source
         CaptureStateStore.publishAwaitingPermission()
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
             != PackageManager.PERMISSION_GRANTED
@@ -141,6 +163,10 @@ class MainActivity : ComponentActivity() {
             ClipData.newPlainText(getString(R.string.capture_evidence_clip_label), evidence),
         )
         Toast.makeText(this, R.string.capture_evidence_copied, Toast.LENGTH_SHORT).show()
+    }
+
+    private companion object {
+        const val STATE_PENDING_CAPTURE_SOURCE = "pending_capture_source"
     }
 }
 
