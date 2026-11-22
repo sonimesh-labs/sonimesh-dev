@@ -75,6 +75,16 @@ Stopping the desktop outright can instead surface a UDP send error first. A
 silent network partition remains undetected until an operation reports failure;
 these emulator checks do not establish physical-network behavior.
 
+After changing the paired lab's 20 ms scheduler to advance from its previous
+deadline, two synthetic-tone emulator runs each authenticated 100 packets. One
+decoded 92 frames after jitter resynchronization discarded eight buffered frames;
+the other decoded 100 with no resynchronization drops. Both reported peak 0.250.
+These counters explain the difference in these two runs, not the earlier runs;
+the cause of the resynchronization itself remains uncharacterized. A separate
+playback-capture run decoded 156 of 156 authenticated packets, recorded 486 CPAL
+callbacks and no stream errors or oversized callbacks. These results are not
+evidence of audible quality, physical-network performance, or latency.
+
 This isolated test encodes a synthetic 48 kHz stereo tone with Android
 MediaCodec. It writes only synthetic audio to the spike application's external
 files directory; it does not use capture or networking. With a single selected

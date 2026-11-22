@@ -205,7 +205,16 @@ fn negotiate_hello(
 }
 
 const SAMPLES: usize = 1_920;
+const PLAYOUT_PERIOD: Duration = Duration::from_millis(20);
 type Receiver = UdpReceiverPipeline<ObservedDecoder, 8, 1_148, SAMPLES>;
+
+fn next_playout_deadline(deadline: Instant, now: Instant) -> Instant {
+    if now.duration_since(deadline) >= PLAYOUT_PERIOD {
+        now + PLAYOUT_PERIOD
+    } else {
+        deadline + PLAYOUT_PERIOD
+    }
+}
 
 struct ObservedDecoder {
     decoder: lab_decoder::Decoder,
@@ -423,7 +432,17 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                         let output_result = playback.stop();
                         drop(receiver.take());
                         drop(consumer.take());
-                        drop(counters.take());
+                        if let Some(metrics) = counters.take() {
+                            let snapshot = metrics.snapshot();
+                            println!(
+                                "RESULT packets {} late {} resync_dropped {} plc {} buffered {}",
+                                snapshot.authenticated_packets,
+                                snapshot.late_packets,
+                                snapshot.jitter_resync_dropped_frames,
+                                snapshot.plc_frames,
+                                snapshot.jitter_frames,
+                            );
+                        }
                         coordinator.complete_stop(token, identity)?;
                         let reply = ControlReply::stream_status(
                             identity,
@@ -471,7 +490,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                 }
             }
             let now = Instant::now();
-            if next_playout.is_some_and(|due| now >= due) {
+            if let Some(due) = next_playout.filter(|due| now >= *due) {
                 if metrics.snapshot().jitter_frames > 0
                     && matches!(pipeline.decode_next()?, DecodeStep::Decoded { .. })
                 {
@@ -484,7 +503,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                         peak = peak.max(sample.abs());
                     }
                 }
-                next_playout = Some(now + Duration::from_millis(20));
+                next_playout = Some(next_playout_deadline(due, now));
             }
         }
         std::thread::sleep(Duration::from_millis(1));
@@ -511,6 +530,29 @@ fn send_reply<S: std::io::Read + std::io::Write>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn playout_deadline_does_not_accumulate_poll_delay() {
+        let origin = Instant::now();
+        let mut deadline = origin;
+        for step in 1..=1_000 {
+            let now = deadline + Duration::from_millis(2);
+            deadline = next_playout_deadline(deadline, now);
+            assert_eq!(deadline, origin + PLAYOUT_PERIOD * step);
+        }
+    }
+
+    #[test]
+    fn playout_deadline_rebases_after_a_missed_period() {
+        let deadline = Instant::now();
+        let late = deadline + PLAYOUT_PERIOD;
+        assert_eq!(next_playout_deadline(deadline, late), late + PLAYOUT_PERIOD);
+        let much_later = deadline + Duration::from_secs(5);
+        assert_eq!(
+            next_playout_deadline(deadline, much_later),
+            much_later + PLAYOUT_PERIOD
+        );
+    }
 
     #[test]
     fn playback_arguments_preserve_default_and_require_explicit_selection() {
