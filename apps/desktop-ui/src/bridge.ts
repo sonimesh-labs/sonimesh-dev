@@ -9,7 +9,7 @@ import type {
   SessionState,
   StreamMetrics,
 } from './types'
-import { TauriDesktopBridge } from './tauri-bridge'
+import { TauriDesktopBridge, tauriGlobalInvoke } from './tauri-bridge'
 import type { DesktopBridge, DesktopBridgeInvoke } from './bridge-contract'
 
 export type { DesktopBridge, DesktopBridgeInvoke } from './bridge-contract'
@@ -455,7 +455,7 @@ const JITTER_MODE_PRESETS: Record<JitterMode, Pick<StreamMetrics, 'targetMinFram
 
 /** Selects the live shell bridge when Tauri exposes its global API. */
 export function createDesktopBridge(invoke?: DesktopBridgeInvoke): DesktopBridge {
-  const runtimeInvoke = invoke ?? (typeof window === 'undefined' ? undefined : window.__TAURI__?.core?.invoke)
+  const runtimeInvoke = invoke ?? tauriGlobalInvoke()
   return runtimeInvoke === undefined ? new PreviewDesktopBridge() : new TauriDesktopBridge(runtimeInvoke)
 }
 

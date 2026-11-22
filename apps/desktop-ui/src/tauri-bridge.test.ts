@@ -69,6 +69,24 @@ describe('TauriDesktopBridge', () => {
     expect(createDesktopBridge(invoke)).toBeInstanceOf(TauriDesktopBridge)
   })
 
+  it('binds the global Tauri core when selecting the runtime bridge', async () => {
+    const previous = window.__TAURI__
+    const core = {
+      invoke<T>(command: string): Promise<T> {
+        expect(this).toBe(core)
+        expect(command).toBe('desktop_snapshot')
+        return Promise.resolve(snapshot() as T)
+      },
+    }
+    window.__TAURI__ = { core }
+
+    try {
+      await expect(createDesktopBridge().snapshot()).resolves.toMatchObject({ previewAdapter: false })
+    } finally {
+      window.__TAURI__ = previous
+    }
+  })
+
   it('maps production commands to low-rate IPC and marks snapshots as live', async () => {
     const calls: Array<[string, Record<string, unknown> | undefined]> = []
     const invoke: DesktopBridgeInvoke = async <T>(command: string, args?: Record<string, unknown>) => {

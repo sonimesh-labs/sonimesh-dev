@@ -115,3 +115,10 @@ declare global {
     __TAURI__?: TauriGlobalRuntime
   }
 }
+
+/** Returns the shell invoke function with its Tauri core context preserved. */
+export function tauriGlobalInvoke(): DesktopBridgeInvoke | undefined {
+  if (typeof window === 'undefined') return undefined
+  const runtime = window.__TAURI__
+  return runtime?.core.invoke.bind(runtime.core)
+}
