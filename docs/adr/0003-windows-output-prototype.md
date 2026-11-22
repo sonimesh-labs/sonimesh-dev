@@ -57,6 +57,11 @@ Add an optional `cpal-output` feature to `sonimesh-platform` for the first Windo
 This decision does not select the release backend. It authorizes a measured CPAL
 prototype only.
 
+The Android audio lab commands may enumerate outputs and let the operator select
+one for a session. They resolve the choice to its CPAL device ID and probe that
+specific endpoint before creating the matching render source. This interactive
+lab selection does not establish device hot-plug recovery or release support.
+
 ## Direct-WASAPI comparison boundary
 
 The direct-WASAPI comparison is a separate Windows-only experimental tool at

@@ -1,4 +1,6 @@
 //! Loopback-only ADB audio lab; this is not the SoniMesh wire protocol.
+mod common;
+
 use std::{
     error::Error,
     io::{self, Read},
@@ -97,38 +99,43 @@ fn receive(
 }
 
 fn main() -> LabResult<()> {
-    let mode = std::env::args().nth(1).unwrap_or_default();
-    if mode != "--check" && mode != "--play" {
-        return Err("usage: android-live --check | --play".into());
+    match common::parse_args(std::env::args().skip(1))? {
+        common::Mode::Check => check(accept_stream()?),
+        common::Mode::Play { select_output } => play(select_output),
     }
+}
+
+fn accept_stream() -> LabResult<std::net::TcpStream> {
     let listener = TcpListener::bind("127.0.0.1:39091")?;
     println!("Listening on desktop loopback port 39091; start capture on Android.");
     let (stream, _) = listener.accept()?;
     stream.set_read_timeout(Some(Duration::from_secs(5)))?;
-    if mode == "--check" {
-        let config = OutputConfig {
-            sample_rate_hz: 48_000,
-            channels: 2,
-            sample_format: SampleFormat::Float32,
-            requested_callback_frames: None,
-            maximum_callback_frames: 960,
-        };
-        let stats = receive(stream, config, |source| Ok(Some(source)))?;
-        if stats.count > 0 && stats.peak >= 0.001 && stats.render_peak < 0.001 {
-            return Err("non-silent audio did not reach the render source".into());
-        }
-        return Ok(());
+    Ok(stream)
+}
+
+fn check(stream: impl Read) -> LabResult<()> {
+    let config = OutputConfig {
+        sample_rate_hz: 48_000,
+        channels: 2,
+        sample_format: SampleFormat::Float32,
+        requested_callback_frames: None,
+        maximum_callback_frames: 960,
+    };
+    let stats = receive(stream, config, |source| Ok(Some(source)))?;
+    if stats.count > 0 && stats.peak >= 0.001 && stats.render_peak < 0.001 {
+        return Err("non-silent audio did not reach the render source".into());
     }
-    play(stream)
+    Ok(())
 }
 
 #[cfg(all(windows, feature = "playback"))]
-fn play(stream: impl Read) -> LabResult<()> {
-    use sonimesh_platform::{AudioOutput, CpalOutput};
-    let mut output = CpalOutput::new();
-    let config = output.default_device_probe()?.output_config(None, 8_192)?;
+fn play(select_output: bool) -> LabResult<()> {
+    use sonimesh_platform::AudioOutput;
+    let (mut output, selection) = common::prepare_output(select_output)?;
+    let stream = accept_stream()?;
+    let config = selection.config;
     let result = receive(stream, config, |source| {
-        output.start(None, config, source)?;
+        output.start(selection.device.as_ref(), config, source)?;
         Ok(None)
     });
     std::thread::sleep(Duration::from_millis(160));
@@ -146,7 +153,7 @@ fn play(stream: impl Read) -> LabResult<()> {
 }
 
 #[cfg(not(all(windows, feature = "playback")))]
-fn play(_stream: impl Read) -> LabResult<()> {
+fn play(_: bool) -> LabResult<()> {
     Err("playback requires Windows and --features playback".into())
 }
 

@@ -86,6 +86,12 @@ adb reverse tcp:39092 tcp:39092
 cargo run -p opus-codec-prototype --features playback --bin android-udp-lab -- --play
 ~~~
 
+Either playback command also accepts `--select-output` after `--play`. Choose
+an enumerated output before starting capture; pressing Enter selects the system
+default. The chosen device and its format are fixed for that lab session. An
+unavailable device or unsupported default format ends the command; automatic
+output recovery is not implemented in these lab commands.
+
 Choose **Start UDP capture (emulator)** and fresh capture consent. Use `--check`
 without `--features playback` for the software render check. Android generates
 a new random lab secret and sends it over the ADB connection; the media packets
@@ -115,6 +121,13 @@ data, a further software run admitted 602 packets, decoded 600 frames, reported
 zero late packets and zero concealed frames, and had 13 empty ticks. The render
 peak was 0.093. A real sequence gap still invokes concealment in the regression
 test. This single short run does not establish long-term clock stability.
+
+On 2026-11-22 an emulator run selected a non-default Windows output: the UDP
+lab admitted 492 packets, decoded 484 frames, observed one resynchronization
+and 38 empty ticks, and recorded 1,150 callbacks with no stream errors. A
+separate ADB TCP run on that endpoint decoded 394 frames with a 0.117 peak and
+recorded 919 callbacks with no stream errors. Neither run included a human
+listening assessment or a physical latency measurement.
 
 When a local SDK is missing one of those components, install the same set the
 Android CI job installs before running the Gradle commands:

@@ -79,6 +79,18 @@ impl CpalOutput {
         probe_device(&device, Some(&default_id)).map_err(|error| map_cpal_error(&error))
     }
 
+    /// Probes one selected output endpoint without probing unrelated devices.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`OutputError::DeviceUnavailable`] if the endpoint is absent, or
+    /// a backend error if its default format cannot be queried.
+    pub fn device_probe(&self, id: &OutputDeviceId) -> Result<CpalDeviceProbe, OutputError> {
+        let device = self.selected_device(Some(id))?;
+        let default_id = self.default_device_id();
+        probe_device(&device, default_id.as_deref()).map_err(|error| map_cpal_error(&error))
+    }
+
     fn default_device_id(&self) -> Option<String> {
         self.host
             .default_output_device()

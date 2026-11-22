@@ -1,4 +1,6 @@
 //! Emulator-only UDP lab. ADB bootstrap is not authenticated pairing.
+mod common;
+
 use std::{
     error::Error,
     io::{self, Read, Write},
@@ -144,7 +146,11 @@ fn decode_buffered(
 }
 
 #[allow(clippy::too_many_lines)] // One lab session coordinates socket, playout, and output lifetimes.
-fn run<O: LabOutput>(mut control: TcpStream, output: O, config: OutputConfig) -> LabResult<()> {
+fn run<O: LabOutput>(
+    mut control: TcpStream,
+    output: O,
+    selection: OutputSelection,
+) -> LabResult<()> {
     let secret = read_secret(&mut control)?;
     let context = MediaKeyContext::new(1, 1, 0, MediaDirection::AndroidToDesktop)?;
     let counters = Arc::new(StreamCounters::default());
@@ -165,13 +171,7 @@ fn run<O: LabOutput>(mut control: TcpStream, output: O, config: OutputConfig) ->
     let factory =
         ReceiverPcmEndpointFactory::new(8, SourcePcmFormat::new(48_000, 2)?, Arc::clone(&counters));
     let mut output = ReceiverOutputController::new(output, factory);
-    output.start(
-        OutputSelection {
-            device: None,
-            config,
-        },
-        &mut receiver,
-    )?;
+    output.start(selection, &mut receiver)?;
     control.write_all(&[1])?;
     control.set_nonblocking(true)?;
     let mut last_packet = Instant::now();
@@ -249,34 +249,43 @@ fn run<O: LabOutput>(mut control: TcpStream, output: O, config: OutputConfig) ->
 }
 
 fn main() -> LabResult<()> {
-    let mode = std::env::args().nth(1).unwrap_or_default();
-    if mode != "--check" && mode != "--play" {
-        return Err("usage: android-udp-lab --check | --play".into());
+    match common::parse_args(std::env::args().skip(1))? {
+        common::Mode::Check => {
+            let control = accept_control()?;
+            let config = OutputConfig {
+                sample_rate_hz: 48_000,
+                channels: 2,
+                sample_format: SampleFormat::Float32,
+                requested_callback_frames: None,
+                maximum_callback_frames: 960,
+            };
+            run(
+                control,
+                CheckOutput::default(),
+                OutputSelection {
+                    device: None,
+                    config,
+                },
+            )
+        }
+        common::Mode::Play { select_output } => play(select_output),
     }
+}
+
+fn accept_control() -> LabResult<TcpStream> {
     let listener = TcpListener::bind("127.0.0.1:39092")?;
     println!("Listening for ADB lab bootstrap on 127.0.0.1:39092; UDP uses 127.0.0.1:39093.");
     let (control, _) = listener.accept()?;
-    if mode == "--check" {
-        let config = OutputConfig {
-            sample_rate_hz: 48_000,
-            channels: 2,
-            sample_format: SampleFormat::Float32,
-            requested_callback_frames: None,
-            maximum_callback_frames: 960,
-        };
-        return run(control, CheckOutput::default(), config);
-    }
-    play(control)
+    Ok(control)
 }
 
 #[cfg(all(windows, feature = "playback"))]
-fn play(control: TcpStream) -> LabResult<()> {
-    let output = sonimesh_platform::CpalOutput::new();
-    let config = output.default_device_probe()?.output_config(None, 8_192)?;
-    run(control, output, config)
+fn play(select_output: bool) -> LabResult<()> {
+    let (output, selection) = common::prepare_output(select_output)?;
+    run(accept_control()?, output, selection)
 }
 #[cfg(not(all(windows, feature = "playback")))]
-fn play(_: TcpStream) -> LabResult<()> {
+fn play(_: bool) -> LabResult<()> {
     Err("playback requires Windows and --features playback".into())
 }
 
