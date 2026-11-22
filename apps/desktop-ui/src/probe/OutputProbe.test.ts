@@ -33,4 +33,18 @@ describe('desktop output probe', () => {
     expect(wrapper.text()).toContain('No output devices found.')
     wrapper.unmount()
   })
+
+  it('keeps endpoints visible when an individual format is unavailable', async () => {
+    window.__TAURI__ = { core: { invoke: vi.fn().mockResolvedValue([
+      { label: 'Unavailable', sampleRateHz: null, channels: null, isDefault: false },
+      { label: 'Speakers', sampleRateHz: 48_000, channels: 2, isDefault: true },
+    ]) } }
+    const wrapper = mount(OutputProbe)
+    await flushPromises()
+    expect(wrapper.text()).toContain('Unavailable')
+    expect(wrapper.text()).toContain('Default format unavailable')
+    expect(wrapper.text()).toContain('Speakers (default)')
+    expect(wrapper.text()).toContain('48,000 Hz · 2 channels')
+    wrapper.unmount()
+  })
 })

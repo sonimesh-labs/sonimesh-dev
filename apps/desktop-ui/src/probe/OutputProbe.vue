@@ -3,8 +3,8 @@ import { onMounted, ref } from 'vue'
 
 interface OutputDevice {
   label: string
-  sampleRateHz: number
-  channels: number
+  sampleRateHz: number | null
+  channels: number | null
   isDefault: boolean
 }
 
@@ -56,7 +56,8 @@ onMounted(refresh)
         <li v-for="(device, index) in devices" :key="index" class="selected-device">
           <div>
             <strong>{{ device.label }}{{ device.isDefault ? ' (default)' : '' }}</strong>
-            <span>{{ device.sampleRateHz.toLocaleString() }} Hz · {{ device.channels }} channels</span>
+            <span v-if="device.sampleRateHz !== null && device.channels !== null">{{ device.sampleRateHz.toLocaleString() }} Hz · {{ device.channels }} channels</span>
+            <span v-else>Default format unavailable</span>
           </div>
         </li>
       </ul>

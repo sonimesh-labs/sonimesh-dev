@@ -293,7 +293,9 @@ when the platforms packages are present.
 
 The isolated Tauri prototype displays the Windows output endpoints and default
 formats returned by the CPAL adapter. It does not start audio or control a
-receiver. Build the web assets and run the prototype from the repository root:
+receiver. If one endpoint's format cannot be read, it remains listed with an
+unavailable-format indication. Build the web assets and run the prototype from
+the repository root:
 
 ~~~powershell
 Push-Location apps/desktop-ui

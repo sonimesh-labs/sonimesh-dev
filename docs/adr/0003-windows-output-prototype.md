@@ -61,6 +61,11 @@ The Android audio lab commands may enumerate outputs and let the operator select
 one for a session. They resolve the choice to its CPAL device ID and probe that
 specific endpoint before creating the matching render source. This interactive
 lab selection does not establish device hot-plug recovery or release support.
+The separate desktop output probe enumerates endpoint identities first and
+queries each default format independently. An endpoint whose format cannot be
+queried remains visible with its format marked unavailable; enumeration failure
+is still reported as a list-level error. This is a read-only snapshot and does
+not establish output support or device recovery.
 The UDP lab may retry the selected endpoint after a reported output fault while
 its media session remains connected. Recovery recreates the PCM endpoint outside
 the callback and preserves the local gain and mute settings. It does not follow a
