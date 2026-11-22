@@ -257,7 +257,6 @@ fn write_bundle_atomically(directory: &Path, sequence: u64, bundle: &str) -> io:
 }
 
 /// Failure while opening or retaining an on-disk export store.
-#[derive(Debug)]
 pub enum ExportStoreError {
     /// A retention policy bound must be positive.
     InvalidRetentionPolicy,
@@ -282,6 +281,32 @@ pub enum ExportStoreError {
         /// The missing sequence.
         sequence: u64,
     },
+}
+
+impl fmt::Debug for ExportStoreError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidRetentionPolicy => formatter.write_str("InvalidRetentionPolicy"),
+            Self::NotADirectory { .. } => formatter.write_str("NotADirectory { path: [REDACTED] }"),
+            Self::Io(error) => formatter
+                .debug_struct("Io")
+                .field("kind", &error.kind())
+                .finish(),
+            Self::SequenceExhausted => formatter.write_str("SequenceExhausted"),
+            Self::ExportBytesExceedRetentionLimit {
+                bytes,
+                max_retained_bytes,
+            } => formatter
+                .debug_struct("ExportBytesExceedRetentionLimit")
+                .field("bytes", bytes)
+                .field("max_retained_bytes", max_retained_bytes)
+                .finish(),
+            Self::NotRetained { sequence } => formatter
+                .debug_struct("NotRetained")
+                .field("sequence", sequence)
+                .finish(),
+        }
+    }
 }
 
 impl fmt::Display for ExportStoreError {
@@ -391,6 +416,21 @@ mod tests {
         assert_eq!(parse_pending_file_name("export-notes.json.pending"), None);
         assert_eq!(parse_pending_file_name("export-1.json.pending"), None);
         assert_eq!(parse_pending_file_name("notes.txt.pending"), None);
+    }
+
+    #[test]
+    fn error_debug_redacts_paths_and_io_details() {
+        let path_error = ExportStoreError::NotADirectory {
+            path: PathBuf::from("C:\\Users\\private\\exports"),
+        };
+        let io_error = ExportStoreError::Io(io::Error::other("private export path"));
+
+        let path_debug = format!("{path_error:?}");
+        let io_debug = format!("{io_error:?}");
+
+        assert_eq!(path_debug, "NotADirectory { path: [REDACTED] }");
+        assert!(io_debug.contains("kind: Other"));
+        assert!(!io_debug.contains("private export path"));
     }
 
     #[test]
