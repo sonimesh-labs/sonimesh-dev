@@ -320,6 +320,19 @@ fn next_playout_deadline(deadline: Instant, now: Instant) -> Instant {
     }
 }
 
+fn decode_playout(receiver: &mut Receiver) -> LabResult<Option<DecodeStep>> {
+    match receiver.decode_next() {
+        Ok(step) => Ok(Some(step)),
+        Err(DecodeWorkerError::Decoder(error))
+            if error.code() == opus::ErrorCode::InvalidPacket =>
+        {
+            // The pipeline has already retired the affected audio state.
+            Ok(None)
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
 struct ObservedDecoder {
     decoder: lab_decoder::Decoder,
     peak: Arc<AtomicU32>,
@@ -583,12 +596,13 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                         if let Some(metrics) = counters.take() {
                             let snapshot = metrics.snapshot();
                             println!(
-                                "RESULT packets {} rejected {} late {} resync_dropped {} plc {} buffered {}",
+                                "RESULT packets {} rejected {} late {} resync_dropped {} plc {} decode_errors {} buffered {}",
                                 snapshot.authenticated_packets,
                                 snapshot.rejected_packets,
                                 snapshot.late_packets,
                                 snapshot.jitter_resync_dropped_frames,
                                 snapshot.plc_frames,
+                                snapshot.decode_errors,
                                 snapshot.jitter_frames,
                             );
                         }
@@ -648,10 +662,15 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
             }
             let now = Instant::now();
             if let Some(due) = next_playout.filter(|due| now >= *due) {
-                if metrics.snapshot().jitter_frames > 0
-                    && matches!(pipeline.decode_next()?, DecodeStep::Decoded { .. })
-                {
-                    decoded += 1;
+                if metrics.snapshot().jitter_frames > 0 {
+                    match decode_playout(pipeline)? {
+                        Some(DecodeStep::Decoded { .. }) => decoded += 1,
+                        Some(_) => {}
+                        None => {
+                            next_playout = None;
+                            continue;
+                        }
+                    }
                 }
                 if let Some(pcm) = &mut consumer {
                     let mut samples = [0_f32; SAMPLES];
@@ -965,6 +984,69 @@ mod tests {
             receiver.decode_next().unwrap(),
             DecodeStep::Decoded { sequence: 0, .. }
         ));
+    }
+
+    #[test]
+    fn invalid_opus_frame_resets_playout_and_accepts_fresh_audio() {
+        use sonimesh_protocol::{MediaKeyContext, MediaSealer};
+        use std::net::UdpSocket;
+
+        let secret = SessionSecret::new([0x35; 32]);
+        let context = MediaKeyContext::new(7, 1, 0, MediaDirection::AndroidToDesktop).unwrap();
+        let metrics = Arc::new(StreamCounters::default());
+        let (producer, mut consumer) = realtime_pcm_queue::<SAMPLES>(8).unwrap();
+        let worker = StreamDecodeWorker::new_for_opus(
+            ObservedDecoder {
+                decoder: lab_decoder::Decoder::new().unwrap(),
+                peak: Arc::new(AtomicU32::new(0)),
+            },
+            producer,
+            0,
+            OpusFrameConfig::new(48_000, 2, 20).unwrap(),
+        )
+        .unwrap();
+        let mut receiver = Receiver::bind_with_worker(
+            "127.0.0.1:0".parse().unwrap(),
+            &secret,
+            context,
+            worker,
+            Arc::clone(&metrics),
+        )
+        .unwrap();
+        let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let mut sealer = MediaSealer::new(&secret, context).unwrap();
+        let invalid = sealer.seal(0, 0, &[0xff]).unwrap();
+        sender
+            .send_to(&invalid.datagram, receiver.local_addr().unwrap())
+            .unwrap();
+        let until = Instant::now() + Duration::from_secs(2);
+        while metrics.snapshot().authenticated_packets < 1 && Instant::now() < until {
+            poll_media(&mut receiver).unwrap();
+        }
+        assert!(decode_playout(&mut receiver).unwrap().is_none());
+        assert_eq!(metrics.snapshot().decode_errors, 1);
+
+        let mut encoder =
+            opus::Encoder::new(48_000, opus::Channels::Stereo, opus::Application::Audio).unwrap();
+        let mut payload = [0_u8; 1_148];
+        let length = encoder
+            .encode_float(&[0.25; SAMPLES], &mut payload)
+            .unwrap();
+        let valid = sealer.seal(0, 960, &payload[..length]).unwrap();
+        sender
+            .send_to(&valid.datagram, receiver.local_addr().unwrap())
+            .unwrap();
+        let until = Instant::now() + Duration::from_secs(2);
+        while metrics.snapshot().authenticated_packets < 2 && Instant::now() < until {
+            poll_media(&mut receiver).unwrap();
+        }
+        assert!(matches!(
+            decode_playout(&mut receiver).unwrap(),
+            Some(DecodeStep::Decoded { sequence: 1, .. })
+        ));
+        let mut samples = [0.0; SAMPLES];
+        consumer.pop_into(&mut samples);
+        assert!(samples.iter().any(|sample| sample.abs() > 0.001));
     }
 
     #[test]

@@ -106,6 +106,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   adjust the receiver's local gain and mute during and across those sessions.
   The UDP lab also retries its selected output after a reported runtime fault;
   simulated recovery is tested, while physical device-removal behavior remains open.
+  The paired lab also resumes after an authenticated Opus packet rejected as
+  invalid: it resets the stream's decode state and waits for fresh media, and
+  reports the decode error count. Other decoder failures still end the session.
   A seeded property walk and a byte-driven libFuzzer target drive in-order
   deliveries, duplicates, tampered ciphertext, retired-epoch packets, and
   rotations against an independent replay oracle and counter model,
