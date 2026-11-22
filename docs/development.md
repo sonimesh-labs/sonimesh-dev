@@ -46,6 +46,14 @@ persistent trust record. If using the older manual setup, copy the printed
 adb shell am instrument -w -e pairingSpkiHex $pin -e class 'com.sonimesh.opusspike.PairedAudioInteropTest#pairs_starts_sends_opus_and_stops' com.sonimesh.opusspike.test/androidx.test.runner.AndroidJUnitRunner
 ~~~
 
+For the complete invitation path, install both APKs and pass the captured
+payload directly to the instrumentation. Keep the invitation in a shell
+variable rather than recording it in logs:
+
+~~~powershell
+adb shell am instrument -w -e pairingInvitationHex $invitationHex -e mediaHost 10.0.2.2 -e class 'com.sonimesh.opusspike.PairedAudioInteropTest#pairs_starts_sends_opus_and_stops' com.sonimesh.opusspike.test/androidx.test.runner.AndroidJUnitRunner
+~~~
+
 The test synthesizes and encodes a tone; the desktop acknowledges start only
 after binding its UDP receiver with the pairing-derived root and acknowledges
 stop after retiring it. Successful runs report the decoded frame count and
@@ -146,6 +154,13 @@ authenticated and decoded 100 packets with zero late packets and zero jitter
 resynchronization drops; each reported peak 0.250. This small sample supports
 the fixture change but does not establish the cause of earlier drops or qualify
 long-running behavior.
+
+On 2026-11-23, a direct API 37 emulator run using a freshly generated invitation
+payload completed one synthetic session with 100 authenticated and decoded
+packets, zero rejected packets, and zero decode errors. The same payload then
+completed two successive sessions against one `--keep-listening` listener with
+the same counters. This verifies the imported-payload and continuous-listener
+lab path; it is not production pairing or physical-network evidence.
 
 This isolated test encodes a synthetic 48 kHz stereo tone with Android
 MediaCodec. It writes only synthetic audio to the spike application's external

@@ -30,13 +30,21 @@ class PairedAudioInteropTest {
     @Test
     fun pairs_starts_sends_opus_and_stops() {
         val args = InstrumentationRegistry.getArguments()
-        assumeTrue("paired audio lab requires pairingSpkiHex", args.containsKey("pairingSpkiHex"))
-        val pin = requireNotNull(args.getString("pairingSpkiHex")).chunked(2).map { it.toInt(16).toByte() }.toByteArray()
-        val invitation = ByteArray(PairingQr.MAX_PAYLOAD_BYTES)
-        val size = PairingQr.encode(1, ByteArray(16) { 0x71 }, ByteArray(32) { 0x42 },
-            args.getString("pairingHost") ?: "127.0.0.1", 47610, pin, 120_100, invitation)
+        assumeTrue(
+            "paired audio lab requires pairingInvitationHex or pairingSpkiHex",
+            args.containsKey("pairingInvitationHex") || args.containsKey("pairingSpkiHex"),
+        )
+        val invitation = args.getString("pairingInvitationHex")?.let { labHexToBytes(it) }
+            ?: run {
+                val pin = requireNotNull(args.getString("pairingSpkiHex"))
+                    .chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+                val encoded = ByteArray(PairingQr.MAX_PAYLOAD_BYTES)
+                val size = PairingQr.encode(1, ByteArray(16) { 0x71 }, ByteArray(32) { 0x42 },
+                    args.getString("pairingHost") ?: "127.0.0.1", 47610, pin, 120_100, encoded)
+                encoded.copyOf(size)
+            }
         val identity = StreamIdentity(0x12345678, 1, 0)
-        PairingClient.connect(invitation.copyOf(size)).use { connection ->
+        PairingClient.connect(invitation).use { connection ->
             connection.negotiateHello("android audio lab", listOf(2))
             val start = connection.startStream(StreamParameters(identity, 48_000, 2, 20))
             assertTrue(start is StreamControlResult.Status)

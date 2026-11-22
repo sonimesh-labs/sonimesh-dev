@@ -28,6 +28,9 @@ class LabActivity : Activity() {
     private var pendingAddress = DEFAULT_LAB_ADDRESS
     private var pendingPin = ""
     private var pendingHost = "127.0.0.1"
+    private var importedInvitation: ByteArray? = null
+    private var importedPin = ""
+    private var importedHost = ""
     private lateinit var address: EditText
     private lateinit var invitation: EditText
     private lateinit var pin: EditText
@@ -42,6 +45,13 @@ class LabActivity : Activity() {
         pendingAddress = savedInstanceState?.getString("pendingAddress") ?: DEFAULT_LAB_ADDRESS
         pendingPin = savedInstanceState?.getString("pendingPin") ?: ""
         pendingHost = savedInstanceState?.getString("pendingHost") ?: "127.0.0.1"
+        savedInstanceState?.getString("importedInvitation")?.let { encoded ->
+            runCatching { labHexToBytes(encoded) }.onSuccess { bytes ->
+                importedInvitation = bytes
+                importedPin = savedInstanceState.getString("importedPin") ?: ""
+                importedHost = savedInstanceState.getString("importedHost") ?: ""
+            }
+        }
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setOnApplyWindowInsetsListener { view, insets ->
@@ -145,6 +155,9 @@ class LabActivity : Activity() {
         outState.putString("pendingAddress", pendingAddress)
         outState.putString("pendingPin", pendingPin)
         outState.putString("pendingHost", pendingHost)
+        importedInvitation?.let { outState.putString("importedInvitation", labHex(it)) }
+        outState.putString("importedPin", importedPin)
+        outState.putString("importedHost", importedHost)
         outState.putString("address", address.text.toString())
         outState.putString("pin", pin.text.toString())
         outState.putString("host", host.text.toString())
@@ -173,6 +186,10 @@ class LabActivity : Activity() {
                 LabStatus.publish("Paste the desktop listener's complete SPKI_HEX.")
                 return
             }
+            if (importedInvitation != null && (entered != importedPin || parsedHost != importedHost)) {
+                importedInvitation?.fill(0)
+                importedInvitation = null
+            }
             pendingPin = entered
             pendingHost = parsedHost
         }
@@ -184,13 +201,22 @@ class LabActivity : Activity() {
     }
 
     private fun applyInvitation() {
+        var raw: ByteArray? = null
+        var retained = false
         try {
-            val decoded = PairingQr.decode(labHexToBytes(invitation.text.toString()))
+            raw = labHexToBytes(invitation.text.toString())
+            val decoded = PairingQr.decode(requireNotNull(raw))
             try {
                 require(decoded.controlPort == 47610)
                 require(decoded.controlHost == "127.0.0.1" || parseLabAddress(decoded.controlHost) != null)
-                pin.setText(labHex(decoded.desktopTlsSpki))
+                val decodedPin = labHex(decoded.desktopTlsSpki)
+                pin.setText(decodedPin)
                 host.setText(decoded.controlHost)
+                importedInvitation?.fill(0)
+                importedInvitation = raw
+                importedPin = decodedPin
+                importedHost = decoded.controlHost
+                retained = true
                 invitation.setText("")
                 LabStatus.publish("Invitation applied. Enter the desktop IPv4 for UDP separately.")
             } finally {
@@ -200,6 +226,8 @@ class LabActivity : Activity() {
             }
         } catch (_: IllegalArgumentException) {
             LabStatus.publish("Paste a valid lab invitation payload.")
+        } finally {
+            if (!retained) raw?.fill(0)
         }
     }
 
@@ -228,8 +256,11 @@ class LabActivity : Activity() {
                 if (pairedMode) {
                     putExtra("pairedPin", pendingPin)
                     putExtra("pairedHost", pendingHost)
+                    importedInvitation?.let { putExtra("pairedInvitation", it.copyOf()) }
                 }
             })
+            importedInvitation?.fill(0)
+            importedInvitation = null
         } else if (requestCode == 2) {
             LabStatus.publish("Screen capture consent was not granted.")
         }
@@ -254,6 +285,8 @@ class LabActivity : Activity() {
     }
 
     override fun onDestroy() {
+        importedInvitation?.fill(0)
+        importedInvitation = null
         tone?.let { it.stop(); it.release() }
         tone = null
         super.onDestroy()

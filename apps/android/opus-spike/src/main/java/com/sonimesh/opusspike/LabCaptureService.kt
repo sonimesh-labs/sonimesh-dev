@@ -57,6 +57,7 @@ class LabCaptureService : Service() {
         }
         if (!running.compareAndSet(false, true)) return START_NOT_STICKY
         LabStatus.publish("Connecting to the desktop listener…")
+        var pendingInvitation: ByteArray? = null
         try {
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(NotificationChannel("lab", "Audio lab", NotificationManager.IMPORTANCE_LOW))
@@ -78,10 +79,14 @@ class LabCaptureService : Service() {
             val pairedMode = intent.getBooleanExtra("pairedMode", false)
             val destination = if (udpMode) parseLabAddress(intent.getStringExtra("udpAddress") ?: "")
                 ?: error("invalid desktop address") else null
-            val invitation = if (pairedMode) labInvitation(intent.getStringExtra("pairedPin") ?: "",
-                intent.getStringExtra("pairedHost") ?: "127.0.0.1") else null
+            pendingInvitation = if (pairedMode) intent.getByteArrayExtra("pairedInvitation")
+                ?: labInvitation(intent.getStringExtra("pairedPin") ?: "",
+                    intent.getStringExtra("pairedHost") ?: "127.0.0.1") else null
+            val invitation = pendingInvitation
             Thread({ capture(current, udpMode, destination, invitation) }, "audio-lab-capture").start()
+            pendingInvitation = null
         } catch (error: Exception) {
+            pendingInvitation?.fill(0)
             Log.e("SoniMeshLab", "Unable to start capture", error)
             finishWith("Unable to start capture. Check permissions and try again.")
         }
@@ -101,7 +106,11 @@ class LabCaptureService : Service() {
             if (invitation != null) {
                 val raw = Socket()
                 check(setupSocket.track(raw)) { "capture stopped before pairing" }
-                val connection = PairingClient.connect(invitation, raw)
+                val connection = try {
+                    PairingClient.connect(invitation, raw)
+                } finally {
+                    invitation.fill(0)
+                }
                 paired = connection
                 check(setupSocket.track(connection.socket)) { "capture stopped during pairing" }
                 check(running.get()) { "capture stopped during pairing" }
