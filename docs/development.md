@@ -30,7 +30,7 @@ loopback. From `apps/android`, build `:opus-spike:assembleDebug` and
 `adb reverse tcp:47610 tcp:47610` and run from the repository root:
 
 ~~~powershell
-cargo run -p opus-codec-prototype --bin paired-audio-lab
+cargo run -p opus-codec-prototype --bin paired-audio-lab -- --require-tone
 ~~~
 
 In another terminal, copy the printed public `SPKI_HEX` into `$pin` and run:
@@ -46,8 +46,18 @@ software PCM peak. On 2026-11-22, two API 37 x86_64 emulator runs decoded 100
 and 92 frames respectively, each with a peak of 0.250; the discrepancy has not
 been characterized. This is not playback-capture, physical WLAN, listening,
 latency, persistent trust, or production UI evidence. The interactive audio lab
-below still uses its separate ADB bootstrap. Remove the reverse mapping when no
-longer needed.
+also has a **Start paired UDP capture** mode: start `paired-audio-lab` without
+`--require-tone`, paste its printed SPKI_HEX in the app, select that mode,
+grant capture consent, and play a capturable source or use **Toggle test tone**.
+**Stop capture** requests the desktop to stop the stream. This mode uses the
+same fixed public lab invitation and ADB-reversed control connection; the
+desktop uses a software PCM check, not the Windows output device. Silence can
+reflect the source or platform capture policy. Other audio-lab modes below use
+their separate ADB bootstrap. Remove the reverse mapping when no longer needed.
+On 2026-11-22 an API 37 x86_64 emulator completed the paired interactive
+capture flow using the app's test tone and system screen-capture consent. The
+desktop acknowledged start and stop and decoded 145 frames at a software peak
+of 0.095. No physical-device or hardware playback result was recorded.
 
 This isolated test encodes a synthetic 48 kHz stereo tone with Android
 MediaCodec. It writes only synthetic audio to the spike application's external

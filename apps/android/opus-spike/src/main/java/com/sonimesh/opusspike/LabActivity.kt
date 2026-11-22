@@ -23,15 +23,20 @@ import kotlin.math.sin
 class LabActivity : Activity() {
     private var tone: AudioTrack? = null
     private var udpMode = false
+    private var pairedMode = false
     private var pendingAddress = DEFAULT_LAB_ADDRESS
+    private var pendingPin = ""
     private lateinit var address: EditText
+    private lateinit var pin: EditText
     private lateinit var status: TextView
     private val statusObserver: (String) -> Unit = { status.text = "Status: $it" }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         udpMode = savedInstanceState?.getBoolean("udpMode") ?: false
+        pairedMode = savedInstanceState?.getBoolean("pairedMode") ?: false
         pendingAddress = savedInstanceState?.getString("pendingAddress") ?: DEFAULT_LAB_ADDRESS
+        pendingPin = savedInstanceState?.getString("pendingPin") ?: ""
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setOnApplyWindowInsetsListener { view, insets ->
@@ -63,6 +68,18 @@ class LabActivity : Activity() {
             text = "Start UDP capture"
             setOnClickListener { startCapture(true) }
         })
+        layout.addView(TextView(this).apply { text = "Paired lab desktop SPKI_HEX (from the listener)" })
+        pin = EditText(this).apply {
+            hint = "Paste desktop SPKI_HEX"
+            contentDescription = "Paired lab desktop SPKI"
+            setSingleLine(true)
+            setText(savedInstanceState?.getString("pin") ?: "")
+        }
+        layout.addView(pin)
+        layout.addView(Button(this).apply {
+            text = "Start paired UDP capture"
+            setOnClickListener { startCapture(true, paired = true) }
+        })
         layout.addView(Button(this).apply {
             text = "Stop capture"
             setOnClickListener { stopService(Intent(this@LabActivity, LabCaptureService::class.java)) }
@@ -86,12 +103,15 @@ class LabActivity : Activity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putBoolean("udpMode", udpMode)
+        outState.putBoolean("pairedMode", pairedMode)
         outState.putString("pendingAddress", pendingAddress)
+        outState.putString("pendingPin", pendingPin)
         outState.putString("address", address.text.toString())
+        outState.putString("pin", pin.text.toString())
         super.onSaveInstanceState(outState)
     }
 
-    private fun startCapture(udp: Boolean) {
+    private fun startCapture(udp: Boolean, paired: Boolean = false) {
         if (udp) {
             val parsed = parseLabAddress(address.text.toString())
             if (parsed == null) {
@@ -101,7 +121,16 @@ class LabActivity : Activity() {
             pendingAddress = requireNotNull(parsed.hostAddress)
             getPreferences(MODE_PRIVATE).edit().putString("desktopAddress", pendingAddress).apply()
         }
+        if (paired) {
+            val entered = pin.text.toString().trim()
+            if (runCatching { labInvitation(entered) }.isFailure) {
+                LabStatus.publish("Paste the desktop listener's complete SPKI_HEX.")
+                return
+            }
+            pendingPin = entered
+        }
         udpMode = udp
+        pairedMode = paired
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 1)
         } else requestProjection()
@@ -128,6 +157,8 @@ class LabActivity : Activity() {
                 putExtra("resultData", data)
                 putExtra("udpMode", udpMode)
                 putExtra("udpAddress", pendingAddress)
+                putExtra("pairedMode", pairedMode)
+                if (pairedMode) putExtra("pairedPin", pendingPin)
             })
         } else if (requestCode == 2) {
             LabStatus.publish("Screen capture consent was not granted.")

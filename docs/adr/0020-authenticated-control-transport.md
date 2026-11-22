@@ -57,6 +57,10 @@ authenticated StartStream identity before acknowledging Streaming, and retires
 it before acknowledging StopStream. Its fixed invitation and local ports are
 test fixtures, not a persistent trust or production discovery mechanism. The
 lab's software PCM check does not establish playback or latency on hardware.
+The Android audio-lab service can also use that same loopback fixture with
+playback capture: it establishes pairing and starts a stream before sending,
+then sends StopStream when capture ends. The user supplies the lab's public
+desktop pin manually; this is not QR scanning or persistent device pairing.
 
 The application-domain invitation listener exposes two explicit boundaries:
 `PairingListener` owns a non-blocking `TcpListener` and lets a caller poll one

@@ -20,6 +20,11 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.util.Log
+import com.sonimesh.sender.pairing.PairedConnection
+import com.sonimesh.sender.pairing.PairingClient
+import com.sonimesh.sender.pairing.StreamControlResult
+import com.sonimesh.sender.pairing.StreamIdentity
+import com.sonimesh.sender.pairing.StreamParameters
 import java.io.DataOutputStream
 import java.net.DatagramPacket
 import java.net.DatagramSocket
@@ -67,9 +72,11 @@ class LabCaptureService : Service() {
                 override fun onStop() { finishWith("Screen capture ended. Grant consent again to restart.") }
             }, handler)
             val udpMode = intent.getBooleanExtra("udpMode", false)
+            val pairedMode = intent.getBooleanExtra("pairedMode", false)
             val destination = if (udpMode) parseLabAddress(intent.getStringExtra("udpAddress") ?: "")
                 ?: error("invalid desktop address") else null
-            Thread({ capture(current, udpMode, destination) }, "audio-lab-capture").start()
+            val invitation = if (pairedMode) labInvitation(intent.getStringExtra("pairedPin") ?: "") else null
+            Thread({ capture(current, udpMode, destination, invitation) }, "audio-lab-capture").start()
         } catch (error: Exception) {
             Log.e("SoniMeshLab", "Unable to start capture", error)
             finishWith("Unable to start capture. Check permissions and try again.")
@@ -78,34 +85,53 @@ class LabCaptureService : Service() {
     }
 
     @SuppressLint("MissingPermission")
-    private fun capture(projection: MediaProjection, udpMode: Boolean, destination: java.net.Inet4Address?) {
+    private fun capture(projection: MediaProjection, udpMode: Boolean, destination: java.net.Inet4Address?, invitation: ByteArray?) {
         var record: AudioRecord? = null
         var codec: MediaCodec? = null
+        var paired: PairedConnection? = null
+        var pairedIdentity: StreamIdentity? = null
         var connected = false
         try {
-            val connection = Socket()
-            synchronized(socketLock) {
-                if (!running.get()) { connection.close(); return }
-                socket = connection
-            }
-            connection.connect(InetSocketAddress("127.0.0.1", if (udpMode) 39092 else 39091), 2_000)
             val packets = ArrayBlockingQueue<EncodedPacket>(8)
-            if (udpMode) {
-                val secret = ByteArray(32)
-                SecureRandom().nextBytes(secret)
-                val sealer = try {
-                    connection.soTimeout = 5_000
-                    connection.getOutputStream().write(secret)
-                    check(connection.getInputStream().read() == 1) { "desktop receiver not ready" }
-                    LabMediaSealer(secret, 1, 1, 0)
-                } finally {
-                    secret.fill(0)
-                }
-                connection.soTimeout = 0
-                Thread({ watchControl(connection) }, "audio-lab-control").start()
+            if (invitation != null) {
+                val connection = PairingClient.connect(invitation)
+                paired = connection
+                check(running.get()) { "capture stopped during pairing" }
+                connection.negotiateHello("android audio lab", listOf(2))
+                val random = SecureRandom()
+                var session = random.nextLong()
+                while (session == 0L) session = random.nextLong()
+                val identity = StreamIdentity(session, 1, 0)
+                val result = connection.startStream(StreamParameters(identity, 48_000, 2, 20))
+                check(result is StreamControlResult.Status && result.state == 2) { "desktop receiver not ready" }
+                pairedIdentity = identity
+                check(running.get()) { "capture stopped while starting stream" }
+                val sealer = LabMediaSealer(connection.mediaRoot, session, 1, 0)
                 Thread({ sendDatagrams(sealer, packets, requireNotNull(destination)) }, "audio-lab-sender").start()
             } else {
-                Thread({ writePackets(connection, packets) }, "audio-lab-sender").start()
+                val connection = Socket()
+                synchronized(socketLock) {
+                    if (!running.get()) { connection.close(); return }
+                    socket = connection
+                }
+                connection.connect(InetSocketAddress("127.0.0.1", if (udpMode) 39092 else 39091), 2_000)
+                if (udpMode) {
+                    val secret = ByteArray(32)
+                    SecureRandom().nextBytes(secret)
+                    val sealer = try {
+                        connection.soTimeout = 5_000
+                        connection.getOutputStream().write(secret)
+                        check(connection.getInputStream().read() == 1) { "desktop receiver not ready" }
+                        LabMediaSealer(secret, 1, 1, 0)
+                    } finally {
+                        secret.fill(0)
+                    }
+                    connection.soTimeout = 0
+                    Thread({ watchControl(connection) }, "audio-lab-control").start()
+                    Thread({ sendDatagrams(sealer, packets, requireNotNull(destination)) }, "audio-lab-sender").start()
+                } else {
+                    Thread({ writePackets(connection, packets) }, "audio-lab-sender").start()
+                }
             }
             connected = true
             val captureConfig = AudioPlaybackCaptureConfiguration.Builder(projection)
@@ -180,6 +206,18 @@ class LabCaptureService : Service() {
             try { record?.stop() } catch (_: IllegalStateException) { }
             record?.release()
             codec?.release()
+            if (paired != null) {
+                try {
+                    pairedIdentity?.let { identity ->
+                        val stopped = paired.stopStream(identity)
+                        check(stopped is StreamControlResult.Status && stopped.state == 4) { "desktop did not stop stream" }
+                    }
+                } catch (error: Exception) {
+                    Log.e("SoniMeshLab", "Paired stream stop failed", error)
+                } finally {
+                    paired.close()
+                }
+            }
             handler.post { stopSelf() }
         }
     }

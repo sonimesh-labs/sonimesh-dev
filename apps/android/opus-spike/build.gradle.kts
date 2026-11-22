@@ -21,7 +21,7 @@ android {
 
 dependencies {
     implementation(project(":pairing-client"))
-    androidTestImplementation(project(":pairing-protocol"))
+    implementation(project(":pairing-protocol"))
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
 }

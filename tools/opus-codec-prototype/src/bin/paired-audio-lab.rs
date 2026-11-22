@@ -37,6 +37,12 @@ fn main() {
 }
 
 fn run() -> LabResult<()> {
+    let args: Vec<_> = std::env::args().skip(1).collect();
+    let require_tone = match args.as_slice() {
+        [] => false,
+        [arg] if arg == "--require-tone" => true,
+        _ => return Err("usage: paired-audio-lab [--require-tone]".into()),
+    };
     let listener = PairingListener::bind("127.0.0.1:47610")?;
     let address = listener.local_addr()?;
     let key = generate_simple_self_signed(vec!["localhost".to_owned()])?;
@@ -100,13 +106,14 @@ fn run() -> LabResult<()> {
         },
     )?;
     println!("RESULT pairing verified");
-    negotiate_hello(channel, session, root)
+    negotiate_hello(channel, session, root, require_tone)
 }
 
 fn negotiate_hello(
     channel: sonimesh_app::TrustedControlChannel,
     session: SessionState,
     root: SessionSecret,
+    require_tone: bool,
 ) -> LabResult<()> {
     let (channel, _exporter) = channel.into_parts();
     let socket = channel.sock.try_clone()?;
@@ -154,7 +161,7 @@ fn negotiate_hello(
     socket.set_read_timeout(None)?;
     socket.set_write_timeout(None)?;
     socket.set_nonblocking(true)?;
-    receive_audio(&mut framed, &mut coordinator, token, root)
+    receive_audio(&mut framed, &mut coordinator, token, root, require_tone)
 }
 
 const SAMPLES: usize = 1_920;
@@ -166,6 +173,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
     coordinator: &mut ControlStreamCoordinator,
     control_token: sonimesh_app::ControlSessionToken,
     root: SessionSecret,
+    require_tone: bool,
 ) -> LabResult<()> {
     let mut allocator = MediaSessionAllocator::new(root);
     let mut receiver: Option<Receiver> = None;
@@ -175,7 +183,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
     let mut decoded = 0_u64;
     let mut peak = 0_f32;
     let deadline = Instant::now() + Duration::from_secs(40);
-    while Instant::now() < deadline {
+    while receiver.is_some() || Instant::now() < deadline {
         match framed.poll()? {
             UntrustedControlPoll::Frame(frame) => {
                 let action = match coordinator.accept(control_token, &frame) {
@@ -251,7 +259,12 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                         send_reply(framed, &reply)?;
                         println!("RESULT decoded {decoded} peak {peak:.3}");
                         if decoded == 0 || peak < 0.001 {
-                            return Err("no non-silent audio decoded".into());
+                            if require_tone {
+                                return Err("no non-silent audio decoded".into());
+                            }
+                            println!(
+                                "No capturable audio detected; the source may be silent or capture-limited, or media packets may not have arrived."
+                            );
                         }
                         return Ok(());
                     }
