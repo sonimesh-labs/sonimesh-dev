@@ -37,6 +37,37 @@ impl core::fmt::Display for DesktopReceiverSchedulerError {
 
 impl std::error::Error for DesktopReceiverSchedulerError {}
 
+/// Failure while replacing a lost control channel after reconnection.
+#[derive(Debug)]
+pub enum DesktopReceiverSchedulerReconnectError {
+    /// A control channel is still attached to this scheduler.
+    ControlAlreadyAttached,
+    /// The receiver lifecycle could not return to a fresh ready session.
+    Lifecycle(DesktopControlOwnerError),
+}
+
+impl core::fmt::Display for DesktopReceiverSchedulerReconnectError {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::ControlAlreadyAttached => {
+                formatter.write_str("desktop receiver still has a control channel")
+            }
+            Self::Lifecycle(error) => {
+                write!(formatter, "desktop receiver reconnect failed: {error}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for DesktopReceiverSchedulerReconnectError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::ControlAlreadyAttached => None,
+            Self::Lifecycle(error) => Some(error),
+        }
+    }
+}
+
 /// Results from one combined control and UDP media scheduler tick.
 ///
 /// Control and media are intentionally reported independently. A transport
@@ -251,9 +282,38 @@ where
         now_ms: u64,
         grace_duration_ms: u64,
     ) -> Result<(), DesktopControlOwnerError> {
+        self.control.take();
         let owner = self.receiver.owner_mut();
         owner.acknowledge_platform_event(SessionEvent::ConnectionLost)?;
         owner.begin_reconnect_grace(now_ms, grace_duration_ms)
+    }
+
+    /// Installs a fresh control session after the receiver has reconnected.
+    ///
+    /// The old transport must have been retired with [`Self::mark_control_lost`].
+    /// This method returns the newly issued token so the caller can retain it
+    /// for diagnostics or correlation, while the scheduler owns the channel.
+    ///
+    /// # Errors
+    ///
+    /// Returns an attachment error when a channel is still present, or a
+    /// lifecycle error when the owner cannot re-enter a fresh ready session.
+    pub fn attach_reconnected_control(
+        &mut self,
+        channel: S,
+    ) -> Result<ControlSessionToken, DesktopReceiverSchedulerReconnectError> {
+        if self.control.is_some() {
+            return Err(DesktopReceiverSchedulerReconnectError::ControlAlreadyAttached);
+        }
+        let owner = self.receiver.owner_mut();
+        owner
+            .acknowledge_platform_event(SessionEvent::Reconnected)
+            .map_err(DesktopReceiverSchedulerReconnectError::Lifecycle)?;
+        let session = owner
+            .install_authenticated_control_session()
+            .map_err(DesktopReceiverSchedulerReconnectError::Lifecycle)?;
+        self.control = Some((session, channel));
+        Ok(session)
     }
 
     /// Polls one control envelope and preserves the channel for the next tick.
@@ -564,6 +624,30 @@ mod tests {
                 remaining_ms: 30_000
             }
         ));
+        assert!(scheduler.detach_control().is_none());
+    }
+
+    #[test]
+    fn scheduler_reconnects_with_a_fresh_token_and_channel() {
+        let mut scheduler = scheduler();
+        let session = scheduler
+            .receiver_mut()
+            .owner_mut()
+            .install_authenticated_control_session()
+            .unwrap();
+        scheduler.attach_control(session, IdleIo).unwrap();
+        scheduler.mark_control_lost(1_000, 30_000).unwrap();
+
+        let fresh = scheduler.attach_reconnected_control(IdleIo).unwrap();
+        assert_ne!(fresh, session);
+        assert_eq!(
+            scheduler.receiver().owner().bridge().state().phase(),
+            crate::SessionPhase::Ready
+        );
+        assert!(matches!(
+            scheduler.poll_control_once().unwrap(),
+            Some(crate::ControlSessionPoll::Empty)
+        ));
     }
 
     #[test]
@@ -753,5 +837,22 @@ where
     {
         let (channel, _exporter) = trusted.into_parts();
         self.attach_control(session, S::from(channel))
+    }
+
+    /// Replaces a lost control channel with a freshly trusted channel.
+    ///
+    /// # Errors
+    ///
+    /// Returns an attachment or lifecycle error when the previous transport
+    /// was not retired or the owner cannot complete reconnection.
+    pub fn attach_trusted_reconnected_control(
+        &mut self,
+        trusted: TrustedControlChannel,
+    ) -> Result<ControlSessionToken, DesktopReceiverSchedulerReconnectError>
+    where
+        S: From<PinnedServerChannel>,
+    {
+        let (channel, _exporter) = trusted.into_parts();
+        self.attach_reconnected_control(S::from(channel))
     }
 }

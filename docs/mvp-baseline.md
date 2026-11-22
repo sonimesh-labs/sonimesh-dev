@@ -94,7 +94,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   control transport failure does not suppress media polling or decode;
   `mark_control_lost` centralizes the follow-up lifecycle transition and arms
   reconnect grace after a closed or failed control poll. `tick_at(now_ms)` then
-  services grace observation in the same low-rate control/media loop;
+  services grace observation in the same low-rate control/media loop, while the
+  reconnect attach entry point retires the old channel and installs a fresh
+  token/channel pair after trusted reconnection;
 - deterministic virtual-clock/network profiles for random and burst loss,
   jitter, duplication, reorder delay, byte-counted bandwidth serialization,
   capacity pressure, and Windows/Linux CI;

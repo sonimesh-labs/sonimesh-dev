@@ -748,6 +748,10 @@ grace before running that same control/media work and returns the lifecycle,
 control, and media results independently. A grace expiry therefore retires the
 output before the tick continues, while a clock error still does not suppress
 the media poll.
+After a fresh trusted channel is accepted, call `attach_reconnected_control`
+(`attach_trusted_reconnected_control` for the TLS wrapper). It clears the grace
+window, returns the lifecycle to `Ready`, issues a fresh control token, and gives
+the scheduler ownership of the new channel.
 The composable polls the same low-rate snapshot command once per second and clears
 that timer on unmount, so reconnect countdowns and asynchronous output faults do
 not depend on a user clicking Refresh.
