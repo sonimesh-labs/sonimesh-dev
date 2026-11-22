@@ -67,6 +67,7 @@ internal fun CaptureScreen(
     onStart: () -> Unit,
     onStop: () -> Unit,
     onCopyEvidence: () -> Unit,
+    onShareEvidence: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -85,6 +86,7 @@ internal fun CaptureScreen(
             CaptureEvidenceCard(
                 evidence = state.evidence,
                 onCopyEvidence = onCopyEvidence,
+                onShareEvidence = onShareEvidence,
             )
         }
         CaptureActionCard(
@@ -282,6 +284,7 @@ private fun CaptureSummaryCard(
 private fun CaptureEvidenceCard(
     evidence: CaptureEvidenceSnapshot,
     onCopyEvidence: () -> Unit,
+    onShareEvidence: () -> Unit,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -317,14 +320,25 @@ private fun CaptureEvidenceCard(
                     Modifier.weight(1f),
                 )
             }
-            OutlinedButton(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 50.dp),
-                onClick = onCopyEvidence,
-                shape = TileShape,
-            ) {
-                Text(stringResource(R.string.copy_capture_evidence), fontWeight = FontWeight.SemiBold)
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedButton(
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 50.dp),
+                    onClick = onCopyEvidence,
+                    shape = TileShape,
+                ) {
+                    Text(stringResource(R.string.copy_capture_evidence), fontWeight = FontWeight.SemiBold)
+                }
+                OutlinedButton(
+                    modifier = Modifier
+                        .weight(1f)
+                        .heightIn(min = 50.dp),
+                    onClick = onShareEvidence,
+                    shape = TileShape,
+                ) {
+                    Text(stringResource(R.string.share_capture_evidence), fontWeight = FontWeight.SemiBold)
+                }
             }
         }
     }

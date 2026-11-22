@@ -2,6 +2,7 @@ package com.sonimesh.sender
 
 import android.Manifest
 import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
@@ -54,6 +55,7 @@ class MainActivity : ComponentActivity() {
                         onStart = { requestCapture(selectedSource) },
                         onStop = { sendStopCommand() },
                         onCopyEvidence = ::copyCaptureEvidence,
+                        onShareEvidence = ::shareCaptureEvidence,
                     )
                 }
             }
@@ -165,10 +167,38 @@ class MainActivity : ComponentActivity() {
         Toast.makeText(this, R.string.capture_evidence_copied, Toast.LENGTH_SHORT).show()
     }
 
+    private fun shareCaptureEvidence() {
+        val evidence = CaptureStateStore.state.value.copyableEvidence()
+        try {
+            startActivity(
+                Intent.createChooser(
+                    buildCaptureEvidenceShareIntent(captureEvidenceShareContent(evidence)),
+                    getString(R.string.share_capture_evidence_title),
+                ),
+            )
+        } catch (_: ActivityNotFoundException) {
+            Toast.makeText(this, R.string.capture_evidence_share_unavailable, Toast.LENGTH_SHORT).show()
+        }
+    }
+
     private companion object {
         const val STATE_PENDING_CAPTURE_SOURCE = "pending_capture_source"
     }
 }
+
+internal data class CaptureEvidenceShareContent(
+    val mimeType: String,
+    val text: String,
+)
+
+internal fun captureEvidenceShareContent(evidence: String): CaptureEvidenceShareContent =
+    CaptureEvidenceShareContent(mimeType = "text/plain", text = evidence)
+
+internal fun buildCaptureEvidenceShareIntent(content: CaptureEvidenceShareContent): Intent =
+    Intent(Intent.ACTION_SEND).apply {
+        type = content.mimeType
+        putExtra(Intent.EXTRA_TEXT, content.text)
+    }
 
 
 internal fun CaptureStatus.description(): String = when (this) {

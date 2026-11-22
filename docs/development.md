@@ -25,7 +25,8 @@ run. Once observations exist, **Copy capture evidence** places the current
 status, selected usage group, observed format, duration, frame counters, and read errors on the
 device clipboard for attaching to a local test report. The text is an operator
 summary, not a raw-audio export or a production diagnostic bundle; it is cleared
-when a new capture request begins.
+when a new capture request begins. **Share evidence** sends the same bounded text
+summary through the platform share sheet; it does not share PCM or an audio file.
 
 Before starting, the capture-only screen lets the operator choose one playback
 usage group: **Media**, **Game**, or **Other**. The choice is passed to the

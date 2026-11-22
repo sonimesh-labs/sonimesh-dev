@@ -10,6 +10,14 @@ import org.junit.Test
 
 class CaptureEvidenceClipboardTest {
     @Test
+    fun share_content_contains_only_the_text_evidence_summary() {
+        val content = captureEvidenceShareContent("SoniMesh capture evidence")
+
+        assertEquals("text/plain", content.mimeType)
+        assertEquals("SoniMesh capture evidence", content.text)
+    }
+
+    @Test
     fun copyable_evidence_contains_status_format_and_observations() {
         val format = requireNotNull(
             CaptureFormat.fromObserved(

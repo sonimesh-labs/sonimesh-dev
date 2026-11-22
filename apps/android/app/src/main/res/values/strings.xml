@@ -6,6 +6,9 @@
     <string name="capture_notification_text">Audio playback capture feasibility run</string>
     <string name="stop_capture">Stop capture</string>
     <string name="copy_capture_evidence">Copy capture evidence</string>
+    <string name="share_capture_evidence">Share evidence</string>
+    <string name="share_capture_evidence_title">Share SoniMesh capture evidence</string>
+    <string name="capture_evidence_share_unavailable">No app is available to share capture evidence</string>
     <string name="capture_evidence_clip_label">SoniMesh capture evidence</string>
     <string name="capture_evidence_copied">Capture evidence copied</string>
     <string name="capture_source_label">Playback source</string>
