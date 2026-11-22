@@ -99,7 +99,7 @@ class CaptureStateTest {
     @Test
     fun evidence_counts_frames_silence_and_errors_without_audio_storage() {
         val evidence = CaptureEvidence()
-        evidence.begin(captureStartedAtMillis = 1_000)
+        evidence.begin(captureStartedAtMillis = 1_000, captureSource = CaptureSource.Game)
 
         evidence.recordRead(frames = 480, silent = true, completedAtMillis = 1_020)
         evidence.recordRead(frames = 240, silent = false, completedAtMillis = 1_030)
@@ -108,6 +108,7 @@ class CaptureStateTest {
         assertEquals(
             CaptureEvidenceSnapshot(
                 captureDurationMillis = 750,
+                captureSource = CaptureSource.Game,
                 lastReadCompletionOffsetMillis = 30,
                 capturedFrames = 720,
                 silentFrames = 480,
@@ -121,7 +122,7 @@ class CaptureStateTest {
     @Test
     fun evidence_reset_discards_only_counters() {
         val evidence = CaptureEvidence()
-        evidence.begin(captureStartedAtMillis = 1_000)
+        evidence.begin(captureStartedAtMillis = 1_000, captureSource = CaptureSource.Unknown)
         evidence.recordRead(frames = 480, silent = true, completedAtMillis = 1_020)
 
         evidence.reset()

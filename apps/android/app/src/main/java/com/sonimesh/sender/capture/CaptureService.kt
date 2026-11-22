@@ -144,7 +144,7 @@ class CaptureService : Service() {
             val format = observedFormat(record, setup.minimumBufferBytes)
             audioRecord = record
             candidateRecord = null
-            CaptureStateStore.evidence.begin(SystemClock.elapsedRealtime())
+            CaptureStateStore.evidence.begin(SystemClock.elapsedRealtime(), captureSource)
 
             record.startRecording()
             CaptureStateStore.publishCapturing(format)

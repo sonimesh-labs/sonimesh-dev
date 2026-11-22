@@ -22,7 +22,7 @@ requires the Android API 37.0 platform.
 
 The capture-only app keeps a bounded, in-memory summary of the latest capture
 run. Once observations exist, **Copy capture evidence** places the current
-status, observed format, duration, frame counters, and read errors on the
+status, selected usage group, observed format, duration, frame counters, and read errors on the
 device clipboard for attaching to a local test report. The text is an operator
 summary, not a raw-audio export or a production diagnostic bundle; it is cleared
 when a new capture request begins.

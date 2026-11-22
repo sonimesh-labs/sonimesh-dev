@@ -15,6 +15,9 @@ internal class CaptureEvidence(
     private val captureStartedAtMillis = AtomicLong(NO_CAPTURE_START)
     private val lastReadCompletedAtMillis = AtomicLong(NO_READ_COMPLETION)
 
+    @Volatile
+    private var captureSource: CaptureSource? = null
+
     /** Records one successful read and its local monotonic completion time. */
     fun recordRead(frames: Int, silent: Boolean, completedAtMillis: Long) {
         require(frames > 0) { "completed read must contain at least one frame" }
@@ -36,15 +39,17 @@ internal class CaptureEvidence(
     }
 
     /** Starts a fresh evidence interval at the supplied monotonic timestamp. */
-    fun begin(captureStartedAtMillis: Long) {
+    fun begin(captureStartedAtMillis: Long, captureSource: CaptureSource? = null) {
         require(captureStartedAtMillis >= 0) { "capture start time must be monotonic" }
         reset()
+        this.captureSource = captureSource
         this.captureStartedAtMillis.set(captureStartedAtMillis)
     }
 
     fun reset() {
         captureStartedAtMillis.set(NO_CAPTURE_START)
         lastReadCompletedAtMillis.set(NO_READ_COMPLETION)
+        captureSource = null
         capturedFrames.reset()
         silentFrames.reset()
         silentReads.reset()
@@ -73,6 +78,7 @@ internal class CaptureEvidence(
         val observedCapturedFrames = capturedFrames.get()
         return CaptureEvidenceSnapshot(
             captureDurationMillis = captureDurationMillis,
+            captureSource = captureSource.takeIf { startedAtMillis != NO_CAPTURE_START },
             lastReadCompletionOffsetMillis = lastReadCompletionOffsetMillis,
             capturedFrames = observedCapturedFrames,
             silentFrames = observedSilentFrames,

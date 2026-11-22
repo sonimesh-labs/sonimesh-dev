@@ -90,6 +90,7 @@ data class CaptureUiState(
 
 data class CaptureEvidenceSnapshot(
     val captureDurationMillis: Long = 0,
+    val captureSource: CaptureSource? = null,
     /** Latest successful AudioRecord read completion relative to capture start. */
     val lastReadCompletionOffsetMillis: Long? = null,
     val capturedFrames: Long = 0,

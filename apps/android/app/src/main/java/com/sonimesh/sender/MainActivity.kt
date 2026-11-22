@@ -187,12 +187,13 @@ private fun com.sonimesh.sender.capture.CaptureFormat.description(): String =
     "${sampleRateHz} Hz, ${channels} channels, source ${audioSource}, channel mask 0x${channelMask.toString(16)}, ${bufferSizeBytes} byte buffer (platform minimum ${minimumBufferBytes})"
 
 internal fun com.sonimesh.sender.capture.CaptureEvidenceSnapshot.description(): String {
+    val source = captureSource?.displayName?.let { " Requested usage: $it." }.orEmpty()
     val latestRead = lastReadCompletionOffsetMillis?.let { offset ->
         " Last successful read at +${formatDuration(offset)}."
     }.orEmpty()
     return "Observed ${capturedFrames} frames over ${formatDuration(captureDurationMillis)}, " +
         "${silentFrames} silent frames across ${silentReads} reads, " +
-        "${readErrors} read errors.$latestRead"
+        "${readErrors} read errors.$source$latestRead"
 }
 
 internal fun com.sonimesh.sender.capture.CaptureUiState.copyableEvidence(): String =
