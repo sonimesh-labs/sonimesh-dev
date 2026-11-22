@@ -8,11 +8,14 @@ use std::time::{Duration, Instant};
 use rcgen::generate_simple_self_signed;
 use rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
 use sonimesh_app::{
-    InvitationInputs, PairingId, PairingInvitationController, PairingListener, PairingQrInvitation,
-    PairingSource, SessionState, accept_pairing_stream, begin_from_rendered_payload,
+    ControlStreamAction, ControlStreamCoordinator, InvitationInputs, PairingId,
+    PairingInvitationController, PairingListener, PairingQrInvitation, PairingSource, SessionState,
+    accept_pairing_stream, begin_from_rendered_payload,
 };
-use sonimesh_network::server_config;
-use sonimesh_protocol::MAX_QR_PAYLOAD_LEN;
+use sonimesh_network::{
+    UntrustedControlPoll, UntrustedControlStream, UntrustedControlWrite, server_config,
+};
+use sonimesh_protocol::{Capability, Envelope, Hello, MAX_QR_PAYLOAD_LEN, envelope};
 use zeroize::{Zeroize, Zeroizing};
 
 const LAB_ID: [u8; 16] = [0x71; 16];
@@ -76,7 +79,7 @@ fn run() -> LabResult<()> {
         std::thread::sleep(Duration::from_millis(10));
     };
     let elapsed = u64::try_from(started.elapsed().as_millis())?;
-    let (_channel, _root) = accept_pairing_stream(
+    let (channel, _root) = accept_pairing_stream(
         stream,
         tls,
         &mut pairing,
@@ -90,5 +93,54 @@ fn run() -> LabResult<()> {
         },
     )?;
     println!("RESULT pairing verified");
+    negotiate_hello(channel, session)
+}
+
+fn negotiate_hello(
+    channel: sonimesh_app::TrustedControlChannel,
+    session: SessionState,
+) -> LabResult<()> {
+    let (channel, _exporter) = channel.into_parts();
+    channel
+        .sock
+        .set_read_timeout(Some(Duration::from_secs(30)))?;
+    channel
+        .sock
+        .set_write_timeout(Some(Duration::from_secs(30)))?;
+    let mut framed = UntrustedControlStream::from_io(channel);
+    let mut coordinator = ControlStreamCoordinator::new(session, &[Capability::FrameDuration20Ms])?;
+    let token = coordinator.install_authenticated_control_session()?;
+    let request = loop {
+        match framed.poll()? {
+            UntrustedControlPoll::Frame(envelope) => break envelope,
+            UntrustedControlPoll::Empty => continue,
+            UntrustedControlPoll::Closed => {
+                return Err("control channel closed before hello".into());
+            }
+        }
+    };
+    if !matches!(
+        coordinator.accept(token, &request)?,
+        ControlStreamAction::Negotiated(_)
+    ) {
+        return Err("expected a valid hello".into());
+    }
+    let reply = Envelope {
+        protocol_version: 1,
+        request_id: request.request_id,
+        payload: Some(envelope::Payload::Hello(Hello {
+            supported_versions: vec![1],
+            capabilities: vec![Capability::FrameDuration20Ms as i32],
+            display_name: "desktop lab".to_owned(),
+        })),
+    };
+    let mut state = framed.send(&reply)?;
+    while state == UntrustedControlWrite::Pending {
+        state = framed.flush_write()?;
+    }
+    if state != UntrustedControlWrite::Complete {
+        return Err("control channel closed during hello reply".into());
+    }
+    println!("RESULT hello negotiated");
     Ok(())
 }

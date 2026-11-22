@@ -20,6 +20,10 @@ class PairingClientInteropTest {
             assertEquals(0, connection.socket.soTimeout)
             assertEquals(32, root.size)
             assertFalse(root.all { it == 0.toByte() })
+            val negotiated = connection.negotiateHello("android lab", listOf(1, 2))
+            assertEquals(1, negotiated.version)
+            assertEquals(listOf(2), negotiated.capabilities)
+            assertEquals("desktop lab", negotiated.peerName)
         } finally {
             connection.close()
         }

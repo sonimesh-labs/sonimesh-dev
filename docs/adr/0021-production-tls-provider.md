@@ -81,7 +81,8 @@ documents.
 The isolated Android `pairing-client` library decodes an invitation's binary
 QR payload, exchanges ADR 0019 proof frames and returns the verified media
 root with the open TLS socket. Its caller owns the socket and root after success;
-it performs no scanning, trust persistence, control negotiation or capture.
+it can exchange Hello capabilities but performs no scanning, trust persistence,
+stream lifecycle or capture.
 The capture-only app does not depend on this library at runtime. A separate
 lab listener exercises this client against the desktop invitation owner using
 public test credentials, rather than the older raw-proof interop protocol.

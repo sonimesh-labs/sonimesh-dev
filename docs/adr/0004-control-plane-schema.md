@@ -67,6 +67,19 @@ unnegotiated so the transport may deliver a corrected authenticated hello; a
 second successful hello is rejected rather than silently changing active
 capability policy.
 
+For a bidirectional capability exchange, the authenticated Android sender
+sends its Hello first. After the desktop coordinator accepts that Hello, the
+desktop transport owner sends its own Hello with the same request ID; each side
+computes the known-capability intersection from the other side's advertised
+capabilities. A sender must not treat writing its Hello alone as successful
+negotiation. The isolated Android pairing client uses the Protobuf Java runtime
+for its bounded Hello wire fields; camera, persistent trust and stream lifecycle
+remain separate integration work. The desktop Hello response is currently wired
+only by the pairing lab, not by the product desktop UI. An API 37 emulator
+connected over ADB reverse completed the exchange with the Rust desktop
+coordinator and both selected the 20 ms capability. This is not physical WLAN
+or product integration evidence.
+
 When the authenticated control session expires, the receiver retires its
 negotiation, active stream identities, pending operation, and local transport token
 together. A later paired session must install a fresh authenticated transport and

@@ -20,6 +20,24 @@ class PairedConnection internal constructor(
     val socket: SSLSocket,
     val mediaRoot: ByteArray,
 ) : AutoCloseable {
+    private var helloStarted = false
+
+    /** Exchanges Hello messages after pairing; call off the UI thread. */
+    @Synchronized
+    fun negotiateHello(displayName: String, capabilities: List<Int>): NegotiatedHello {
+        check(!helloStarted) { "hello exchange already started" }
+        helloStarted = true
+        try {
+            socket.soTimeout = 30_000
+            val result = exchangeHello(socket.inputStream, socket.outputStream, displayName, capabilities)
+            socket.soTimeout = 0
+            return result
+        } catch (error: Throwable) {
+            runCatching { close() }
+            throw error
+        }
+    }
+
     override fun close() {
         try {
             socket.close()

@@ -17,5 +17,6 @@ android {
 dependencies {
     implementation(project(":pairing-protocol"))
     implementation("org.conscrypt:conscrypt-android:2.6.1")
+    implementation("com.google.protobuf:protobuf-java:3.25.5")
     testImplementation("junit:junit:4.13.2")
 }

@@ -242,10 +242,12 @@ adb shell am instrument -w -r -e class 'com.sonimesh.tlsproviderspike.security.P
 ~~~
 
 The `rejects_a_changed_desktop_pin` method expects the desktop to exit with a
-TLS error. This lab uses a fixed public secret and ADB loopback; it does not
-implement camera scanning, persistent trust, control negotiation or physical
-WLAN validation. The QR expiry is interpreted by the desktop invitation owner,
-whose monotonic clock is not comparable to the Android device clock.
+TLS error. The positive test also exchanges Hello messages and confirms the
+20 ms capability on both sides. This lab uses a fixed public secret and ADB
+loopback; it does not implement camera scanning, persistent trust, stream
+lifecycle or physical WLAN validation. The QR expiry is interpreted by the
+desktop invitation owner, whose monotonic clock is not comparable to the Android
+device clock.
 
 The vector pin checkers (`check_pairing_vectors.py`, `check_control_frame_vectors.py`,
 `check_media_header_vectors.py`, `check_media_key_vectors.py`,
