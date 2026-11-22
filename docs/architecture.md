@@ -2,7 +2,7 @@
 
 > Status: architecture draft for feasibility validation
 > Version: 1.0.0
-> Updated: 2026-08-20
+> Updated: 2026-11-22
 
 This document describes the intended product boundary and engineering constraints
 for SoniMesh. It deliberately separates verified platform facts, implementation
@@ -57,6 +57,10 @@ local to the lab and do not implement the desktop UI bridge.
 If its output reports a runtime fault, the UDP lab keeps the media session alive
 while it retries the selected output outside the realtime callback. A successful
 restart uses a fresh PCM endpoint and resumes from new media arrivals.
+The paired audio lab can optionally report low-rate packet, decode, and output
+recovery state while a session is active. These diagnostics are sampled outside
+the output callback and do not prove audible playback or identify why capture
+is silent.
 
 The first product goal is not synchronized multi-device playback, recording of
 calls, remote desktop, or a universal Bluetooth receiver. It is a practical

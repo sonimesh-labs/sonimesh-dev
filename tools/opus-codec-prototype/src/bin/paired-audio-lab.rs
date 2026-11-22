@@ -25,7 +25,7 @@ use sonimesh_audio::{
     DecodeStep, DecodeWorkerError, FrameDecoder, OpusFrameConfig, StreamDecodeWorker,
     realtime_pcm_queue,
 };
-use sonimesh_diagnostics::StreamCounters;
+use sonimesh_diagnostics::{StreamCounters, StreamMetricsSnapshot};
 use sonimesh_network::{
     IngressError, UdpReceiveError, UntrustedControlPoll, UntrustedControlStream,
     UntrustedControlWrite, server_config,
@@ -136,14 +136,7 @@ fn run_session(
         },
     )?;
     println!("RESULT pairing verified");
-    negotiate_hello(
-        channel,
-        session,
-        root,
-        options.require_tone,
-        playback,
-        options.bind,
-    )
+    negotiate_hello(channel, session, root, options, playback)
 }
 
 #[allow(clippy::struct_excessive_bools)] // Independent command-line switches.
@@ -153,6 +146,7 @@ struct Options {
     select_output: bool,
     keep_listening: bool,
     control: bool,
+    status: bool,
     bind: Ipv4Addr,
     host: Ipv4Addr,
 }
@@ -165,6 +159,7 @@ impl Default for Options {
             select_output: false,
             keep_listening: false,
             control: false,
+            status: false,
             bind: Ipv4Addr::LOCALHOST,
             host: Ipv4Addr::LOCALHOST,
         }
@@ -184,6 +179,7 @@ impl Options {
                 "--select-output" if !result.select_output => result.select_output = true,
                 "--keep-listening" if !result.keep_listening => result.keep_listening = true,
                 "--control" if !result.control => result.control = true,
+                "--status" if !result.status => result.status = true,
                 "--bind" if !bind_set => {
                     result.bind = args
                         .next()
@@ -200,7 +196,7 @@ impl Options {
                 }
                 _ => {
                     return Err(
-                        "usage: paired-audio-lab [--require-tone] [--play [--select-output] [--control]] [--keep-listening] [--bind IPv4 --host IPv4]"
+                        "usage: paired-audio-lab [--require-tone] [--play [--select-output] [--control]] [--status] [--keep-listening] [--bind IPv4 --host IPv4]"
                             .into(),
                     );
                 }
@@ -227,9 +223,8 @@ fn negotiate_hello(
     channel: sonimesh_app::TrustedControlChannel,
     session: SessionState,
     root: SessionSecret,
-    require_tone: bool,
+    options: &Options,
     playback: &mut Playback,
-    bind: Ipv4Addr,
 ) -> LabResult<()> {
     let (channel, _exporter) = channel.into_parts();
     let socket = channel.sock.try_clone()?;
@@ -282,15 +277,37 @@ fn negotiate_hello(
         &mut coordinator,
         token,
         root,
-        require_tone,
+        options,
         playback,
-        bind,
     )
 }
 
 const SAMPLES: usize = 1_920;
 const PLAYOUT_PERIOD: Duration = Duration::from_millis(20);
+const STATUS_PERIOD: Duration = Duration::from_secs(5);
 type Receiver = UdpReceiverPipeline<ObservedDecoder, 8, 1_148, SAMPLES>;
+
+fn status_if_due(
+    next: &mut Option<Instant>,
+    now: Instant,
+    metrics: StreamMetricsSnapshot,
+    decoded: u64,
+    peak: f32,
+    output: &str,
+) -> Option<String> {
+    if next.is_none_or(|due| now < due) {
+        return None;
+    }
+    *next = Some(now + STATUS_PERIOD);
+    Some(format!(
+        "STATUS packets {} rejected {} decoded {decoded} peak {peak:.3} plc {} decode_errors {} buffered {} output {output}",
+        metrics.authenticated_packets,
+        metrics.rejected_packets,
+        metrics.plc_frames,
+        metrics.decode_errors,
+        metrics.jitter_frames,
+    ))
+}
 
 fn poll_media(receiver: &mut Receiver) -> LabResult<Option<UdpPollOutcome>> {
     match receiver.poll() {
@@ -492,15 +509,15 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
     coordinator: &mut ControlStreamCoordinator,
     control_token: sonimesh_app::ControlSessionToken,
     root: SessionSecret,
-    require_tone: bool,
+    options: &Options,
     playback: &mut Playback,
-    bind: Ipv4Addr,
 ) -> LabResult<()> {
     let mut allocator = MediaSessionAllocator::new(root);
     let mut receiver: Option<Receiver> = None;
     let mut consumer = None;
     let mut counters = None;
     let mut next_playout = None;
+    let mut next_status = None;
     let mut retry_at = None;
     let mut decoded = 0_u64;
     let mut peak = 0_f32;
@@ -554,7 +571,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                                 OpusFrameConfig::new(48_000, 2, 20)?,
                             )?;
                             let mut pipeline = Receiver::bind_with_worker(
-                                SocketAddrV4::new(bind, 39093).into(),
+                                SocketAddrV4::new(options.bind, 39093).into(),
                                 grant.root(),
                                 grant.context(),
                                 worker,
@@ -581,6 +598,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                             consumer = if playing { None } else { Some(next_consumer) };
                             counters = Some(metrics);
                             coordinator.complete_start(token, request)?;
+                            next_status = options.status.then(|| Instant::now() + STATUS_PERIOD);
                             println!("RESULT receiver started");
                             ControlReply::stream_status(
                                 request.identity,
@@ -625,7 +643,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                         }
                         println!("RESULT decoded {decoded} peak {peak:.3}");
                         if decoded == 0 || peak < 0.001 {
-                            if require_tone {
+                            if options.require_tone {
                                 return Err("no non-silent audio decoded".into());
                             }
                             println!(
@@ -680,6 +698,26 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                     }
                 }
                 next_playout = Some(next_playout_deadline(due, now));
+            }
+            if next_status.is_some_and(|due| now >= due) {
+                let output = if retry_at.is_some() {
+                    "recovering"
+                } else if playing {
+                    "active"
+                } else {
+                    "software-check"
+                };
+                let decoded_peak = f32::from_bits(decoded_peak.load(Ordering::Relaxed));
+                if let Some(status) = status_if_due(
+                    &mut next_status,
+                    now,
+                    metrics.snapshot(),
+                    decoded,
+                    decoded_peak,
+                    output,
+                ) {
+                    println!("{status}");
+                }
             }
         }
         std::thread::sleep(Duration::from_millis(1));
@@ -1082,6 +1120,9 @@ mod tests {
         };
         let defaults = Options::parse(args(&[])).unwrap();
         assert!(!defaults.play && !defaults.require_tone);
+        assert!(!defaults.status);
+        assert!(Options::parse(args(&["--status"])).unwrap().status);
+        assert!(Options::parse(args(&["--status", "--status"])).is_err());
         let playback =
             Options::parse(args(&["--require-tone", "--play", "--select-output"])).unwrap();
         assert!(playback.play && playback.require_tone && playback.select_output);
@@ -1104,6 +1145,44 @@ mod tests {
         assert_eq!(network.host, Ipv4Addr::new(10, 0, 2, 2));
         assert!(Options::parse(args(&["--bind", "0.0.0.0"])).is_err());
         assert!(Options::parse(args(&["--bind", "0.0.0.0", "--host", "0.0.0.0"])).is_err());
+    }
+
+    #[test]
+    fn live_status_reports_media_progress_and_output_recovery() {
+        let now = Instant::now();
+        let mut next = Some(now + STATUS_PERIOD);
+        let metrics = StreamMetricsSnapshot {
+            authenticated_packets: 120,
+            rejected_packets: 3,
+            plc_frames: 2,
+            decode_errors: 1,
+            jitter_frames: 4,
+            ..StreamMetricsSnapshot::default()
+        };
+        assert!(status_if_due(&mut next, now, metrics, 115, 0.25, "recovering").is_none());
+        let late = now + STATUS_PERIOD * 3;
+        assert_eq!(
+            status_if_due(&mut next, late, metrics, 115, 0.25, "recovering").as_deref(),
+            Some(
+                "STATUS packets 120 rejected 3 decoded 115 peak 0.250 plc 2 decode_errors 1 buffered 4 output recovering"
+            )
+        );
+        assert!(status_if_due(&mut next, late, metrics, 115, 0.25, "recovering").is_none());
+        assert_eq!(
+            status_if_due(
+                &mut next,
+                late + STATUS_PERIOD,
+                StreamMetricsSnapshot::default(),
+                0,
+                0.0,
+                "software-check"
+            )
+            .as_deref(),
+            Some(
+                "STATUS packets 0 rejected 0 decoded 0 peak 0.000 plc 0 decode_errors 0 buffered 0 output software-check"
+            )
+        );
+        assert!(status_if_due(&mut None, late, metrics, 0, 0.0, "active").is_none());
     }
 
     #[test]

@@ -56,6 +56,10 @@ desktop defaults to a software PCM check. On Windows, add `--features playback`
 before `--` and pass `--play` after it to use the default output device; add
 `--select-output` to choose a device. `--require-tone` checks decoded audio,
 not whether it was audible. Output callback counts are not a listening test.
+Add `--status` to print packet counts, decode counts and peak, jitter occupancy,
+and output recovery state every five seconds during a session. This can help
+distinguish missing media from decoded silence; counts and peak are cumulative
+for the session, and they do not prove audible output.
 Add `--control` alongside `--play` to adjust playback from the listener console:
 enter `volume 0` through `volume 100`, `mute`, or `unmute`. These local settings
 survive output recovery and successive sessions while the listener is running.
