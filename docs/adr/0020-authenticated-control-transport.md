@@ -51,6 +51,13 @@ pairing owner. The media root from `VerifiedPeerProof` feeds the existing
 [`MediaSessionAllocator`](./0017-control-reconnect-fresh-media-session.md)
 boundary unchanged.
 
+An isolated paired-audio lab composes this boundary with the existing UDP
+receiver: the desktop prepares the receiver from the pairing root and the
+authenticated StartStream identity before acknowledging Streaming, and retires
+it before acknowledging StopStream. Its fixed invitation and local ports are
+test fixtures, not a persistent trust or production discovery mechanism. The
+lab's software PCM check does not establish playback or latency on hardware.
+
 The application-domain invitation listener exposes two explicit boundaries:
 `PairingListener` owns a non-blocking `TcpListener` and lets a caller poll one
 queued peer with `try_accept`, while `accept_pairing_stream` performs the

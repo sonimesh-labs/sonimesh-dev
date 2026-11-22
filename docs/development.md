@@ -22,6 +22,33 @@ requires the Android API 37.0 platform.
 
 ### Android Opus interoperability lab
 
+The paired-audio interoperability lab exercises the real pairing, Hello and
+start/stop control messages together with protected UDP and software decoding.
+It uses a public fixed invitation and is restricted to an emulator and desktop
+loopback. From `apps/android`, build `:opus-spike:assembleDebug` and
+`:opus-spike:assembleDebugAndroidTest`, then install both APKs. Set up
+`adb reverse tcp:47610 tcp:47610` and run from the repository root:
+
+~~~powershell
+cargo run -p opus-codec-prototype --bin paired-audio-lab
+~~~
+
+In another terminal, copy the printed public `SPKI_HEX` into `$pin` and run:
+
+~~~powershell
+adb shell am instrument -w -e pairingSpkiHex $pin -e class 'com.sonimesh.opusspike.PairedAudioInteropTest#pairs_starts_sends_opus_and_stops' com.sonimesh.opusspike.test/androidx.test.runner.AndroidJUnitRunner
+~~~
+
+The test synthesizes and encodes a tone; the desktop acknowledges start only
+after binding its UDP receiver with the pairing-derived root and acknowledges
+stop after retiring it. Successful runs report the decoded frame count and
+software PCM peak. On 2026-11-22, two API 37 x86_64 emulator runs decoded 100
+and 92 frames respectively, each with a peak of 0.250; the discrepancy has not
+been characterized. This is not playback-capture, physical WLAN, listening,
+latency, persistent trust, or production UI evidence. The interactive audio lab
+below still uses its separate ADB bootstrap. Remove the reverse mapping when no
+longer needed.
+
 This isolated test encodes a synthetic 48 kHz stereo tone with Android
 MediaCodec. It writes only synthetic audio to the spike application's external
 files directory; it does not use capture or networking. With a single selected
