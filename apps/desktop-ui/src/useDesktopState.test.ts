@@ -113,6 +113,25 @@ afterEach(() => {
 })
 
 describe('useDesktopState', () => {
+  it('polls the bridge for low-rate state and stops polling after unmount', async () => {
+    vi.useFakeTimers()
+    desktopBridgeMock.snapshot.mockResolvedValue(receiverSnapshot('ready'))
+    const wrapper = mount(StateHarness)
+    await flushPromises()
+
+    expect(desktopBridgeMock.snapshot).toHaveBeenCalledTimes(1)
+
+    vi.advanceTimersByTime(1_000)
+    await flushPromises()
+    expect(desktopBridgeMock.snapshot).toHaveBeenCalledTimes(2)
+
+    wrapper.unmount()
+    vi.advanceTimersByTime(2_000)
+    await flushPromises()
+    expect(desktopBridgeMock.snapshot).toHaveBeenCalledTimes(2)
+    vi.useRealTimers()
+  })
+
   it('accepts only one bridge command while a prior command is pending', async () => {
     desktopBridgeMock.snapshot.mockResolvedValueOnce(receiverSnapshot('ready'))
     const wrapper = mount(StateHarness)

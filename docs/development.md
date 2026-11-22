@@ -711,6 +711,9 @@ injectable `TauriDesktopBridge` only maps low-rate commands to a shell-provided
 realtime callbacks. The shell-neutral `DesktopControlOwner` now provides the
 low-rate command owner for lifecycle, output, stream, and diagnostics actions;
 a live Tauri shell and its command bindings remain pending platform integration.
+The composable polls the same low-rate snapshot command once per second and clears
+that timer on unmount, so reconnect countdowns and asynchronous output faults do
+not depend on a user clicking Refresh.
 
 ## File and module size
 

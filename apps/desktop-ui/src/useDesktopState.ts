@@ -1,13 +1,16 @@
-import { onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 
 import { desktopBridge } from './bridge'
 import type { DesktopSnapshot } from './types'
 import type { JitterMode } from './types'
 
+const SNAPSHOT_POLL_INTERVAL_MS = 1_000
+
 export function useDesktopState() {
   const snapshot = ref<DesktopSnapshot | null>(null)
   const busy = ref(false)
   const error = ref<string | null>(null)
+  let snapshotPollTimer: ReturnType<typeof setInterval> | undefined
 
   async function run(command: () => Promise<DesktopSnapshot>) {
     if (busy.value) return
@@ -15,7 +18,10 @@ export function useDesktopState() {
     busy.value = true
     error.value = null
     try {
-      snapshot.value = await command()
+      const nextSnapshot = await command()
+      if (nextSnapshot !== undefined) {
+        snapshot.value = nextSnapshot
+      }
     } catch {
       error.value = 'The desktop control service did not accept this command.'
     } finally {
@@ -44,7 +50,19 @@ export function useDesktopState() {
   const simulateCommandRejection = () => run(() => desktopBridge.simulateCommandRejection())
   const resetPreview = () => run(() => desktopBridge.resetPreview())
 
-  onMounted(refresh)
+  onMounted(() => {
+    void refresh()
+    snapshotPollTimer = setInterval(() => {
+      void refresh()
+    }, SNAPSHOT_POLL_INTERVAL_MS)
+  })
+
+  onBeforeUnmount(() => {
+    if (snapshotPollTimer !== undefined) {
+      clearInterval(snapshotPollTimer)
+      snapshotPollTimer = undefined
+    }
+  })
 
   return {
     snapshot,
