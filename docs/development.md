@@ -738,6 +738,11 @@ turning a recoverable `Pending` write into a dropped session.
 The UDP specialization also exposes `tick`, which runs one control poll and one
 media poll/decode together while returning their results independently, so a
 control transport failure does not suppress the media tick.
+When a control poll returns `Closed` or an unrecoverable transport error, the
+caller should invoke `mark_control_lost(now_ms, grace_duration_ms)` once. That
+retires pending control work, moves the lifecycle to `Reconnecting`, and arms
+the bounded reconnect window while leaving the UDP receiver available for the
+same scheduler loop.
 The composable polls the same low-rate snapshot command once per second and clears
 that timer on unmount, so reconnect countdowns and asynchronous output faults do
 not depend on a user clicking Refresh.

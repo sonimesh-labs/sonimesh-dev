@@ -12,9 +12,9 @@ use sonimesh_network::UntrustedControlWrite;
 use sonimesh_platform::AudioOutput;
 
 use crate::{
-    ControlSessionError, ControlSessionPoll, ControlSessionToken, DesktopControlSession,
-    DesktopReceiverOwner, ReceiverPcmProducerInstaller, TrustedControlChannel, UdpMediaTick,
-    UdpReceiverError, UdpReceiverPipeline,
+    ControlSessionError, ControlSessionPoll, ControlSessionToken, DesktopControlOwnerError,
+    DesktopControlSession, DesktopReceiverOwner, ReceiverPcmProducerInstaller, SessionEvent,
+    TrustedControlChannel, UdpMediaTick, UdpReceiverError, UdpReceiverPipeline,
 };
 
 /// Failure while attaching a control channel to a receiver scheduler.
@@ -188,6 +188,26 @@ where
     /// Detaches the current channel, if one is attached.
     pub fn detach_control(&mut self) -> Option<(ControlSessionToken, S)> {
         self.control.take()
+    }
+
+    /// Retires the control transport and starts a bounded reconnect window.
+    ///
+    /// Call this after [`Self::poll_control_once`] reports `Closed` or an
+    /// unrecoverable transport error. The media pipeline remains owned by the
+    /// scheduler while the control owner moves to `Reconnecting`.
+    ///
+    /// # Errors
+    ///
+    /// Returns a lifecycle error when the owner cannot transition from its
+    /// current state or arm the requested grace period.
+    pub fn mark_control_lost(
+        &mut self,
+        now_ms: u64,
+        grace_duration_ms: u64,
+    ) -> Result<(), DesktopControlOwnerError> {
+        let owner = self.receiver.owner_mut();
+        owner.acknowledge_platform_event(SessionEvent::ConnectionLost)?;
+        owner.begin_reconnect_grace(now_ms, grace_duration_ms)
     }
 
     /// Polls one control envelope and preserves the channel for the next tick.
@@ -473,6 +493,31 @@ mod tests {
             Some(crate::ControlSessionPoll::Empty)
         ));
         assert!(scheduler.detach_control().is_some());
+    }
+
+    #[test]
+    fn scheduler_marks_control_loss_and_arms_reconnect_grace() {
+        let mut scheduler = scheduler();
+        let session = scheduler
+            .receiver_mut()
+            .owner_mut()
+            .install_authenticated_control_session()
+            .unwrap();
+        scheduler.attach_control(session, IdleIo).unwrap();
+
+        scheduler.mark_control_lost(1_000, 30_000).unwrap();
+
+        let owner = scheduler.receiver_mut().owner_mut();
+        assert_eq!(
+            owner.bridge().state().phase(),
+            crate::SessionPhase::Reconnecting
+        );
+        assert!(matches!(
+            owner.observe_reconnect_grace(1_000).unwrap(),
+            crate::ReconnectGraceObservation::InGrace {
+                remaining_ms: 30_000
+            }
+        ));
     }
 
     #[test]

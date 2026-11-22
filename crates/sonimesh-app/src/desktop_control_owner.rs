@@ -341,6 +341,26 @@ where
             .map_err(|error| DesktopControlOwnerError::Mixer(ControlToMixerError::Control(error)))
     }
 
+    /// Starts the bounded reconnect window after a control transport loss.
+    ///
+    /// The lifecycle transition must be acknowledged first so the coordinator
+    /// can retire pending work and keep the existing media path in its grace
+    /// state until the deadline.
+    ///
+    /// # Errors
+    ///
+    /// Returns a control error when the current lifecycle cannot enter
+    /// reconnecting or the grace window cannot be armed.
+    pub fn begin_reconnect_grace(
+        &mut self,
+        now_ms: u64,
+        duration_ms: u64,
+    ) -> Result<(), DesktopControlOwnerError> {
+        self.bridge
+            .begin_reconnect_grace(now_ms, duration_ms)
+            .map_err(|error| DesktopControlOwnerError::Mixer(ControlToMixerError::Control(error)))
+    }
+
     /// Applies a non-stream platform lifecycle event through the bridge.
     ///
     /// # Errors
