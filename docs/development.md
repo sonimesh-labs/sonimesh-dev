@@ -205,15 +205,21 @@ python tools/check_android_discovery_record.py --self-test
 python tools/check_ci_wiring.py
 Push-Location apps/android
 .\gradlew.bat lintDebug testDebugUnitTest assembleDebug --no-daemon
+.\gradlew.bat :pairing-protocol:lint :pairing-protocol:assemble --no-daemon
 .\gradlew.bat :discovery-spike:lintDebug :discovery-spike:assembleDebugAndroidTest --no-daemon
 .\gradlew.bat :tls-provider-spike:assembleDebugAndroidTest --no-daemon
 Pop-Location
-
 Push-Location apps/desktop-ui
 npm test
 npm run build
 Pop-Location
 ~~~
+
+With an Android device or emulator connected, run the pairing codec's published
+vector and copy-ownership tests with
+`./gradlew.bat :pairing-protocol:connectedDebugAndroidTest` from `apps/android`.
+The library provides codecs only; the capture-only app does not use them at
+runtime and this check does not exercise scanning or a pairing connection.
 
 The vector pin checkers (`check_pairing_vectors.py`, `check_control_frame_vectors.py`,
 `check_media_header_vectors.py`, `check_media_key_vectors.py`,

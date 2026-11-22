@@ -45,6 +45,10 @@ The frame is deliberately independent of the unauthenticated control-plane
 envelope: pairing proofs flow only inside the freshly established pinned TLS
 channel, never across the plain TCP framing boundary.
 
+The Android `pairing-protocol` library exposes the frame codec for future
+runtime integration. It copies decoded fields and does not establish a TLS
+connection or verify proofs. The capture-only app uses it only in host tests.
+
 The desktop handshake composition in `sonimesh-app` consumes the frame at its
 boundary: `verify_scanned_proof` now takes the peer's raw frame bytes, parses
 them with the bounded decoder, and requires the Android-client role byte and
@@ -83,10 +87,12 @@ representation.
   exactly one attempt; and a successful exchange renders a reply frame whose
   carried proof verifies as the desktop server role under the same
   transcript binding.
-- The Android host-JVM `PairingProofFrame` mirror and
+- The Android `PairingProofFrame` codec and host-JVM
   `PairingProofFrameVectorTest` reproduce the same golden bytes for both
   roles and the same rejection behavior, so a Kotlin sender cannot drift from
   the Rust receiver-side layout.
+- The same vector tests passed on an API 37 Android emulator; this does not
+  establish a pairing connection or verify a proof.
 - `tools/check_pairing_proof_frame.py` reimplements the layout in pure
   standard-library Python, recomputes both frames from the published
   TLS-binding outputs, rejects mutated magic/version/role fields and

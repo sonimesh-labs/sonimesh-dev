@@ -43,6 +43,12 @@ existing boundaries: the SPKI pin goes to the TLS provider spike verifier, the
 ID/secret go to the pure pairing binding, and the expiry seeds the pairing
 record. A future manual-code path must not reuse this format (ADR 0008).
 
+The Android `pairing-protocol` library exposes the same wire codec for future
+runtime integration. Unlike the Rust decoder, its Kotlin decoder copies the
+ID, secret, and SPKI into mutable arrays; the caller owns those copies and the
+original payload. It does not implement scanning, TLS, or trust storage. The
+capture-only app depends on this library only in host tests.
+
 ## Security implications
 
 The QR payload carries the one-time pairing secret through a visible channel,
@@ -63,9 +69,12 @@ TLS channel through the transcript-bound proof.
   hosts, boundary lengths (1-byte host at minimum SPKI, 255-byte host at
   maximum SPKI filling exactly 834 bytes), short output buffers, and redacted
   `Debug`.
-- The Android host-JVM `PairingQr` mirror and `PairingQrVectorTest` reproduce
+- The Android `PairingQr` codec and host-JVM `PairingQrVectorTest` reproduce
   the same golden bytes and the same rejection behavior, so a Kotlin sender
   cannot drift from the Rust receiver-side layout.
+- The same vector tests and a copied-field ownership test passed on an API 37
+  Android emulator. This validates the codec on Android, not camera scanning or
+  a pairing session.
 - The Android host-JVM `PairingHandshake` test-source model pins the client-role
   composition over that decoder and binding: a canonical invitation derives
   the published Android proof, the desktop server proof unlocks the published

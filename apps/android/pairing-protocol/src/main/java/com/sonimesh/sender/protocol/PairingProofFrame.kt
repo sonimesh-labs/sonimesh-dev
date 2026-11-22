@@ -1,15 +1,14 @@
 package com.sonimesh.sender.protocol
 
 /**
- * Host-JVM mirror of `sonimesh-protocol`'s bounded pairing proof-exchange
- * frame codec, shared by the pairing proof-frame vector test so the Android
- * sender wraps and unwraps exactly the version-one wire layout pinned in
+ * Android implementation of `sonimesh-protocol`'s bounded pairing proof-exchange
+ * frame codec, using the version-one wire layout pinned in
  * `docs/protocol/pairing-proof-frame-vectors.md`.
  *
  * After the pinned TLS 1.3 handshake, each peer sends one 32-byte transcript
  * proof (ADR 0008). The frame is fixed-length, so every field is validated
  * before use and no declared length can disagree with the total size.
- * Decoding copies into fresh arrays; this mirror performs no TLS, derivation,
+ * Decoding copies into fresh arrays; this codec performs no TLS, derivation,
  * verification, pairing-record consumption, or trust storage.
  *
  * @throws IllegalArgumentException when a field is outside the documented
@@ -26,7 +25,7 @@ class PairingProofFrame private constructor(
         const val FRAME_BYTES: Int = 55
         const val ROLE_ANDROID_CLIENT: Int = 0
         const val ROLE_DESKTOP_SERVER: Int = 1
-        val MAGIC = "SMPE".encodeToByteArray()
+        private val MAGIC = "SMPE".encodeToByteArray()
 
         /** Validates and encodes one proof frame into [out]. */
         fun encode(
@@ -60,7 +59,7 @@ class PairingProofFrame private constructor(
             return FRAME_BYTES
         }
 
-        /** Parses an untrusted frame into a validated view. */
+        /** Parses an untrusted frame into validated copied fields. */
         fun decode(frame: ByteArray): PairingProofFrame {
             require(frame.size == FRAME_BYTES) {
                 "pairing proof frame is truncated or oversized"

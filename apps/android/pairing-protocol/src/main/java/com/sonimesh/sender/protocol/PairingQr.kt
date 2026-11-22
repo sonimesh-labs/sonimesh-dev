@@ -1,16 +1,16 @@
 package com.sonimesh.sender.protocol
 
 /**
- * Host-JVM mirror of `sonimesh-protocol`'s bounded pairing QR payload codec,
- * shared by the pairing QR vector test so the Android sender encodes and
+ * Android implementation of `sonimesh-protocol`'s bounded pairing QR payload codec,
+ * so the Android sender can encode and
  * decodes exactly the version-one wire layout pinned in
  * `docs/protocol/pairing-qr-vectors.md`.
  *
  * The payload is scanned before any TLS connection exists, so every length is
  * bounded before any data is copied and a decoded view exists only when the
- * declared lengths exactly match the total size. Decoding borrows the input
- * buffer for the pairing secret and SPKI; the caller owns that buffer's
- * lifetime. This mirror performs no TLS, pairing-record consumption, proof
+ * declared lengths exactly match the total size. Decoding copies the ID,
+ * secret and SPKI into mutable arrays owned by the caller, who also owns the
+ * input buffer. This codec performs no TLS, pairing-record consumption, proof
  * exchange, or trust storage.
  *
  * @throws IllegalArgumentException when a field is outside the documented
@@ -33,7 +33,7 @@ class PairingQr private constructor(
         const val SPKI_MIN_BYTES: Int = 32
         const val SPKI_MAX_BYTES: Int = 512
         const val MAX_PAYLOAD_BYTES: Int = PREFIX_BYTES + HOST_MAX_BYTES + SPKI_MAX_BYTES
-        val MAGIC = "SMQR".encodeToByteArray()
+        private val MAGIC = "SMQR".encodeToByteArray()
 
         /**
          * Validates and encodes one invitation into [out], returning the
@@ -104,7 +104,7 @@ class PairingQr private constructor(
             return encodedLength
         }
 
-        /** Parses an untrusted payload into a validated view. */
+        /** Parses an untrusted payload into validated copied fields. */
         fun decode(payload: ByteArray): PairingQr {
             require(payload.size <= MAX_PAYLOAD_BYTES) {
                 "pairing QR payload exceeds the hard limit"
@@ -153,10 +153,9 @@ class PairingQr private constructor(
             }
 
             val pairingId = payload.copyOfRange(PAIRING_ID_OFFSET, PAIRING_ID_OFFSET + PAIRING_ID_BYTES)
-            var pairingSecretOffset = PAIRING_SECRET_OFFSET
             val pairingSecret = payload.copyOfRange(
-                pairingSecretOffset,
-                pairingSecretOffset + PAIRING_SECRET_BYTES,
+                PAIRING_SECRET_OFFSET,
+                PAIRING_SECRET_OFFSET + PAIRING_SECRET_BYTES,
             )
             val spkiStart = hostEnd
             val spki = payload.copyOfRange(spkiStart, spkiStart + spkiLen)
