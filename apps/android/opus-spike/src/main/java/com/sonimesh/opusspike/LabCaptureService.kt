@@ -89,6 +89,7 @@ class LabCaptureService : Service() {
             startForeground(1, Notification.Builder(this, "lab")
                 .setSmallIcon(android.R.drawable.ic_btn_speak_now)
                 .setContentTitle("SoniMesh audio lab capturing")
+                .setContentText("Transport: ${transport.label}")
                 .setContentIntent(open)
                 .addAction(Notification.Action.Builder(null, "Stop", stop).build()).build())
             wakeLock = getSystemService(PowerManager::class.java)
