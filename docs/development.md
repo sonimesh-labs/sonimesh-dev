@@ -577,6 +577,10 @@ The lab's optional test tone continues across activity configuration recreation;
 the button still stops it, and finishing the activity releases it. An API 37
 emulator test on 2026-11-23 checked the AudioTrack play state and stop control
 across recreation; it did not check audible output or physical-device behavior.
+In a separate paired capture, the same emulator recreated the activity while
+capturing a test tone. The active signal status remained after recreation and
+the software listener decoded 309 frames with a 0.095 peak and no decode errors.
+This checks emulator loopback rather than continuous physical playback or WLAN.
 The control address defaults to `127.0.0.1` for ADB reverse; for a controlled LAN use an address Android can
 reach. The listener binds TCP 47610 on all IPv4 interfaces and uses UDP 39093;
 it plays through the selected output, or the default output when no device is

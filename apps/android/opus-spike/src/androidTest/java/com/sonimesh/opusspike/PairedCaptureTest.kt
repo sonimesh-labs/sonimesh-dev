@@ -78,6 +78,9 @@ class PairedCaptureTest {
     fun captures_after_pasted_invitation() = runCapture(expectDisconnect = false, startFromPaste = true)
 
     @Test
+    fun keeps_capturing_tone_after_activity_recreation() = runCapture(expectDisconnect = false, recreate = true)
+
+    @Test
     fun captures_again_after_stopping() {
         runCapture(expectDisconnect = false)
         runCapture(expectDisconnect = false)
@@ -92,7 +95,7 @@ class PairedCaptureTest {
     @Test
     fun returns_to_active_capture_from_notification() = runCapture(expectDisconnect = false, notificationReturn = true)
 
-    private fun runCapture(expectDisconnect: Boolean, screenOff: Boolean = false, notificationReturn: Boolean = false, startFromScan: Boolean = false, startFromPaste: Boolean = false) {
+    private fun runCapture(expectDisconnect: Boolean, screenOff: Boolean = false, notificationReturn: Boolean = false, startFromScan: Boolean = false, startFromPaste: Boolean = false, recreate: Boolean = false) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val args = InstrumentationRegistry.getArguments()
         assumeTrue(
@@ -199,7 +202,16 @@ class PairedCaptureTest {
                 }
                 assertTrue("desktop disconnect was not reported", disconnectStatus != null)
             } else {
-                if (notificationReturn) {
+                if (recreate) {
+                    SystemClock.sleep(3_000)
+                    scenario.recreate()
+                    SystemClock.sleep(3_000)
+                    scenario.onActivity { activity ->
+                        assertTrue("test tone stopped after recreation", activity.isTestTonePlaying())
+                        assertTrue("capture did not retain signal after recreation",
+                            containsStatus(activity.window.decorView, "Status: Capturing audio"))
+                    }
+                } else if (notificationReturn) {
                     automation.executeShellCommand("input keyevent KEYCODE_HOME").close()
                     val homeDeadline = SystemClock.elapsedRealtime() + 10_000
                     var homeVisible = false
