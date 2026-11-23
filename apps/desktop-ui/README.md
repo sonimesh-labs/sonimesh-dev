@@ -45,7 +45,9 @@ log capped at eight, mirroring the Rust ADR 0011 export journal, so the
 retention bound and receipt formatting can be exercised without writing
 files. `Download preview JSON` writes the allowlisted synthetic metrics and
 receipt list to a browser download for local inspection; it is explicitly a
-preview artifact, not a live diagnostic bundle. A preview
+preview artifact, not a live diagnostic bundle. `Copy preview JSON` copies the
+same bounded artifact to the clipboard when the browser grants clipboard
+access. A preview
 `Simulate command rejection` action rejects like a real bridge command so the
 control error banner and its recovery can be exercised. A
 `Reset preview` action restores the initial synthetic session and counters so
