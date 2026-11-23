@@ -112,6 +112,13 @@ The lab's capture usage selector applies to the next capture session: **All**
 includes media, game and unknown usage, while the other choices select one
 usage. The test tone uses media usage. Android and the source application still
 control whether playback can be captured; the selector does not select apps.
+**Sender queue drops** counts encoded packets discarded locally when the bounded
+sender queue is full, for the current or most recent capture. It does not count
+network loss or confirm playback; it resets when the next capture starts.
+On 2026-11-23 an API 37 x86_64 emulator run verified that the count is visible
+during paired capture and remains visible after stop; the software listener
+decoded 151 frames with a 0.094 peak. A separate recreation test restored a
+synthetic count. Neither run injected sender-queue congestion.
 The lab foreground service holds a partial CPU wake lock until the service is
 destroyed so it can be evaluated with the screen off. Physical-device screen-off
 continuity and power consumption remain unmeasured.

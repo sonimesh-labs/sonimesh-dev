@@ -41,8 +41,12 @@ class LabActivity : Activity() {
     private lateinit var pin: EditText
     private lateinit var host: EditText
     private lateinit var status: TextView
+    private lateinit var senderQueueDrops: TextView
     private lateinit var usage: Spinner
     private val statusObserver: (String) -> Unit = { status.text = "Status: $it" }
+    private val dropsObserver: (Long?) -> Unit = { count ->
+        senderQueueDrops.text = if (count == null) "Sender queue drops: —" else "Sender queue drops: $count"
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -72,6 +76,8 @@ class LabActivity : Activity() {
         })
         status = TextView(this).apply { accessibilityLiveRegion = android.view.View.ACCESSIBILITY_LIVE_REGION_POLITE }
         layout.addView(status)
+        senderQueueDrops = TextView(this)
+        layout.addView(senderQueueDrops)
         layout.addView(TextView(this).apply { text = "Playback usage for the next capture" })
         usage = Spinner(this).apply {
             contentDescription = "Playback usage for capture"
@@ -187,10 +193,12 @@ class LabActivity : Activity() {
     override fun onStart() {
         super.onStart()
         LabStatus.observe(statusObserver)
+        LabStatus.observeSenderQueueDrops(dropsObserver)
     }
 
     override fun onStop() {
         LabStatus.remove(statusObserver)
+        LabStatus.removeSenderQueueDrops(dropsObserver)
         super.onStop()
     }
 

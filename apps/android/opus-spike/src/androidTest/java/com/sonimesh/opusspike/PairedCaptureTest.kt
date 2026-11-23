@@ -75,6 +75,9 @@ class PairedCaptureTest {
             }
             assertTrue("capture did not start", capturing)
             scenario.onActivity { activity ->
+                find(activity.window.decorView) {
+                    it is TextView && it.text.toString().matches(Regex("Sender queue drops: [0-9]+"))
+                }
                 find(activity.window.decorView) { it is Button && it.text.toString().equals("Start paired UDP capture", true) }.performClick()
                 assertTrue(
                     "duplicate capture request replaced the active capture status",
@@ -134,6 +137,12 @@ class PairedCaptureTest {
                 if (!stopped) SystemClock.sleep(100)
             }
             assertTrue("capture service did not stop", stopped)
+            scenario.onActivity { activity ->
+                val count = find(activity.window.decorView) {
+                    it is TextView && it.text.toString().matches(Regex("Sender queue drops: [0-9]+"))
+                }
+                assertTrue("final sender queue count was not retained", count is TextView)
+            }
             if (expectDisconnect) {
                 scenario.onActivity { activity ->
                     assertTrue("disconnect reason was not retained", containsStatus(activity.window.decorView, requireNotNull(disconnectStatus)))

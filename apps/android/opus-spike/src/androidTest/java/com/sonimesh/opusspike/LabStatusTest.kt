@@ -14,6 +14,21 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class LabStatusTest {
     @Test
+    fun senderQueueDropsSurviveActivityRecreation() {
+        ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                LabStatus.publishSenderQueueDrops(7)
+                assertTrue(hasStatus(activity.window.decorView, "Sender queue drops: 7"))
+            }
+            scenario.recreate()
+            scenario.onActivity { activity ->
+                assertTrue(hasStatus(activity.window.decorView, "Sender queue drops: 7"))
+                LabStatus.publishSenderQueueDrops(null)
+            }
+        }
+    }
+
+    @Test
     fun failedServiceStartSurvivesActivityRecreation() {
         ActivityScenario.launch(LabActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->

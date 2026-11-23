@@ -63,6 +63,7 @@ class LabCaptureService : Service() {
         started = true
         LabStatus.captureAdmission.serviceStarted()
         running.set(true)
+        LabStatus.publishSenderQueueDrops(null)
         LabStatus.publish("Connecting to the desktop listener…")
         var pendingInvitation: ByteArray? = null
         try {
@@ -122,6 +123,9 @@ class LabCaptureService : Service() {
         val pairedProducerFinished = AtomicBoolean(false)
         var pairedSender: Thread? = null
         var flushEncoderTail: (() -> Boolean)? = null
+        var senderQueueDrops = 0L
+        var lastDropPublication = 0L
+        var captureStarted = false
         try {
             val packets = ArrayBlockingQueue<EncodedPacket>(8)
             if (invitation != null) {
@@ -188,8 +192,12 @@ class LabCaptureService : Service() {
             val activeCodec = OpusEncoder.create()
             codec = activeCodec
             activeRecord.startRecording()
+            captureStarted = true
             handler.post {
-                if (running.get() && !terminalStatus) LabStatus.publish("Capturing audio and sending to desktop.")
+                if (running.get() && !terminalStatus) {
+                    LabStatus.publishSenderQueueDrops(0)
+                    LabStatus.publish("Capturing audio and sending to desktop.")
+                }
             }
             val pcm = ShortArray(OpusEncoder.FRAME_SAMPLES)
             val signalMonitor = LabSignalMonitor()
@@ -202,9 +210,14 @@ class LabCaptureService : Service() {
                 return when (activeCodec.poll { packet ->
                     check(outputSequence <= 0xffff_ffffL) { "media sequence exhausted" }
                     val encoded = EncodedPacket(outputSequence++, packet)
-                    if (!packets.offer(encoded)) {
-                        packets.poll()
-                        packets.offer(encoded)
+                    if (enqueueLatest(packets, encoded)) {
+                        if (senderQueueDrops < Long.MAX_VALUE) senderQueueDrops++
+                        val now = SystemClock.elapsedRealtime()
+                        if (lastDropPublication == 0L || now - lastDropPublication >= 1_000) {
+                            lastDropPublication = now
+                            val count = senderQueueDrops
+                            handler.post { LabStatus.publishSenderQueueDrops(count) }
+                        }
                     }
                 }) {
                     OpusEncoder.Output.Empty -> EncoderTailOutput.Empty
@@ -293,6 +306,10 @@ class LabCaptureService : Service() {
                     if (error is InterruptedException) Thread.currentThread().interrupt()
                     Log.w("SoniMeshLab", "Encoder tail drain failed", error)
                 }
+            }
+            if (captureStarted) {
+                val count = senderQueueDrops
+                handler.post { LabStatus.publishSenderQueueDrops(count) }
             }
             codec?.close()
             if (paired != null) {

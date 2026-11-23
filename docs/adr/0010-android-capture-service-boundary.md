@@ -156,6 +156,11 @@ If non-blocking reads return no samples continuously for five seconds, the lab
 stops capture and asks the operator to restart. Positive reads reset that timer;
 silent PCM is still valid input and follows the separate no-audio indication.
 The timeout is a lab recovery policy, not a measured platform guarantee.
+The lab separately displays the number of encoded packets discarded from its
+bounded sender queue in the current or most recent capture. This count resets on
+a new service start and is retained across activity recreation. Updates are
+throttled during capture and finalized at worker exit; they describe local queue
+replacement only, not packets lost on the network or heard at the output.
 During paired-lab setup, the service tracks the connecting socket through TLS,
 Hello, and StartStream. Stopping the service closes the setup socket to interrupt
 pending I/O; after StartStream succeeds, ownership moves to the capture worker,
