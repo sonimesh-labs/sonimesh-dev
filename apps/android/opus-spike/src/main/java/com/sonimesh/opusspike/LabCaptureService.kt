@@ -368,7 +368,9 @@ class LabCaptureService : Service() {
                     paired.close()
                 }
             }
-            handler.post { LabStatus.publishSentPackets(sentPackets.get()) }
+            if (captureStarted) {
+                handler.post { LabStatus.publishSentPackets(sentPackets.get()) }
+            }
             handler.post {
                 workerFinished = true
                 captureStopWarning(terminalStatus, stopResult)?.let {
