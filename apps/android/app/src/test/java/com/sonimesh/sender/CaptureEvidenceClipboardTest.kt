@@ -4,6 +4,7 @@ import com.sonimesh.sender.capture.CaptureEvidenceSnapshot
 import com.sonimesh.sender.capture.CaptureFormat
 import com.sonimesh.sender.capture.CaptureSource
 import com.sonimesh.sender.capture.CaptureStatus
+import com.sonimesh.sender.capture.CaptureStopReason
 import com.sonimesh.sender.capture.CaptureUiState
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -51,5 +52,16 @@ class CaptureEvidenceClipboardTest {
                 "1 read errors. Requested usage: Game. Last successful read at +2.4 s.",
             state.copyableEvidence(),
         )
+    }
+
+    @Test
+    fun stopped_and_failed_capture_evidence_include_retained_format() {
+        val format = requireNotNull(CaptureFormat.fromObserved(48_000, 2, 8, 0xC, 7_680, 3_840))
+        val evidence = CaptureEvidenceSnapshot(captureFormat = format)
+        for (status in listOf(CaptureStatus.Stopped(CaptureStopReason.UserRequested), CaptureStatus.Failed("Read failed"))) {
+            val text = CaptureUiState(status = status, evidence = evidence).copyableEvidence()
+            org.junit.Assert.assertTrue(text.contains("Capture format: 48000 Hz, 2 channels, source 8, channel mask 0xc, 7680 byte buffer (platform minimum 3840)."))
+            org.junit.Assert.assertTrue(evidence.hasObservations())
+        }
     }
 }

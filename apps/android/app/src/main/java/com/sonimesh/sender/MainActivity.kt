@@ -213,7 +213,7 @@ internal fun CaptureStatus.description(): String = when (this) {
     is CaptureStatus.Failed -> "Capture failed: $message"
 }
 
-private fun com.sonimesh.sender.capture.CaptureFormat.description(): String =
+internal fun com.sonimesh.sender.capture.CaptureFormat.description(): String =
     "${sampleRateHz} Hz, ${channels} channels, source ${audioSource}, channel mask 0x${channelMask.toString(16)}, ${bufferSizeBytes} byte buffer (platform minimum ${minimumBufferBytes})"
 
 internal fun com.sonimesh.sender.capture.CaptureEvidenceSnapshot.description(): String {
@@ -226,11 +226,17 @@ internal fun com.sonimesh.sender.capture.CaptureEvidenceSnapshot.description(): 
         "${readErrors} read errors.$source$latestRead"
 }
 
-internal fun com.sonimesh.sender.capture.CaptureUiState.copyableEvidence(): String =
-    "SoniMesh capture evidence\nStatus: ${status.description()}\n${evidence.description()}"
+internal fun com.sonimesh.sender.capture.CaptureUiState.copyableEvidence(): String {
+    val terminalFormat = if (status is CaptureStatus.Stopped || status is CaptureStatus.Failed) {
+        evidence.captureFormat?.let { "\nCapture format: ${it.description()}." }.orEmpty()
+    } else {
+        ""
+    }
+    return "SoniMesh capture evidence\nStatus: ${status.description()}$terminalFormat\n${evidence.description()}"
+}
 
 internal fun com.sonimesh.sender.capture.CaptureEvidenceSnapshot.hasObservations(): Boolean =
-    captureDurationMillis != 0L || capturedFrames != 0L || silentFrames != 0L ||
+    captureFormat != null || captureDurationMillis != 0L || capturedFrames != 0L || silentFrames != 0L ||
         silentReads != 0L || readErrors != 0L
 
 internal fun formatDuration(durationMillis: Long): String =

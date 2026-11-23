@@ -300,6 +300,9 @@ private fun CaptureEvidenceCard(
                 title = "Local observations",
                 supporting = "Capture counters stay on this device and summarize the latest run.",
             )
+            evidence.captureFormat?.let { format ->
+                EvidenceItem(stringResource(R.string.capture_evidence_format), format.description())
+            }
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 EvidenceItem("Frames", formatCount(evidence.capturedFrames), Modifier.weight(1f))
                 EvidenceItem("Silent frames", formatCount(evidence.silentFrames), Modifier.weight(1f))

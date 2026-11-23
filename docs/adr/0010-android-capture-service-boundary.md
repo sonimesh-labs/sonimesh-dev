@@ -55,6 +55,11 @@ been accepted. It owns:
 - service state publication to the activity through a bounded, low-rate state
   model.
 
+The latest observed capture format remains in the process-local evidence after
+stop or failure, so an operator can review or share it with the final counters.
+A fresh capture request clears it with the previous evidence. It is not persisted
+across process death and does not identify a source application.
+
 `MediaProjection.Callback.onStop()` and the notification stop action use the
 same idempotent teardown path. That path stops capture admission, releases
 AudioRecord and projection resources, retires PCM/encoded buffers, destroys

@@ -117,6 +117,20 @@ class CaptureStateStoreTest {
     }
 
     @Test
+    fun capture_format_survives_terminal_states_and_clears_for_a_new_request() {
+        CaptureStateStore.evidence.begin(0, CaptureSource.Game, format())
+        CaptureStateStore.publishCapturing(format())
+        CaptureStateStore.publishStopped(CaptureStopReason.UserRequested)
+        assertEquals(format(), CaptureStateStore.state.value.evidence.captureFormat)
+
+        CaptureStateStore.publishFailure("Capture failed")
+        assertEquals(format(), CaptureStateStore.state.value.evidence.captureFormat)
+
+        CaptureStateStore.publishAwaitingPermission()
+        assertEquals(null, CaptureStateStore.state.value.evidence.captureFormat)
+    }
+
+    @Test
     fun awaiting_permission_resets_evidence_before_the_next_session() {
         CaptureStateStore.evidence.begin(captureStartedAtMillis = 0)
         CaptureStateStore.evidence.recordRead(
