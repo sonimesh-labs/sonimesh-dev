@@ -21,8 +21,12 @@ const loaded = ref(false)
 const generation = ref(0)
 const playing = ref<number | null>(null)
 const message = ref<string | null>(null)
-interface LabSnapshot { running: boolean; status: string; invitation: string | null }
-const lab = ref<LabSnapshot>({ running: false, status: 'Stopped', invitation: null })
+interface LabMetrics {
+  packets: string; rejected: string; decoded: string; peak: string
+  plc: string; decodeErrors: string; buffered: string; output: 'active' | 'recovering' | 'software-check'
+}
+interface LabSnapshot { running: boolean; status: string; invitation: string | null; metrics: LabMetrics | null }
+const lab = ref<LabSnapshot>({ running: false, status: 'Stopped', invitation: null, metrics: null })
 const labHost = ref('127.0.0.1')
 const labBusy = ref(false)
 const labError = ref<string | null>(null)
@@ -37,9 +41,13 @@ async function pollLab() {
     const snapshot = await window.__TAURI__.core.invoke<LabSnapshot>('lab_status')
     if (disposed || request !== labRequest) return
     lab.value = snapshot
+    labError.value = null
     if (!disposed && lab.value.running) timer = setTimeout(pollLab, 1000)
   } catch {
-    if (!disposed && request === labRequest) labError.value = 'Could not check the listener. Try stopping it.'
+    if (!disposed && request === labRequest) {
+      labError.value = 'Could not check the listener. Retrying…'
+      if (lab.value.running) timer = setTimeout(pollLab, 1000)
+    }
   }
 }
 
@@ -153,6 +161,20 @@ onBeforeUnmount(() => { disposed = true; labRequest++; clearTimeout(timer) })
       <button type="button" class="preview-action" :disabled="labBusy" @click="toggleLab">{{ lab.running ? 'Stop listener' : 'Start listener' }}</button>
       <p role="status">{{ lab.status }}</p>
       <p v-if="labError" class="command-error" role="alert">{{ labError }}</p>
+      <section v-if="lab.metrics" aria-labelledby="lab-metrics-title">
+        <h3 id="lab-metrics-title">Session observations</h3>
+        <dl class="lab-metrics">
+          <div><dt>Accepted packets</dt><dd>{{ lab.metrics.packets }}</dd></div>
+          <div><dt>Packets rejected</dt><dd>{{ lab.metrics.rejected }}</dd></div>
+          <div><dt>Decoded frames</dt><dd>{{ lab.metrics.decoded }}</dd></div>
+          <div><dt>Decoded peak</dt><dd>{{ lab.metrics.peak }}</dd></div>
+          <div><dt>Concealed frames</dt><dd>{{ lab.metrics.plc }}</dd></div>
+          <div><dt>Decode errors</dt><dd>{{ lab.metrics.decodeErrors }}</dd></div>
+          <div><dt>Buffered frames</dt><dd>{{ lab.metrics.buffered }}</dd></div>
+          <div><dt>Output</dt><dd>{{ lab.metrics.output === 'recovering' ? 'Recovering' : lab.metrics.output === 'active' ? 'Active' : 'Software check' }}</dd></div>
+        </dl>
+        <p class="preview-note">Updated at session start and every five seconds. Counts and peak are cumulative; they do not confirm audible playback.</p>
+      </section>
       <template v-if="lab.invitation">
         <label for="lab-invitation">Lab invitation payload</label>
         <textarea id="lab-invitation" :value="lab.invitation" readonly rows="4" @focus="($event.target as HTMLTextAreaElement).select()" />

@@ -77,7 +77,10 @@ For controlled experiments, the desktop probe may launch the separately built
 paired audio lab as a child process, display its public lab invitation and
 low-rate status, and stop it when requested or when the probe exits. The child
 owns pairing, UDP, decoding, and default-device playback; the UI carries no
-audio. This is a development-only process boundary, not the product receiver,
+audio. During an active session the probe displays the child's periodic packet,
+decode, jitter-buffer, and output-recovery observations; these are cleared when
+the listener returns to waiting. They do not establish audibility or latency.
+This is a development-only process boundary, not the product receiver,
 device selection, persistent trust, or evidence of audible playback.
 The UDP lab may retry the selected endpoint after a reported output fault while
 its media session remains connected. Recovery recreates the PCM endpoint outside

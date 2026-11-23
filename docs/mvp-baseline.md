@@ -384,9 +384,10 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
 - an isolated Tauri output-probe prototype that lists Windows CPAL devices and
   their default formats and can play a short test tone on a selected endpoint.
   It can also start and stop the separately built paired-audio lab process and
-  display its public test invitation and session status. That process uses the
-  default output; the probe does not own a product receiver session or change the
-  system default output.
+  display its public test invitation, session status, and periodic packet,
+  decode, and output-recovery observations. That process uses the default output;
+  the probe does not own a product receiver session or change the system default
+  output. The observations are not evidence of audible playback or latency.
 - a dependency-free `tools/latency-measurement` crate that generates a
   deterministic MLS reference WAVE (PCM 16/24/32 or IEEE float 32/64), reads
   and reports the declared properties of WAVE recordings (PCM 16/24/32, IEEE

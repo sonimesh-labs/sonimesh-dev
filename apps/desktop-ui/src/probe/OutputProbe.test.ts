@@ -55,6 +55,45 @@ describe('desktop output probe', () => {
     expect(wrapper.text()).toContain('Waiting for Android')
     wrapper.unmount()
   })
+
+  it('shows live observations and clears them when the session ends', async () => {
+    const metrics = { packets: '120', rejected: '3', decoded: '115', peak: '0.250', plc: '2', decodeErrors: '1', buffered: '4', output: 'recovering' }
+    const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [] })
+      .mockResolvedValueOnce({ running: true, status: 'Starting listener…', invitation: null, metrics: null })
+      .mockResolvedValueOnce({ running: true, status: 'Session active', invitation: '01ab', metrics })
+      .mockResolvedValueOnce({ running: true, status: 'Waiting for Android', invitation: '01ab', metrics: null })
+    window.__TAURI__ = { core: { invoke } }
+    const wrapper = mount(OutputProbe)
+    await flushPromises()
+    vi.useFakeTimers()
+    await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(wrapper.get('.lab-metrics').text()).toContain('Accepted packets120')
+    expect(wrapper.get('.lab-metrics').text()).toContain('Decoded peak0.250')
+    expect(wrapper.get('.lab-metrics').text()).toContain('OutputRecovering')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(wrapper.find('.lab-metrics').exists()).toBe(false)
+    expect(wrapper.text()).toContain('Waiting for Android')
+    wrapper.unmount()
+  })
+
+  it('retries a failed status request while the listener is running', async () => {
+    const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [] })
+      .mockResolvedValueOnce({ running: true, status: 'Starting listener…', invitation: null, metrics: null })
+      .mockRejectedValueOnce(new Error('temporary failure'))
+      .mockResolvedValueOnce({ running: true, status: 'Waiting for Android', invitation: '01ab', metrics: null })
+    window.__TAURI__ = { core: { invoke } }
+    const wrapper = mount(OutputProbe)
+    await flushPromises()
+    vi.useFakeTimers()
+    await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(wrapper.text()).toContain('Retrying')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(wrapper.text()).toContain('Waiting for Android')
+    expect(wrapper.text()).not.toContain('Retrying')
+    wrapper.unmount()
+  })
   it('loads real probe results and refreshes them on request', async () => {
     const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [
       { label: 'Speakers', sampleRateHz: 48_000, channels: 2, isDefault: true },

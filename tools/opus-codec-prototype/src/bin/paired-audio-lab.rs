@@ -713,7 +713,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                             consumer = if playing { None } else { Some(next_consumer) };
                             counters = Some(metrics);
                             coordinator.complete_start(token, request)?;
-                            next_status = options.status.then(|| Instant::now() + STATUS_PERIOD);
+                            next_status = options.status.then(Instant::now);
                             println!("RESULT receiver started");
                             ControlReply::stream_status(
                                 request.identity,

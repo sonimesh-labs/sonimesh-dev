@@ -10,6 +10,22 @@ pub struct LabSnapshot {
     pub running: bool,
     pub status: String,
     pub invitation: Option<String>,
+    pub metrics: Option<LabMetrics>,
+    #[serde(skip)]
+    session_active: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LabMetrics {
+    packets: String,
+    rejected: String,
+    decoded: String,
+    peak: String,
+    plc: String,
+    decode_errors: String,
+    buffered: String,
+    output: String,
 }
 
 impl Default for LabSnapshot {
@@ -18,6 +34,8 @@ impl Default for LabSnapshot {
             running: false,
             status: "Stopped".into(),
             invitation: None,
+            metrics: None,
+            session_active: false,
         }
     }
 }
@@ -72,6 +90,8 @@ impl Lab {
             running: true,
             status: "Starting listener…".into(),
             invitation: None,
+            metrics: None,
+            session_active: false,
         };
         Ok(self.snapshot.clone())
     }
@@ -87,6 +107,8 @@ impl Lab {
                 Ok(Some(_)) => {
                     self.snapshot.running = false;
                     self.snapshot.invitation = None;
+                    self.snapshot.metrics = None;
+                    self.snapshot.session_active = false;
                     self.snapshot.status = "Listener exited. Check the output device and whether port 47610 is in use.".into();
                     self.child = None;
                     self.events = None;
@@ -154,13 +176,67 @@ fn update_snapshot(snapshot: &mut LabSnapshot, line: &str) {
         }
     } else if line == "READY" {
         snapshot.status = "Waiting for Android".into();
+        snapshot.metrics = None;
+        snapshot.session_active = false;
     } else if line == "RESULT pairing verified" {
         snapshot.status = "Paired; negotiating session".into();
     } else if line == "RESULT receiver started" {
         snapshot.status = "Session active on the default output".into();
-    } else if line.starts_with("Session ended:") {
+        snapshot.metrics = None;
+        snapshot.session_active = true;
+    } else if snapshot.session_active
+        && let Some(metrics) = parse_metrics(line)
+    {
+        snapshot.metrics = Some(metrics);
+    } else if line.starts_with("Session ended:") && !snapshot.session_active {
         snapshot.status = "Session ended; waiting for Android".into();
     }
+}
+
+fn parse_metrics(line: &str) -> Option<LabMetrics> {
+    let parts: Vec<_> = line.split_whitespace().collect();
+    let [
+        "STATUS",
+        "packets",
+        packets,
+        "rejected",
+        rejected,
+        "decoded",
+        decoded,
+        "peak",
+        peak,
+        "plc",
+        plc,
+        "decode_errors",
+        decode_errors,
+        "buffered",
+        buffered,
+        "output",
+        output,
+    ] = parts.as_slice()
+    else {
+        return None;
+    };
+    for value in [packets, rejected, decoded, plc, decode_errors, buffered] {
+        value.parse::<u64>().ok()?;
+    }
+    let value: f32 = peak.parse().ok()?;
+    if !value.is_finite()
+        || value < 0.0
+        || !matches!(*output, "active" | "recovering" | "software-check")
+    {
+        return None;
+    }
+    Some(LabMetrics {
+        packets: (*packets).into(),
+        rejected: (*rejected).into(),
+        decoded: (*decoded).into(),
+        peak: (*peak).into(),
+        plc: (*plc).into(),
+        decode_errors: (*decode_errors).into(),
+        buffered: (*buffered).into(),
+        output: (*output).into(),
+    })
 }
 
 #[cfg(test)]
@@ -187,6 +263,27 @@ mod tests {
             assert!(lab.start(host).is_err());
         }
         assert!(!lab.refresh().running);
+    }
+
+    #[test]
+    fn metrics_follow_session_lifecycle_and_ignore_invalid_status() {
+        let mut snapshot = LabSnapshot::default();
+        let status = "STATUS packets 120 rejected 3 decoded 115 peak 0.250 plc 2 decode_errors 1 buffered 4 output recovering";
+        update_snapshot(&mut snapshot, status);
+        assert!(snapshot.metrics.is_none());
+        update_snapshot(&mut snapshot, "RESULT receiver started");
+        update_snapshot(&mut snapshot, status);
+        let metrics = snapshot.metrics.clone().unwrap();
+        assert_eq!(metrics.packets, "120");
+        assert_eq!(metrics.output, "recovering");
+        update_snapshot(&mut snapshot, "STATUS packets invalid");
+        assert_eq!(snapshot.metrics, Some(metrics));
+        update_snapshot(&mut snapshot, "READY");
+        assert!(snapshot.metrics.is_none());
+        update_snapshot(&mut snapshot, status);
+        assert!(snapshot.metrics.is_none());
+        assert!(parse_metrics(&status.replace("0.250", "NaN")).is_none());
+        assert!(parse_metrics(&status.replace("recovering", "unknown")).is_none());
     }
 
     #[test]
