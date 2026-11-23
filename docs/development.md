@@ -204,6 +204,12 @@ On a normal stop, `RESULT schedule` reports the number of live playout
 decisions, decisions at least one frame late, and the maximum lateness in
 microseconds. These measure the lab loop against its own deadlines, exclude
 the stop drain, and do not measure packet arrival time or physical playback.
+In one 2026-11-23 API 37 emulator software session, the notification-return
+capture test completed with 193 live decisions, one at least 20 ms late, and
+26,122 microseconds maximum lateness; the listener decoded 177 frames and
+reported 5 late packets and 8 resynchronization drops. This single uncontrolled
+run confirms the observation path, but does not correlate the late decision
+with the drops or identify their cause.
 On 2026-11-23, separate API 37 emulator sessions completed with the revised
 schedule: fixed mode decoded 199 frames with 8 resynchronization drops;
 adaptive mode decoded 160 frames with 16 drops. Both reported zero late packets.
