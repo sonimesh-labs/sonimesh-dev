@@ -130,7 +130,8 @@ reply can delay completion until the control command times out. The Android
 lab reports when capture has stopped locally but the desktop did not confirm
 the stop; in that case check or restart the listener before trying again.
 The lab activity also ignores repeated start requests while permission or screen
-capture consent is pending, or while its service is active or stopping. Once
+capture consent is pending, or while its service is active or stopping. It shows
+a brief message without replacing the current session status. Once
 the service finishes, starting again requests fresh screen-capture consent.
 The desktop defaults to a software PCM check. On Windows, add `--features playback`
 before `--` and pass `--play` after it to use the default output device; add

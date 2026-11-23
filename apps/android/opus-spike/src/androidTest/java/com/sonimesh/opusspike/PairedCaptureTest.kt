@@ -73,8 +73,8 @@ class PairedCaptureTest {
             scenario.onActivity { activity ->
                 find(activity.window.decorView) { it is Button && it.text.toString().equals("Start paired UDP capture", true) }.performClick()
                 assertTrue(
-                    "duplicate capture request was not rejected",
-                    containsStatus(activity.window.decorView, "Status: Capture is already starting, running, or stopping."),
+                    "duplicate capture request replaced the active capture status",
+                    containsStatus(activity.window.decorView, "Status: Capturing audio"),
                 )
             }
             if (expectDisconnect) {

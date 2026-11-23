@@ -18,6 +18,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
+import android.widget.Toast
 import com.sonimesh.sender.protocol.PairingQr
 import com.journeyapps.barcodescanner.ScanOptions
 import kotlin.math.PI
@@ -212,7 +213,7 @@ class LabActivity : Activity() {
 
     private fun startCapture(udp: Boolean, paired: Boolean = false) {
         if (!LabStatus.captureAdmission.canBegin()) {
-            LabStatus.publish("Capture is already starting, running, or stopping.")
+            showCaptureBusy()
             return
         }
         if (udp) {
@@ -248,7 +249,7 @@ class LabActivity : Activity() {
         pendingUsage = selectedUsage()
         val needsPermission = checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED
         if (!LabStatus.captureAdmission.begin(needsPermission)) {
-            LabStatus.publish("Capture is already starting, running, or stopping.")
+            showCaptureBusy()
             return
         }
         if (needsPermission) {
@@ -263,6 +264,10 @@ class LabActivity : Activity() {
 
     private fun selectedUsage(): LabCaptureUsage =
         LabCaptureUsage.entries.getOrElse(usage.selectedItemPosition) { LabCaptureUsage.All }
+
+    private fun showCaptureBusy() {
+        Toast.makeText(this, "Capture is already starting, running, or stopping.", Toast.LENGTH_SHORT).show()
+    }
 
     private fun applyInvitation(useAddressForUdp: Boolean = false) {
         var raw: ByteArray? = null
