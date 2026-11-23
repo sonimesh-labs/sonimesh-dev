@@ -78,6 +78,9 @@ cargo run -p opus-codec-prototype --bin paired-audio-lab -- --require-tone
 The listener prints `SPKI_HEX` and a complete lab-only `INVITATION_HEX`. In the
 Android lab activity, paste `INVITATION_HEX` into **Lab invitation payload** and
 tap **Apply invitation payload** to fill the SPKI and paired control address.
+The desktop output probe also provides **Copy invitation** beside the displayed
+payload so the operator can paste it directly into the Android lab; if the
+clipboard is unavailable, the read-only payload can still be selected manually.
 For a LAN where both routes use the same address, **Apply invitation and use
 address for UDP** also fills the UDP destination. A loopback invitation leaves
 the UDP destination unchanged for ADB reverse; enter the emulator host alias

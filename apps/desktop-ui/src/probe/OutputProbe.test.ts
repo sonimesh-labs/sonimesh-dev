@@ -3,7 +3,13 @@ import { flushPromises, mount } from '@vue/test-utils'
 import type { DesktopBridgeInvoke } from '../bridge'
 import OutputProbe from './OutputProbe.vue'
 
-afterEach(() => { vi.useRealTimers(); delete window.__TAURI__ })
+const originalClipboard = navigator.clipboard
+
+afterEach(() => {
+  vi.useRealTimers()
+  delete window.__TAURI__
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: originalClipboard })
+})
 
 function mountStoppedProbe() {
   const core = window.__TAURI__!.core
@@ -459,6 +465,42 @@ describe('desktop output probe', () => {
     expect((wrapper.get('#lab-invitation').element as HTMLTextAreaElement).value).toBe('01ab')
     expect(wrapper.get('.lab-invitation-qr').attributes('src')).toMatch(/^data:image\/svg\+xml,/)
     expect(wrapper.text()).toContain('Waiting for Android')
+    wrapper.unmount()
+  })
+
+  it('copies the displayed invitation for Android setup', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [] })
+      .mockResolvedValueOnce({ running: true, status: 'Starting listener…', invitation: null })
+      .mockResolvedValueOnce({ running: true, status: 'Waiting for Android', invitation: '01ab' })
+    window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+    const wrapper = mountStoppedProbe()
+    await flushPromises()
+    vi.useFakeTimers()
+    await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
+    await vi.advanceTimersByTimeAsync(1000)
+    await wrapper.findAll('button').find(button => button.text() === 'Copy invitation')!.trigger('click')
+    await flushPromises()
+    expect(writeText).toHaveBeenCalledWith('01ab')
+    expect(wrapper.text()).toContain('Invitation copied.')
+    wrapper.unmount()
+  })
+
+  it('explains when invitation copying is unavailable', async () => {
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined })
+    const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [] })
+      .mockResolvedValueOnce({ running: true, status: 'Starting listener…', invitation: null })
+      .mockResolvedValueOnce({ running: true, status: 'Waiting for Android', invitation: '01ab' })
+    window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+    const wrapper = mountStoppedProbe()
+    await flushPromises()
+    vi.useFakeTimers()
+    await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
+    await vi.advanceTimersByTimeAsync(1000)
+    await wrapper.findAll('button').find(button => button.text() === 'Copy invitation')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Could not copy the invitation')
     wrapper.unmount()
   })
 

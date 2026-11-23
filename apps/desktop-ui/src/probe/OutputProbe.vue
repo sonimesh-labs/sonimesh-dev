@@ -34,11 +34,13 @@ interface LabSnapshot { running: boolean; sessionActive: boolean; status: string
 const lab = ref<LabSnapshot>({ running: false, sessionActive: false, status: 'Checking listener…', invitation: null, metrics: null, volume: null, muted: null })
 const invitationQr = ref<string | null>(null)
 const invitationQrError = ref(false)
+const invitationCopyMessage = ref<string | null>(null)
 watch(() => lab.value.invitation, async (invitation, _previous, onCleanup) => {
   let cancelled = false
   onCleanup(() => { cancelled = true })
   invitationQr.value = null
   invitationQrError.value = false
+  invitationCopyMessage.value = null
   if (!invitation) return
   try {
     const svg = await QRCode.toString(invitation.toUpperCase(), { type: 'svg', errorCorrectionLevel: 'M', margin: 4 })
@@ -47,6 +49,18 @@ watch(() => lab.value.invitation, async (invitation, _previous, onCleanup) => {
     if (!cancelled) invitationQrError.value = true
   }
 })
+
+async function copyInvitation() {
+  const invitation = lab.value.invitation
+  if (!invitation) return
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable')
+    await navigator.clipboard.writeText(invitation)
+    invitationCopyMessage.value = 'Invitation copied.'
+  } catch {
+    invitationCopyMessage.value = 'Could not copy the invitation. Select the payload below instead.'
+  }
+}
 const labHost = ref('127.0.0.1')
 const androidHost = ref('')
 const suggestedHost = ref<string | null>(null)
@@ -359,6 +373,8 @@ onBeforeUnmount(() => { disposed = true; labRequest++; clearTimeout(timer); clea
         <p v-if="invitationQrError" class="command-error" role="alert">Could not display the QR code. Copy the invitation below instead.</p>
         <label for="lab-invitation">Lab invitation payload</label>
         <textarea id="lab-invitation" :value="lab.invitation" readonly rows="4" @focus="($event.target as HTMLTextAreaElement).select()" />
+        <button type="button" class="preview-action" @click="copyInvitation">Copy invitation</button>
+        <p v-if="invitationCopyMessage" role="status">{{ invitationCopyMessage }}</p>
         <p class="preview-note">Scan with the Android audio lab or copy this payload. Check its UDP address before capture.</p>
       </template>
     </section>
