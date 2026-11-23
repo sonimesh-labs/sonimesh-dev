@@ -42,6 +42,11 @@ class AllUsagesCaptureTest {
                     "capture notification did not expose duration",
                     notification?.extras?.getString(Notification.EXTRA_SUB_TEXT)?.startsWith("Capture duration: ") == true,
                 )
+                assertTrue("capture notification missing return action", notification?.contentIntent != null)
+                notification?.contentIntent?.send()
+                assertTrue("notification did not return to capture activity", waitUntil(8_000) {
+                    automation.rootInActiveWindow?.packageName?.toString() == instrumentation.targetContext.packageName
+                })
             }
             ActivityScenario.launch(MainActivity::class.java).use {
                 val selected = waitUntil(8_000) {
