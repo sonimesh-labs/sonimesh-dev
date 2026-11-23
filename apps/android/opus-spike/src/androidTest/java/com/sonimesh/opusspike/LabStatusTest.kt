@@ -176,6 +176,14 @@ class LabStatusTest {
     }
 
     @Test
+    fun transportFlagsPreferPairedUdpAndDistinguishTheThreeCapturePaths() {
+        assertEquals(LabTransport.Adb, LabTransport.fromFlags(udpMode = false, pairedMode = false))
+        assertEquals(LabTransport.Udp, LabTransport.fromFlags(udpMode = true, pairedMode = false))
+        assertEquals(LabTransport.PairedUdp, LabTransport.fromFlags(udpMode = true, pairedMode = true))
+        assertEquals(LabTransport.PairedUdp, LabTransport.fromFlags(udpMode = false, pairedMode = true))
+    }
+
+    @Test
     fun labEvidenceShareIntentUsesPlainText() {
         val evidence = "SoniMesh paired audio lab\nStatus: Ready"
         val intent = buildLabEvidenceShareIntent(evidence)
