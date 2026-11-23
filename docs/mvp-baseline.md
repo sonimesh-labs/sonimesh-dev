@@ -141,6 +141,10 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   counts, decoded peak, and output recovery state for controlled-lab diagnosis.
   Its fixed startup wait is configurable from 20 to 120 ms for network experiments;
   it does not implement adaptive jitter control or measure end-to-end latency.
+  During live playout the paired lab conceals short gaps even when no later
+  packet is buffered, then resets an empty stream after three consecutive PLC
+  frames to permit fresh audio after an extended interruption. A real UDP and
+  native Opus test covers the software path; physical listening remains open.
   A seeded property walk and a byte-driven libFuzzer target drive in-order
   deliveries, duplicates, tampered ciphertext, retired-epoch packets, and
   rotations against an independent replay oracle and counter model,

@@ -329,6 +329,7 @@ const PLAYOUT_PERIOD: Duration = Duration::from_millis(20);
 const STATUS_PERIOD: Duration = Duration::from_secs(5);
 const STOP_DRAIN_QUIET: Duration = Duration::from_millis(160);
 const STOP_DRAIN_LIMIT: Duration = Duration::from_millis(500);
+const MAX_CONSECUTIVE_PLC: u8 = 3;
 type Receiver = UdpReceiverPipeline<ObservedDecoder, 8, 1_148, SAMPLES>;
 
 fn status_if_due(
@@ -392,6 +393,26 @@ fn decode_playout(receiver: &mut Receiver) -> LabResult<Option<DecodeStep>> {
         }
         Err(error) => Err(error.into()),
     }
+}
+
+fn decode_live_playout(
+    receiver: &mut Receiver,
+    metrics: &StreamCounters,
+    consecutive_plc: &mut u8,
+) -> LabResult<Option<DecodeStep>> {
+    if *consecutive_plc >= MAX_CONSECUTIVE_PLC && metrics.snapshot().jitter_frames == 0 {
+        receiver.hard_resynchronize();
+        *consecutive_plc = 0;
+        return Ok(None);
+    }
+    let step = decode_playout(receiver)?;
+    match step {
+        Some(DecodeStep::Concealed { .. }) => {
+            *consecutive_plc = consecutive_plc.saturating_add(1);
+        }
+        _ => *consecutive_plc = 0,
+    }
+    Ok(step)
 }
 
 fn drain_stop_tail(
@@ -610,6 +631,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
     let mut consumer = None;
     let mut counters = None;
     let mut next_playout = None;
+    let mut consecutive_plc = 0;
     let mut next_status = None;
     let mut retry_at = None;
     let mut decoded = 0_u64;
@@ -769,6 +791,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
         if let (Some(pipeline), Some(metrics)) = (&mut receiver, &counters) {
             if playback.monitor(pipeline, &mut retry_at) {
                 next_playout = None;
+                consecutive_plc = 0;
             }
             for _ in 0..32 {
                 match poll_media(pipeline)? {
@@ -783,14 +806,12 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
             }
             let now = Instant::now();
             if let Some(due) = next_playout.filter(|due| now >= *due) {
-                if metrics.snapshot().jitter_frames > 0 {
-                    match decode_playout(pipeline)? {
-                        Some(DecodeStep::Decoded { .. }) => decoded += 1,
-                        Some(_) => {}
-                        None => {
-                            next_playout = None;
-                            continue;
-                        }
+                match decode_live_playout(pipeline, metrics, &mut consecutive_plc)? {
+                    Some(DecodeStep::Decoded { .. }) => decoded += 1,
+                    Some(_) => {}
+                    None => {
+                        next_playout = None;
+                        continue;
                     }
                 }
                 if let Some(pcm) = &mut consumer {
@@ -1253,6 +1274,103 @@ mod tests {
         let mut samples = [0.0; SAMPLES];
         consumer.pop_into(&mut samples);
         assert!(samples.iter().any(|sample| sample.abs() > 0.001));
+    }
+
+    #[test]
+    fn live_playout_conceals_loss_and_restarts_after_outage() {
+        use sonimesh_protocol::{MediaKeyContext, MediaSealer};
+        use std::net::UdpSocket;
+
+        let secret = SessionSecret::new([0x36; 32]);
+        let context = MediaKeyContext::new(7, 1, 0, MediaDirection::AndroidToDesktop).unwrap();
+        let metrics = Arc::new(StreamCounters::default());
+        let (producer, mut consumer) = realtime_pcm_queue::<SAMPLES>(8).unwrap();
+        let worker = StreamDecodeWorker::new_for_opus(
+            ObservedDecoder {
+                decoder: lab_decoder::Decoder::new().unwrap(),
+                peak: Arc::new(AtomicU32::new(0)),
+            },
+            producer,
+            0,
+            OpusFrameConfig::new(48_000, 2, 20).unwrap(),
+        )
+        .unwrap();
+        let mut receiver = Receiver::bind_with_worker(
+            "127.0.0.1:0".parse().unwrap(),
+            &secret,
+            context,
+            worker,
+            Arc::clone(&metrics),
+        )
+        .unwrap();
+        let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let mut encoder =
+            opus::Encoder::new(48_000, opus::Channels::Stereo, opus::Application::Audio).unwrap();
+        let mut payload = [0_u8; 1_148];
+        let length = encoder
+            .encode_float(&[0.25; SAMPLES], &mut payload)
+            .unwrap();
+        let mut sealer = MediaSealer::new(&secret, context).unwrap();
+        let address = receiver.local_addr().unwrap();
+        let send = |packet: &[u8]| {
+            sender.send_to(packet, address).unwrap();
+        };
+        let first = sealer.seal(0, 0, &payload[..length]).unwrap();
+        send(&first.datagram);
+        poll_media(&mut receiver).unwrap();
+        let mut consecutive_plc = 0;
+        assert!(matches!(
+            decode_live_playout(&mut receiver, &metrics, &mut consecutive_plc).unwrap(),
+            Some(DecodeStep::Decoded { sequence: 0, .. })
+        ));
+        let _lost = sealer.seal(0, 960, &payload[..length]).unwrap();
+        assert!(matches!(
+            decode_live_playout(&mut receiver, &metrics, &mut consecutive_plc).unwrap(),
+            Some(DecodeStep::Concealed { sequence: 1, .. })
+        ));
+        let next = sealer.seal(0, 1920, &payload[..length]).unwrap();
+        send(&next.datagram);
+        poll_media(&mut receiver).unwrap();
+        assert!(matches!(
+            decode_live_playout(&mut receiver, &metrics, &mut consecutive_plc).unwrap(),
+            Some(DecodeStep::Decoded { sequence: 2, .. })
+        ));
+        for sequence in 3..6 {
+            assert!(
+                matches!(decode_live_playout(&mut receiver, &metrics, &mut consecutive_plc).unwrap(), Some(DecodeStep::Concealed { sequence: actual, .. }) if actual == sequence)
+            );
+        }
+        assert!(
+            decode_live_playout(&mut receiver, &metrics, &mut consecutive_plc)
+                .unwrap()
+                .is_none()
+        );
+        let resumed = sealer.seal(0, 2880, &payload[..length]).unwrap();
+        send(&resumed.datagram);
+        poll_media(&mut receiver).unwrap();
+        assert!(matches!(
+            decode_live_playout(&mut receiver, &metrics, &mut consecutive_plc).unwrap(),
+            Some(DecodeStep::Decoded { sequence: 3, .. })
+        ));
+        let mut samples = [0.0; SAMPLES];
+        consumer.pop_into(&mut samples);
+        assert!(samples.iter().any(|sample| sample.abs() > 0.001));
+        for index in 4..8 {
+            let _ = sealer.seal(0, index * 960, &payload[..length]).unwrap();
+        }
+        let later = sealer.seal(0, 8 * 960, &payload[..length]).unwrap();
+        send(&later.datagram);
+        poll_media(&mut receiver).unwrap();
+        for sequence in 4..8 {
+            assert!(
+                matches!(decode_live_playout(&mut receiver, &metrics, &mut consecutive_plc).unwrap(), Some(DecodeStep::Concealed { sequence: actual, .. }) if actual == sequence)
+            );
+        }
+        assert!(matches!(
+            decode_live_playout(&mut receiver, &metrics, &mut consecutive_plc).unwrap(),
+            Some(DecodeStep::Decoded { sequence: 8, .. })
+        ));
+        assert_eq!(metrics.snapshot().plc_frames, 8);
     }
 
     #[test]

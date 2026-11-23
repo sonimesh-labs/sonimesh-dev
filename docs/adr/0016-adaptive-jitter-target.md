@@ -48,7 +48,13 @@ already handed to an output callback or device cannot be withdrawn. Stopped, unm
 output-unavailable streams reset their cadence. This is software scheduling
 behavior, not a latency or physical playback measurement.
 
-The separate paired audio lab uses a bounded best-effort stop drain: it polls
+The separate paired audio lab schedules Opus PLC at each live playout deadline,
+including when its jitter buffer is empty. After three consecutive concealed
+frames, it resets an empty stream on the next deadline and waits for a fresh
+packet; buffered later frames are still reached through PLC. This lab policy is
+not an adaptive jitter target or a measured quality guarantee.
+
+The paired audio lab uses a bounded best-effort stop drain: it polls
 UDP for trailing packets, continues paced decode, and gives queued PCM time to
 reach the output before stopping. A quiet interval ends the drain, and an
 absolute deadline limits it even under continuous traffic. UDP has no end marker;

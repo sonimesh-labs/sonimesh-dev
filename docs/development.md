@@ -80,7 +80,11 @@ adb shell am instrument -w -e pairingInvitationHex $invitationHex -e mediaHost 1
 The test synthesizes and encodes a tone; the desktop acknowledges start only
 after binding its UDP receiver with the pairing-derived root and acknowledges
 stop after retiring it. Successful runs report the decoded frame count and
-software PCM peak. On stop, the paired lab briefly polls for trailing UDP and
+software PCM peak. During live playout, the paired lab uses Opus packet-loss
+concealment for missing frames, including when the jitter buffer is empty. After
+three consecutive concealed frames and an empty buffer it waits for fresh media
+to re-establish playout. This is a fixed lab policy, not adaptive jitter control.
+On stop, the paired lab briefly polls for trailing UDP and
 plays out buffered frames before closing the receiver, with a fixed upper time
 limit. UDP does not identify the final packet, so this is best effort and does
 not guarantee that every frame or hardware output buffer has played. On
