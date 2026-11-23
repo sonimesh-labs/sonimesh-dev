@@ -141,7 +141,9 @@ class LabCaptureService : Service() {
         val sentPackets = AtomicLong(0)
         val lastSentPublication = AtomicLong(0)
         val packetSent: () -> Unit = {
-            val count = sentPackets.incrementAndGet()
+            val count = sentPackets.updateAndGet { value ->
+                if (value == Long.MAX_VALUE) value else value + 1
+            }
             val now = SystemClock.elapsedRealtime()
             val previous = lastSentPublication.get()
             if (now - previous >= 1_000 && lastSentPublication.compareAndSet(previous, now)) {

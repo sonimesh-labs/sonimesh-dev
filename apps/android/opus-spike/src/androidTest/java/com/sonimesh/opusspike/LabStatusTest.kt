@@ -96,6 +96,17 @@ class LabStatusTest {
     }
 
     @Test
+    fun sentPacketStatusAllowsSaturatedLongValue() {
+        ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                LabStatus.publishSentPackets(Long.MAX_VALUE)
+                assertTrue(hasStatus(activity.window.decorView, "Media packets sent: ${Long.MAX_VALUE}"))
+                LabStatus.publishSentPackets(null)
+            }
+        }
+    }
+
+    @Test
     fun failedServiceStartSurvivesActivityRecreation() {
         ActivityScenario.launch(LabActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
