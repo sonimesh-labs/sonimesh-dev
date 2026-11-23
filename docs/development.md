@@ -78,9 +78,10 @@ cargo run -p opus-codec-prototype --bin paired-audio-lab -- --require-tone
 The listener prints `SPKI_HEX` and a complete lab-only `INVITATION_HEX`. In the
 Android lab activity, paste `INVITATION_HEX` into **Lab invitation payload** and
 tap **Apply invitation payload** to fill the SPKI and paired control address.
-The desktop output probe also provides **Copy invitation** beside the displayed
-payload so the operator can paste it directly into the Android lab; if the
-clipboard is unavailable, the read-only payload can still be selected manually.
+The desktop output probe provides **Copy invitation** and **Share invitation**
+beside the displayed payload. Sharing uses the system share API when available
+and otherwise falls back to copying; if both are unavailable, the read-only
+payload can still be selected manually.
 The Android lab's **Paste lab invitation** button reads the current clipboard,
 rejects empty or oversized text, and fills the invitation field for review before
 the operator applies it.

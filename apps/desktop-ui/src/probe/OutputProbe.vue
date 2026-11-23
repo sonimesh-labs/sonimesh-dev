@@ -62,6 +62,24 @@ async function copyInvitation() {
   }
 }
 
+async function shareInvitation() {
+  const invitation = lab.value.invitation
+  if (!invitation) return
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: 'SoniMesh lab invitation', text: invitation })
+      invitationCopyMessage.value = 'Invitation shared.'
+      return
+    }
+    if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable')
+    await navigator.clipboard.writeText(invitation)
+    invitationCopyMessage.value = 'System sharing is unavailable; invitation copied instead.'
+  } catch (cause) {
+    if (cause instanceof DOMException && cause.name === 'AbortError') return
+    invitationCopyMessage.value = 'Could not share the invitation. Select the payload below instead.'
+  }
+}
+
 function evidenceValue(value: unknown): string {
   const text = value == null ? '-' : String(value)
   return text.length <= 80 ? text : `${text.slice(0, 77)}...`
@@ -419,6 +437,7 @@ onBeforeUnmount(() => { disposed = true; labRequest++; clearTimeout(timer); clea
         <label for="lab-invitation">Lab invitation payload</label>
         <textarea id="lab-invitation" :value="lab.invitation" readonly rows="4" @focus="($event.target as HTMLTextAreaElement).select()" />
         <button type="button" class="preview-action" @click="copyInvitation">Copy invitation</button>
+        <button type="button" class="preview-action" @click="shareInvitation">Share invitation</button>
         <p v-if="invitationCopyMessage" role="status">{{ invitationCopyMessage }}</p>
         <p class="preview-note">Scan with the Android audio lab or copy this payload. Check its UDP address before capture.</p>
       </template>

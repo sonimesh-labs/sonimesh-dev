@@ -4,11 +4,13 @@ import type { DesktopBridgeInvoke } from '../bridge'
 import OutputProbe from './OutputProbe.vue'
 
 const originalClipboard = navigator.clipboard
+const originalShare = navigator.share
 
 afterEach(() => {
   vi.useRealTimers()
   delete window.__TAURI__
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: originalClipboard })
+  Object.defineProperty(navigator, 'share', { configurable: true, value: originalShare })
 })
 
 function mountStoppedProbe() {
@@ -484,6 +486,25 @@ describe('desktop output probe', () => {
     await flushPromises()
     expect(writeText).toHaveBeenCalledWith('01ab')
     expect(wrapper.text()).toContain('Invitation copied.')
+    wrapper.unmount()
+  })
+
+  it('shares the displayed invitation through the system share API', async () => {
+    const share = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'share', { configurable: true, value: share })
+    const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [] })
+      .mockResolvedValueOnce({ running: true, status: 'Starting listener…', invitation: null })
+      .mockResolvedValueOnce({ running: true, status: 'Waiting for Android', invitation: '01ab' })
+    window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+    const wrapper = mountStoppedProbe()
+    await flushPromises()
+    vi.useFakeTimers()
+    await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
+    await vi.advanceTimersByTimeAsync(1000)
+    await wrapper.findAll('button').find(button => button.text() === 'Share invitation')!.trigger('click')
+    await flushPromises()
+    expect(share).toHaveBeenCalledWith({ title: 'SoniMesh lab invitation', text: '01ab' })
+    expect(wrapper.text()).toContain('Invitation shared.')
     wrapper.unmount()
   })
 
