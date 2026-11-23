@@ -231,6 +231,9 @@ On Android 13 and newer the lab requests notification permission before screen
 capture consent, so the capture notification and its stop action can appear in
 the notification drawer. If permission is denied, enable it in app settings
 and retry; capture does not start. The notification opens the lab activity.
+Its body identifies the selected transport, and its subtext updates once per
+second with the elapsed capture duration while the service is running; the
+duration remains visible after leaving the activity until the service stops.
 On 2026-11-23, an API 37 emulator rejected notification permission, retried and
 granted it, then reached screen-capture consent. A separate paired capture
 granted permission during startup, returned through the notification, and decoded 182 frames in
