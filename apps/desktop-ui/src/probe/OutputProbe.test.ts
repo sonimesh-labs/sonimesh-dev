@@ -123,13 +123,13 @@ describe('desktop output probe', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('Session active')
     expect(wrapper.text()).toContain('running listener may use different settings')
-    expect(invoke).not.toHaveBeenCalledWith('probe_outputs')
+    expect(invoke).not.toHaveBeenCalledWith('probe_outputs', expect.anything())
     await vi.advanceTimersByTimeAsync(1000)
     expect(wrapper.text()).toContain('Waiting for Android')
     await wrapper.findAll('button').find(button => button.text() === 'Stop listener')!.trigger('click')
     await flushPromises()
     expect(invoke).toHaveBeenCalledWith('stop_lab')
-    expect(invoke).toHaveBeenCalledWith('probe_outputs')
+    expect(invoke).toHaveBeenCalledWith('probe_outputs', { generation: 0, selectedIndex: null })
     wrapper.unmount()
   })
 
@@ -161,7 +161,7 @@ describe('desktop output probe', () => {
     await vi.advanceTimersByTimeAsync(1000)
     expect(wrapper.text()).toContain('Listener exited')
     expect(wrapper.text()).not.toContain('running listener may use different settings')
-    expect(invoke).toHaveBeenCalledWith('probe_outputs')
+    expect(invoke).toHaveBeenCalledWith('probe_outputs', { generation: 0, selectedIndex: null })
     wrapper.unmount()
   })
 
@@ -341,7 +341,7 @@ describe('desktop output probe', () => {
     expect(wrapper.findAll('button').find(button => button.text() === 'Mute')!.attributes('disabled')).toBeUndefined()
     wrapper.unmount()
   })
-  it('uses the selected device snapshot for the listener and resets it on refresh', async () => {
+  it('requires a new selection if the selected device disappears on refresh', async () => {
     const invoke = vi.fn().mockResolvedValueOnce({ generation: 4, devices: [
       { label: 'Speakers', sampleRateHz: 48_000, channels: 2, isDefault: true },
       { label: 'Headphones', sampleRateHz: 48_000, channels: 2, isDefault: false },
@@ -364,7 +364,47 @@ describe('desktop output probe', () => {
     await flushPromises()
     await wrapper.get('button').trigger('click')
     await flushPromises()
-    expect((wrapper.get('#lab-output').element as HTMLSelectElement).value).toBe('')
+    expect((wrapper.get('#lab-output').element as HTMLSelectElement).value).toBe('unavailable')
+    expect(invoke).toHaveBeenCalledWith('probe_outputs', { generation: 4, selectedIndex: 1 })
+    expect(wrapper.findAll('button').find(button => button.text() === 'Start listener')!.attributes('disabled')).toBeDefined()
+    await wrapper.get('#lab-output').setValue('')
+    expect(wrapper.findAll('button').find(button => button.text() === 'Start listener')!.attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+  it('preserves a selected endpoint when its index changes on refresh', async () => {
+    const speakers = { label: 'Speakers', sampleRateHz: 48_000, channels: 2, isDefault: true }
+    const headphones = { label: 'Headphones', sampleRateHz: 48_000, channels: 2, isDefault: false }
+    const invoke = vi.fn().mockResolvedValueOnce({ generation: 4, devices: [speakers, headphones], selectedIndex: null })
+      .mockResolvedValueOnce({ generation: 5, devices: [headphones, speakers], selectedIndex: 0 })
+      .mockResolvedValueOnce({ running: true, status: 'Starting listener…', invitation: null, metrics: null })
+    window.__TAURI__ = { core: { invoke } }
+    const wrapper = mountStoppedProbe()
+    await flushPromises()
+    await wrapper.get('#lab-output').setValue('1')
+    await wrapper.findAll('button').find(button => button.text() === 'Refresh devices')!.trigger('click')
+    await flushPromises()
+    expect(invoke).toHaveBeenCalledWith('probe_outputs', { generation: 4, selectedIndex: 1 })
+    expect((wrapper.get('#lab-output').element as HTMLSelectElement).value).toBe('0')
+    await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
+    expect(invoke).toHaveBeenCalledWith('start_lab', { host: '127.0.0.1', generation: 5, index: 0, startupBufferMs: 60, adaptive: false })
+    wrapper.unmount()
+  })
+  it.each(['format unavailable', 'refresh failed'])('requires reselection when %s', async (failure) => {
+    const device = { label: 'Headphones', sampleRateHz: 48_000, channels: 2, isDefault: false }
+    const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [device], selectedIndex: null })
+    if (failure === 'refresh failed') invoke.mockRejectedValueOnce(new Error('unavailable'))
+    else invoke.mockResolvedValueOnce({ generation: 2, devices: [{ ...device, sampleRateHz: null, channels: null }], selectedIndex: 0 })
+    window.__TAURI__ = { core: { invoke } }
+    const wrapper = mountStoppedProbe()
+    await flushPromises()
+    await wrapper.get('#lab-output').setValue('0')
+    await wrapper.findAll('button').find(button => button.text() === 'Refresh devices')!.trigger('click')
+    await flushPromises()
+    expect((wrapper.get('#lab-output').element as HTMLSelectElement).value).toBe('unavailable')
+    const start = wrapper.findAll('button').find(button => button.text() === 'Start listener')!
+    expect(start.attributes('disabled')).toBeDefined()
+    await start.trigger('click')
+    expect(invoke).not.toHaveBeenCalledWith('start_lab', expect.anything())
     wrapper.unmount()
   })
   it('starts and stops the lab listener with the specified control address', async () => {
@@ -566,7 +606,7 @@ describe('desktop output probe', () => {
     window.__TAURI__ = { core: { invoke } }
     const wrapper = mountStoppedProbe()
     await flushPromises()
-    expect(invoke).toHaveBeenCalledWith('probe_outputs')
+    expect(invoke).toHaveBeenCalledWith('probe_outputs', { generation: 0, selectedIndex: null })
     expect(wrapper.text()).toContain('Speakers (default)')
     expect(wrapper.text()).toContain('48,000 Hz · 2 channels')
     await wrapper.get('button').trigger('click')

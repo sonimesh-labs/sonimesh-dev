@@ -132,7 +132,7 @@ async function pollLab(retryUnknown = false) {
 }
 
 async function toggleLab() {
-  if (labBusy.value || !window.__TAURI__ || (!lab.value.running && (playing.value !== null || busy.value))) return
+  if (labBusy.value || !window.__TAURI__ || (!lab.value.running && (playing.value !== null || busy.value || labOutput.value === 'unavailable'))) return
   labBusy.value = true
   labError.value = null
   clearControl()
@@ -199,18 +199,23 @@ const playbackErrors = new Set([
 async function refresh() {
   if (busy.value || lab.value.running || labBusy.value) return
   busy.value = true
-  labOutput.value = ''
   error.value = null
   message.value = null
   try {
     if (!window.__TAURI__) throw new Error('Desktop probe unavailable')
-    const snapshot = await window.__TAURI__.core.invoke<{ generation: number; devices: OutputDevice[] }>('probe_outputs')
+    const selectedIndex = labOutput.value !== '' && labOutput.value !== 'unavailable' ? Number(labOutput.value) : null
+    const snapshot = await window.__TAURI__.core.invoke<{ generation: number; devices: OutputDevice[]; selectedIndex?: number | null }>('probe_outputs', { generation: generation.value, selectedIndex })
     generation.value = snapshot.generation
     devices.value = snapshot.devices
+    if (selectedIndex !== null) {
+      const restored = snapshot.selectedIndex
+      labOutput.value = restored != null && snapshot.devices[restored]?.sampleRateHz != null ? String(restored) : 'unavailable'
+    }
     loaded.value = true
   } catch {
     devices.value = []
     loaded.value = false
+    if (labOutput.value !== '') labOutput.value = 'unavailable'
     error.value = 'Could not inspect output devices. Try refreshing.'
   } finally {
     busy.value = false
@@ -276,8 +281,10 @@ onBeforeUnmount(() => { disposed = true; labRequest++; clearTimeout(timer); clea
       <label for="lab-output">Playback output</label>
       <select id="lab-output" v-model="labOutput" :disabled="lab.running || labBusy || busy">
         <option value="">System default output</option>
+        <option v-if="labOutput === 'unavailable'" value="unavailable" disabled>Previously selected output unavailable</option>
         <option v-for="(device, index) in devices" :key="index" :value="String(index)" :disabled="device.sampleRateHz === null">{{ device.label }}{{ device.isDefault ? ' (default)' : '' }}</option>
       </select>
+      <p v-if="labOutput === 'unavailable'" role="status">Select an available output before starting the listener.</p>
       <label for="lab-host">Desktop address for Android control</label>
       <input id="lab-host" v-model="labHost" :disabled="lab.running || labBusy" autocomplete="off" />
       <p class="preview-note">For ADB reverse use 127.0.0.1 here; enter the UDP address separately in Android (typically 10.0.2.2 for an emulator).</p>
@@ -298,7 +305,7 @@ onBeforeUnmount(() => { disposed = true; labRequest++; clearTimeout(timer); clea
         <option :value="true">Adaptive (experimental)</option>
       </select>
       <p class="preview-note">Adaptive mode may pause audio while buffering; restart the listener to change modes.</p>
-      <button type="button" class="preview-action" :disabled="labBusy || suggestBusy || (!lab.running && (playing !== null || busy))" @click="toggleLab">{{ lab.running ? 'Stop listener' : 'Start listener' }}</button>
+      <button type="button" class="preview-action" :disabled="labBusy || suggestBusy || (!lab.running && (playing !== null || busy || labOutput === 'unavailable'))" @click="toggleLab">{{ lab.running ? 'Stop listener' : 'Start listener' }}</button>
       <p v-if="playing !== null" class="preview-note">Wait for the test sound to finish before starting the listener.</p>
       <p v-else-if="lab.running" class="preview-note">Stop the listener before testing an output.</p>
       <p role="status">{{ lab.status }}</p>

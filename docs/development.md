@@ -622,8 +622,9 @@ This checks emulator loopback rather than continuous physical playback or WLAN.
 The control address defaults to `127.0.0.1` for ADB reverse; for a controlled LAN use an address Android can
 reach. The listener binds TCP 47610 on all IPv4 interfaces and uses UDP 39093;
 it plays through the selected output, or the default output when no device is
-selected. Refreshing the device list resets the selection; an unavailable chosen
-device prevents the listener from starting. Set the startup buffer before
+selected. Refreshing the device list retains an explicitly selected output when
+the same endpoint remains available. If it disappears or its format is unavailable,
+choose another output or the system default before starting the listener. Set the startup buffer before
 starting the listener (20–120 ms in 20 ms steps, default 60 ms); it controls the
 initial playout wait, not adaptive jitter or measured end-to-end latency.
 The optional **Adaptive (experimental)** playout mode uses the Balanced target

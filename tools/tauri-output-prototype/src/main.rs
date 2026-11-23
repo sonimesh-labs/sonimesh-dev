@@ -212,6 +212,34 @@ impl SelectionSnapshot {
             .cloned()
             .ok_or("Device is no longer available.")
     }
+
+    fn matching_index(
+        &self,
+        generation: u32,
+        index: Option<usize>,
+        ids: &[sonimesh_platform::OutputDeviceId],
+    ) -> Option<usize> {
+        let id = self.select(generation, index?).ok()?;
+        if self
+            .ids
+            .iter()
+            .filter(|candidate| **candidate == id)
+            .count()
+            != 1
+        {
+            return None;
+        }
+        let mut matches = ids
+            .iter()
+            .enumerate()
+            .filter(|(_, candidate)| **candidate == id);
+        let (position, _) = matches.next()?;
+        if matches.next().is_some() {
+            None
+        } else {
+            Some(position)
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -219,6 +247,7 @@ impl SelectionSnapshot {
 struct OutputSnapshot {
     generation: u32,
     devices: Vec<OutputDevice>,
+    selected_index: Option<usize>,
 }
 
 #[derive(Serialize)]
@@ -231,7 +260,11 @@ struct OutputDevice {
 }
 
 #[tauri::command]
-fn probe_outputs(state: tauri::State<'_, ProbeState>) -> Result<OutputSnapshot, &'static str> {
+fn probe_outputs(
+    state: tauri::State<'_, ProbeState>,
+    generation: u32,
+    selected_index: Option<usize>,
+) -> Result<OutputSnapshot, &'static str> {
     #[cfg(windows)]
     {
         use sonimesh_platform::AudioOutput;
@@ -240,7 +273,7 @@ fn probe_outputs(state: tauri::State<'_, ProbeState>) -> Result<OutputSnapshot, 
         let devices = output
             .devices()
             .map_err(|_| "Could not inspect output devices.")?;
-        let ids = devices.iter().map(|device| device.id.clone()).collect();
+        let ids: Vec<_> = devices.iter().map(|device| device.id.clone()).collect();
         let devices = map_devices(devices, |id| {
             output
                 .device_probe(id)
@@ -251,6 +284,7 @@ fn probe_outputs(state: tauri::State<'_, ProbeState>) -> Result<OutputSnapshot, 
             .snapshot
             .lock()
             .map_err(|_| "Could not inspect output devices.")?;
+        let selected_index = snapshot.matching_index(generation, selected_index, &ids);
         snapshot.generation = snapshot
             .generation
             .checked_add(1)
@@ -259,6 +293,7 @@ fn probe_outputs(state: tauri::State<'_, ProbeState>) -> Result<OutputSnapshot, 
         Ok(OutputSnapshot {
             generation: snapshot.generation,
             devices,
+            selected_index,
         })
     }
     #[cfg(not(windows))]
@@ -455,6 +490,33 @@ mod tests {
         assert_eq!(snapshot.select(5, 0).unwrap().as_str(), "first");
         assert!(snapshot.select(4, 0).is_err());
         assert!(snapshot.select(5, 1).is_err());
+    }
+
+    #[test]
+    fn refresh_matches_only_the_original_unique_endpoint() {
+        let snapshot = SelectionSnapshot {
+            generation: 5,
+            ids: vec![OutputDeviceId::new("first"), OutputDeviceId::new("chosen")],
+        };
+        let reordered = vec![OutputDeviceId::new("chosen"), OutputDeviceId::new("first")];
+        assert_eq!(snapshot.matching_index(5, Some(1), &reordered), Some(0));
+        assert_eq!(snapshot.matching_index(4, Some(1), &reordered), None);
+        assert_eq!(snapshot.matching_index(5, Some(2), &reordered), None);
+        assert_eq!(snapshot.matching_index(5, None, &reordered), None);
+        assert_eq!(snapshot.matching_index(5, Some(1), &reordered[1..]), None);
+        assert_eq!(
+            snapshot.matching_index(
+                5,
+                Some(1),
+                &[OutputDeviceId::new("chosen"), OutputDeviceId::new("chosen")]
+            ),
+            None
+        );
+        let ambiguous = SelectionSnapshot {
+            generation: 6,
+            ids: vec![OutputDeviceId::new("chosen"), OutputDeviceId::new("chosen")],
+        };
+        assert_eq!(ambiguous.matching_index(6, Some(0), &reordered), None);
     }
 
     #[test]
