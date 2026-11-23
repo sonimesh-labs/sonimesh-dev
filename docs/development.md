@@ -153,7 +153,10 @@ service is starting, running, or stopping; otherwise it uses the selector.
 playing: stop and restart the tone to apply the applicable usage. On
 the interactive lab screen, **Copy lab evidence** copies a bounded text summary
 of the current status, session request, sender queue drops, sent packet count,
-and encoded payload average. It excludes the invitation, SPKI, and audio data.
+encoded payload average, and the latest capture signal state. The signal state
+is **no capturable audio** after a bounded silent interval, **signal detected**
+after non-zero PCM arrives, or unknown before the capture has produced enough
+samples. It excludes the invitation, SPKI, and audio data.
 **Share lab evidence** sends that same text summary through the Android share
 sheet; if no share target is installed, the activity reports that locally.
 The displayed status message is bounded before it reaches the screen or the
