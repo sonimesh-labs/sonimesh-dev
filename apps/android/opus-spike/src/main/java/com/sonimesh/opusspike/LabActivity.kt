@@ -219,7 +219,7 @@ class LabActivity : Activity() {
             }
         })
         layout.addView(TextView(this).apply {
-            text = "Test tone uses the selected playback usage. Stop and restart it to apply a new selection."
+            text = "New test tones use the current capture usage, or the selection when capture is stopped. Restart a playing tone to apply changes."
         })
         layout.addView(Button(this).apply {
             text = if (tone == null) "Start test tone" else "Stop test tone"
@@ -472,7 +472,7 @@ class LabActivity : Activity() {
             (sin(2.0 * PI * (index / 2 % 48) / 48.0) * 3_000).toInt().toShort()
         }
         val track = AudioTrack.Builder()
-            .setAudioAttributes(AudioAttributes.Builder().setUsage(selectedUsage().usages.first()).build())
+            .setAudioAttributes(AudioAttributes.Builder().setUsage((LabStatus.captureUsage ?: selectedUsage()).usages.first()).build())
             .setAudioFormat(AudioFormat.Builder().setSampleRate(48_000)
                 .setEncoding(AudioFormat.ENCODING_PCM_16BIT).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build())
             .setTransferMode(AudioTrack.MODE_STATIC)

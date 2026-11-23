@@ -70,6 +70,37 @@ class LabCaptureUsageUiTest {
         }
     }
 
+    @Test
+    fun newToneUsesCaptureUsageUntilServiceFinishes() {
+        try {
+            ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    LabStatus.serviceStarted(LabCaptureUsage.Media)
+                    val root = activity.window.decorView
+                    findSpinner(root, "Playback usage for capture").setSelection(2)
+                    findButton(root, "Start test tone").performClick()
+                    assertEquals(AudioAttributes.USAGE_MEDIA, activity.testToneUsage())
+                    findButton(root, "Stop test tone").performClick()
+                }
+                scenario.recreate()
+                scenario.onActivity { activity ->
+                    val root = activity.window.decorView
+                    findButton(root, "Start test tone").performClick()
+                    assertEquals(AudioAttributes.USAGE_MEDIA, activity.testToneUsage())
+                    findButton(root, "Stop test tone").performClick()
+                    LabStatus.serviceFinished()
+                    findButton(root, "Start test tone").performClick()
+                    assertEquals(AudioAttributes.USAGE_GAME, activity.testToneUsage())
+                    findButton(root, "Stop test tone").performClick()
+                }
+            }
+        } finally {
+            androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().runOnMainSync {
+                LabStatus.serviceFinished()
+            }
+        }
+    }
+
     private fun findButton(view: View, text: String): Button {
         if (view is Button && view.text.toString() == text) return view
         if (view is ViewGroup) {

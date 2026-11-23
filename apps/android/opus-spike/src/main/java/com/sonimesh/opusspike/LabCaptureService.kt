@@ -62,7 +62,8 @@ class LabCaptureService : Service() {
         }
         if (started) return START_NOT_STICKY
         started = true
-        LabStatus.captureAdmission.serviceStarted()
+        val usage = LabCaptureUsage.fromValue(intent?.getStringExtra("captureUsage"))
+        LabStatus.serviceStarted(usage)
         running.set(true)
         LabStatus.publishSenderQueueDrops(null)
         LabStatus.publishEncoderRate(null)
@@ -93,7 +94,6 @@ class LabCaptureService : Service() {
             }, handler)
             val udpMode = intent.getBooleanExtra("udpMode", false)
             val pairedMode = intent.getBooleanExtra("pairedMode", false)
-            val usage = LabCaptureUsage.fromValue(intent.getStringExtra("captureUsage"))
             val bitrate = OpusBitrate.fromBitsPerSecond(intent.getIntExtra("bitrate", OpusBitrate.STANDARD.bitsPerSecond))
             val destination = if (udpMode) parseLabAddress(intent.getStringExtra("udpAddress") ?: "")
                 ?: error("invalid desktop address") else null
@@ -352,7 +352,7 @@ class LabCaptureService : Service() {
                     LabStatus.publish(it)
                 }
                 if (destroyed) {
-                    LabStatus.captureAdmission.serviceFinished()
+                    LabStatus.serviceFinished()
                     if (!terminalStatus) LabStatus.publish("Capture stopped.")
                 } else stopSelf()
             }
@@ -450,7 +450,7 @@ class LabCaptureService : Service() {
             LabStatus.publish(if (workerStarted && !workerFinished) "Stopping capture…" else "Capture stopped.")
         }
         destroyed = true
-        if (started && (!workerStarted || workerFinished)) LabStatus.captureAdmission.serviceFinished()
+        if (started && (!workerStarted || workerFinished)) LabStatus.serviceFinished()
         super.onDestroy()
     }
 }

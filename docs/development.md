@@ -137,9 +137,11 @@ also has a **Start paired UDP capture** mode: start `paired-audio-lab` without
 grant capture consent, and play a capturable source or use **Start test tone**.
 The lab's capture usage selector applies to the next capture session: **All**
 includes media, game and unknown usage, while the other choices select one
-usage. A new test tone uses the selected usage; **All** uses Media. Changing
-the selector does not change a tone already playing: stop and restart the tone
-to apply it. On 2026-11-23, an API 37 x86_64 emulator test checked all four
+usage. A new test tone uses the current capture session's usage while the
+service is starting, running, or stopping; otherwise it uses the selector.
+**All** uses Media. Changing the selector does not change a tone already
+playing: stop and restart the tone to apply the applicable usage. On
+2026-11-23, an API 37 x86_64 emulator test checked all four
 choices and confirmed the playing tone retains its usage across activity
 recreation; this checks audio attributes, not audible output. Android and the source application still
 control whether playback can be captured; the selector does not select apps.

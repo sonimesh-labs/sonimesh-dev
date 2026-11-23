@@ -3,12 +3,24 @@ package com.sonimesh.opusspike
 /** Process-local, main-thread status for the interactive lab. */
 internal object LabStatus {
     val captureAdmission = LabCaptureAdmission()
+    var captureUsage: LabCaptureUsage? = null
+        private set
     private var message = "Idle"
     private val observers = mutableSetOf<(String) -> Unit>()
     private var senderQueueDrops: Long? = null
     private val dropObservers = mutableSetOf<(Long?) -> Unit>()
     private var encoderRate: Long? = null
     private val rateObservers = mutableSetOf<(Long?) -> Unit>()
+
+    fun serviceStarted(usage: LabCaptureUsage) {
+        captureUsage = usage
+        captureAdmission.serviceStarted()
+    }
+
+    fun serviceFinished() {
+        captureUsage = null
+        captureAdmission.serviceFinished()
+    }
 
     fun observe(observer: (String) -> Unit) {
         observers.add(observer)
