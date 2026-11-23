@@ -34,7 +34,9 @@ not physical-device capture or audio playback.
 While a capture is active, the foreground notification also shows elapsed
 capture duration in its subtext and updates from the same bounded evidence
 clock. This keeps the run's liveness visible when the activity is off-screen;
-the notification still exposes only control text and no audio data.
+the notification still exposes only control text and no audio data. Tapping its
+content action returns to the capture activity without changing the running
+service.
 
 Before starting, the capture-only screen lets the operator choose **Media**,
 **Game**, **Other**, or **All supported** (the three groups together).
