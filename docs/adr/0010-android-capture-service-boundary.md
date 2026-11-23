@@ -121,6 +121,9 @@ capture app's UID. The guard is a direct-boundary check, not proof that the
 capture implementation cannot reach every indirect dependency or that an
 instrumentation spike proves a production capability.
 
+The separate audio encoder module is exercised by the lab sender; it does not
+start capture, own a socket, or become a dependency of the capture-only app.
+
 The separate `:opus-spike` may exercise playback capture, MediaCodec encoding,
 and a loopback-only ADB-reversed stream for an interactive lab. Its foreground
 service owns projection and capture; consent is requested afresh by its activity.

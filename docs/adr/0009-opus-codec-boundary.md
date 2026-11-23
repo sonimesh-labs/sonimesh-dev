@@ -41,6 +41,13 @@ zero-padded to the lab's 20 ms frame size. If the encoder does not finish within
 the deadline, shutdown continues; this is best effort and does not prove tail
 delivery or physical playback.
 
+The paired Android lab uses a separate reusable MediaCodec encoder module for
+its fixed 48 kHz stereo, 20 ms PCM frames and bounded Opus output. The caller
+owns capture, packet queues, scheduling, and shutdown; the encoder only accepts
+complete frames (or a padded final frame) and polls codec output without blocking.
+This is an experimental component, not yet an encoder selection or a change to
+the capture-only main application. Device and end-to-end validation remain open.
+
 Keep `sonimesh-audio::FrameDecoder` as the stable boundary. A future optional
 `opus-codec` feature may add a `FrameDecoder` implementation only after:
 

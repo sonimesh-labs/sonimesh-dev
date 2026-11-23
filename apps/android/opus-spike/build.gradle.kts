@@ -20,6 +20,7 @@ android {
 }
 
 dependencies {
+    implementation(project(":audio-encoder"))
     implementation(project(":pairing-client"))
     implementation(project(":pairing-protocol"))
     testImplementation("junit:junit:4.13.2")

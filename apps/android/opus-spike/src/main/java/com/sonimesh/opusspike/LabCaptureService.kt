@@ -11,8 +11,6 @@ import android.content.Intent
 import android.media.AudioFormat
 import android.media.AudioPlaybackCaptureConfiguration
 import android.media.AudioRecord
-import android.media.MediaCodec
-import android.media.MediaFormat
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Handler
@@ -20,6 +18,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
+import com.sonimesh.sender.encoder.OpusEncoder
 import com.sonimesh.sender.pairing.PairedConnection
 import com.sonimesh.sender.pairing.PairingClient
 import com.sonimesh.sender.pairing.StreamControlResult
@@ -31,7 +30,6 @@ import java.net.DatagramSocket
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.SocketTimeoutException
-import java.nio.ByteOrder
 import java.security.SecureRandom
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.TimeUnit
@@ -102,7 +100,7 @@ class LabCaptureService : Service() {
         usage: LabCaptureUsage,
     ) {
         var record: AudioRecord? = null
-        var codec: MediaCodec? = null
+        var codec: OpusEncoder? = null
         var paired: PairedConnection? = null
         var pairedIdentity: StreamIdentity? = null
         var connected = false
@@ -173,60 +171,37 @@ class LabCaptureService : Service() {
                 .setBufferSizeInBytes(maxOf(minimum, 3_840)).build()
             record = activeRecord
             check(activeRecord.state == AudioRecord.STATE_INITIALIZED && activeRecord.sampleRate == 48_000 && activeRecord.channelCount == 2)
-            val activeCodec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_OPUS)
+            val activeCodec = OpusEncoder.create()
             codec = activeCodec
-            val format = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_OPUS, 48_000, 2)
-            format.setInteger(MediaFormat.KEY_BIT_RATE, 96_000)
-            activeCodec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-            activeCodec.start()
             activeRecord.startRecording()
             handler.post {
                 if (running.get() && !terminalStatus) LabStatus.publish("Capturing audio and sending to desktop.")
             }
-            val pcm = ShortArray(1_920)
+            val pcm = ShortArray(OpusEncoder.FRAME_SAMPLES)
             val signalMonitor = LabSignalMonitor()
-            val info = MediaCodec.BufferInfo()
             var filled = 0
             var frame = 0L
             var outputSequence = 0L
             fun pollEncodedOutput(): EncoderTailOutput {
-                val index = activeCodec.dequeueOutputBuffer(info, 0)
-                if (index < 0) return EncoderTailOutput.Empty
-                if (info.size > 0 && info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0) {
-                    require(info.size <= 1_148)
-                    val packet = ByteArray(info.size)
-                    requireNotNull(activeCodec.getOutputBuffer(index)).apply { position(info.offset); get(packet) }
+                return when (activeCodec.poll { packet ->
                     check(outputSequence <= 0xffff_ffffL) { "media sequence exhausted" }
                     val encoded = EncodedPacket(outputSequence++, packet)
                     if (!packets.offer(encoded)) {
                         packets.poll()
                         packets.offer(encoded)
                     }
+                }) {
+                    OpusEncoder.Output.Empty -> EncoderTailOutput.Empty
+                    OpusEncoder.Output.Progress -> EncoderTailOutput.Progress
+                    OpusEncoder.Output.End -> EncoderTailOutput.End
                 }
-                val end = info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
-                activeCodec.releaseOutputBuffer(index, false)
-                return if (end) EncoderTailOutput.End else EncoderTailOutput.Progress
             }
             flushEncoderTail = {
                 drainEncoderTail(
                     nowMillis = SystemClock::elapsedRealtime,
                     submitEnd = {
-                        val index = activeCodec.dequeueInputBuffer(0)
-                        if (index < 0) {
-                            false
-                        } else {
-                            val size = if (filled > 0) {
-                                pcm.fill(0, filled, pcm.size)
-                                val input = requireNotNull(activeCodec.getInputBuffer(index))
-                                input.clear()
-                                input.order(ByteOrder.LITTLE_ENDIAN).asShortBuffer().put(pcm)
-                                pcm.size * Short.SIZE_BYTES
-                            } else {
-                                0
-                            }
-                            activeCodec.queueInputBuffer(index, 0, size, frame * 20_000, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
-                            true
-                        }
+                        if (filled > 0) pcm.fill(0, filled, pcm.size)
+                        activeCodec.tryQueue(if (filled > 0) pcm else null, frame * 20_000, end = true)
                     },
                     pollOutput = ::pollEncodedOutput,
                     idle = { Thread.sleep(2) },
@@ -268,12 +243,7 @@ class LabCaptureService : Service() {
                     if (read == 0) Thread.sleep(2)
                 }
                 if (filled == pcm.size) {
-                    val index = activeCodec.dequeueInputBuffer(0)
-                    if (index >= 0) {
-                        val input = requireNotNull(activeCodec.getInputBuffer(index))
-                        input.clear()
-                        input.order(ByteOrder.LITTLE_ENDIAN).asShortBuffer().put(pcm)
-                        activeCodec.queueInputBuffer(index, 0, pcm.size * Short.SIZE_BYTES, frame * 20_000, 0)
+                    if (activeCodec.tryQueue(pcm, frame * 20_000)) {
                         frame++
                         filled = 0
                     }
@@ -298,7 +268,7 @@ class LabCaptureService : Service() {
                     Log.w("SoniMeshLab", "Encoder tail drain failed", error)
                 }
             }
-            codec?.release()
+            codec?.close()
             if (paired != null) {
                 finishPairedSender(pairedProducerFinished, pairedSender)
                 try {

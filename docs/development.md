@@ -256,7 +256,8 @@ or the notification action ends the stream. Restart the desktop listener for
 each session. Remove the ADB mapping afterwards with `adb reverse --remove
 tcp:39091`. Select the device with `adb -s SERIAL` if several are connected.
 
-The service captures 48 kHz stereo PCM, encodes with MediaCodec, and sends
+The service captures 48 kHz stereo PCM, encodes using the experimental
+`:audio-encoder` MediaCodec module, and sends
 length-prefixed Opus packets through an eight-packet queue (dropping the oldest
 when full). Android connects to its own loopback and ADB forwards to a listener
 bound to desktop loopback. The desktop decodes off the output callback and uses
@@ -265,6 +266,9 @@ session. This is an unauthenticated ADB lab transport, not the product media
 protocol or a WLAN receiver. Do not expose its port through a network tunnel.
 Silent output can reflect source silence or platform capture policy; it does not
 identify the cause. The lab currently lacks reconnection and device switching.
+The encoder's device test can be run separately with
+`./gradlew.bat :audio-encoder:connectedDebugAndroidTest` on an available device;
+building its test APK alone does not exercise MediaCodec.
 
 On 2026-11-22 an API 37 x86_64 emulator captured the lab tone and sent 588 frames
 to a Windows software render check, with decoded and rendered peaks of 0.093;
