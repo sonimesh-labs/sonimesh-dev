@@ -8,6 +8,18 @@ import org.junit.Test
 
 class CaptureStatusDescriptionTest {
     @Test
+    fun signal_label_waits_for_non_silent_capture_and_honors_no_signal_status() {
+        val format = requireNotNull(CaptureFormat.fromObserved(48_000, 2, 8, 12, 7_680, 3_840))
+        val capturing = CaptureStatus.Capturing(format)
+        assertEquals("Checking", capturing.signalLabel(CaptureEvidenceSnapshot()))
+        assertEquals("Checking", capturing.signalLabel(CaptureEvidenceSnapshot(capturedFrames = 960, silentFrames = 960)))
+        val signal = CaptureEvidenceSnapshot(capturedFrames = 1_920, silentFrames = 960)
+        assertEquals("Observed", capturing.signalLabel(signal))
+        assertEquals("None", CaptureStatus.NoCapturableAudio(format).signalLabel(signal))
+        assertEquals("Waiting", CaptureStatus.Idle.signalLabel(signal))
+    }
+
+    @Test
     fun evidence_description_reports_silent_frames_separately_from_read_count() {
         val evidence = CaptureEvidenceSnapshot(
             captureDurationMillis = 2_500,

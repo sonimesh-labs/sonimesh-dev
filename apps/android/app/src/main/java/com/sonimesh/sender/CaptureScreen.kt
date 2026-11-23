@@ -262,7 +262,7 @@ private fun CaptureSummaryCard(
                 SummaryMetric(
                     modifier = Modifier.weight(1f),
                     label = "Signal",
-                    value = status.signalLabel(),
+                    value = status.signalLabel(evidence),
                 )
             }
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -662,8 +662,8 @@ private fun CaptureStatus.headline(): String = when (this) {
     is CaptureStatus.Failed -> "Capture needs attention"
 }
 
-private fun CaptureStatus.signalLabel(): String = when (this) {
-    is CaptureStatus.Capturing -> "Observed"
+internal fun CaptureStatus.signalLabel(evidence: CaptureEvidenceSnapshot): String = when (this) {
+    is CaptureStatus.Capturing -> if (evidence.capturedFrames > evidence.silentFrames) "Observed" else "Checking"
     is CaptureStatus.NoCapturableAudio -> "None"
     else -> "Waiting"
 }

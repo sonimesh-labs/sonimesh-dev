@@ -107,8 +107,11 @@ does not claim source-specific capture denial, pair devices, send a production
 audio stream, or make a latency promise. The no-audio transition requires two
 seconds worth of completed silent PCM frames at the observed sample rate. It is
 not based on read-call count because non-blocking `AudioRecord` reads may be
-partial; any completed non-silent read resets the silent-frame interval. Every
-non-teardown `AudioRecord.read` failure increments the bounded `readErrors`
+partial; any completed non-silent read resets the silent-frame interval. A
+new capture initially shows that signal is being checked; the UI reports signal
+observed only after evidence includes a non-silent read. A no-signal status takes
+precedence after the silent-frame threshold. The low-rate display may lag reads.
+Every non-teardown `AudioRecord.read` failure increments the bounded `readErrors`
 evidence counter whether Android reports a negative error code or throws a
 read-call exception. Every positive result is rejected before sample access unless
 it is within the fixed request and exactly channel-aligned; a contract violation
