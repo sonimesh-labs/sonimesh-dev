@@ -11,6 +11,7 @@ import android.widget.TextView
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.sonimesh.sender.encoder.OpusBitrate
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -136,6 +137,16 @@ class LabStatusTest {
                 }
             }
         }
+    }
+
+    @Test
+    fun labEvidenceShareIntentUsesPlainText() {
+        val evidence = "SoniMesh paired audio lab\nStatus: Ready"
+        val intent = buildLabEvidenceShareIntent(evidence)
+
+        assertEquals(Intent.ACTION_SEND, intent.action)
+        assertEquals("text/plain", intent.type)
+        assertEquals(evidence, intent.getStringExtra(Intent.EXTRA_TEXT))
     }
 
     @Test

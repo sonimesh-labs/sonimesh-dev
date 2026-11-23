@@ -147,6 +147,8 @@ playing: stop and restart the tone to apply the applicable usage. On
 the interactive lab screen, **Copy lab evidence** copies a bounded text summary
 of the current status, session request, sender queue drops, sent packet count,
 and encoded payload average. It excludes the invitation, SPKI, and audio data.
+**Share lab evidence** sends that same text summary through the Android share
+sheet; if no share target is installed, the activity reports that locally.
 On 2026-11-23, an API 37 x86_64 emulator test checked all four
 choices and confirmed the playing tone retains its usage across activity
 recreation; this checks audio attributes, not audible output. Android and the source application still

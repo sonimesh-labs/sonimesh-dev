@@ -2,6 +2,7 @@ package com.sonimesh.opusspike
 
 import android.Manifest
 import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
@@ -109,6 +110,10 @@ class LabActivity : Activity() {
         layout.addView(Button(this).apply {
             text = "Copy lab evidence"
             setOnClickListener { copyLabEvidence() }
+        })
+        layout.addView(Button(this).apply {
+            text = "Share lab evidence"
+            setOnClickListener { shareLabEvidence() }
         })
         layout.addView(TextView(this).apply { text = "Playback usage for the next capture" })
         usage = Spinner(this).apply {
@@ -359,6 +364,19 @@ class LabActivity : Activity() {
         Toast.makeText(this, "Lab evidence copied.", Toast.LENGTH_SHORT).show()
     }
 
+    private fun shareLabEvidence() {
+        try {
+            startActivity(
+                Intent.createChooser(
+                    buildLabEvidenceShareIntent(LabStatus.copyableEvidence()),
+                    "Share lab evidence",
+                ),
+            )
+        } catch (_: ActivityNotFoundException) {
+            Toast.makeText(this, "No app is available to share lab evidence.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     private fun scanInvitation(startAfterScan: Boolean) {
         if (startAfterScan && !LabStatus.captureAdmission.canBegin()) {
             showCaptureBusy()
@@ -528,3 +546,9 @@ class LabActivity : Activity() {
         super.onDestroy()
     }
 }
+
+internal fun buildLabEvidenceShareIntent(evidence: String): Intent =
+    Intent(Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(Intent.EXTRA_TEXT, evidence)
+    }
