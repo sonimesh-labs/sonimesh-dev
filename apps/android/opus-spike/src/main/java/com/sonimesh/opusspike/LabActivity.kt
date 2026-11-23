@@ -218,6 +218,9 @@ class LabActivity : Activity() {
                 startService(Intent(this@LabActivity, LabCaptureService::class.java).setAction("stop"))
             }
         })
+        layout.addView(TextView(this).apply {
+            text = "Test tone uses the selected playback usage. Stop and restart it to apply a new selection."
+        })
         layout.addView(Button(this).apply {
             text = if (tone == null) "Start test tone" else "Stop test tone"
             setOnClickListener {
@@ -469,7 +472,7 @@ class LabActivity : Activity() {
             (sin(2.0 * PI * (index / 2 % 48) / 48.0) * 3_000).toInt().toShort()
         }
         val track = AudioTrack.Builder()
-            .setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).build())
+            .setAudioAttributes(AudioAttributes.Builder().setUsage(selectedUsage().usages.first()).build())
             .setAudioFormat(AudioFormat.Builder().setSampleRate(48_000)
                 .setEncoding(AudioFormat.ENCODING_PCM_16BIT).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build())
             .setTransferMode(AudioTrack.MODE_STATIC)
@@ -484,6 +487,8 @@ class LabActivity : Activity() {
     override fun onRetainNonConfigurationInstance(): Any? = tone
 
     internal fun isTestTonePlaying(): Boolean = tone?.playState == AudioTrack.PLAYSTATE_PLAYING
+
+    internal fun testToneUsage(): Int? = tone?.audioAttributes?.usage
 
     override fun onDestroy() {
         importedInvitation?.fill(0)
