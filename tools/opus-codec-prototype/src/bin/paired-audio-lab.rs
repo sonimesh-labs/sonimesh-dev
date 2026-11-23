@@ -431,11 +431,10 @@ fn poll_media(receiver: &mut Receiver) -> LabResult<Option<UdpPollOutcome>> {
 }
 
 fn next_playout_deadline(deadline: Instant, now: Instant) -> Instant {
-    if now.duration_since(deadline) >= PLAYOUT_PERIOD {
-        now + PLAYOUT_PERIOD
-    } else {
-        deadline + PLAYOUT_PERIOD
-    }
+    let phase = now.duration_since(deadline).as_nanos() % PLAYOUT_PERIOD.as_nanos();
+    let remaining_nanos = u64::try_from(PLAYOUT_PERIOD.as_nanos() - phase)
+        .expect("one playout period fits in u64 nanoseconds");
+    now + Duration::from_nanos(remaining_nanos).max(PLAYOUT_PERIOD / 2)
 }
 
 fn decode_playout(
@@ -1597,15 +1596,39 @@ mod tests {
     }
 
     #[test]
-    fn playout_deadline_rebases_after_a_missed_period() {
+    fn playout_deadline_skips_missed_ticks_and_limits_catchup() {
         let deadline = Instant::now();
-        let late = deadline + PLAYOUT_PERIOD;
-        assert_eq!(next_playout_deadline(deadline, late), late + PLAYOUT_PERIOD);
+        let almost_next = deadline + Duration::from_millis(19);
+        assert_eq!(
+            next_playout_deadline(deadline, almost_next),
+            almost_next + Duration::from_millis(10)
+        );
+        let late = deadline + Duration::from_millis(21);
+        assert_eq!(
+            next_playout_deadline(deadline, late),
+            deadline + Duration::from_millis(40)
+        );
         let much_later = deadline + Duration::from_secs(5);
         assert_eq!(
             next_playout_deadline(deadline, much_later),
             much_later + PLAYOUT_PERIOD
         );
+    }
+
+    #[test]
+    fn playout_deadline_maintains_bounded_spacing_under_variable_delays() {
+        let mut deadline = Instant::now();
+        for delay_ms in [0, 2, 9, 10, 19, 20, 21, 29, 39, 41, 500]
+            .into_iter()
+            .cycle()
+            .take(1_000)
+        {
+            let now = deadline + Duration::from_millis(delay_ms);
+            let next = next_playout_deadline(deadline, now);
+            assert!(next.duration_since(now) >= Duration::from_millis(10));
+            assert!(next.duration_since(now) <= PLAYOUT_PERIOD);
+            deadline = next;
+        }
     }
 
     #[test]

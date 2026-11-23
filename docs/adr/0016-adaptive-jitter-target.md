@@ -212,6 +212,11 @@ method remains an immediate drain path. This is software scheduling evidence,
 not proof of a production output-callback integration or physical latency.
 The default single-stream path stays ungated until a platform/control owner
 adopts the boundary deliberately.
+The paired audio lab uses its own monotonic 20 ms playout loop for both fixed
+and adaptive experiments. After a late decision, it skips missed deadlines and
+waits at least half a frame before the next decision, shifting the next deadline
+when necessary. This avoids near-back-to-back catch-up decisions; it is a lab
+scheduling policy, not an acoustic latency or physical WLAN claim.
 Deterministic property walks (`jitter_scheduler_property.rs`,
 `multi_stream_jitter_target_property.rs`) and libFuzzer targets
 (`jitter_scheduler`, `multi_stream_jitter_target`) now drive the

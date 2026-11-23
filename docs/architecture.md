@@ -530,6 +530,10 @@ routing metadata only and does not authenticate the peer.
 ## 11. Jitter, loss, and clock drift
 
 Each stream owns a bounded jitter buffer and a monotonic playout schedule.
+The paired audio lab's 20 ms scheduler skips missed frame deadlines and keeps
+at least 10 ms between decode decisions; if the next phase-aligned deadline is
+closer, the lab shifts it to that minimum interval. This limits catch-up bursts
+after host scheduling delays without claiming a physical latency improvement.
 Initial user-selectable modes are:
 
 | Mode | Target buffer | Intended use |

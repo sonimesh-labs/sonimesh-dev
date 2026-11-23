@@ -197,6 +197,14 @@ wait after the first packet, in 20 ms steps from 20 to 120 ms (default 60 ms).
 The same wait is used after output recovery or decoder resynchronization. This is
 a fixed startup delay, not an adaptive jitter target or an end-to-end latency
 measurement; a longer wait can overflow the bounded packet buffer under bursts.
+After a delayed playout decision the lab skips missed frame deadlines and waits
+at least 10 ms before another decision. This bounds catch-up pacing; it does not
+prevent loss caused by a host stall or establish physical audio continuity.
+On 2026-11-23, separate API 37 emulator sessions completed with the revised
+schedule: fixed mode decoded 199 frames with 8 resynchronization drops;
+adaptive mode decoded 160 frames with 16 drops. Both reported zero late packets.
+These short, uncontrolled software runs do not establish a before/after
+improvement or identify the causes of the remaining drops.
 Add `--status` to print packet counts, decode counts and peak, jitter occupancy,
 and output recovery state at session start and every five seconds afterward. This can help
 distinguish missing media from decoded silence; counts and peak are cumulative
