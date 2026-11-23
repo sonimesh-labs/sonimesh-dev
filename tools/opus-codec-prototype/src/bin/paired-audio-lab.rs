@@ -8,6 +8,7 @@ mod lab_control;
 mod lab_decoder;
 
 use std::fmt::Write;
+use std::io::Write as IoWrite;
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -73,6 +74,7 @@ fn run() -> LabResult<()> {
     println!("INVITATION_HEX {}", bytes_to_hex(&invitation));
     println!("LISTENING {address}");
     println!("INVITATION_HOST {}", options.host);
+    std::io::stdout().flush()?;
     loop {
         println!("READY");
         let started = Instant::now();
@@ -882,8 +884,11 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
     playback: &mut Playback,
 ) -> LabResult<()> {
     let mut allocator = MediaSessionAllocator::new(root);
-    let mut receiver: Option<Receiver> = None;
-    let mut pending_receiver: Option<(MediaStreamIdentity, PreparedReceiver)> = None;
+    // Keep the bounded audio pipeline off the control thread's stack. The
+    // receiver owns PCM/jitter buffers that are too large for the default
+    // process stack once both active and retry state are represented here.
+    let mut receiver: Option<Box<Receiver>> = None;
+    let mut pending_receiver: Option<(MediaStreamIdentity, Box<PreparedReceiver>)> = None;
     let mut consumer = None;
     let mut counters = None;
     let mut next_playout = None;
@@ -994,11 +999,11 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                                             Arc::clone(&metrics),
                                         )?
                                     };
-                                    Ok((pipeline, next_consumer, metrics))
+                                    Ok(Box::new((pipeline, next_consumer, metrics)))
                                 },
-                                |(pipeline, _, _)| playback.start(pipeline),
+                                |prepared| playback.start(&mut prepared.0),
                             )?;
-                            let ((pipeline, next_consumer, metrics), started) = match prepared {
+                            let (prepared, started) = match prepared {
                                 Ok(result) => result,
                                 Err(error) => {
                                     eprintln!("output start failed: {error}");
@@ -1015,10 +1020,11 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                                     continue;
                                 }
                             };
+                            let (pipeline, next_consumer, metrics) = *prepared;
                             playing = started;
                             retry_at = None;
                             last_output_state = None;
-                            receiver = Some(pipeline);
+                            receiver = Some(Box::new(pipeline));
                             consumer = if playing { None } else { Some(next_consumer) };
                             counters = Some(metrics);
                             coordinator.complete_start(token, request)?;
