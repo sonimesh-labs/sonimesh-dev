@@ -175,6 +175,10 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   identify the cause of an interruption or establish that audio was decoded.
   Output recovery transitions are also emitted promptly for the desktop probe;
   the cumulative status line remains the compatibility fallback.
+  The probe retains the latest 32 bounded lifecycle events for the current
+  listener snapshot. Session evidence copy/share includes those events, and
+  remains available with status plus events when a session ends before metrics
+  arrive. This is operator evidence only and excludes invitations and audio.
   Its fixed startup wait is configurable from 20 to 120 ms for network experiments;
   the desktop probe exposes this setting before listener startup. An opt-in
   experimental Balanced adaptive target gates live playout with bounded waits;
