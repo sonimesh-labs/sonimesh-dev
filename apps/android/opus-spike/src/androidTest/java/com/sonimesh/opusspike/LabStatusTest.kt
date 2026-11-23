@@ -8,6 +8,7 @@ import android.os.SystemClock
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.Spinner
 import android.widget.TextView
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
@@ -184,6 +185,24 @@ class LabStatusTest {
     }
 
     @Test
+    fun captureSelectorsPersistForTheNextLabLaunch() {
+        ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                findSpinner(activity.window.decorView, "Playback usage for capture").setSelection(2)
+                findSpinner(activity.window.decorView, "Opus target bitrate for capture").setSelection(2)
+            }
+        }
+        ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                assertEquals("Game", findSpinner(activity.window.decorView, "Playback usage for capture").selectedItem)
+                assertEquals("128 kbps", findSpinner(activity.window.decorView, "Opus target bitrate for capture").selectedItem)
+                findSpinner(activity.window.decorView, "Playback usage for capture").setSelection(0)
+                findSpinner(activity.window.decorView, "Opus target bitrate for capture").setSelection(1)
+            }
+        }
+    }
+
+    @Test
     fun labEvidenceShareIntentUsesPlainText() {
         val evidence = "SoniMesh paired audio lab\nStatus: Ready"
         val intent = buildLabEvidenceShareIntent(evidence)
@@ -319,6 +338,16 @@ class LabStatusTest {
             }
         }
         return null
+    }
+
+    private fun findSpinner(view: View, description: String): Spinner {
+        if (view is Spinner && view.contentDescription == description) return view
+        if (view is ViewGroup) {
+            for (index in 0 until view.childCount) {
+                runCatching { findSpinner(view.getChildAt(index), description) }.getOrNull()?.let { return it }
+            }
+        }
+        error("spinner not found: $description")
     }
 
     private fun hasStatus(view: View, prefix: String): Boolean {
