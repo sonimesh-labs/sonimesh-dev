@@ -1,6 +1,7 @@
 package com.sonimesh.opusspike
 
 import android.app.ActivityManager
+import android.app.NotificationManager
 import android.os.Bundle
 import android.os.PowerManager
 import android.os.SystemClock
@@ -32,7 +33,10 @@ class PairedCaptureTest {
     @Test
     fun stops_capture_when_desktop_disconnects() = runCapture(expectDisconnect = true)
 
-    private fun runCapture(expectDisconnect: Boolean, screenOff: Boolean = false) {
+    @Test
+    fun returns_to_active_capture_from_notification() = runCapture(expectDisconnect = false, notificationReturn = true)
+
+    private fun runCapture(expectDisconnect: Boolean, screenOff: Boolean = false, notificationReturn: Boolean = false) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val args = InstrumentationRegistry.getArguments()
         assumeTrue(
@@ -98,7 +102,34 @@ class PairedCaptureTest {
                 }
                 assertTrue("desktop disconnect was not reported", disconnectStatus != null)
             } else {
-                if (screenOff) {
+                if (notificationReturn) {
+                    automation.executeShellCommand("input keyevent KEYCODE_HOME").close()
+                    val homeDeadline = SystemClock.elapsedRealtime() + 10_000
+                    var homeVisible = false
+                    while (!homeVisible && SystemClock.elapsedRealtime() < homeDeadline) {
+                        val name = automation.rootInActiveWindow?.packageName?.toString()
+                        homeVisible = name != null && name != instrumentation.targetContext.packageName
+                        if (!homeVisible) SystemClock.sleep(100)
+                    }
+                    assertTrue("home screen did not appear", homeVisible)
+                    val notification = instrumentation.targetContext.getSystemService(NotificationManager::class.java)
+                        .activeNotifications.firstOrNull { it.id == 1 }?.notification
+                    requireNotNull(notification?.contentIntent) { "capture notification has no open action" }.send()
+                    val returnDeadline = SystemClock.elapsedRealtime() + 10_000
+                    var returned = false
+                    while (!returned && SystemClock.elapsedRealtime() < returnDeadline) {
+                        val root = automation.rootInActiveWindow
+                        returned = root?.packageName?.toString() == instrumentation.targetContext.packageName &&
+                            root.findAccessibilityNodeInfosByText("Status: Capturing audio").isNotEmpty()
+                        if (!returned) SystemClock.sleep(100)
+                    }
+                    assertTrue("notification did not return to active capture", returned)
+                    scenario.onActivity { activity ->
+                        assertTrue("returning from notification lost capture status",
+                            containsStatus(activity.window.decorView, "Status: Capturing audio"))
+                    }
+                    SystemClock.sleep(3_000)
+                } else if (screenOff) {
                     val power = instrumentation.targetContext.getSystemService(PowerManager::class.java)
                     try {
                         automation.executeShellCommand("input keyevent KEYCODE_SLEEP").close()

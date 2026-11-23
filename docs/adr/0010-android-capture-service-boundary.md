@@ -138,6 +138,9 @@ behavior remain unverified.
 The lab activity presents the service's current connection and capture state,
 including a terminal reason on connection failure or projection revocation;
 this process-local status is not a production diagnostics interface.
+The lab foreground notification opens the activity when selected, allowing the
+operator to return to the existing capture and its status without starting a new
+projection session. Its stop action remains available independently.
 The experimental lab foreground service holds a partial CPU wake lock while its
 capture service is active and releases it when the service is destroyed. This
 supports screen-off experiments without keeping the display on; it is not a

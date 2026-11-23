@@ -122,6 +122,12 @@ synthetic count. Neither run injected sender-queue congestion.
 The lab foreground service holds a partial CPU wake lock until the service is
 destroyed so it can be evaluated with the screen off. Physical-device screen-off
 continuity and power consumption remain unmeasured.
+The capture notification opens the lab activity and retains its stop action.
+On 2026-11-23, an API 37 x86_64 emulator test returned home during paired
+capture, invoked the published notification's content action, observed the
+active capture screen, and stopped normally; the software listener decoded
+163 frames with a 0.094 peak. The test invoked the notification action directly;
+notification-shade presentation and physical-device behavior remain unverified.
 For an emulator check, run the paired capture instrumentation with the method
 `keeps_service_active_while_screen_is_off` and the listener's `--status` option.
 The test checks that the screen remains off and the service remains present;

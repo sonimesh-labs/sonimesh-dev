@@ -71,9 +71,13 @@ class LabCaptureService : Service() {
             manager.createNotificationChannel(NotificationChannel("lab", "Audio lab", NotificationManager.IMPORTANCE_LOW))
             val stop = PendingIntent.getService(this, 0, Intent(this, LabCaptureService::class.java).setAction("stop"),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+            val open = PendingIntent.getActivity(this, 0, Intent(this, LabActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            }, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
             startForeground(1, Notification.Builder(this, "lab")
                 .setSmallIcon(android.R.drawable.ic_btn_speak_now)
                 .setContentTitle("SoniMesh audio lab capturing")
+                .setContentIntent(open)
                 .addAction(Notification.Action.Builder(null, "Stop", stop).build()).build())
             wakeLock = getSystemService(PowerManager::class.java)
                 .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SoniMesh:LabCapture").also { it.acquire() }
