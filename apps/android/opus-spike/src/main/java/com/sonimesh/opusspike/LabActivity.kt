@@ -48,6 +48,7 @@ class LabActivity : Activity() {
     private lateinit var pin: EditText
     private lateinit var host: EditText
     private lateinit var status: TextView
+    private lateinit var signal: TextView
     private lateinit var senderQueueDrops: TextView
     private lateinit var sentPackets: TextView
     private lateinit var encoderRate: TextView
@@ -55,6 +56,9 @@ class LabActivity : Activity() {
     private lateinit var usage: Spinner
     private lateinit var bitrate: Spinner
     private val statusObserver: (String) -> Unit = { status.text = "Status: $it" }
+    private val signalObserver: (LabSignalState?) -> Unit = { state ->
+        signal.text = "Capture signal: ${state?.label ?: "—"}"
+    }
     private val dropsObserver: (Long?) -> Unit = { count ->
         senderQueueDrops.text = if (count == null) "Sender queue drops: —" else "Sender queue drops: $count"
     }
@@ -107,6 +111,8 @@ class LabActivity : Activity() {
         })
         status = TextView(this).apply { accessibilityLiveRegion = android.view.View.ACCESSIBILITY_LIVE_REGION_POLITE }
         layout.addView(status)
+        signal = TextView(this)
+        layout.addView(signal)
         senderQueueDrops = TextView(this)
         layout.addView(senderQueueDrops)
         sentPackets = TextView(this)
@@ -307,6 +313,7 @@ class LabActivity : Activity() {
     override fun onStart() {
         super.onStart()
         LabStatus.observe(statusObserver)
+        LabStatus.observeSignal(signalObserver)
         LabStatus.observeSenderQueueDrops(dropsObserver)
         LabStatus.observeSentPackets(sentPacketsObserver)
         LabStatus.observeEncoderRate(rateObserver)
@@ -315,6 +322,7 @@ class LabActivity : Activity() {
 
     override fun onStop() {
         LabStatus.remove(statusObserver)
+        LabStatus.removeSignal(signalObserver)
         LabStatus.removeSenderQueueDrops(dropsObserver)
         LabStatus.removeSentPackets(sentPacketsObserver)
         LabStatus.removeEncoderRate(rateObserver)

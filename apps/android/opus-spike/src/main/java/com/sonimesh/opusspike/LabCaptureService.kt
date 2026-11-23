@@ -307,9 +307,14 @@ class LabCaptureService : Service() {
                         if (transition != null) handler.post {
                             if (running.get() && !terminalStatus) {
                                 LabStatus.publish(when (transition) {
-                                    LabSignalTransition.NoCapturableAudio ->
+                                    LabSignalTransition.NoCapturableAudio -> {
+                                        LabStatus.publishSignal(LabSignalState.Silent)
                                         "No capturable audio detected. The source may be silent or capture-limited."
-                                    LabSignalTransition.SignalDetected -> "Capturing audio and sending to desktop."
+                                    }
+                                    LabSignalTransition.SignalDetected -> {
+                                        LabStatus.publishSignal(LabSignalState.Detected)
+                                        "Capturing audio and sending to desktop."
+                                    }
                                 })
                             }
                         }

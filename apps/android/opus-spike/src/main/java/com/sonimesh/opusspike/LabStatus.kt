@@ -24,6 +24,11 @@ internal data class LabSessionConfig(
     val transport: LabTransport,
 )
 
+internal enum class LabSignalState(val label: String) {
+    Silent("no capturable audio"),
+    Detected("signal detected"),
+}
+
 /** Process-local, main-thread status for the interactive lab. */
 internal object LabStatus {
     private const val MAX_MESSAGE_CHARS = 256
@@ -40,12 +45,16 @@ internal object LabStatus {
     private val sentPacketObservers = mutableSetOf<(Long?) -> Unit>()
     private var sessionConfig: LabSessionConfig? = null
     private val sessionObservers = mutableSetOf<(LabSessionConfig?) -> Unit>()
+    private var signalState: LabSignalState? = null
+    private val signalObservers = mutableSetOf<(LabSignalState?) -> Unit>()
 
     fun serviceStarted(usage: LabCaptureUsage, bitrate: OpusBitrate, transport: LabTransport = LabTransport.Adb) {
         captureUsage = usage
         captureAdmission.serviceStarted()
         sessionConfig = LabSessionConfig(usage, bitrate, transport)
+        signalState = null
         sessionObservers.toList().forEach { it(sessionConfig) }
+        signalObservers.toList().forEach { it(null) }
     }
 
     fun serviceFinished() {
@@ -60,6 +69,20 @@ internal object LabStatus {
 
     fun removeSessionConfig(observer: (LabSessionConfig?) -> Unit) {
         sessionObservers.remove(observer)
+    }
+
+    fun observeSignal(observer: (LabSignalState?) -> Unit) {
+        signalObservers.add(observer)
+        observer(signalState)
+    }
+
+    fun removeSignal(observer: (LabSignalState?) -> Unit) {
+        signalObservers.remove(observer)
+    }
+
+    fun publishSignal(value: LabSignalState?) {
+        signalState = value
+        signalObservers.toList().forEach { it(value) }
     }
 
     fun observe(observer: (String) -> Unit) {
@@ -131,6 +154,7 @@ internal object LabStatus {
             appendLine("Session request: ${config.usage.label}, ${config.bitrate.bitsPerSecond / 1_000} kbps target")
             appendLine("Transport: ${config.transport.label}")
         }
+        appendLine("Capture signal: ${signalState?.label ?: "—"}")
         appendLine("Sender queue drops: ${senderQueueDrops ?: "—"}")
         appendLine("Media packets sent: ${sentPackets ?: "—"}")
         appendLine("Encoded payload average: ${encoderRate?.let { "$it kbps" } ?: "—"}")
