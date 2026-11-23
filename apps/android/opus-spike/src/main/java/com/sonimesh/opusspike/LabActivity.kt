@@ -19,6 +19,7 @@ import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
 import android.widget.Toast
+import com.sonimesh.sender.encoder.OpusBitrate
 import com.sonimesh.sender.protocol.PairingQr
 import com.journeyapps.barcodescanner.ScanOptions
 import kotlin.math.PI
@@ -33,6 +34,7 @@ class LabActivity : Activity() {
     private var pendingPin = ""
     private var pendingHost = "127.0.0.1"
     private var pendingUsage = LabCaptureUsage.All
+    private var pendingBitrate = OpusBitrate.STANDARD
     private var importedInvitation: ByteArray? = null
     private var importedPin = ""
     private var importedHost = ""
@@ -43,6 +45,7 @@ class LabActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var senderQueueDrops: TextView
     private lateinit var usage: Spinner
+    private lateinit var bitrate: Spinner
     private val statusObserver: (String) -> Unit = { status.text = "Status: $it" }
     private val dropsObserver: (Long?) -> Unit = { count ->
         senderQueueDrops.text = if (count == null) "Sender queue drops: —" else "Sender queue drops: $count"
@@ -56,6 +59,8 @@ class LabActivity : Activity() {
         pendingPin = savedInstanceState?.getString("pendingPin") ?: ""
         pendingHost = savedInstanceState?.getString("pendingHost") ?: "127.0.0.1"
         pendingUsage = LabCaptureUsage.fromValue(savedInstanceState?.getString("pendingUsage"))
+        val defaultBitrate = OpusBitrate.STANDARD.bitsPerSecond
+        pendingBitrate = OpusBitrate.fromBitsPerSecond(savedInstanceState?.getInt("pendingBitrate", defaultBitrate) ?: defaultBitrate)
         savedInstanceState?.getString("importedInvitation")?.let { encoded ->
             runCatching { labHexToBytes(encoded) }.onSuccess { bytes ->
                 importedInvitation = bytes
@@ -90,6 +95,18 @@ class LabActivity : Activity() {
             setSelection(LabCaptureUsage.entries.indexOf(selected))
         }
         layout.addView(usage)
+        layout.addView(TextView(this).apply { text = "Opus target bitrate for the next capture" })
+        bitrate = Spinner(this).apply {
+            contentDescription = "Opus target bitrate for capture"
+            adapter = ArrayAdapter(
+                this@LabActivity,
+                android.R.layout.simple_spinner_dropdown_item,
+                OpusBitrate.entries.map { "${it.bitsPerSecond / 1_000} kbps" },
+            )
+            val selected = OpusBitrate.fromBitsPerSecond(savedInstanceState?.getInt("selectedBitrate", defaultBitrate) ?: defaultBitrate)
+            setSelection(OpusBitrate.entries.indexOf(selected))
+        }
+        layout.addView(bitrate)
         layout.addView(Button(this).apply {
             text = "Start ADB capture"
             setOnClickListener { startCapture(false) }
@@ -210,6 +227,8 @@ class LabActivity : Activity() {
         outState.putString("pendingHost", pendingHost)
         outState.putString("pendingUsage", pendingUsage.value)
         outState.putString("selectedUsage", selectedUsage().value)
+        outState.putInt("pendingBitrate", pendingBitrate.bitsPerSecond)
+        outState.putInt("selectedBitrate", selectedBitrate().bitsPerSecond)
         importedInvitation?.let { outState.putString("importedInvitation", labHex(it)) }
         outState.putString("importedPin", importedPin)
         outState.putString("importedHost", importedHost)
@@ -255,6 +274,7 @@ class LabActivity : Activity() {
         udpMode = udp
         pairedMode = paired
         pendingUsage = selectedUsage()
+        pendingBitrate = selectedBitrate()
         val needsPermission = checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED
         if (!LabStatus.captureAdmission.begin(needsPermission)) {
             showCaptureBusy()
@@ -272,6 +292,9 @@ class LabActivity : Activity() {
 
     private fun selectedUsage(): LabCaptureUsage =
         LabCaptureUsage.entries.getOrElse(usage.selectedItemPosition) { LabCaptureUsage.All }
+
+    private fun selectedBitrate(): OpusBitrate =
+        OpusBitrate.entries.getOrElse(bitrate.selectedItemPosition) { OpusBitrate.STANDARD }
 
     private fun showCaptureBusy() {
         Toast.makeText(this, "Capture is already starting, running, or stopping.", Toast.LENGTH_SHORT).show()
@@ -363,6 +386,7 @@ class LabActivity : Activity() {
                     putExtra("udpAddress", pendingAddress)
                     putExtra("pairedMode", pairedMode)
                     putExtra("captureUsage", pendingUsage.value)
+                    putExtra("bitrate", pendingBitrate.bitsPerSecond)
                     if (pairedMode) {
                         putExtra("pairedPin", pendingPin)
                         putExtra("pairedHost", pendingHost)

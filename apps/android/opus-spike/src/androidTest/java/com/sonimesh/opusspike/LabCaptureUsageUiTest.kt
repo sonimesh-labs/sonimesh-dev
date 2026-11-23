@@ -9,28 +9,43 @@ import org.junit.Test
 
 class LabCaptureUsageUiTest {
     @Test
+    fun bitrateChoiceDefaultsTo96AndSurvivesActivityRecreation() {
+        ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                val spinner = findSpinner(activity.window.decorView, "Opus target bitrate for capture")
+                assertEquals("96 kbps", spinner.selectedItem)
+                spinner.setSelection(2)
+            }
+            scenario.recreate()
+            scenario.onActivity { activity ->
+                assertEquals("128 kbps", findSpinner(activity.window.decorView, "Opus target bitrate for capture").selectedItem)
+            }
+        }
+    }
+
+    @Test
     fun usageChoiceSurvivesActivityRecreation() {
         ActivityScenario.launch(LabActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
-                val spinner = findUsage(activity.window.decorView)
+                val spinner = findSpinner(activity.window.decorView, "Playback usage for capture")
                 assertEquals(0, spinner.selectedItemPosition)
                 spinner.setSelection(2)
             }
             scenario.recreate()
             scenario.onActivity { activity ->
-                assertEquals(2, findUsage(activity.window.decorView).selectedItemPosition)
+                assertEquals(2, findSpinner(activity.window.decorView, "Playback usage for capture").selectedItemPosition)
             }
         }
     }
 
-    private fun findUsage(view: View): Spinner {
-        if (view is Spinner && view.contentDescription == "Playback usage for capture") return view
+    private fun findSpinner(view: View, description: String): Spinner {
+        if (view is Spinner && view.contentDescription == description) return view
         if (view is ViewGroup) {
             for (index in 0 until view.childCount) {
-                val found = runCatching { findUsage(view.getChildAt(index)) }.getOrNull()
+                val found = runCatching { findSpinner(view.getChildAt(index), description) }.getOrNull()
                 if (found != null) return found
             }
         }
-        error("capture usage selector not found")
+        error("selector not found: $description")
     }
 }

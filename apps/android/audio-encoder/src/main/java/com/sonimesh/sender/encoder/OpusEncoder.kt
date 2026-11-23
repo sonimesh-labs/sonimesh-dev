@@ -5,6 +5,15 @@ import android.media.MediaFormat
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
+enum class OpusBitrate(val bitsPerSecond: Int) {
+    LOW(64_000), STANDARD(96_000), HIGH(128_000);
+
+    companion object {
+        fun fromBitsPerSecond(value: Int): OpusBitrate =
+            entries.firstOrNull { it.bitsPerSecond == value } ?: STANDARD
+    }
+}
+
 /** A single-threaded, non-blocking encoder for the controlled audio lab. */
 class OpusEncoder internal constructor(private val codec: EncoderCodec) : AutoCloseable {
     private var endSubmitted = false
@@ -53,11 +62,12 @@ class OpusEncoder internal constructor(private val codec: EncoderCodec) : AutoCl
         const val FRAME_SAMPLES = 1_920
         const val MAX_PACKET_BYTES = 1_148
 
-        fun create(): OpusEncoder {
+        @JvmOverloads
+        fun create(bitrate: OpusBitrate = OpusBitrate.STANDARD): OpusEncoder {
             val codec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_OPUS)
             try {
                 val format = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_OPUS, 48_000, 2)
-                format.setInteger(MediaFormat.KEY_BIT_RATE, 96_000)
+                format.setInteger(MediaFormat.KEY_BIT_RATE, bitrate.bitsPerSecond)
                 codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
                 codec.start()
                 return OpusEncoder(AndroidEncoderCodec(codec))

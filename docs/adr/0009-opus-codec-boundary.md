@@ -47,6 +47,11 @@ owns capture, packet queues, scheduling, and shutdown; the encoder only accepts
 complete frames (or a padded final frame) and polls codec output without blocking.
 This is an experimental component, not yet an encoder selection or a change to
 the capture-only main application. Device and end-to-end validation remain open.
+The Android lab may request 64, 96, or 128 kb/s from MediaCodec for a new
+capture; 96 kb/s remains the default. This changes neither the negotiated frame
+shape nor the packet-size limit. The requested bitrate is an encoder setting,
+not a guarantee of actual bitrate, quality, device support, or network usage.
+The selection is fixed for a capture and can be changed for the next session.
 
 Keep `sonimesh-audio::FrameDecoder` as the stable boundary. A future optional
 `opus-codec` feature may add a `FrameDecoder` implementation only after:

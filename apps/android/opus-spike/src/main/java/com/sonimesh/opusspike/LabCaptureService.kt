@@ -19,6 +19,7 @@ import android.os.Looper
 import android.os.PowerManager
 import android.os.SystemClock
 import android.util.Log
+import com.sonimesh.sender.encoder.OpusBitrate
 import com.sonimesh.sender.encoder.OpusEncoder
 import com.sonimesh.sender.pairing.PairedConnection
 import com.sonimesh.sender.pairing.PairingClient
@@ -92,13 +93,14 @@ class LabCaptureService : Service() {
             val udpMode = intent.getBooleanExtra("udpMode", false)
             val pairedMode = intent.getBooleanExtra("pairedMode", false)
             val usage = LabCaptureUsage.fromValue(intent.getStringExtra("captureUsage"))
+            val bitrate = OpusBitrate.fromBitsPerSecond(intent.getIntExtra("bitrate", OpusBitrate.STANDARD.bitsPerSecond))
             val destination = if (udpMode) parseLabAddress(intent.getStringExtra("udpAddress") ?: "")
                 ?: error("invalid desktop address") else null
             pendingInvitation = if (pairedMode) intent.getByteArrayExtra("pairedInvitation")
                 ?: labInvitation(intent.getStringExtra("pairedPin") ?: "",
                     intent.getStringExtra("pairedHost") ?: "127.0.0.1") else null
             val invitation = pendingInvitation
-            Thread({ capture(current, udpMode, destination, invitation, usage) }, "audio-lab-capture").start()
+            Thread({ capture(current, udpMode, destination, invitation, usage, bitrate) }, "audio-lab-capture").start()
             workerStarted = true
             pendingInvitation = null
         } catch (error: Exception) {
@@ -116,6 +118,7 @@ class LabCaptureService : Service() {
         destination: java.net.Inet4Address?,
         invitation: ByteArray?,
         usage: LabCaptureUsage,
+        bitrate: OpusBitrate,
     ) {
         var record: AudioRecord? = null
         var codec: OpusEncoder? = null
@@ -193,7 +196,7 @@ class LabCaptureService : Service() {
                 .setBufferSizeInBytes(maxOf(minimum, 3_840)).build()
             record = activeRecord
             check(activeRecord.state == AudioRecord.STATE_INITIALIZED && activeRecord.sampleRate == 48_000 && activeRecord.channelCount == 2)
-            val activeCodec = OpusEncoder.create()
+            val activeCodec = OpusEncoder.create(bitrate)
             codec = activeCodec
             activeRecord.startRecording()
             captureStarted = true

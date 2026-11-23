@@ -10,6 +10,14 @@ import org.junit.Test
 
 class OpusEncoderUnitTest {
     @Test
+    fun bitrateChoicesUseTheStandardDefaultForUnknownValues() {
+        assertEquals(OpusBitrate.LOW, OpusBitrate.fromBitsPerSecond(64_000))
+        assertEquals(OpusBitrate.STANDARD, OpusBitrate.fromBitsPerSecond(96_000))
+        assertEquals(OpusBitrate.HIGH, OpusBitrate.fromBitsPerSecond(128_000))
+        assertEquals(OpusBitrate.STANDARD, OpusBitrate.fromBitsPerSecond(0))
+    }
+
+    @Test
     fun inputBackpressureAndEndOfStreamPreserveFrames() {
         val codec = FakeCodec()
         val encoder = OpusEncoder(codec)

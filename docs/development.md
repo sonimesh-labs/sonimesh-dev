@@ -112,6 +112,13 @@ The lab's capture usage selector applies to the next capture session: **All**
 includes media, game and unknown usage, while the other choices select one
 usage. The test tone uses media usage. Android and the source application still
 control whether playback can be captured; the selector does not select apps.
+The lab also lets the operator request 64, 96 (default), or 128 kbps Opus for
+the next capture. This is a MediaCodec target, not a measured or guaranteed
+bitrate; changing the selector does not reconfigure an active capture.
+On 2026-11-23, separate API 37 x86_64 emulator paired-capture runs selected 64
+and 128 kbps and decoded 154 and 150 frames respectively on the software
+listener, with peaks 0.100 and 0.093. These are interoperability checks, not
+actual bitrate, quality, physical-device, or latency measurements.
 **Sender queue drops** counts encoded packets discarded locally when the bounded
 sender queue is full, for the current or most recent capture. It does not count
 network loss or confirm playback; it resets when the next capture starts.

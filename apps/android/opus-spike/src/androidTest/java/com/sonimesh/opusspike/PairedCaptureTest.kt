@@ -10,9 +10,11 @@ import android.view.ViewGroup
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.Button
 import android.widget.EditText
+import android.widget.Spinner
 import android.widget.TextView
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
@@ -45,8 +47,25 @@ class PairedCaptureTest {
         )
         val pin = args.getString("pairingSpkiHex")
         ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+            args.getString("bitrateKbps")?.let { requested ->
+                val position = listOf("64", "96", "128").indexOf(requested)
+                require(position >= 0) { "unsupported test bitrate" }
+                scenario.onActivity { activity ->
+                    val spinner = find(activity.window.decorView) {
+                        it is Spinner && it.contentDescription == "Opus target bitrate for capture"
+                    } as Spinner
+                    spinner.setSelection(position)
+                }
+                instrumentation.waitForIdleSync()
+            }
             scenario.onActivity { activity ->
                 val root = activity.window.decorView
+                args.getString("bitrateKbps")?.let { requested ->
+                    val spinner = find(root) {
+                        it is Spinner && it.contentDescription == "Opus target bitrate for capture"
+                    } as Spinner
+                    assertEquals("$requested kbps", spinner.selectedItem)
+                }
                 args.getString("mediaHost")?.let { mediaHost ->
                     (find(root) { it is EditText && it.contentDescription == "Desktop IPv4 address for UDP" } as EditText)
                         .setText(mediaHost)
