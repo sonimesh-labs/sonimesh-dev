@@ -113,6 +113,22 @@ class LabStatusTest {
     }
 
     @Test
+    fun longStatusMessagesAreBoundedForTheScreenAndEvidence() {
+        ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                LabStatus.publish("Status: ${"x".repeat(400)}")
+                val status = requireNotNull(findStatusText(activity.window.decorView))
+                assertTrue(status.text.length <= 256)
+                assertTrue(status.text.endsWith("..."))
+                val evidence = LabStatus.copyableEvidence()
+                assertTrue(evidence.contains("Status: "))
+                assertTrue(evidence.length < 400)
+                LabStatus.publish("Idle")
+            }
+        }
+    }
+
+    @Test
     fun copyLabEvidenceIncludesBoundedStatusCounters() {
         ActivityScenario.launch(LabActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
@@ -287,5 +303,15 @@ class LabStatusTest {
             }
         }
         return false
+    }
+
+    private fun findStatusText(view: View): TextView? {
+        if (view is TextView && view.text.toString().startsWith("Status: ")) return view
+        if (view is ViewGroup) {
+            for (index in 0 until view.childCount) {
+                findStatusText(view.getChildAt(index))?.let { return it }
+            }
+        }
+        return null
     }
 }
