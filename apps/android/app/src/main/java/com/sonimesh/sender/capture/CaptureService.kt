@@ -24,6 +24,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import com.sonimesh.sender.R
+import com.sonimesh.sender.MainActivity
 
 class CaptureService : Service() {
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -413,6 +414,7 @@ class CaptureService : Service() {
             .setContentTitle(getString(R.string.capture_notification_title))
             .setContentText(getString(R.string.capture_notification_text))
             .setSubText(getString(R.string.capture_notification_duration, 0))
+            .setContentIntent(openActivityPendingIntent())
             .setOngoing(true)
             .addAction(
                 NotificationCompat.Action.Builder(
@@ -438,6 +440,15 @@ class CaptureService : Service() {
         builder.setSubText(getString(R.string.capture_notification_duration, seconds))
         manager.notify(NOTIFICATION_ID, builder.build())
     }
+
+    private fun openActivityPendingIntent(): PendingIntent = PendingIntent.getActivity(
+        this,
+        OPEN_ACTIVITY_REQUEST_CODE,
+        Intent(this, MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        },
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )
 
     private fun stopPendingIntent(): PendingIntent = PendingIntent.getService(
         this,
@@ -543,6 +554,7 @@ class CaptureService : Service() {
         private const val NOTIFICATION_CHANNEL_ID = "sonimesh-capture"
         private const val NOTIFICATION_ID = 1001
         private const val STOP_REQUEST_CODE = 1002
+        private const val OPEN_ACTIVITY_REQUEST_CODE = 1003
         private const val NO_SIGNAL_DURATION_MS = 2_000L
         private const val CAPTURE_POLL_INTERVAL_MS = 5L
         private const val CAPTURE_READ_TIMEOUT_MS = 5_000L
