@@ -614,13 +614,6 @@ mod tests {
         assert!(matches!(
             scheduler.poll_control_once().unwrap(),
             Some(crate::ControlSessionPoll::Processed {
-                replied: false,
-                write: None,
-            })
-        ));
-        assert!(matches!(
-            scheduler.poll_control_once().unwrap(),
-            Some(crate::ControlSessionPoll::Processed {
                 replied: true,
                 write: Some(sonimesh_network::UntrustedControlWrite::Pending),
             })
@@ -631,10 +624,24 @@ mod tests {
         ));
         assert!(matches!(
             scheduler.poll_control_once().unwrap(),
+            Some(crate::ControlSessionPoll::Processed {
+                replied: true,
+                write: Some(sonimesh_network::UntrustedControlWrite::Complete),
+            })
+        ));
+        assert!(matches!(
+            scheduler.poll_control_once().unwrap(),
             Some(crate::ControlSessionPoll::Empty)
         ));
         let (_, channel) = scheduler.detach_control().unwrap();
-        let reply = decode_control_frame(&channel.output).unwrap();
+        let hello_len = u32::from_be_bytes(channel.output[..4].try_into().unwrap()) as usize + 4;
+        let hello_reply = decode_control_frame(&channel.output[..hello_len]).unwrap();
+        assert_eq!(hello_reply.request_id, 1);
+        assert!(matches!(
+            hello_reply.payload,
+            Some(envelope::Payload::Hello(_))
+        ));
+        let reply = decode_control_frame(&channel.output[hello_len..]).unwrap();
         assert_eq!(reply.request_id, 2);
         assert!(matches!(
             reply.payload,

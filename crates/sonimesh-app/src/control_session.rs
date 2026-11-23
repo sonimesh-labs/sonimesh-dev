@@ -11,7 +11,7 @@ use sonimesh_network::{
     PinnedServerChannel, UntrustedControlError, UntrustedControlPoll, UntrustedControlStream,
     UntrustedControlWrite,
 };
-use sonimesh_protocol::{ControlFrameError, Envelope, ErrorCode, StreamState};
+use sonimesh_protocol::{ControlFrameError, Envelope, ErrorCode, Hello, StreamState, envelope};
 
 use crate::{
     ControlReply, ControlSessionToken, ControlStreamAction, ControlToMixerError,
@@ -209,9 +209,8 @@ where
 
     /// Polls and processes at most one control envelope.
     ///
-    /// Lifecycle replies are correlated with the request ID. Hello, no-op, and
-    /// ignored envelopes produce no reply because version one has no dedicated
-    /// negotiation acknowledgement payload.
+    /// Hello and lifecycle replies are correlated with the request ID. No-op
+    /// and ignored envelopes do not produce a reply.
     ///
     /// # Errors
     ///
@@ -291,6 +290,21 @@ fn reply_for_action(
     request_id: u64,
 ) -> Result<Option<Envelope>, ControlFrameError> {
     let (identity, state, detail) = match action {
+        ControlStreamAction::Negotiated(negotiated) => {
+            return Ok(Some(Envelope {
+                protocol_version: negotiated.version(),
+                request_id,
+                payload: Some(envelope::Payload::Hello(Hello {
+                    supported_versions: vec![negotiated.version()],
+                    capabilities: negotiated
+                        .capabilities()
+                        .iter()
+                        .map(|cap| *cap as i32)
+                        .collect(),
+                    display_name: "SoniMesh".to_owned(),
+                })),
+            }));
+        }
         ControlStreamAction::Start { request, .. } => {
             (request.identity, StreamState::Streaming, "stream started")
         }
@@ -302,9 +316,7 @@ fn reply_for_action(
         ControlStreamAction::Stop { identity, .. } => {
             (identity, StreamState::Stopped, "stream stopped")
         }
-        ControlStreamAction::Negotiated(_)
-        | ControlStreamAction::Noop
-        | ControlStreamAction::Ignored => return Ok(None),
+        ControlStreamAction::Noop | ControlStreamAction::Ignored => return Ok(None),
     };
     ControlReply::stream_status(identity, state, detail)?
         .into_envelope(request_id)
@@ -463,7 +475,10 @@ mod tests {
             request_id: 1,
             payload: Some(envelope::Payload::Hello(Hello {
                 supported_versions: vec![CONTROL_PROTOCOL_VERSION],
-                capabilities: vec![Capability::FrameDuration10Ms as i32],
+                capabilities: vec![
+                    Capability::FrameDuration10Ms as i32,
+                    Capability::FrameDuration20Ms as i32,
+                ],
                 display_name: "test sender".to_owned(),
             })),
         }
@@ -529,8 +544,8 @@ mod tests {
         assert_eq!(
             control.poll_once().unwrap(),
             ControlSessionPoll::Processed {
-                replied: false,
-                write: None,
+                replied: true,
+                write: Some(UntrustedControlWrite::Complete),
             }
         );
         assert_eq!(
@@ -541,7 +556,15 @@ mod tests {
             }
         );
         let io = control.into_inner();
-        let reply = decode_control_frame(&io.output).unwrap();
+        let hello_len = u32::from_be_bytes(io.output[..4].try_into().unwrap()) as usize + 4;
+        let hello_reply = decode_control_frame(&io.output[..hello_len]).unwrap();
+        assert_eq!(hello_reply.request_id, 1);
+        let Some(envelope::Payload::Hello(hello)) = hello_reply.payload else {
+            panic!("expected a hello reply");
+        };
+        assert_eq!(hello.supported_versions, [CONTROL_PROTOCOL_VERSION]);
+        assert_eq!(hello.capabilities, [Capability::FrameDuration10Ms as i32]);
+        let reply = decode_control_frame(&io.output[hello_len..]).unwrap();
         let Some(envelope::Payload::StreamStatus(status)) = reply.payload else {
             panic!("expected a stream status reply");
         };

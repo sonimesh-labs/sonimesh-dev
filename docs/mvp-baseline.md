@@ -81,8 +81,8 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   remains owned by the control-session coordinator;
 - a shell-neutral `DesktopControlSession` that attaches the existing bounded
   framed transport to `DesktopReceiverOwner`, executes one authenticated
-  envelope per poll, and returns correlated lifecycle status/error envelopes;
-  hello acknowledgement, a live Tauri shell, and platform output evidence remain
+  envelope per poll, and returns a correlated Hello response and lifecycle
+  status/error envelopes; a live Tauri shell and platform output evidence remain
   open;
 - a bounded `DesktopReceiverOwner::tick_media` operation that couples one UDP
   poll with one decode/PLC decision and reports both outcomes to the low-rate

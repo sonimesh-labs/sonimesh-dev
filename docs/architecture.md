@@ -48,9 +48,9 @@ output backend. A
 owner. It polls the existing bounded control framing, executes at most one
 envelope per tick, and sends correlated `StreamStatus` replies for start,
 rotation, and stop actions. Owner rejections become correlated `ControlError`
-replies and do not retire the authenticated transport. Hello, no-op, and
-ignored envelopes remain reply-less because version one has no negotiation
-acknowledgement payload. The adapter exposes explicit flush/closed states and
+replies and do not retire the authenticated transport. A successful Hello gets a
+correlated Hello response containing the negotiated version and capabilities;
+no-op and ignored envelopes remain reply-less. The adapter exposes explicit flush/closed states and
 does not enter the realtime output callback. A
 future Tauri shell can delegate to this owner without moving UI code into the
 realtime path. The projection excludes pairing IDs,

@@ -69,13 +69,15 @@ capability policy.
 
 For a bidirectional capability exchange, the authenticated Android sender
 sends its Hello first. After the desktop coordinator accepts that Hello, the
-desktop transport owner sends its own Hello with the same request ID; each side
-computes the known-capability intersection from the other side's advertised
-capabilities. A sender must not treat writing its Hello alone as successful
+desktop transport owner sends a Hello with the same request ID and the selected
+version and common capabilities. This lets the sender independently confirm the
+intersection without advertising capabilities outside the accepted negotiation.
+A sender must not treat writing its Hello alone as successful
 negotiation. The isolated Android pairing client uses the Protobuf Java runtime
 for its bounded Hello wire fields; camera, persistent trust and stream lifecycle
-remain separate integration work. The desktop Hello response is currently wired
-only by the pairing lab, not by the product desktop UI. An API 37 emulator
+remain separate integration work. The pairing lab and shell-neutral desktop
+control session both return a Hello; the product desktop UI is not yet wired to
+the latter. An API 37 emulator
 connected over ADB reverse completed the exchange with the Rust desktop
 coordinator and both selected the 20 ms capability. This is not physical WLAN
 or product integration evidence.
