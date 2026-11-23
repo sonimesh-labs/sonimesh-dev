@@ -39,6 +39,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -429,26 +430,30 @@ private fun CaptureSourceSelector(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             style = MaterialTheme.typography.labelMedium,
         )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            CaptureSource.entries.forEach { source ->
-                OutlinedButton(
-                    modifier = Modifier.weight(1f),
-                    enabled = enabled,
-                    onClick = { onSourceSelected(source) },
-                    shape = TileShape,
-                    colors = if (source == selectedSource) {
-                        ButtonDefaults.outlinedButtonColors(
-                            containerColor = MaterialTheme.colorScheme.primaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                        )
-                    } else {
-                        ButtonDefaults.outlinedButtonColors()
-                    },
-                ) {
-                    Text(source.label())
+        CaptureSource.entries.chunked(2).forEach { sources ->
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                sources.forEach { source ->
+                    OutlinedButton(
+                        modifier = Modifier
+                            .weight(1f)
+                            .semantics { selected = source == selectedSource },
+                        enabled = enabled,
+                        onClick = { onSourceSelected(source) },
+                        shape = TileShape,
+                        colors = if (source == selectedSource) {
+                            ButtonDefaults.outlinedButtonColors(
+                                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                                contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                            )
+                        } else {
+                            ButtonDefaults.outlinedButtonColors()
+                        },
+                    ) {
+                        Text(source.label())
+                    }
                 }
             }
         }
@@ -668,6 +673,7 @@ private fun CaptureSource.label(): String = when (this) {
     CaptureSource.Media -> stringResource(R.string.capture_source_media)
     CaptureSource.Game -> stringResource(R.string.capture_source_game)
     CaptureSource.Unknown -> stringResource(R.string.capture_source_unknown)
+    CaptureSource.AllSupported -> stringResource(R.string.capture_source_all_supported)
 }
 
 private fun formatCount(value: Long): String = String.format(Locale.US, "%,d", value)

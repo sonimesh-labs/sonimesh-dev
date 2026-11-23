@@ -20,7 +20,7 @@ possible.
 | Evidence publication | Duration, frames, silent reads, and errors at no more than 2 Hz |
 | PCM persistence | None; samples are scanned for silence and discarded |
 | Transport | None; no encoder, keys, pairing, or UDP |
-| Playback usage selection | One operator-selected group per session: Media, Game, or Other (`USAGE_MEDIA`, `USAGE_GAME`, or `USAGE_UNKNOWN`) |
+| Playback usage selection | Media, Game, Other, or all three together (`USAGE_MEDIA`, `USAGE_GAME`, and `USAGE_UNKNOWN`) per session |
 | Silence wording | "No capturable audio detected"; no source-specific cause |
 
 ## Required run matrix
@@ -62,7 +62,8 @@ replacement for a device-side capture result.
    observation.
 2. Start from `Ready to request playback capture consent`. For every capture
    attempt, use fresh MediaProjection consent, choose the required **Media**,
-   **Game**, or **Other** usage group, select only the required source category,
+   **Game**, **Other**, or **All supported**; select the individual group
+   when a scenario requires isolating a source category,
    and record the displayed `CaptureFormat` fields: sample rate,
    channels, `audioSource`, channel mask, actual buffer, platform-minimum
    buffer. Record the configured read block separately as the fixed 20 ms,

@@ -32,11 +32,17 @@ the screen retained the observed 48 kHz stereo format, buffer sizes, and final
 frame counters. This silent emulator run checks the display and lifecycle path,
 not physical-device capture or audio playback.
 
-Before starting, the capture-only screen lets the operator choose one playback
-usage group: **Media**, **Game**, or **Other**. The choice is passed to the
+Before starting, the capture-only screen lets the operator choose **Media**,
+**Game**, **Other**, or **All supported** (the three groups together).
+Media remains the default. The choice is passed to the
 foreground service for that capture session only; it does not identify the
 source application, override Android capture policy, or change the observed
-format reported by the service. The default is **Media**.
+format reported by the service.
+On 2026-11-23, an API 37 x86_64 emulator accepted **All supported** and began
+capturing after fresh consent; the screen showed the selected usage, increasing
+silent-frame counts, and zero read errors. No playback source was exercised in
+that run, so it does not verify signal capture for each usage or on a physical
+device.
 
 ### Android Opus interoperability lab
 

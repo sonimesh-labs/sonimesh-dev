@@ -196,9 +196,10 @@ The application must handle the platform returning silence after authorization
 loss or when the source is not capturable. MediaProjection.Callback.onStop() is
 the authoritative signal for projection-session invalidation.
 
-The capture-only prototype lets the operator select one usage group before each
-session: `USAGE_MEDIA`, `USAGE_GAME`, or `USAGE_UNKNOWN`. This narrows the
-playback-capture request for that session; it does not identify the source
+The capture-only prototype lets the operator select Media, Game, Other, or
+All supported usages before each session. The last option requests
+`USAGE_MEDIA`, `USAGE_GAME`, and `USAGE_UNKNOWN` together. This selection
+filters the playback-capture request for that session; it does not identify the source
 application or override the source application's capture policy. The observed
 `AudioRecord` format remains the authoritative local measurement.
 

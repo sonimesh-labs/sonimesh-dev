@@ -360,8 +360,8 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   otherwise). Replies survive the untrusted TCP control framing in both
   directions; no TLS, pairing, or key material is involved.
 - a capture-only Kotlin/Compose Android phase 0A bootstrap with a per-session
-  playback-usage selector for Media, Game, and Other (`USAGE_MEDIA`,
-  `USAGE_GAME`, and `USAGE_UNKNOWN`), plus direct,
+  playback-usage selector for Media, Game, Other, or all three together
+  (`USAGE_MEDIA`, `USAGE_GAME`, and `USAGE_UNKNOWN`), plus direct,
   non-persisted MediaProjection consent transfer, a media-projection foreground
   service, a fixed PCM16 AudioRecord read buffer, low-rate state publication
   that rebases after a nonnegative clock regression, bounded evidence counters

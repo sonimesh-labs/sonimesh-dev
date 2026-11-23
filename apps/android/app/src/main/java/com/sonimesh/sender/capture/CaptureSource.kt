@@ -21,6 +21,15 @@ enum class CaptureSource(
         wireValue = "unknown",
         displayName = "Other",
         usages = listOf(AudioAttributes.USAGE_UNKNOWN),
+    ),
+    AllSupported(
+        wireValue = "all_supported",
+        displayName = "All supported",
+        usages = listOf(
+            AudioAttributes.USAGE_MEDIA,
+            AudioAttributes.USAGE_GAME,
+            AudioAttributes.USAGE_UNKNOWN,
+        ),
     );
 
     companion object {
