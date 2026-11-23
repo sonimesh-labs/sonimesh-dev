@@ -89,6 +89,9 @@ existing prototype until the production gate is met.
 The UDP and local audio labs reset native decoder state when the worker retires a
 playout epoch, including output recovery. A reset failure is surfaced on the
 next decode or PLC operation; it is not silently treated as a successful reset.
+The isolated prototype may also exercise this decoder with the shell-neutral
+desktop scheduler, protected loopback UDP, and an in-memory output. Such a test
+does not enable the binding in the core or establish device playback evidence.
 
 ## Reliability and security implications
 

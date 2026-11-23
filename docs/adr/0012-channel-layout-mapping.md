@@ -29,6 +29,9 @@ Add a bounded `ChannelMapper` in `sonimesh-audio` and a
 - a larger input layout is folded by output-index modulo and each destination
   receives the average of its contributing input channels;
 - the mapper rejects frame-unaligned input and insufficient output storage;
+- a decoded source queue block is sized in interleaved samples: negotiated
+  frames per packet multiplied by source channels. Admission and rotation use
+  that same budget before installing the format adapter;
 - all source scratch storage is allocated before stream start;
 - the realtime adapter initializes its complete output, performs only bounded
   copies and arithmetic, and emits silence for an out-of-bound callback;

@@ -89,7 +89,7 @@ struct StreamRecord {
     membership_slot: Option<usize>,
     source_format: SourcePcmFormat,
     source_queue_capacity: usize,
-    /// Frames per source block the pump was compiled and admitted for.
+    /// Interleaved samples per source block the pump was admitted for.
     samples_per_block: usize,
     gain: GainControlHandle,
     counters: Option<Arc<StreamCounters>>,
@@ -172,7 +172,7 @@ where
     /// Admits one decoded stream through per-stream format adaptation.
     ///
     /// The stream's source block size `S` must equal the negotiated
-    /// frame-duration and sample-rate budget. On success the returned source
+    /// frame-duration, sample-rate, and channel-count budget. On success the returned source
     /// producer is installed into `pipeline`, the adapter pump is owned by the
     /// session and advanced by [`Self::pump_all`], and the stream occupies the
     /// returned slot after the next render.
@@ -192,11 +192,11 @@ where
     where
         P: ReceiverPcmProducerInstaller<S>,
     {
-        let expected = frames_per_block(request)?;
+        let source_format = source_format_of(request)?;
+        let expected = samples_per_block(request)?;
         if expected != S {
             return Err(MixerStreamSessionError::SourceBlockMismatch { expected });
         }
-        let source_format = source_format_of(request)?;
         if self.slot_for(request.identity).is_some() {
             return Err(MixerStreamSessionError::DuplicateStream(request.identity));
         }
@@ -391,8 +391,8 @@ where
         previous: MediaStreamIdentity,
         next: StreamStartRequest,
     ) -> Result<StartedMixerStream, MixerStreamSessionError> {
-        let next_budget = frames_per_block(next)?;
         let next_format = source_format_of(next)?;
+        let next_budget = samples_per_block(next)?;
         let record_slot = self
             .slot_for(previous)
             .ok_or(MixerStreamSessionError::UnknownStream(previous))?;
@@ -720,7 +720,7 @@ pub enum MixerStreamSessionError {
     SourceFormat(SourcePcmFormatError),
     /// The pipeline's source block size differs from the frame budget.
     SourceBlockMismatch {
-        /// Frames per block required by the negotiated frame duration and rate.
+        /// Interleaved samples required by the negotiated format and duration.
         expected: usize,
     },
     /// A stream with this identity is already admitted.
@@ -758,7 +758,7 @@ impl fmt::Display for MixerStreamSessionError {
             }
             Self::SourceBlockMismatch { expected } => write!(
                 formatter,
-                "mixer session pipeline block size must be {expected} frames"
+                "mixer session pipeline block size must be {expected} samples"
             ),
             Self::DuplicateStream(identity) => {
                 write!(
@@ -824,14 +824,17 @@ fn source_format_of(
         .map_err(MixerStreamSessionError::SourceFormat)
 }
 
-fn frames_per_block(request: StreamStartRequest) -> Result<usize, MixerStreamSessionError> {
+fn samples_per_block(request: StreamStartRequest) -> Result<usize, MixerStreamSessionError> {
     let numerator = u64::from(request.frame_duration_ms)
         .checked_mul(u64::from(request.sample_rate_hz))
         .ok_or(MixerStreamSessionError::FrameBudgetOverflow)?;
     if numerator % 1_000 != 0 {
         return Err(MixerStreamSessionError::NonIntegralFrameBlock);
     }
-    usize::try_from(numerator / 1_000).map_err(|_| MixerStreamSessionError::FrameBudgetOverflow)
+    let samples = (numerator / 1_000)
+        .checked_mul(u64::from(request.channels))
+        .ok_or(MixerStreamSessionError::FrameBudgetOverflow)?;
+    usize::try_from(samples).map_err(|_| MixerStreamSessionError::FrameBudgetOverflow)
 }
 #[cfg(test)]
 mod tests {

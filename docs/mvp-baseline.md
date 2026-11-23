@@ -97,6 +97,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   mixer queues. A real UDP loopback test observes non-silent output from that
   composition, using a test decoder and output. Control, media and pump results
   are independent; the caller still owns playout timing and packet polling;
+  the native Opus prototype additionally exercises scheduled protected UDP,
+  decoding, PLC, and an in-memory output together on loopback. This is software
+  integration evidence, not a platform host or audible playback result;
   `mark_control_lost` centralizes the follow-up lifecycle transition and arms
   reconnect grace after a closed or failed control poll. `tick_at(now_ms)` then
   services grace and output-health observation in the same low-rate
