@@ -94,6 +94,22 @@ describe('DiagnosticsPanel', () => {
     vi.unstubAllGlobals()
   })
 
+  it('reports denied clipboard access without throwing', async () => {
+    vi.stubGlobal('navigator', { clipboard: { writeText: vi.fn().mockRejectedValue(new Error('denied')) } })
+
+    const wrapper = mount(DiagnosticsPanel, {
+      props: {
+        metrics: metrics(),
+        preview: true,
+      },
+    })
+
+    await wrapper.findAll('.export-section button')[2].trigger('click')
+
+    expect(wrapper.text()).toContain('Clipboard access was denied in this preview.')
+    vi.unstubAllGlobals()
+  })
+
   it('labels synthetic metrics as preview values instead of measurements', () => {
     const wrapper = mount(DiagnosticsPanel, {
       props: {
