@@ -508,6 +508,26 @@ describe('desktop output probe', () => {
     wrapper.unmount()
   })
 
+  it('falls back to copying the invitation when system sharing is unavailable', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'share', { configurable: true, value: undefined })
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [] })
+      .mockResolvedValueOnce({ running: true, status: 'Starting listener…', invitation: null })
+      .mockResolvedValueOnce({ running: true, status: 'Waiting for Android', invitation: '01ab' })
+    window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+    const wrapper = mountStoppedProbe()
+    await flushPromises()
+    vi.useFakeTimers()
+    await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
+    await vi.advanceTimersByTimeAsync(1000)
+    await wrapper.findAll('button').find(button => button.text() === 'Share invitation')!.trigger('click')
+    await flushPromises()
+    expect(writeText).toHaveBeenCalledWith('01ab')
+    expect(wrapper.text()).toContain('invitation copied instead')
+    wrapper.unmount()
+  })
+
   it('explains when invitation copying is unavailable', async () => {
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined })
     const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [] })
