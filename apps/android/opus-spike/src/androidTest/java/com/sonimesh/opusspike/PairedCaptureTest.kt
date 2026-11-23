@@ -77,17 +77,19 @@ class PairedCaptureTest {
                     containsStatus(activity.window.decorView, "Status: Capturing audio"),
                 )
             }
+            var disconnectStatus: String? = null
             if (expectDisconnect) {
                 instrumentation.sendStatus(1, Bundle().apply { putString("pairedCapture", "ready") })
-                var disconnected = false
                 val disconnectDeadline = SystemClock.elapsedRealtime() + 20_000
-                while (!disconnected && SystemClock.elapsedRealtime() < disconnectDeadline) {
+                while (disconnectStatus == null && SystemClock.elapsedRealtime() < disconnectDeadline) {
                     scenario.onActivity { activity ->
-                        disconnected = containsStatus(activity.window.decorView, "Status: Desktop connection ended.")
+                        val root = activity.window.decorView
+                        disconnectStatus = listOf("Status: Desktop connection ended.", "Status: UDP sending failed.")
+                            .firstOrNull { containsStatus(root, it) }
                     }
-                    if (!disconnected) SystemClock.sleep(100)
+                    if (disconnectStatus == null) SystemClock.sleep(100)
                 }
-                assertTrue("desktop disconnect was not reported", disconnected)
+                assertTrue("desktop disconnect was not reported", disconnectStatus != null)
             } else {
                 SystemClock.sleep(3_000)
                 scenario.onActivity { activity ->
@@ -107,7 +109,11 @@ class PairedCaptureTest {
                 if (!stopped) SystemClock.sleep(100)
             }
             assertTrue("capture service did not stop", stopped)
-            if (!expectDisconnect) {
+            if (expectDisconnect) {
+                scenario.onActivity { activity ->
+                    assertTrue("disconnect reason was not retained", containsStatus(activity.window.decorView, requireNotNull(disconnectStatus)))
+                }
+            } else {
                 scenario.onActivity { activity ->
                     assertTrue("capture did not publish completion", containsStatus(activity.window.decorView, "Status: Capture stopped."))
                 }

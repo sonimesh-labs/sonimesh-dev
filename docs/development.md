@@ -117,6 +117,14 @@ retains it and continues polling output. It pauses briefly if neither side can
 progress; after two seconds without accepting that frame, it stops the session
 and asks the user to retry. Capture continuity during codec stalls is not
 guaranteed because the platform capture buffer can overflow.
+If the desktop disappears during capture, the lab stops when it observes a
+control-channel closure or a UDP send failure. The first observed failure is
+shown; check the listener and network, then start a fresh capture. UDP send
+success alone does not prove that the desktop is reachable. On 2026-11-23 an
+API 37 x86_64 emulator reported a UDP send failure and stopped after the desktop
+listener process was terminated; a subsequent separate instrumentation run with
+a restarted listener, its new SPKI, and fresh consent decoded 153 frames with a
+nonzero PCM peak. This does not demonstrate automatic reconnect or physical WLAN.
 **Stop capture** requests the desktop to stop the stream. This mode uses the
 same fixed public lab invitation and ADB-reversed control connection. The
 Android sender first gives its encoder a bounded opportunity to flush pending

@@ -353,7 +353,7 @@ class LabCaptureService : Service() {
         } catch (error: Exception) {
             if (running.get()) {
                 Log.e("SoniMeshLab", "UDP sender failed", error)
-                handler.post { finishWith("UDP sending failed. Restart the lab session.") }
+                handler.post { finishWith("UDP sending failed. Check the network and desktop listener, then restart capture.") }
             }
         } finally {
             sealer.clear()
