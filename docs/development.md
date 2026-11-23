@@ -699,6 +699,10 @@ and output recovery state. These are software observations, not proof of audible
 playback. Media arrival and output recovery transitions are emitted promptly;
 the cumulative counters retain their five-second cadence. The last observations remain while waiting and clear on the next
 client attempt.
+When metrics are available, **Copy session evidence** copies a bounded text
+summary of the displayed status and counters without including the invitation or
+audio data. If clipboard access is unavailable, the visible metrics remain
+available for manual selection.
 For adaptive playout the observations also show the current target and range,
 smoothed arrival jitter, gated ticks and forced playouts. These values describe
 the current stream epoch: a decoder or jitter reset clears their history, while

@@ -61,6 +61,42 @@ async function copyInvitation() {
     invitationCopyMessage.value = 'Could not copy the invitation. Select the payload below instead.'
   }
 }
+
+function evidenceValue(value: unknown): string {
+  const text = value == null ? '-' : String(value)
+  return text.length <= 80 ? text : `${text.slice(0, 77)}...`
+}
+
+const labEvidenceMessage = ref<string | null>(null)
+
+async function copyLabEvidence() {
+  const metrics = lab.value.metrics
+  if (!metrics) return
+  const lines = [
+    'SoniMesh paired audio lab',
+    `Status: ${evidenceValue(lab.value.status)}`,
+    `Session: ${lab.value.sessionActive ? 'active' : 'last reported'}`,
+    `Accepted packets: ${evidenceValue(metrics.packets)}`,
+    `Packets rejected: ${evidenceValue(metrics.rejected)}`,
+    `Decoded frames: ${evidenceValue(metrics.decoded)}`,
+    `Decoded peak: ${evidenceValue(metrics.peak)}`,
+    `Concealed frames: ${evidenceValue(metrics.plc)}`,
+    `Decode errors: ${evidenceValue(metrics.decodeErrors)}`,
+    `Buffered frames: ${evidenceValue(metrics.buffered)}`,
+    `Output: ${evidenceValue(metrics.output)}`,
+  ]
+  if (metrics.media) lines.push(`Media arrival: ${evidenceValue(metrics.media)}`)
+  if (metrics.late != null) lines.push(`Late packets: ${evidenceValue(metrics.late)}`)
+  if (metrics.resyncDropped != null) lines.push(`Frames dropped on resync: ${evidenceValue(metrics.resyncDropped)}`)
+  if (metrics.playout) lines.push(`Playout mode: ${evidenceValue(metrics.playout)}`)
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable')
+    await navigator.clipboard.writeText(lines.join('\n'))
+    labEvidenceMessage.value = 'Session evidence copied.'
+  } catch {
+    labEvidenceMessage.value = 'Could not copy session evidence. Select the visible metrics instead.'
+  }
+}
 const labHost = ref('127.0.0.1')
 const androidHost = ref('')
 const suggestedHost = ref<string | null>(null)
@@ -356,6 +392,8 @@ onBeforeUnmount(() => { disposed = true; labRequest++; clearTimeout(timer); clea
           </template>
           <div><dt>Output</dt><dd>{{ !lab.sessionActive && lab.metrics.output !== 'stopped' ? 'Last reported: ' : '' }}{{ lab.metrics.output === 'recovering' ? 'Recovering' : lab.metrics.output === 'active' ? 'Active' : lab.metrics.output === 'stopped' ? 'Stopped' : 'Software check' }}</dd></div>
         </dl>
+        <button type="button" class="preview-action" @click="copyLabEvidence">Copy session evidence</button>
+        <p v-if="labEvidenceMessage" role="status">{{ labEvidenceMessage }}</p>
         <p class="preview-note">{{ lab.sessionActive ? 'Updated at session start, on media or output state changes, and every five seconds.' : lab.metrics.output === 'stopped' ? 'Final update after the stop drain.' : 'Last available update; the session may have ended before its final report.' }} Packet and decode counts and peak are cumulative; they do not confirm audible playback.</p>
         <p v-if="lab.metrics.media" class="preview-note">Media arrival reports accepted packets within the past two seconds; a gap does not identify its cause.</p>
         <p v-if="lab.metrics.late != null" class="preview-note">Late packets missed their playout deadline; resync drops are buffered frames discarded when the jitter buffer resynchronizes.</p>

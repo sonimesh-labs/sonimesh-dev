@@ -504,6 +504,33 @@ describe('desktop output probe', () => {
     wrapper.unmount()
   })
 
+  it('copies bounded session evidence without the invitation', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    const metrics = {
+      packets: '120', rejected: '3', decoded: '115', peak: '0.250', plc: '2',
+      decodeErrors: '1', buffered: '4', output: 'active', media: 'receiving',
+      late: '5', resyncDropped: '1', playout: 'fixed', adaptive: null,
+    }
+    const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [] })
+      .mockResolvedValueOnce({ running: true, status: 'Starting listener…', invitation: null })
+      .mockResolvedValueOnce({ running: true, sessionActive: true, status: 'Session active', invitation: 'secret-invitation', metrics })
+    window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+    const wrapper = mountStoppedProbe()
+    await flushPromises()
+    vi.useFakeTimers()
+    await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
+    await vi.advanceTimersByTimeAsync(1000)
+    await wrapper.findAll('button').find(button => button.text() === 'Copy session evidence')!.trigger('click')
+    await flushPromises()
+    const copied = writeText.mock.calls[0][0] as string
+    expect(copied).toContain('Accepted packets: 120')
+    expect(copied).toContain('Output: active')
+    expect(copied).not.toContain('secret-invitation')
+    expect(wrapper.text()).toContain('Session evidence copied.')
+    wrapper.unmount()
+  })
+
   it('shows live and final session observations, then clears them on the next client', async () => {
     const metrics = { packets: '120', rejected: '3', decoded: '115', peak: '0.250', plc: '2', decodeErrors: '1', buffered: '4', output: 'recovering', late: '9007199254740993', resyncDropped: '4', media: 'receiving' }
     const finalMetrics = { ...metrics, decoded: '120', output: 'stopped', late: '9007199254740994', resyncDropped: '5', media: 'interrupted' }
