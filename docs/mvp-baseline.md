@@ -175,6 +175,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   packet is buffered, then resets an empty stream after three consecutive PLC
   frames to permit fresh audio after an extended interruption. A real UDP and
   native Opus test covers the software path; physical listening remains open.
+  After a control-loop stall of at least 160 ms, the paired lab also drops
+  accumulated media in bounded batches and resumes with later packets, avoiding
+  persistent software backlog; audio already handed to output cannot be recalled.
   A seeded property walk and a byte-driven libFuzzer target drive in-order
   deliveries, duplicates, tampered ciphertext, retired-epoch packets, and
   rotations against an independent replay oracle and counter model,

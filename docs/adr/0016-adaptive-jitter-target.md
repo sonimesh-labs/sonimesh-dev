@@ -60,6 +60,11 @@ including when its jitter buffer is empty. After three consecutive concealed
 frames, it resets an empty stream on the next deadline and waits for a fresh
 packet; buffered later frames are still reached through PLC. This lab policy is
 not an adaptive jitter target or a measured quality guarantee.
+When live playout's control loop stalls for at least eight 20 ms frames, the
+lab resets stream-local playout, drains the accumulated UDP in batches of at
+most 32 polls, and starts buffering again only after the socket becomes empty.
+Control and status work continue during draining. Audio already delivered to
+the platform cannot be recalled; recovery requires subsequent fresh packets.
 
 The paired audio lab may explicitly select an experimental Balanced adaptive
 target instead of its default fixed scheduling policy. It treats arrivals as

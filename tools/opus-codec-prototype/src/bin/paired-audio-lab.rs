@@ -356,6 +356,8 @@ const STATUS_PERIOD: Duration = Duration::from_secs(5);
 const STOP_DRAIN_QUIET: Duration = Duration::from_millis(160);
 const STOP_DRAIN_LIMIT: Duration = Duration::from_millis(500);
 const MAX_CONSECUTIVE_PLC: u8 = 3;
+const MAX_MEDIA_POLLS: usize = 32;
+const PLAYOUT_STALL: Duration = Duration::from_millis(160);
 type Receiver = UdpReceiverPipeline<ObservedDecoder, 8, 1_148, SAMPLES>;
 type PreparedReceiver = (Receiver, RealtimePcmConsumer<SAMPLES>, Arc<StreamCounters>);
 
@@ -532,6 +534,20 @@ fn poll_media(receiver: &mut Receiver) -> LabResult<Option<UdpPollOutcome>> {
         ) => Ok(None),
         Err(error) => Err(error.into()),
     }
+}
+
+fn drain_stale_media(receiver: &mut Receiver) -> LabResult<bool> {
+    for _ in 0..MAX_MEDIA_POLLS {
+        if matches!(poll_media(receiver)?, Some(UdpPollOutcome::Empty)) {
+            receiver.hard_resynchronize();
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn playout_stalled(active: bool, gap: Option<Duration>) -> bool {
+    active && gap.is_some_and(|elapsed| elapsed >= PLAYOUT_STALL)
 }
 
 fn next_playout_deadline(deadline: Instant, now: Instant) -> Instant {
@@ -834,11 +850,23 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
     let mut schedule = ScheduleObservations::default();
     let mut resyncs = ResyncObservations::default();
     let mut previous_loop = None;
+    let mut draining_stale = false;
     let mut previous_decision: Option<(Instant, Duration)> = None;
     let mut playing = false;
     let decoded_peak = Arc::new(AtomicU32::new(0));
     let deadline = Instant::now() + Duration::from_secs(40);
     while receiver.is_some() || Instant::now() < deadline {
+        let loop_start = Instant::now();
+        let loop_gap = previous_loop.map(|previous| loop_start.duration_since(previous));
+        previous_loop = Some(loop_start);
+        if !draining_stale && playout_stalled(next_playout.is_some(), loop_gap) {
+            if let Some(pipeline) = &mut receiver {
+                pipeline.hard_resynchronize();
+                next_playout = None;
+                consecutive_plc = 0;
+                draining_stale = true;
+            }
+        }
         match framed.poll()? {
             UntrustedControlPoll::Frame(frame) => {
                 let action = match coordinator.accept(control_token, &frame) {
@@ -955,7 +983,9 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                         }
                     }
                     ControlStreamAction::Stop { token, identity } => {
-                        if let (Some(pipeline), Some(metrics)) = (&mut receiver, &counters) {
+                        if let (false, Some(pipeline), Some(metrics)) =
+                            (draining_stale, &mut receiver, &counters)
+                        {
                             drain_stop_tail(
                                 pipeline,
                                 metrics,
@@ -1038,28 +1068,29 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
             UntrustedControlPoll::Empty => {}
         }
         if let (Some(pipeline), Some(metrics)) = (&mut receiver, &counters) {
-            let loop_start = Instant::now();
-            let loop_gap = previous_loop.map(|previous| loop_start.duration_since(previous));
-            previous_loop = Some(loop_start);
             if playback.monitor(pipeline, &mut retry_at) {
                 next_playout = None;
                 consecutive_plc = 0;
             }
-            for _ in 0..32 {
-                match poll_media(pipeline)? {
-                    None => continue,
-                    Some(UdpPollOutcome::Empty) => break,
-                    Some(UdpPollOutcome::Processed { admission, .. }) => {
-                        if matches!(admission, InsertOutcome::Resynchronized { .. }) {
-                            resyncs.observe_admission(
-                                admission,
-                                loop_gap,
-                                previous_decision,
-                                Instant::now(),
-                            );
-                        }
-                        if next_playout.is_none() && retry_at.is_none() {
-                            next_playout = Some(Instant::now() + options.startup_buffer);
+            if draining_stale {
+                draining_stale = !drain_stale_media(pipeline)?;
+            } else {
+                for _ in 0..MAX_MEDIA_POLLS {
+                    match poll_media(pipeline)? {
+                        None => continue,
+                        Some(UdpPollOutcome::Empty) => break,
+                        Some(UdpPollOutcome::Processed { admission, .. }) => {
+                            if matches!(admission, InsertOutcome::Resynchronized { .. }) {
+                                resyncs.observe_admission(
+                                    admission,
+                                    loop_gap,
+                                    previous_decision,
+                                    Instant::now(),
+                                );
+                            }
+                            if next_playout.is_none() && retry_at.is_none() {
+                                next_playout = Some(Instant::now() + options.startup_buffer);
+                            }
                         }
                     }
                 }
@@ -1135,6 +1166,69 @@ mod tests {
         AudioOutput, OutputConfig, OutputDeviceId, OutputDeviceInfo, OutputError, OutputHealth,
         RenderSource, SampleFormat,
     };
+
+    #[test]
+    fn stalled_playout_discards_udp_backlog_and_decodes_fresh_audio() {
+        use sonimesh_protocol::{MediaKeyContext, MediaSealer};
+        use std::net::UdpSocket;
+
+        assert!(!playout_stalled(true, Some(Duration::from_millis(159))));
+        assert!(!playout_stalled(false, Some(Duration::from_secs(1))));
+        assert!(playout_stalled(true, Some(Duration::from_millis(160))));
+        let secret = SessionSecret::new([7; 32]);
+        let context = MediaKeyContext::new(1, 1, 0, MediaDirection::AndroidToDesktop).unwrap();
+        let metrics = Arc::new(StreamCounters::default());
+        let (producer, mut consumer) = realtime_pcm_queue::<SAMPLES>(8).unwrap();
+        let worker = StreamDecodeWorker::new_for_opus(
+            ObservedDecoder {
+                decoder: lab_decoder::Decoder::new().unwrap(),
+                peak: Arc::new(AtomicU32::new(0)),
+            },
+            producer,
+            0,
+            OpusFrameConfig::new(48_000, 2, 20).unwrap(),
+        )
+        .unwrap();
+        let mut receiver = Receiver::bind_with_worker(
+            "127.0.0.1:0".parse().unwrap(),
+            &secret,
+            context,
+            worker,
+            Arc::clone(&metrics),
+        )
+        .unwrap();
+        let mut encoder =
+            opus::Encoder::new(48_000, opus::Channels::Stereo, opus::Application::Audio).unwrap();
+        let mut payload = [0_u8; 1_148];
+        let size = encoder
+            .encode_float(&[0.25; SAMPLES], &mut payload)
+            .unwrap();
+        let mut sealer = MediaSealer::new(&secret, context).unwrap();
+        let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let address = receiver.local_addr().unwrap();
+        for sequence in 0..40 {
+            let packet = sealer.seal(0, sequence * 960, &payload[..size]).unwrap();
+            sender.send_to(&packet.datagram, address).unwrap();
+        }
+        receiver.hard_resynchronize();
+        assert!(!drain_stale_media(&mut receiver).unwrap());
+        assert!(drain_stale_media(&mut receiver).unwrap());
+        assert_eq!(receiver.jitter_len(), 0);
+        assert_eq!(metrics.snapshot().authenticated_packets, 40);
+        let packet = sealer.seal(0, 40 * 960, &payload[..size]).unwrap();
+        sender.send_to(&packet.datagram, address).unwrap();
+        assert!(matches!(
+            poll_media(&mut receiver).unwrap(),
+            Some(UdpPollOutcome::Processed { .. })
+        ));
+        assert!(matches!(
+            receiver.decode_next().unwrap(),
+            DecodeStep::Decoded { .. }
+        ));
+        let mut samples = [0.0; SAMPLES];
+        consumer.pop_into(&mut samples);
+        assert!(samples.iter().any(|sample| sample.abs() > 0.001));
+    }
 
     #[test]
     fn stop_drain_decodes_buffered_and_late_udp_frames() {
