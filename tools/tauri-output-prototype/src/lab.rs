@@ -240,7 +240,14 @@ fn read_output(output: impl Read + Send + 'static, sender: SyncSender<String>) {
             if part.last() == Some(&b'\n') {
                 if !oversized {
                     let text = String::from_utf8_lossy(&line);
-                    let _ = sender.try_send(text.trim_end_matches(['\r', '\n']).to_owned());
+                    // Apply bounded backpressure instead of silently dropping a
+                    // state transition when the UI is between snapshot polls.
+                    if sender
+                        .send(text.trim_end_matches(['\r', '\n']).to_owned())
+                        .is_err()
+                    {
+                        break;
+                    }
                 }
                 line.clear();
                 oversized = false;
@@ -704,6 +711,29 @@ mod tests {
         assert_eq!(metrics.decoded, "12");
         assert_eq!(metrics.output, "stopped");
         assert!(!snapshot.session_active);
+    }
+
+    #[test]
+    fn read_output_preserves_events_when_snapshot_polling_is_delayed() {
+        use std::io::Cursor;
+        use std::time::Duration;
+
+        let (sender, events) = mpsc::sync_channel(1);
+        read_output(
+            Cursor::new("READY\nRESULT client connected\nRESULT pairing verified\n"),
+            sender,
+        );
+
+        for expected in [
+            "READY",
+            "RESULT client connected",
+            "RESULT pairing verified",
+        ] {
+            assert_eq!(
+                events.recv_timeout(Duration::from_secs(1)).unwrap(),
+                expected
+            );
+        }
     }
 
     #[test]
