@@ -67,9 +67,12 @@ class LabActivity : Activity() {
         sessionConfig.text = if (config == null) "Session request: —" else
             "Session request: ${config.usage.label}, ${config.bitrate.bitsPerSecond / 1_000} kbps target"
     }
+    private val labPreferences by lazy { getPreferences(MODE_PRIVATE) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val savedInvitation = savedInstanceState?.getString("importedInvitation")
+            ?: labPreferences.getString(PREF_INVITATION, null)
         tone = lastNonConfigurationInstance as? AudioTrack
         udpMode = savedInstanceState?.getBoolean("udpMode") ?: false
         pairedMode = savedInstanceState?.getBoolean("pairedMode") ?: false
@@ -79,11 +82,15 @@ class LabActivity : Activity() {
         pendingUsage = LabCaptureUsage.fromValue(savedInstanceState?.getString("pendingUsage"))
         val defaultBitrate = OpusBitrate.STANDARD.bitsPerSecond
         pendingBitrate = OpusBitrate.fromBitsPerSecond(savedInstanceState?.getInt("pendingBitrate", defaultBitrate) ?: defaultBitrate)
-        savedInstanceState?.getString("importedInvitation")?.let { encoded ->
+        savedInvitation?.let { encoded ->
             runCatching { labHexToBytes(encoded) }.onSuccess { bytes ->
                 importedInvitation = bytes
-                importedPin = savedInstanceState.getString("importedPin") ?: ""
-                importedHost = savedInstanceState.getString("importedHost") ?: ""
+                importedPin = savedInstanceState?.getString("importedPin")
+                    ?: labPreferences.getString(PREF_PIN, "")
+                    ?: ""
+                importedHost = savedInstanceState?.getString("importedHost")
+                    ?: labPreferences.getString(PREF_HOST, "")
+                    ?: ""
             }
         }
         val layout = LinearLayout(this).apply {
@@ -194,6 +201,10 @@ class LabActivity : Activity() {
             }
         })
         layout.addView(Button(this).apply {
+            text = "Clear saved lab setup"
+            setOnClickListener { clearSavedLabSetup() }
+        })
+        layout.addView(Button(this).apply {
             text = "Start UDP capture"
             setOnClickListener { startCapture(true) }
         })
@@ -202,7 +213,7 @@ class LabActivity : Activity() {
             hint = "Paste desktop SPKI_HEX"
             contentDescription = "Paired lab desktop SPKI"
             setSingleLine(true)
-            setText(savedInstanceState?.getString("pin") ?: "")
+            setText(savedInstanceState?.getString("pin") ?: labPreferences.getString(PREF_PIN, ""))
         }
         layout.addView(pin)
         layout.addView(Button(this).apply {
@@ -215,7 +226,7 @@ class LabActivity : Activity() {
             contentDescription = "Paired control IPv4 address"
             keyListener = DigitsKeyListener.getInstance("0123456789.")
             setSingleLine(true)
-            setText(savedInstanceState?.getString("host") ?: "127.0.0.1")
+            setText(savedInstanceState?.getString("host") ?: labPreferences.getString(PREF_HOST, "127.0.0.1"))
         }
         layout.addView(host)
         layout.addView(Button(this).apply {
@@ -262,6 +273,9 @@ class LabActivity : Activity() {
         })
         setContentView(ScrollView(this).apply { addView(layout) })
         handleIncomingInvitation(intent)
+        if (savedInstanceState == null && importedInvitation != null && intent?.action != Intent.ACTION_SEND) {
+            LabStatus.publish("Restored the last lab setup. Check the UDP address before starting.")
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -340,6 +354,10 @@ class LabActivity : Activity() {
             }
             pendingPin = entered
             pendingHost = parsedHost
+            labPreferences.edit()
+                .putString(PREF_PIN, entered)
+                .putString(PREF_HOST, parsedHost)
+                .apply()
         }
         udpMode = udp
         pairedMode = paired
@@ -468,11 +486,19 @@ class LabActivity : Activity() {
                 val decodedPin = labHex(decoded.desktopTlsSpki)
                 pin.setText(decodedPin)
                 host.setText(decoded.controlHost)
-                if (useAddressForUdp && udpAddress != null) address.setText(udpAddress.hostAddress)
+                if (useAddressForUdp && udpAddress != null) {
+                    address.setText(udpAddress.hostAddress)
+                    labPreferences.edit().putString("desktopAddress", udpAddress.hostAddress).apply()
+                }
                 importedInvitation?.fill(0)
                 importedInvitation = raw
                 importedPin = decodedPin
                 importedHost = decoded.controlHost
+                labPreferences.edit()
+                    .putString(PREF_INVITATION, labHex(raw))
+                    .putString(PREF_PIN, decodedPin)
+                    .putString(PREF_HOST, decoded.controlHost)
+                    .apply()
                 retained = true
                 invitation.setText("")
                 LabStatus.publish(
@@ -490,6 +516,24 @@ class LabActivity : Activity() {
             if (!retained) raw?.fill(0)
         }
         return retained
+    }
+
+    private fun clearSavedLabSetup() {
+        importedInvitation?.fill(0)
+        importedInvitation = null
+        importedPin = ""
+        importedHost = ""
+        labPreferences.edit()
+            .remove(PREF_INVITATION)
+            .remove(PREF_PIN)
+            .remove(PREF_HOST)
+            .remove("desktopAddress")
+            .apply()
+        invitation.setText("")
+        pin.setText("")
+        host.setText("127.0.0.1")
+        address.setText(DEFAULT_LAB_ADDRESS)
+        LabStatus.publish("Saved lab setup cleared.")
     }
 
     internal fun applyScannedInvitation(contents: String?, startAfterScan: Boolean = false) {
@@ -619,3 +663,7 @@ internal fun buildLabEvidenceShareIntent(evidence: String): Intent =
         type = "text/plain"
         putExtra(Intent.EXTRA_TEXT, evidence)
     }
+
+private const val PREF_INVITATION = "labInvitation"
+private const val PREF_PIN = "labPin"
+private const val PREF_HOST = "labHost"

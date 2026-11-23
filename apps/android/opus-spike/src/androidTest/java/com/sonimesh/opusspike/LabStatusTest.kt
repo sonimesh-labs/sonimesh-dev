@@ -212,6 +212,32 @@ class LabStatusTest {
     }
 
     @Test
+    fun appliedInvitationRestoresAcrossActivityRecreationAndCanBeCleared() {
+        val pin = "ab".repeat(32)
+        val invitation = labHex(labInvitation(pin, "127.0.0.1"))
+        ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                requireNotNull(findTextField(activity.window.decorView, "Lab invitation payload")).text = invitation
+                requireNotNull(findButton(activity.window.decorView, "Apply invitation payload")).performClick()
+                assertTrue(findTextField(activity.window.decorView, "Paired lab desktop SPKI")?.text?.toString() == pin)
+                assertTrue(hasStatus(activity.window.decorView, "Status: Invitation applied."))
+            }
+            scenario.recreate()
+            scenario.onActivity { activity ->
+                assertTrue(findTextField(activity.window.decorView, "Paired lab desktop SPKI")?.text?.toString() == pin)
+                assertTrue(findTextField(activity.window.decorView, "Paired control IPv4 address")?.text?.toString() == "127.0.0.1")
+                requireNotNull(findButton(activity.window.decorView, "Clear saved lab setup")).performClick()
+                assertTrue(findTextField(activity.window.decorView, "Paired lab desktop SPKI")?.text?.isEmpty() == true)
+                assertTrue(hasStatus(activity.window.decorView, "Status: Saved lab setup cleared."))
+            }
+            scenario.recreate()
+            scenario.onActivity { activity ->
+                assertTrue(findTextField(activity.window.decorView, "Paired lab desktop SPKI")?.text?.isEmpty() == true)
+            }
+        }
+    }
+
+    @Test
     fun failedServiceStartSurvivesActivityRecreation() {
         ActivityScenario.launch(LabActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
