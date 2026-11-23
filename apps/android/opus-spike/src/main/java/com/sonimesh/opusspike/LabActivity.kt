@@ -11,10 +11,12 @@ import android.media.projection.MediaProjectionManager
 import android.os.Bundle
 import android.text.method.DigitsKeyListener
 import android.view.WindowInsets
+import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.Spinner
 import android.widget.TextView
 import com.sonimesh.sender.protocol.PairingQr
 import kotlin.math.PI
@@ -28,6 +30,7 @@ class LabActivity : Activity() {
     private var pendingAddress = DEFAULT_LAB_ADDRESS
     private var pendingPin = ""
     private var pendingHost = "127.0.0.1"
+    private var pendingUsage = LabCaptureUsage.All
     private var importedInvitation: ByteArray? = null
     private var importedPin = ""
     private var importedHost = ""
@@ -36,6 +39,7 @@ class LabActivity : Activity() {
     private lateinit var pin: EditText
     private lateinit var host: EditText
     private lateinit var status: TextView
+    private lateinit var usage: Spinner
     private val statusObserver: (String) -> Unit = { status.text = "Status: $it" }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -45,6 +49,7 @@ class LabActivity : Activity() {
         pendingAddress = savedInstanceState?.getString("pendingAddress") ?: DEFAULT_LAB_ADDRESS
         pendingPin = savedInstanceState?.getString("pendingPin") ?: ""
         pendingHost = savedInstanceState?.getString("pendingHost") ?: "127.0.0.1"
+        pendingUsage = LabCaptureUsage.fromValue(savedInstanceState?.getString("pendingUsage"))
         savedInstanceState?.getString("importedInvitation")?.let { encoded ->
             runCatching { labHexToBytes(encoded) }.onSuccess { bytes ->
                 importedInvitation = bytes
@@ -65,6 +70,18 @@ class LabActivity : Activity() {
         })
         status = TextView(this).apply { accessibilityLiveRegion = android.view.View.ACCESSIBILITY_LIVE_REGION_POLITE }
         layout.addView(status)
+        layout.addView(TextView(this).apply { text = "Playback usage for the next capture" })
+        usage = Spinner(this).apply {
+            contentDescription = "Playback usage for capture"
+            adapter = ArrayAdapter(
+                this@LabActivity,
+                android.R.layout.simple_spinner_dropdown_item,
+                LabCaptureUsage.entries.map { it.label },
+            )
+            val selected = LabCaptureUsage.fromValue(savedInstanceState?.getString("selectedUsage"))
+            setSelection(LabCaptureUsage.entries.indexOf(selected))
+        }
+        layout.addView(usage)
         layout.addView(Button(this).apply {
             text = "Start ADB capture"
             setOnClickListener { startCapture(false) }
@@ -155,6 +172,8 @@ class LabActivity : Activity() {
         outState.putString("pendingAddress", pendingAddress)
         outState.putString("pendingPin", pendingPin)
         outState.putString("pendingHost", pendingHost)
+        outState.putString("pendingUsage", pendingUsage.value)
+        outState.putString("selectedUsage", selectedUsage().value)
         importedInvitation?.let { outState.putString("importedInvitation", labHex(it)) }
         outState.putString("importedPin", importedPin)
         outState.putString("importedHost", importedHost)
@@ -195,10 +214,14 @@ class LabActivity : Activity() {
         }
         udpMode = udp
         pairedMode = paired
+        pendingUsage = selectedUsage()
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 1)
         } else requestProjection()
     }
+
+    private fun selectedUsage(): LabCaptureUsage =
+        LabCaptureUsage.entries.getOrElse(usage.selectedItemPosition) { LabCaptureUsage.All }
 
     private fun applyInvitation() {
         var raw: ByteArray? = null
@@ -253,6 +276,7 @@ class LabActivity : Activity() {
                 putExtra("udpMode", udpMode)
                 putExtra("udpAddress", pendingAddress)
                 putExtra("pairedMode", pairedMode)
+                putExtra("captureUsage", pendingUsage.value)
                 if (pairedMode) {
                     putExtra("pairedPin", pendingPin)
                     putExtra("pairedHost", pendingHost)

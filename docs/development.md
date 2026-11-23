@@ -91,6 +91,10 @@ latency, persistent trust, or production UI evidence. The interactive audio lab
 also has a **Start paired UDP capture** mode: start `paired-audio-lab` without
 `--require-tone`, paste its printed SPKI_HEX in the app, select that mode,
 grant capture consent, and play a capturable source or use **Toggle test tone**.
+The lab's capture usage selector applies to the next capture session: **All**
+includes media, game and unknown usage, while the other choices select one
+usage. The test tone uses media usage. Android and the source application still
+control whether playback can be captured; the selector does not select apps.
 **Stop capture** requests the desktop to stop the stream. This mode uses the
 same fixed public lab invitation and ADB-reversed control connection. The
 Android sender first gives its already encoded, bounded UDP queue a short time

@@ -8,7 +8,6 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
-import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioPlaybackCaptureConfiguration
 import android.media.AudioRecord
@@ -77,13 +76,14 @@ class LabCaptureService : Service() {
             }, handler)
             val udpMode = intent.getBooleanExtra("udpMode", false)
             val pairedMode = intent.getBooleanExtra("pairedMode", false)
+            val usage = LabCaptureUsage.fromValue(intent.getStringExtra("captureUsage"))
             val destination = if (udpMode) parseLabAddress(intent.getStringExtra("udpAddress") ?: "")
                 ?: error("invalid desktop address") else null
             pendingInvitation = if (pairedMode) intent.getByteArrayExtra("pairedInvitation")
                 ?: labInvitation(intent.getStringExtra("pairedPin") ?: "",
                     intent.getStringExtra("pairedHost") ?: "127.0.0.1") else null
             val invitation = pendingInvitation
-            Thread({ capture(current, udpMode, destination, invitation) }, "audio-lab-capture").start()
+            Thread({ capture(current, udpMode, destination, invitation, usage) }, "audio-lab-capture").start()
             pendingInvitation = null
         } catch (error: Exception) {
             pendingInvitation?.fill(0)
@@ -94,7 +94,13 @@ class LabCaptureService : Service() {
     }
 
     @SuppressLint("MissingPermission")
-    private fun capture(projection: MediaProjection, udpMode: Boolean, destination: java.net.Inet4Address?, invitation: ByteArray?) {
+    private fun capture(
+        projection: MediaProjection,
+        udpMode: Boolean,
+        destination: java.net.Inet4Address?,
+        invitation: ByteArray?,
+        usage: LabCaptureUsage,
+    ) {
         var record: AudioRecord? = null
         var codec: MediaCodec? = null
         var paired: PairedConnection? = null
@@ -155,10 +161,9 @@ class LabCaptureService : Service() {
                 }
             }
             connected = true
-            val captureConfig = AudioPlaybackCaptureConfiguration.Builder(projection)
-                .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
-                .addMatchingUsage(AudioAttributes.USAGE_GAME)
-                .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN).build()
+            val captureConfigBuilder = AudioPlaybackCaptureConfiguration.Builder(projection)
+            usage.usages.forEach(captureConfigBuilder::addMatchingUsage)
+            val captureConfig = captureConfigBuilder.build()
             val minimum = AudioRecord.getMinBufferSize(48_000, AudioFormat.CHANNEL_IN_STEREO, AudioFormat.ENCODING_PCM_16BIT)
             require(minimum in 1..262_144)
             val activeRecord = AudioRecord.Builder().setAudioPlaybackCaptureConfig(captureConfig)
