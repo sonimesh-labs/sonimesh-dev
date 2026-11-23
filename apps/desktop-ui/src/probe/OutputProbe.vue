@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import QRCode from 'qrcode'
 
 interface OutputDevice {
   label: string
@@ -27,6 +28,21 @@ interface LabMetrics {
 }
 interface LabSnapshot { running: boolean; status: string; invitation: string | null; metrics: LabMetrics | null; volume: number | null; muted: boolean | null }
 const lab = ref<LabSnapshot>({ running: false, status: 'Stopped', invitation: null, metrics: null, volume: null, muted: null })
+const invitationQr = ref<string | null>(null)
+const invitationQrError = ref(false)
+watch(() => lab.value.invitation, async (invitation, _previous, onCleanup) => {
+  let cancelled = false
+  onCleanup(() => { cancelled = true })
+  invitationQr.value = null
+  invitationQrError.value = false
+  if (!invitation) return
+  try {
+    const svg = await QRCode.toString(invitation.toUpperCase(), { type: 'svg', errorCorrectionLevel: 'M', margin: 4 })
+    if (!cancelled) invitationQr.value = `data:image/svg+xml,${encodeURIComponent(svg)}`
+  } catch {
+    if (!cancelled) invitationQrError.value = true
+  }
+})
 const labHost = ref('127.0.0.1')
 const androidHost = ref('')
 const suggestedHost = ref<string | null>(null)
@@ -242,9 +258,11 @@ onBeforeUnmount(() => { disposed = true; labRequest++; clearTimeout(timer) })
         <p class="preview-note">Updated at session start and every five seconds. Counts and peak are cumulative; they do not confirm audible playback.</p>
       </section>
       <template v-if="lab.invitation">
+        <img v-if="invitationQr" class="lab-invitation-qr" :src="invitationQr" alt="QR code for the public lab invitation" />
+        <p v-if="invitationQrError" class="command-error" role="alert">Could not display the QR code. Copy the invitation below instead.</p>
         <label for="lab-invitation">Lab invitation payload</label>
         <textarea id="lab-invitation" :value="lab.invitation" readonly rows="4" @focus="($event.target as HTMLTextAreaElement).select()" />
-        <p class="preview-note">Copy this payload into the Android audio lab and configure its UDP address separately.</p>
+        <p class="preview-note">Scan with the Android audio lab or copy this payload. Check its UDP address before capture.</p>
       </template>
     </section>
   </main>

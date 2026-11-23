@@ -133,6 +133,7 @@ describe('desktop output probe', () => {
     await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
     await vi.advanceTimersByTimeAsync(1000)
     expect((wrapper.get('#lab-invitation').element as HTMLTextAreaElement).value).toBe('01ab')
+    expect(wrapper.get('.lab-invitation-qr').attributes('src')).toMatch(/^data:image\/svg\+xml,/)
     expect(wrapper.text()).toContain('Waiting for Android')
     wrapper.unmount()
   })

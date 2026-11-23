@@ -371,6 +371,7 @@ button:focus-visible, select:focus-visible, a:focus-visible { outline: 3px solid
   font: inherit;
 }
 .probe-shell textarea { overflow-wrap: anywhere; resize: vertical; }
+.lab-invitation-qr { display: block; width: min(100%, 360px); height: auto; margin-top: 16px; image-rendering: pixelated; }
 .lab-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
 .lab-metrics div { min-width: 0; }
 .lab-metrics dt { font-size: 0.85em; }

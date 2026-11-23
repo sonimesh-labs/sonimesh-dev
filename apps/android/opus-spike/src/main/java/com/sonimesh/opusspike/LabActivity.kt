@@ -2,6 +2,7 @@ package com.sonimesh.opusspike
 
 import android.Manifest
 import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.AudioAttributes
@@ -105,6 +106,18 @@ class LabActivity : Activity() {
             setSingleLine(true)
         }
         layout.addView(invitation)
+        layout.addView(Button(this).apply {
+            text = "Scan lab invitation"
+            setOnClickListener {
+                try {
+                    startActivityForResult(Intent("com.google.zxing.client.android.SCAN").apply {
+                        putExtra("SCAN_MODE", "QR_CODE_MODE")
+                    }, 3)
+                } catch (_: ActivityNotFoundException) {
+                    LabStatus.publish("No compatible scanner found. Paste the lab invitation instead.")
+                }
+            }
+        })
         layout.addView(Button(this).apply {
             text = "Apply invitation payload"
             setOnClickListener { applyInvitation() }
@@ -274,6 +287,15 @@ class LabActivity : Activity() {
         }
     }
 
+    internal fun applyScannedInvitation(contents: String?) {
+        if (contents == null || contents.length > PairingQr.MAX_PAYLOAD_BYTES * 2) {
+            LabStatus.publish("Scan a valid lab invitation, or paste its payload.")
+            return
+        }
+        invitation.setText(contents)
+        applyInvitation(useAddressForUdp = true)
+    }
+
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == 1) {
@@ -289,6 +311,10 @@ class LabActivity : Activity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == 3) {
+            if (resultCode == RESULT_OK) applyScannedInvitation(data?.getStringExtra("SCAN_RESULT"))
+            return
+        }
         if (requestCode == 2 && resultCode == RESULT_OK && data != null) {
             startForegroundService(Intent(this, LabCaptureService::class.java).apply {
                 putExtra("resultCode", resultCode)

@@ -412,7 +412,13 @@ cargo build -p opus-codec-prototype --bin paired-audio-lab --features playback
 ~~~
 
 The probe expects `target/debug/paired-audio-lab.exe` in this checkout. Start the
-listener in the window and copy the displayed invitation to the Android audio lab.
+listener in the window and scan its lab invitation with the Android audio lab's
+**Scan lab invitation** button (requires an installed app that supports the
+ZXing scan intent). Alternatively, copy and paste the displayed payload. The
+experimental QR contains the same hexadecimal test payload as the text field;
+it is not the production binary QR representation from ADR 0018. A scan from a
+non-loopback address also fills the UDP destination; a loopback invitation keeps
+the separately configured UDP destination for ADB reverse.
 The control address defaults to `127.0.0.1` for ADB reverse; for a controlled LAN use an address Android can
 reach. The listener binds TCP 47610 on all IPv4 interfaces and uses UDP 39093;
 it plays through the selected output, or the default output when no device is

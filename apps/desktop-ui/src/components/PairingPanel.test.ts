@@ -164,7 +164,7 @@ describe('PairingPanel', () => {
     vi.spyOn(Date, 'now').mockImplementation(() => nowMillis)
     vi.spyOn(window, 'setInterval').mockImplementation((callback) => {
       intervalCallback = callback as () => void
-      return 1
+      return 1 as unknown as ReturnType<typeof window.setInterval>
     })
 
     const wrapper = mount(PairingPanel, {
@@ -187,7 +187,7 @@ describe('PairingPanel', () => {
     vi.spyOn(Date, 'now').mockImplementation(() => nowMillis)
     vi.spyOn(window, 'setInterval').mockImplementation((callback) => {
       intervalCallback = callback as () => void
-      return 1
+      return 1 as unknown as ReturnType<typeof window.setInterval>
     })
 
     const wrapper = mount(PairingPanel, {

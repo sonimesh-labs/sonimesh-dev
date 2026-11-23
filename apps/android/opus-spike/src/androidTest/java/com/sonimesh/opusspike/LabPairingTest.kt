@@ -74,6 +74,29 @@ class LabPairingTest {
         }
     }
 
+    @Test
+    fun scanned_lab_invitation_updates_fields_and_keeps_loopback_udp_separate() {
+        ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                val root = activity.window.decorView
+                val udp = requireNotNull(findField(root, "Desktop IPv4 address for UDP"))
+                val pin = requireNotNull(findField(root, "Paired lab desktop SPKI"))
+                val host = requireNotNull(findField(root, "Paired control IPv4 address"))
+                activity.applyScannedInvitation(labHex(labInvitation("AB".repeat(32), "192.168.1.7")).uppercase())
+                assertEquals("192.168.1.7", udp.text.toString())
+                assertEquals("192.168.1.7", host.text.toString())
+                assertEquals("ab".repeat(32), pin.text.toString())
+                udp.setText("10.0.2.2")
+                activity.applyScannedInvitation(labHex(labInvitation("CD".repeat(32))))
+                assertEquals("10.0.2.2", udp.text.toString())
+                assertEquals("127.0.0.1", host.text.toString())
+                activity.applyScannedInvitation("not an invitation")
+                assertEquals("127.0.0.1", host.text.toString())
+                assertEquals("cd".repeat(32), pin.text.toString())
+            }
+        }
+    }
+
     private fun findButton(view: View, text: String): Button? {
         if (view is Button && view.text == text) return view
         if (view is ViewGroup) for (index in 0 until view.childCount) {
