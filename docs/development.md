@@ -237,6 +237,10 @@ with Ctrl+C. To exercise two
 successive synthetic sessions, run the instrumentation method
 `PairedAudioInteropTest#pairs_twice_with_continuous_listener` with the listener
 in this mode and the same `pairingSpkiHex` and optional `pairingHost` arguments.
+If the Android lab reports that the desktop connection ended, check that the
+listener is waiting and start capture again with fresh screen-capture consent.
+The continuously running listener does not need to be restarted for a new
+session; a listener that has exited must be started again.
 
 On 2026-11-22, a malformed TLS handshake was followed by two successful API 37
 emulator sessions against one continuously running Windows listener using CPAL.

@@ -132,8 +132,10 @@ class PairedCaptureTest {
                 while (disconnectStatus == null && SystemClock.elapsedRealtime() < disconnectDeadline) {
                     scenario.onActivity { activity ->
                         val root = activity.window.decorView
-                        disconnectStatus = listOf("Status: Desktop connection ended.", "Status: UDP sending failed.")
-                            .firstOrNull { containsStatus(root, it) }
+                        disconnectStatus = listOf(
+                            "Status: Desktop connection ended. Check the listener, then start capture again.",
+                            "Status: UDP sending failed. Check the network and listener, then start capture again.",
+                        ).firstOrNull { containsStatus(root, it) }
                     }
                     if (disconnectStatus == null) SystemClock.sleep(100)
                 }

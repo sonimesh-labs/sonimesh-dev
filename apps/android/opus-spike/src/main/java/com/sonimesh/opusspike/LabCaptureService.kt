@@ -268,7 +268,7 @@ class LabCaptureService : Service() {
                     } catch (error: Exception) {
                         pairedControlFailed = true
                         Log.e("SoniMeshLab", "Paired control connection ended", error)
-                        handler.post { finishWith("Desktop connection ended. Restart the listener to reconnect.") }
+                        handler.post { finishWith("Desktop connection ended. Check the listener, then start capture again.") }
                         break
                     }
                     nextControlPoll = SystemClock.elapsedRealtime() + 250
@@ -402,7 +402,7 @@ class LabCaptureService : Service() {
         } catch (error: Exception) {
             if (running.get()) {
                 Log.e("SoniMeshLab", "UDP sender failed", error)
-                handler.post { finishWith("UDP sending failed. Check the network and desktop listener, then restart capture.") }
+                handler.post { finishWith("UDP sending failed. Check the network and listener, then start capture again.") }
             }
         } finally {
             sealer.clear()
