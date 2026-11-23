@@ -44,7 +44,10 @@ fuzz_target!(|data: &[u8]| {
         let payload = PairingQrPayload {
             protocol_version: view.protocol_version,
             pairing_id: view.pairing_id,
-            pairing_secret: [0_u8; 32],
+            pairing_secret: view
+                .pairing_secret
+                .try_into()
+                .expect("validated secret length"),
             control_host: view.control_host,
             control_port: view.control_port,
             desktop_tls_spki: view.desktop_tls_spki,
@@ -57,11 +60,11 @@ fuzz_target!(|data: &[u8]| {
         assert_eq!(written, published_len);
         assert_eq!(&encoded[..written], &near_valid[..published_len]);
 
-        // The re-encoded payload must decode to the same fields again, with
-        // the zeroed secret substituted back before comparison.
+        // The re-encoded payload must decode to the same fields again.
         let redecoded =
             parse_pairing_qr_payload(&encoded[..written]).expect("the encoder output must decode");
         assert_eq!(redecoded.pairing_id, view.pairing_id);
+        assert_eq!(redecoded.pairing_secret, view.pairing_secret);
         assert_eq!(redecoded.control_host, view.control_host);
         assert_eq!(redecoded.control_port, view.control_port);
         assert_eq!(redecoded.desktop_tls_spki, view.desktop_tls_spki);
