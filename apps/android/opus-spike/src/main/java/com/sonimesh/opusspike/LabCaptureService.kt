@@ -70,11 +70,7 @@ class LabCaptureService : Service() {
         val bitrate = OpusBitrate.fromBitsPerSecond(intent?.getIntExtra("bitrate", OpusBitrate.STANDARD.bitsPerSecond) ?: OpusBitrate.STANDARD.bitsPerSecond)
         val udpMode = intent?.getBooleanExtra("udpMode", false) ?: false
         val pairedMode = intent?.getBooleanExtra("pairedMode", false) ?: false
-        val transport = when {
-            pairedMode -> LabTransport.PairedUdp
-            udpMode -> LabTransport.Udp
-            else -> LabTransport.Adb
-        }
+        val transport = LabTransport.fromFlags(udpMode, pairedMode)
         LabStatus.serviceStarted(usage, bitrate, transport)
         running.set(true)
         LabStatus.publishSenderQueueDrops(null)

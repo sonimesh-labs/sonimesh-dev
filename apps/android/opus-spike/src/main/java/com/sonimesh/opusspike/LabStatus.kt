@@ -6,6 +6,16 @@ internal enum class LabTransport(val label: String) {
     Adb("ADB TCP"),
     Udp("UDP"),
     PairedUdp("paired UDP"),
+
+    ;
+
+    companion object {
+        fun fromFlags(udpMode: Boolean, pairedMode: Boolean): LabTransport = when {
+            pairedMode -> PairedUdp
+            udpMode -> Udp
+            else -> Adb
+        }
+    }
 }
 
 internal data class LabSessionConfig(
