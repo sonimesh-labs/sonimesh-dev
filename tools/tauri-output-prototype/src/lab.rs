@@ -29,6 +29,7 @@ pub struct LabMetrics {
     output: String,
     late: Option<String>,
     resync_dropped: Option<String>,
+    media: Option<String>,
     playout: Option<String>,
     adaptive: Option<AdaptiveMetrics>,
 }
@@ -280,8 +281,17 @@ fn update_snapshot(snapshot: &mut LabSnapshot, line: &str) {
         snapshot.metrics = None;
         snapshot.session_active = true;
     } else if snapshot.session_active
-        && let Some(metrics) = parse_metrics(line)
+        && let Some(state @ ("waiting" | "receiving" | "interrupted")) = line.strip_prefix("MEDIA ")
+        && let Some(metrics) = &mut snapshot.metrics
     {
+        metrics.media = Some(state.into());
+    } else if snapshot.session_active
+        && let Some(mut metrics) = parse_metrics(line)
+    {
+        metrics.media = snapshot
+            .metrics
+            .as_ref()
+            .and_then(|previous| previous.media.clone());
         snapshot.metrics = Some(metrics);
     } else if line == "RESULT session complete" {
         snapshot.status = "Session ended; waiting for Android".into();
@@ -399,6 +409,7 @@ fn parse_metrics(line: &str) -> Option<LabMetrics> {
         output: (*output).into(),
         late,
         resync_dropped,
+        media: None,
         playout,
         adaptive,
     })
@@ -505,6 +516,7 @@ mod tests {
         let prefix = "STATUS packets 120 rejected 3 decoded 115 peak 0.250 plc 2 decode_errors 1 buffered 4 output active";
         let old = parse_metrics(&format!("{prefix} playout fixed")).unwrap();
         assert_eq!((old.late, old.resync_dropped), (None, None));
+        assert_eq!(old.media, None);
         let extended = format!("{prefix} late 9007199254740993 resync_dropped 7 playout fixed");
         let parsed = parse_metrics(&extended).unwrap();
         assert_eq!(parsed.late.as_deref(), Some("9007199254740993"));
@@ -516,6 +528,32 @@ mod tests {
         );
         assert!(parse_metrics(&format!("{prefix} late 1 playout fixed")).is_none());
         assert!(parse_metrics(&format!("{prefix} late 2 resync_dropped 3 playout adaptive target 3 min 2 max 4 jitter_ms 17 gated 7 forced 2 resets 1")).is_some());
+    }
+
+    #[test]
+    fn media_observation_follows_status_and_stays_with_last_session() {
+        let mut snapshot = LabSnapshot::default();
+        let status = "STATUS packets 1 rejected 0 decoded 1 peak 0.100 plc 0 decode_errors 0 buffered 0 output active playout fixed";
+        update_snapshot(&mut snapshot, "RESULT receiver started");
+        update_snapshot(&mut snapshot, status);
+        assert_eq!(snapshot.metrics.as_ref().unwrap().media, None);
+        for state in ["waiting", "receiving", "interrupted"] {
+            update_snapshot(&mut snapshot, &format!("MEDIA {state}"));
+            update_snapshot(&mut snapshot, status);
+            assert_eq!(
+                snapshot.metrics.as_ref().unwrap().media.as_deref(),
+                Some(state)
+            );
+        }
+        update_snapshot(&mut snapshot, "MEDIA invalid");
+        update_snapshot(&mut snapshot, "RESULT session complete");
+        update_snapshot(&mut snapshot, "MEDIA receiving");
+        assert_eq!(
+            snapshot.metrics.as_ref().unwrap().media.as_deref(),
+            Some("interrupted")
+        );
+        update_snapshot(&mut snapshot, "RESULT client connected");
+        assert!(snapshot.metrics.is_none());
     }
 
     #[test]

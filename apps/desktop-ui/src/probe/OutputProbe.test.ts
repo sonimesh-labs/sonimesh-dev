@@ -461,8 +461,8 @@ describe('desktop output probe', () => {
   })
 
   it('shows live and final session observations, then clears them on the next client', async () => {
-    const metrics = { packets: '120', rejected: '3', decoded: '115', peak: '0.250', plc: '2', decodeErrors: '1', buffered: '4', output: 'recovering', late: '9007199254740993', resyncDropped: '4' }
-    const finalMetrics = { ...metrics, decoded: '120', output: 'stopped', late: '9007199254740994', resyncDropped: '5' }
+    const metrics = { packets: '120', rejected: '3', decoded: '115', peak: '0.250', plc: '2', decodeErrors: '1', buffered: '4', output: 'recovering', late: '9007199254740993', resyncDropped: '4', media: 'receiving' }
+    const finalMetrics = { ...metrics, decoded: '120', output: 'stopped', late: '9007199254740994', resyncDropped: '5', media: 'interrupted' }
     const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [] })
       .mockResolvedValueOnce({ running: true, status: 'Starting listener…', invitation: null, metrics: null })
       .mockResolvedValueOnce({ running: true, sessionActive: true, status: 'Session active', invitation: '01ab', metrics })
@@ -475,6 +475,7 @@ describe('desktop output probe', () => {
     await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
     await vi.advanceTimersByTimeAsync(1000)
     expect(wrapper.get('.lab-metrics').text()).toContain('Accepted packets120')
+    expect(wrapper.get('.lab-metrics').text()).toContain('Media arrivalReceiving packets')
     expect(wrapper.get('.lab-metrics').text()).toContain('Late packets9007199254740993')
     expect(wrapper.get('.lab-metrics').text()).toContain('Frames dropped on resync4')
     expect(wrapper.get('.lab-metrics').text()).toContain('Decoded peak0.250')
@@ -486,6 +487,7 @@ describe('desktop output probe', () => {
     expect(wrapper.get('.lab-metrics').text()).toContain('Late packets9007199254740994')
     expect(wrapper.get('.lab-metrics').text()).toContain('Frames dropped on resync5')
     expect(wrapper.get('.lab-metrics').text()).toContain('OutputStopped')
+    expect(wrapper.get('.lab-metrics').text()).toContain('Media arrivalLast reported: No recent packets')
     await vi.advanceTimersByTimeAsync(1000)
     expect(wrapper.find('.lab-metrics').exists()).toBe(false)
     expect(wrapper.text()).toContain('Android connecting')
@@ -493,7 +495,7 @@ describe('desktop output probe', () => {
   })
 
   it('shows the listener’s adaptive epoch and keeps the last update until the next session', async () => {
-    const base = { packets: '120', rejected: '3', decoded: '115', peak: '0.250', plc: '2', decodeErrors: '1', buffered: '4', output: 'active', playout: 'adaptive' }
+    const base = { packets: '120', rejected: '3', decoded: '115', peak: '0.250', plc: '2', decodeErrors: '1', buffered: '4', output: 'active', playout: 'adaptive', media: 'waiting' }
     const first = { ...base, adaptive: { target: 3, min: 2, max: 4, jitterMs: 17, gated: '9007199254740993', forced: '2', resets: '1' } }
     const reset = { ...base, output: 'stopped', adaptive: { target: 0, min: 0, max: 0, jitterMs: 0, gated: '0', forced: '0', resets: '2' } }
     const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [] })
@@ -508,6 +510,7 @@ describe('desktop output probe', () => {
     await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
     await vi.advanceTimersByTimeAsync(1000)
     expect(wrapper.get('.lab-metrics').text()).toContain('Playout modeAdaptive (experimental)')
+    expect(wrapper.get('.lab-metrics').text()).toContain('Media arrivalWaiting for first packet')
     expect(wrapper.get('.lab-metrics').text()).not.toContain('Late packets')
     expect(wrapper.get('.lab-metrics').text()).not.toContain('Frames dropped on resync')
     expect(wrapper.get('.lab-metrics').text()).toContain('Adaptive target3 frames (2–4)')

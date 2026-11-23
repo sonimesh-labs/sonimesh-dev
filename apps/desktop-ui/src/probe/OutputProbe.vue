@@ -26,6 +26,7 @@ interface LabMetrics {
   packets: string; rejected: string; decoded: string; peak: string
   plc: string; decodeErrors: string; buffered: string; output: 'active' | 'recovering' | 'software-check' | 'stopped'
   late: string | null; resyncDropped: string | null
+  media?: 'waiting' | 'receiving' | 'interrupted' | null
   playout: 'fixed' | 'adaptive' | null
   adaptive: { target: number; min: number; max: number; jitterMs: number; gated: string; forced: string; resets: string } | null
 }
@@ -322,6 +323,7 @@ onBeforeUnmount(() => { disposed = true; labRequest++; clearTimeout(timer); clea
         <h3 id="lab-metrics-title">{{ lab.sessionActive ? 'Session observations' : 'Last session observations' }}</h3>
         <dl class="lab-metrics">
           <div><dt>Accepted packets</dt><dd>{{ lab.metrics.packets }}</dd></div>
+          <div v-if="lab.metrics.media"><dt>Media arrival</dt><dd>{{ !lab.sessionActive ? 'Last reported: ' : '' }}{{ lab.metrics.media === 'waiting' ? 'Waiting for first packet' : lab.metrics.media === 'receiving' ? 'Receiving packets' : 'No recent packets' }}</dd></div>
           <div><dt>Packets rejected</dt><dd>{{ lab.metrics.rejected }}</dd></div>
           <div v-if="lab.metrics.late != null"><dt>Late packets</dt><dd>{{ lab.metrics.late }}</dd></div>
           <div v-if="lab.metrics.resyncDropped != null"><dt>Frames dropped on resync</dt><dd>{{ lab.metrics.resyncDropped }}</dd></div>
@@ -341,6 +343,7 @@ onBeforeUnmount(() => { disposed = true; labRequest++; clearTimeout(timer); clea
           <div><dt>Output</dt><dd>{{ !lab.sessionActive && lab.metrics.output !== 'stopped' ? 'Last reported: ' : '' }}{{ lab.metrics.output === 'recovering' ? 'Recovering' : lab.metrics.output === 'active' ? 'Active' : lab.metrics.output === 'stopped' ? 'Stopped' : 'Software check' }}</dd></div>
         </dl>
         <p class="preview-note">{{ lab.sessionActive ? 'Updated at session start and every five seconds.' : lab.metrics.output === 'stopped' ? 'Final update after the stop drain.' : 'Last available update; the session may have ended before its final report.' }} Packet and decode counts and peak are cumulative; they do not confirm audible playback.</p>
+        <p v-if="lab.metrics.media" class="preview-note">Media arrival reports accepted packets within the past two seconds; a gap does not identify its cause.</p>
         <p v-if="lab.metrics.late != null" class="preview-note">Late packets missed their playout deadline; resync drops are buffered frames discarded when the jitter buffer resynchronizes.</p>
         <p v-if="lab.metrics.adaptive" class="preview-note">Adaptive target, jitter, gated ticks and forced playouts reset with the stream epoch; stream resets count the session's resets.</p>
       </section>

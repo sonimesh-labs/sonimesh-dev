@@ -358,6 +358,7 @@ const STOP_DRAIN_LIMIT: Duration = Duration::from_millis(500);
 const MAX_CONSECUTIVE_PLC: u8 = 3;
 const MAX_MEDIA_POLLS: usize = 32;
 const PLAYOUT_STALL: Duration = Duration::from_millis(160);
+const MEDIA_IDLE: Duration = Duration::from_secs(2);
 type Receiver = UdpReceiverPipeline<ObservedDecoder, 8, 1_148, SAMPLES>;
 type PreparedReceiver = (Receiver, RealtimePcmConsumer<SAMPLES>, Arc<StreamCounters>);
 
@@ -385,6 +386,29 @@ struct ScheduleObservations {
     decisions: u64,
     frame_late: u64,
     max_lateness_us: u64,
+}
+
+#[derive(Default)]
+struct MediaActivity {
+    packets: u64,
+    last_packet: Option<Instant>,
+}
+
+impl MediaActivity {
+    fn observe(&mut self, now: Instant, packets: u64) {
+        if packets > self.packets {
+            self.last_packet = Some(now);
+        }
+        self.packets = packets;
+    }
+
+    fn status(&self, now: Instant) -> &'static str {
+        match self.last_packet {
+            None => "waiting",
+            Some(last) if now.duration_since(last) < MEDIA_IDLE => "receiving",
+            Some(_) => "interrupted",
+        }
+    }
 }
 
 impl ScheduleObservations {
@@ -848,6 +872,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
     let mut decoded = 0_u64;
     let mut peak = 0_f32;
     let mut schedule = ScheduleObservations::default();
+    let mut activity = MediaActivity::default();
     let mut resyncs = ResyncObservations::default();
     let mut previous_loop = None;
     let mut draining_stale = false;
@@ -1003,6 +1028,8 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                         }
                         if let Some(metrics) = counters.take() {
                             let snapshot = metrics.snapshot();
+                            let now = Instant::now();
+                            activity.observe(now, snapshot.authenticated_packets);
                             if options.status {
                                 println!(
                                     "{}",
@@ -1014,6 +1041,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                                         options.adaptive
                                     )
                                 );
+                                println!("MEDIA {}", activity.status(now));
                             }
                             println!(
                                 "RESULT packets {} rejected {} late {} resync_dropped {} plc {} decode_errors {} buffered {}",
@@ -1096,6 +1124,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                 }
             }
             let now = Instant::now();
+            activity.observe(now, metrics.snapshot().authenticated_packets);
             if let Some(due) = next_playout.filter(|due| now >= *due) {
                 schedule.observe(due, now);
                 previous_decision = Some((now, now.duration_since(due)));
@@ -1135,6 +1164,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                     options.adaptive,
                 ) {
                     println!("{status}");
+                    println!("MEDIA {}", activity.status(now));
                 }
             }
         }
@@ -2199,6 +2229,26 @@ mod tests {
             )
         );
         assert!(status_if_due(&mut None, late, metrics, 0, 0.0, "active", false).is_none());
+    }
+
+    #[test]
+    fn media_activity_distinguishes_first_packet_gap_and_resumption() {
+        let now = Instant::now();
+        let mut activity = MediaActivity::default();
+        activity.observe(now, 0);
+        assert_eq!(activity.status(now + Duration::from_secs(20)), "waiting");
+        activity.observe(now + Duration::from_secs(20), 1);
+        assert_eq!(
+            activity.status(now + Duration::from_millis(21_999)),
+            "receiving"
+        );
+        activity.observe(now + Duration::from_secs(22), 1);
+        assert_eq!(
+            activity.status(now + Duration::from_secs(22)),
+            "interrupted"
+        );
+        activity.observe(now + Duration::from_secs(23), 2);
+        assert_eq!(activity.status(now + Duration::from_secs(23)), "receiving");
     }
 
     #[test]
