@@ -110,6 +110,10 @@ class LabActivity : Activity() {
             setOnClickListener { applyInvitation() }
         })
         layout.addView(Button(this).apply {
+            text = "Apply invitation and use address for UDP"
+            setOnClickListener { applyInvitation(useAddressForUdp = true) }
+        })
+        layout.addView(Button(this).apply {
             text = "Start UDP capture"
             setOnClickListener { startCapture(true) }
         })
@@ -234,7 +238,7 @@ class LabActivity : Activity() {
     private fun selectedUsage(): LabCaptureUsage =
         LabCaptureUsage.entries.getOrElse(usage.selectedItemPosition) { LabCaptureUsage.All }
 
-    private fun applyInvitation() {
+    private fun applyInvitation(useAddressForUdp: Boolean = false) {
         var raw: ByteArray? = null
         var retained = false
         try {
@@ -242,17 +246,22 @@ class LabActivity : Activity() {
             val decoded = PairingQr.decode(requireNotNull(raw))
             try {
                 require(decoded.controlPort == 47610)
-                require(decoded.controlHost == "127.0.0.1" || parseLabAddress(decoded.controlHost) != null)
+                val udpAddress = parseLabAddress(decoded.controlHost)
+                require(decoded.controlHost == "127.0.0.1" || udpAddress != null)
                 val decodedPin = labHex(decoded.desktopTlsSpki)
                 pin.setText(decodedPin)
                 host.setText(decoded.controlHost)
+                if (useAddressForUdp && udpAddress != null) address.setText(udpAddress.hostAddress)
                 importedInvitation?.fill(0)
                 importedInvitation = raw
                 importedPin = decodedPin
                 importedHost = decoded.controlHost
                 retained = true
                 invitation.setText("")
-                LabStatus.publish("Invitation applied. Enter the desktop IPv4 for UDP separately.")
+                LabStatus.publish(
+                    if (useAddressForUdp && udpAddress != null) "Invitation applied. UDP uses the same address."
+                    else "Invitation applied. Check the desktop IPv4 for UDP separately.",
+                )
             } finally {
                 decoded.pairingId.fill(0)
                 decoded.pairingSecret.fill(0)

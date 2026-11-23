@@ -51,8 +51,10 @@ cargo run -p opus-codec-prototype --bin paired-audio-lab -- --require-tone
 The listener prints `SPKI_HEX` and a complete lab-only `INVITATION_HEX`. In the
 Android lab activity, paste `INVITATION_HEX` into **Lab invitation payload** and
 tap **Apply invitation payload** to fill the SPKI and paired control address.
-Enter the UDP address separately; the payload does not replace it. The payload
-contains the fixed public lab fixture secret and is not a production QR or a
+For a LAN where both routes use the same address, **Apply invitation and use
+address for UDP** also fills the UDP destination. A loopback invitation leaves
+the UDP destination unchanged for ADB reverse; enter the emulator host alias
+separately. The payload contains the fixed public lab fixture secret and is not a production QR or a
 persistent trust record. When control and UDP use the same LAN address, **Use
 control address for UDP** copies it explicitly; loopback is rejected because
 ADB reverse does not forward UDP. If using the older manual setup, copy the printed
@@ -370,8 +372,8 @@ when the platforms packages are present.
 
 The isolated Tauri prototype displays the Windows output endpoints and default
 formats returned by the CPAL adapter, and can play a short test tone after the
-operator selects an endpoint. It does not control a receiver or change the
-system default output. If one endpoint's format cannot be read, it remains listed with an
+operator selects an endpoint. It can manage the separate lab listener but does
+not change the system default output. If one endpoint's format cannot be read, it remains listed with an
 unavailable-format indication. Build the web assets and run the prototype from
 the repository root:
 
@@ -392,9 +394,8 @@ cargo build -p opus-codec-prototype --bin paired-audio-lab --features playback
 ~~~
 
 The probe expects `target/debug/paired-audio-lab.exe` in this checkout. Start the
-listener in the window, copy the displayed invitation to the Android audio lab,
-and enter the UDP address separately on Android. The control address defaults to
-`127.0.0.1` for ADB reverse; for a controlled LAN use an address Android can
+listener in the window and copy the displayed invitation to the Android audio lab.
+The control address defaults to `127.0.0.1` for ADB reverse; for a controlled LAN use an address Android can
 reach. The listener binds TCP 47610 on all IPv4 interfaces and uses UDP 39093;
 it plays through the selected output, or the default output when no device is
 selected. Refreshing the device list resets the selection; an unavailable chosen

@@ -51,6 +51,29 @@ class LabPairingTest {
         }
     }
 
+    @Test
+    fun invitation_can_fill_udp_address_without_replacing_it_with_loopback() {
+        ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                val root = activity.window.decorView
+                val udp = requireNotNull(findField(root, "Desktop IPv4 address for UDP"))
+                val invitation = requireNotNull(findField(root, "Lab invitation payload"))
+                val apply = requireNotNull(findButton(root, "Apply invitation and use address for UDP"))
+                udp.setText("10.0.2.2")
+                invitation.setText(labHex(labInvitation("AB".repeat(32), "192.168.1.7")))
+                apply.performClick()
+                assertEquals("192.168.1.7", udp.text.toString())
+                udp.setText("10.0.2.2")
+                invitation.setText(labHex(labInvitation("AB".repeat(32))))
+                apply.performClick()
+                assertEquals("10.0.2.2", udp.text.toString())
+                invitation.setText("invalid")
+                apply.performClick()
+                assertEquals("10.0.2.2", udp.text.toString())
+            }
+        }
+    }
+
     private fun findButton(view: View, text: String): Button? {
         if (view is Button && view.text == text) return view
         if (view is ViewGroup) for (index in 0 until view.childCount) {
