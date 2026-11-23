@@ -9,12 +9,35 @@ import android.widget.Button
 import android.widget.TextView
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.sonimesh.sender.encoder.OpusBitrate
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class LabStatusTest {
+    @Test
+    fun sessionRequestSurvivesRecreationAndStop() {
+        try {
+            ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    LabStatus.serviceStarted(LabCaptureUsage.Game, OpusBitrate.fromBitsPerSecond(128_000))
+                    assertTrue(hasStatus(activity.window.decorView, "Session request: Game, 128 kbps target"))
+                }
+                scenario.recreate()
+                scenario.onActivity { activity ->
+                    assertTrue(hasStatus(activity.window.decorView, "Session request: Game, 128 kbps target"))
+                    LabStatus.serviceFinished()
+                    assertTrue(hasStatus(activity.window.decorView, "Session request: Game, 128 kbps target"))
+                }
+            }
+        } finally {
+            androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().runOnMainSync {
+                LabStatus.serviceFinished()
+            }
+        }
+    }
+
     @Test
     fun testToneButtonReflectsPlaybackAndActivityRecreation() {
         ActivityScenario.launch(LabActivity::class.java).use { scenario ->

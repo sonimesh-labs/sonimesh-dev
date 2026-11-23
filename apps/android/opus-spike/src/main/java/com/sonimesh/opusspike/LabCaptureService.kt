@@ -63,7 +63,8 @@ class LabCaptureService : Service() {
         if (started) return START_NOT_STICKY
         started = true
         val usage = LabCaptureUsage.fromValue(intent?.getStringExtra("captureUsage"))
-        LabStatus.serviceStarted(usage)
+        val bitrate = OpusBitrate.fromBitsPerSecond(intent?.getIntExtra("bitrate", OpusBitrate.STANDARD.bitsPerSecond) ?: OpusBitrate.STANDARD.bitsPerSecond)
+        LabStatus.serviceStarted(usage, bitrate)
         running.set(true)
         LabStatus.publishSenderQueueDrops(null)
         LabStatus.publishEncoderRate(null)
@@ -94,7 +95,6 @@ class LabCaptureService : Service() {
             }, handler)
             val udpMode = intent.getBooleanExtra("udpMode", false)
             val pairedMode = intent.getBooleanExtra("pairedMode", false)
-            val bitrate = OpusBitrate.fromBitsPerSecond(intent.getIntExtra("bitrate", OpusBitrate.STANDARD.bitsPerSecond))
             val destination = if (udpMode) parseLabAddress(intent.getStringExtra("udpAddress") ?: "")
                 ?: error("invalid desktop address") else null
             pendingInvitation = if (pairedMode) intent.getByteArrayExtra("pairedInvitation")

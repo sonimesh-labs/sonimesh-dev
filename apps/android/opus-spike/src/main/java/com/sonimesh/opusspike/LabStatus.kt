@@ -1,5 +1,9 @@
 package com.sonimesh.opusspike
 
+import com.sonimesh.sender.encoder.OpusBitrate
+
+internal data class LabSessionConfig(val usage: LabCaptureUsage, val bitrate: OpusBitrate)
+
 /** Process-local, main-thread status for the interactive lab. */
 internal object LabStatus {
     val captureAdmission = LabCaptureAdmission()
@@ -11,15 +15,28 @@ internal object LabStatus {
     private val dropObservers = mutableSetOf<(Long?) -> Unit>()
     private var encoderRate: Long? = null
     private val rateObservers = mutableSetOf<(Long?) -> Unit>()
+    private var sessionConfig: LabSessionConfig? = null
+    private val sessionObservers = mutableSetOf<(LabSessionConfig?) -> Unit>()
 
-    fun serviceStarted(usage: LabCaptureUsage) {
+    fun serviceStarted(usage: LabCaptureUsage, bitrate: OpusBitrate) {
         captureUsage = usage
         captureAdmission.serviceStarted()
+        sessionConfig = LabSessionConfig(usage, bitrate)
+        sessionObservers.toList().forEach { it(sessionConfig) }
     }
 
     fun serviceFinished() {
         captureUsage = null
         captureAdmission.serviceFinished()
+    }
+
+    fun observeSessionConfig(observer: (LabSessionConfig?) -> Unit) {
+        sessionObservers.add(observer)
+        observer(sessionConfig)
+    }
+
+    fun removeSessionConfig(observer: (LabSessionConfig?) -> Unit) {
+        sessionObservers.remove(observer)
     }
 
     fun observe(observer: (String) -> Unit) {

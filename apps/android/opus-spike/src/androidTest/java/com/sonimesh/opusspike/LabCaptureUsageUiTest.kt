@@ -6,6 +6,7 @@ import android.view.ViewGroup
 import android.widget.Button
 import android.widget.Spinner
 import androidx.test.core.app.ActivityScenario
+import com.sonimesh.sender.encoder.OpusBitrate
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -75,7 +76,7 @@ class LabCaptureUsageUiTest {
         try {
             ActivityScenario.launch(LabActivity::class.java).use { scenario ->
                 scenario.onActivity { activity ->
-                    LabStatus.serviceStarted(LabCaptureUsage.Media)
+                    LabStatus.serviceStarted(LabCaptureUsage.Media, OpusBitrate.STANDARD)
                     val root = activity.window.decorView
                     findSpinner(root, "Playback usage for capture").setSelection(2)
                     findButton(root, "Start test tone").performClick()

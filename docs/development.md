@@ -159,6 +159,15 @@ Android recreates the activity, so it can still be reviewed and applied.
 The lab also lets the operator request 64, 96 (default), or 128 kbps Opus for
 the next capture. This is a MediaCodec target, not a measured or guaranteed
 bitrate; changing the selector does not reconfigure an active capture.
+The lab displays the usage and target bitrate requested for the current or most
+recent session separately from the selectors for the next session. This is the
+requested configuration, not confirmation that capture or encoding succeeded;
+it remains until the next service start and is lost if the app process ends.
+On 2026-11-23, an API 37 x86_64 emulator paired-capture test requested Media
+at 128 kbps, changed the next usage to Game, and recreated the activity; the
+session request stayed visible and the software listener decoded 277 frames.
+A separate UI test checked that the request remains after service stop. These
+checks do not establish physical WLAN, audible output, or actual encoder bitrate.
 **Encoded payload average** shows cumulative Opus bytes divided by elapsed
 capture time, including encoder tail drain and packets later discarded locally.
 It becomes available after one second, excludes packet and network overhead,

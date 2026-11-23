@@ -178,6 +178,9 @@ class PairedCaptureTest {
             }
             assertTrue("capture did not start", capturing)
             scenario.onActivity { activity ->
+                val usage = if (changeUsage) "Media" else "All supported usages"
+                val bitrate = args.getString("bitrateKbps") ?: "96"
+                assertTrue(containsStatus(activity.window.decorView, "Session request: $usage, $bitrate kbps target"))
                 find(activity.window.decorView) {
                     it is TextView && it.text.toString().matches(Regex("Sender queue drops: [0-9]+"))
                 }
@@ -215,6 +218,7 @@ class PairedCaptureTest {
                         val root = activity.window.decorView
                         (find(root) { it is Spinner && it.contentDescription == "Playback usage for capture" } as Spinner)
                             .setSelection(2)
+                        assertTrue(containsStatus(root, "Session request: Media, ${args.getString("bitrateKbps") ?: "96"} kbps target"))
                         find(root) { it is Button && it.text.toString() == "Stop test tone" }.performClick()
                     }
                     var silent = false
@@ -230,6 +234,7 @@ class PairedCaptureTest {
                     scenario.onActivity { activity ->
                         val root = activity.window.decorView
                         assertEquals(2, (find(root) { it is Spinner && it.contentDescription == "Playback usage for capture" } as Spinner).selectedItemPosition)
+                        assertTrue(containsStatus(root, "Session request: Media, ${args.getString("bitrateKbps") ?: "96"} kbps target"))
                         find(root) { it is Button && it.text.toString() == "Start test tone" }.performClick()
                         assertEquals(AudioAttributes.USAGE_MEDIA, activity.testToneUsage())
                     }
