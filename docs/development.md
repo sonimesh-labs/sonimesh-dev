@@ -479,6 +479,9 @@ playback. The observations clear when the listener returns to waiting.
 The probe's volume and mute controls apply to the lab receiver, including
 successive sessions and output recovery while the listener remains running.
 They do not change the system volume.
+In the probe window, finish the test tone before starting the listener, and stop
+the listener before testing an output. This keeps the two playback experiments
+separate; it does not control audio from other applications.
 This development-only UI uses
 the public test invitation and does not establish product pairing, audibility,
 or latency evidence.

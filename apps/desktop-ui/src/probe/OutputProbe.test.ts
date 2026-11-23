@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import type { DesktopBridgeInvoke } from '../bridge'
 import OutputProbe from './OutputProbe.vue'
 
 afterEach(() => { vi.useRealTimers(); delete window.__TAURI__ })
@@ -19,6 +20,73 @@ function mountStoppedProbe() {
 }
 
 describe('desktop output probe', () => {
+  it('waits for a test sound to finish before starting the listener, including after a playback failure', async () => {
+    let rejectTone!: (reason: string) => void
+    const tone = new Promise((_resolve, reject) => { rejectTone = reject })
+    const invoke = vi.fn((command: string) => {
+      if (command === 'probe_outputs') return Promise.resolve({ generation: 1, devices: [{ label: 'Speakers', sampleRateHz: 48000, channels: 2, isDefault: true }] })
+      if (command === 'play_test_tone') return tone
+      return Promise.resolve({ running: true, status: 'Starting', invitation: null, metrics: null, volume: null, muted: null })
+    })
+    window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+    const wrapper = mountStoppedProbe()
+    await flushPromises()
+    await wrapper.get('[aria-label="Play test tone on Speakers"]').trigger('click')
+    const start = wrapper.findAll('button').find(button => button.text() === 'Start listener')!
+    expect(start.attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('Wait for the test sound')
+    await start.trigger('click')
+    expect(invoke).not.toHaveBeenCalledWith('start_lab', expect.anything())
+    rejectTone('Could not start this output.')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Could not start this output.')
+    expect(start.attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('disables test sounds while the listener starts and runs, then restores them after stop', async () => {
+    let resolveStart!: (snapshot: unknown) => void
+    const pendingStart = new Promise(resolve => { resolveStart = resolve })
+    const stopped = { running: false, sessionActive: false, status: 'Stopped', invitation: null, metrics: null, volume: null, muted: null }
+    const running = { ...stopped, running: true, status: 'Waiting' }
+    const invoke = vi.fn((command: string) => {
+      if (command === 'probe_outputs') return Promise.resolve({ generation: 1, devices: [{ label: 'Speakers', sampleRateHz: 48000, channels: 2, isDefault: true }] })
+      if (command === 'start_lab') return pendingStart
+      if (command === 'stop_lab') return Promise.resolve(stopped)
+      return Promise.resolve(running)
+    })
+    window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+    const wrapper = mountStoppedProbe()
+    await flushPromises()
+    const tone = wrapper.get('[aria-label="Play test tone on Speakers"]')
+    await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
+    expect(tone.attributes('disabled')).toBeDefined()
+    await tone.trigger('click')
+    expect(invoke).not.toHaveBeenCalledWith('play_test_tone', expect.anything())
+    resolveStart(running)
+    await flushPromises()
+    expect(tone.attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('Stop the listener before testing an output')
+    await wrapper.findAll('button').find(button => button.text() === 'Stop listener')!.trigger('click')
+    await flushPromises()
+    expect(tone.attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('restores test sounds when listener startup fails', async () => {
+    const invoke = vi.fn()
+      .mockResolvedValueOnce({ generation: 1, devices: [{ label: 'Speakers', sampleRateHz: 48000, channels: 2, isDefault: true }] })
+      .mockRejectedValueOnce('Could not launch the lab listener.')
+    window.__TAURI__ = { core: { invoke } }
+    const wrapper = mountStoppedProbe()
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Could not launch the lab listener.')
+    expect(wrapper.get('[aria-label="Play test tone on Speakers"]').attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+
   it('reports an unavailable desktop bridge while checking the listener', async () => {
     const wrapper = mount(OutputProbe)
     await flushPromises()

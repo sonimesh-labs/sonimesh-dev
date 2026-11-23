@@ -102,7 +102,7 @@ async function pollLab() {
 }
 
 async function toggleLab() {
-  if (labBusy.value || !window.__TAURI__) return
+  if (labBusy.value || !window.__TAURI__ || (!lab.value.running && (playing.value !== null || busy.value))) return
   labBusy.value = true
   labError.value = null
   labRequest++
@@ -174,7 +174,7 @@ async function refresh() {
 }
 
 async function play(index: number) {
-  if (busy.value || playing.value !== null) return
+  if (busy.value || playing.value !== null || labBusy.value || lab.value.running) return
   playing.value = index
   error.value = null
   message.value = null
@@ -217,7 +217,7 @@ onBeforeUnmount(() => { disposed = true; labRequest++; clearTimeout(timer) })
             <span v-if="device.sampleRateHz !== null && device.channels !== null">{{ device.sampleRateHz.toLocaleString() }} Hz · {{ device.channels }} channels</span>
             <span v-else>Default format unavailable</span>
           </div>
-          <button type="button" class="preview-action probe-play" :disabled="busy || playing !== null || device.sampleRateHz === null" :aria-label="`Play test tone on ${device.label}`" @click="play(index)">
+          <button type="button" class="preview-action probe-play" :disabled="busy || playing !== null || lab.running || labBusy || device.sampleRateHz === null" :aria-label="`Play test tone on ${device.label}`" @click="play(index)">
             {{ playing === index ? 'Playing…' : 'Test sound' }}
           </button>
         </li>
@@ -248,7 +248,9 @@ onBeforeUnmount(() => { disposed = true; labRequest++; clearTimeout(timer) })
         <option v-for="value in [20, 40, 60, 80, 100, 120]" :key="value" :value="value">{{ value }} ms</option>
       </select>
       <p class="preview-note">Initial playout wait; restart the listener to change it. This is not an end-to-end latency measurement.</p>
-      <button type="button" class="preview-action" :disabled="labBusy || suggestBusy" @click="toggleLab">{{ lab.running ? 'Stop listener' : 'Start listener' }}</button>
+      <button type="button" class="preview-action" :disabled="labBusy || suggestBusy || (!lab.running && (playing !== null || busy))" @click="toggleLab">{{ lab.running ? 'Stop listener' : 'Start listener' }}</button>
+      <p v-if="playing !== null" class="preview-note">Wait for the test sound to finish before starting the listener.</p>
+      <p v-else-if="lab.running" class="preview-note">Stop the listener before testing an output.</p>
       <p role="status">{{ lab.status }}</p>
       <p v-if="labError" class="command-error" role="alert">{{ labError }}</p>
       <div v-if="lab.running && lab.volume != null && lab.muted != null">
