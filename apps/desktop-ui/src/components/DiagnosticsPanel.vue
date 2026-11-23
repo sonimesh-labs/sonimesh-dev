@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { Activity, FileDown, Gauge, Layers, RefreshCcwDot, ShieldCheck, Target, Waves } from '@lucide/vue'
+import { Activity, Clipboard, FileDown, Gauge, Layers, RefreshCcwDot, ShieldCheck, Target, Waves } from '@lucide/vue'
 
 import type { DiagnosticExportReceipt, JitterMode, StreamMetrics } from '../types'
 
@@ -63,11 +63,7 @@ function downloadPreviewDiagnostics() {
     return
   }
 
-  const bundle = JSON.stringify({
-    format: 'sonimesh-preview-diagnostics/v1',
-    metrics: props.metrics,
-    exports: props.diagnosticExports,
-  }, null, 2)
+  const bundle = previewDiagnosticsBundle()
   const url = createObjectUrl.call(URL, new Blob([bundle], { type: 'application/json' }))
   const link = document.createElement('a')
   link.href = url
@@ -76,6 +72,23 @@ function downloadPreviewDiagnostics() {
   link.remove()
   URL.revokeObjectURL(url)
   downloadMessage.value = 'Preview diagnostics downloaded.'
+}
+
+function previewDiagnosticsBundle() {
+  return JSON.stringify({
+    format: 'sonimesh-preview-diagnostics/v1',
+    metrics: props.metrics,
+    exports: props.diagnosticExports,
+  }, null, 2)
+}
+
+async function copyPreviewDiagnostics() {
+  if (!navigator.clipboard?.writeText) {
+    downloadMessage.value = 'Clipboard access is unavailable in this preview.'
+    return
+  }
+  await navigator.clipboard.writeText(previewDiagnosticsBundle())
+  downloadMessage.value = 'Preview diagnostics copied.'
 }
 </script>
 
@@ -192,6 +205,10 @@ function downloadPreviewDiagnostics() {
       <button class="preview-action" :disabled="busy" @click="downloadPreviewDiagnostics">
         <FileDown :size="17" aria-hidden="true" />
         Download preview JSON
+      </button>
+      <button class="preview-action" :disabled="busy" @click="copyPreviewDiagnostics">
+        <Clipboard :size="17" aria-hidden="true" />
+        Copy preview JSON
       </button>
       <p v-if="downloadMessage" role="status">{{ downloadMessage }}</p>
       <ul v-if="diagnosticExports.length > 0" class="export-receipts">
