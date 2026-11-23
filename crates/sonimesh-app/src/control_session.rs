@@ -399,6 +399,12 @@ fn owner_error_reply(
             "receiver media pipeline is not configured for the requested stream",
         )?
         .into_envelope(request_id)?,
+        DesktopControlOwnerError::MediaFormatMismatch => ControlReply::error(
+            ErrorCode::RetryLater,
+            true,
+            "receiver Opus format does not match the requested stream",
+        )?
+        .into_envelope(request_id)?,
         DesktopControlOwnerError::Mixer(ControlToMixerError::Control(control)) => {
             ControlReply::for_rejection(request_id, control)?
         }
@@ -466,15 +472,20 @@ mod tests {
     struct TestPipeline {
         replacements: usize,
         context: Option<sonimesh_protocol::MediaKeyContext>,
+        opus_frame: Option<sonimesh_audio::OpusFrameConfig>,
     }
 
-    impl ReceiverPcmProducerInstaller<SOURCE_SAMPLES> for TestPipeline {
-        fn replace_pcm_producer(&mut self, _producer: RealtimePcmProducer<SOURCE_SAMPLES>) {
+    impl<const N: usize> ReceiverPcmProducerInstaller<N> for TestPipeline {
+        fn replace_pcm_producer(&mut self, _producer: RealtimePcmProducer<N>) {
             self.replacements += 1;
         }
 
         fn media_context(&self) -> Option<sonimesh_protocol::MediaKeyContext> {
             self.context
+        }
+
+        fn opus_frame_config(&self) -> Option<sonimesh_audio::OpusFrameConfig> {
+            self.opus_frame
         }
     }
 
@@ -520,6 +531,11 @@ mod tests {
     fn receiver()
     -> DesktopReceiverOwner<TestOutput, TestPipeline, SLOTS, OUTPUT_SAMPLES, 1, SOURCE_SAMPLES>
     {
+        receiver_with_block_size()
+    }
+
+    fn receiver_with_block_size<const N: usize>()
+    -> DesktopReceiverOwner<TestOutput, TestPipeline, SLOTS, OUTPUT_SAMPLES, 1, N> {
         let bridge = ControlToMixerBridge::new(
             SessionState::READY,
             &[Capability::FrameDuration10Ms],
@@ -607,6 +623,48 @@ mod tests {
                 | ControlSessionPoll::Rejected { replied: true, .. }
         ));
         decode_control_frame(&control.into_inner().output).unwrap()
+    }
+
+    #[test]
+    fn mismatched_opus_format_can_be_retried_on_the_same_session() {
+        let mut receiver = receiver_with_block_size::<960>();
+        receiver.pipeline_mut().opus_frame =
+            Some(sonimesh_audio::OpusFrameConfig::new(48_000, 2, 10).unwrap());
+        let session = receiver
+            .owner_mut()
+            .install_authenticated_control_session()
+            .unwrap();
+        receiver.accept_and_execute(session, &hello()).unwrap();
+        let mut valid = start();
+        valid.request_id = 3;
+        if let Some(envelope::Payload::StartStream(start)) = &mut valid.payload {
+            start.channels = 2;
+        }
+        let mut control = DesktopControlSession::new(
+            &mut receiver,
+            session,
+            MemoryIo::from_frames(&[start(), valid]),
+        );
+        assert!(matches!(
+            control.poll_once().unwrap(),
+            ControlSessionPoll::Rejected { replied: true, .. }
+        ));
+        control.poll_once().unwrap();
+        let io = control.into_inner();
+        let first_len = u32::from_be_bytes(io.output[..4].try_into().unwrap()) as usize + 4;
+        let first = decode_control_frame(&io.output[..first_len]).unwrap();
+        assert_eq!(first.request_id, 2);
+        assert!(
+            matches!(first.payload, Some(envelope::Payload::Error(error)) if error.code == ErrorCode::RetryLater as i32 && error.retryable)
+        );
+        let second = decode_control_frame(&io.output[first_len..]).unwrap();
+        assert_eq!(second.request_id, 3);
+        assert!(
+            matches!(&second.payload, Some(envelope::Payload::StreamStatus(status)) if status.state == StreamState::Streaming as i32),
+            "{second:?}"
+        );
+        assert_eq!(receiver.pipeline_mut().replacements, 1);
+        assert!(!receiver.owner().bridge().coordinator().has_pending_change());
     }
 
     #[test]

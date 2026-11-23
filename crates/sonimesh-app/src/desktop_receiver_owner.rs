@@ -171,6 +171,23 @@ where
                 return Err(DesktopControlOwnerError::MediaContextMismatch);
             }
         }
+        if let (Some(frame), Some(envelope::Payload::StartStream(start))) =
+            (self.pipeline.opus_frame_config(), envelope.payload.as_ref())
+        {
+            if start.sample_rate_hz != sonimesh_audio::OPUS_SAMPLE_RATE_HZ
+                || start.channels != u32::from(sonimesh_audio::OPUS_CHANNELS)
+                || start.frame_duration_ms != u32::from(frame.frame_duration_ms())
+            {
+                if let Some((Some(token), _)) = requested {
+                    let _ = self
+                        .owner
+                        .bridge_mut()
+                        .coordinator_mut()
+                        .abort_pending(token);
+                }
+                return Err(DesktopControlOwnerError::MediaFormatMismatch);
+            }
+        }
         self.owner
             .execute_control_action(action, self.counters.clone(), &mut self.pipeline)?;
         Ok(action)

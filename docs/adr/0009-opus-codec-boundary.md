@@ -90,6 +90,10 @@ An Opus-configured worker supplies exactly the selected frame's PCM span to
 both decode and PLC, even when its reserved block is larger. It rejects a
 different returned sample count instead of queuing audio with the wrong duration.
 The generic codec-neutral worker retains its variable-length behavior.
+The desktop receiver owner checks a known Opus worker's frame policy against
+StartStream before admitting the stream or acknowledging a duplicate start.
+An unconfigured generic worker does not report a format, so the host remains
+responsible for matching it to the negotiated stream.
 The deterministic A-F simulator also constructs mock `StreamDecodeWorker`
 instances through `new_for_opus` for both fixed capacities. Those runs prove
 worker/PLC/queue control flow only; they are not a libopus, quality, power, or

@@ -63,7 +63,9 @@ The scheduling result distinguishes idle, mismatched media identity, output
 failure, pending stream re-admission, and a ready media path. The preconfigured
 pipeline is not yet built from Start. Known pipeline contexts are checked
 against the requested media identity and direction before admission and a
-streaming reply; audio format and adapters with opaque contexts are not checked.
+streaming reply. A pipeline configured with the initial Opus frame policy also
+checks the requested sample rate, channels, and frame duration; generic adapters
+with unknown context or format remain the host's responsibility.
 A successful control reply does not by itself establish media readiness.
 A `DesktopControlSession` can now attach a trusted post-pairing channel to that
 owner. It polls the existing bounded control framing, executes at most one

@@ -286,6 +286,12 @@ where
         self.pipeline.context()
     }
 
+    /// Returns the worker's Opus frame policy when configured.
+    #[must_use]
+    pub const fn opus_frame_config(&self) -> Option<sonimesh_audio::OpusFrameConfig> {
+        self.pipeline.opus_frame_config()
+    }
+
     /// Returns the source endpoint pinned by the first protected packet outcome.
     ///
     /// A fresh pipeline or successfully installed fresh session is unbound

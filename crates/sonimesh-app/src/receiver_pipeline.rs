@@ -337,6 +337,12 @@ where
         self.ingress.context()
     }
 
+    /// Returns the worker's Opus frame policy when configured.
+    #[must_use]
+    pub const fn opus_frame_config(&self) -> Option<sonimesh_audio::OpusFrameConfig> {
+        self.decode.opus_frame_config()
+    }
+
     /// Returns the session, stream, and epoch accepted by this pipeline.
     #[must_use]
     pub const fn identity(&self) -> StreamIdentity {

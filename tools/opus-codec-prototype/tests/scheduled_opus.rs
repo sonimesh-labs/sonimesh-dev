@@ -145,7 +145,7 @@ fn scheduled_protected_opus_reaches_memory_output_and_conceals_loss() {
     let address = pipeline.local_addr().unwrap();
     let bridge = ControlToMixerBridge::new(
         state,
-        &[Capability::FrameDuration20Ms],
+        &[Capability::FrameDuration10Ms, Capability::FrameDuration20Ms],
         MemoryOutput::default(),
         OutputSelection {
             device: None,
@@ -174,7 +174,10 @@ fn scheduled_protected_opus_reaches_memory_output_and_conceals_loss() {
         request_id: 1,
         payload: Some(envelope::Payload::Hello(Hello {
             supported_versions: vec![CONTROL_PROTOCOL_VERSION],
-            capabilities: vec![Capability::FrameDuration20Ms as i32],
+            capabilities: vec![
+                Capability::FrameDuration10Ms as i32,
+                Capability::FrameDuration20Ms as i32,
+            ],
             display_name: "loopback sender".to_owned(),
         })),
     };
@@ -194,6 +197,21 @@ fn scheduled_protected_opus_reaches_memory_output_and_conceals_loss() {
         .receiver_mut()
         .accept_and_execute(session, &hello)
         .unwrap();
+    for (sample_rate, channels, duration) in [(44_100, 2, 20), (48_000, 1, 20), (48_000, 2, 10)] {
+        let mut mismatch = start.clone();
+        let Some(envelope::Payload::StartStream(request)) = mismatch.payload.as_mut() else {
+            unreachable!()
+        };
+        request.sample_rate_hz = sample_rate;
+        request.channels = channels;
+        request.frame_duration_ms = duration;
+        assert!(matches!(
+            scheduler
+                .receiver_mut()
+                .accept_and_execute(session, &mismatch),
+            Err(sonimesh_app::DesktopControlOwnerError::MediaFormatMismatch)
+        ));
+    }
     scheduler
         .receiver_mut()
         .accept_and_execute(session, &start)

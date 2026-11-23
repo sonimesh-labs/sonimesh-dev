@@ -123,7 +123,7 @@ pub struct StreamDecodeWorker<
     jitter: JitterBuffer<JITTER_CAPACITY, MAX_ENCODED_BYTES>,
     producer: RealtimePcmProducer<PCM_SAMPLES_PER_BLOCK>,
     pcm: [f32; PCM_SAMPLES_PER_BLOCK],
-    opus_frame_samples: Option<usize>,
+    opus_frame: Option<OpusFrameConfig>,
 }
 
 impl<
@@ -147,7 +147,7 @@ where
             jitter: JitterBuffer::with_start_sequence(sequence),
             producer,
             pcm: [0.0; PCM_SAMPLES_PER_BLOCK],
-            opus_frame_samples: None,
+            opus_frame: None,
         }
     }
 
@@ -169,8 +169,14 @@ where
     ) -> Result<Self, OpusFrameConfigError> {
         frame.validate_pcm_block_capacity(PCM_SAMPLES_PER_BLOCK)?;
         let mut worker = Self::new(decoder, producer, sequence);
-        worker.opus_frame_samples = Some(frame.interleaved_samples());
+        worker.opus_frame = Some(frame);
         Ok(worker)
+    }
+
+    /// Returns the selected Opus frame policy, or None for a generic worker.
+    #[must_use]
+    pub const fn opus_frame_config(&self) -> Option<OpusFrameConfig> {
+        self.opus_frame
     }
 
     /// Admits a packet that has already passed network authentication and replay checks.
@@ -198,7 +204,9 @@ where
     /// worker requires exactly one configured frame. No block is queued on error.
     pub fn decode_next(&mut self) -> Result<DecodeStep, DecodeWorkerError<D::Error>> {
         let playout = self.jitter.take_next();
-        let output_samples = self.opus_frame_samples.unwrap_or(PCM_SAMPLES_PER_BLOCK);
+        let output_samples = self
+            .opus_frame
+            .map_or(PCM_SAMPLES_PER_BLOCK, OpusFrameConfig::interleaved_samples);
         let (sequence, concealed, samples) = match playout {
             PlayoutOutcome::NotReady => return Ok(DecodeStep::NotReady),
             PlayoutOutcome::Frame(frame) => (
@@ -219,8 +227,8 @@ where
         if samples == 0
             || samples > output_samples
             || self
-                .opus_frame_samples
-                .is_some_and(|expected| samples != expected)
+                .opus_frame
+                .is_some_and(|frame| samples != frame.interleaved_samples())
         {
             self.pcm.fill(0.0);
             return Err(DecodeWorkerError::InvalidOutputLength);

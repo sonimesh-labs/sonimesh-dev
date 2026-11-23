@@ -19,6 +19,11 @@ pub trait ReceiverPcmProducerInstaller<const PCM_SAMPLES_PER_BLOCK: usize> {
     fn media_context(&self) -> Option<MediaKeyContext> {
         None
     }
+
+    /// Returns the configured Opus frame policy, if known.
+    fn opus_frame_config(&self) -> Option<sonimesh_audio::OpusFrameConfig> {
+        None
+    }
 }
 
 impl<
@@ -38,6 +43,10 @@ where
     fn media_context(&self) -> Option<MediaKeyContext> {
         Some(self.context())
     }
+
+    fn opus_frame_config(&self) -> Option<sonimesh_audio::OpusFrameConfig> {
+        ReceiverStreamPipeline::opus_frame_config(self)
+    }
 }
 
 impl<
@@ -56,6 +65,10 @@ where
 
     fn media_context(&self) -> Option<MediaKeyContext> {
         Some(self.context())
+    }
+
+    fn opus_frame_config(&self) -> Option<sonimesh_audio::OpusFrameConfig> {
+        UdpReceiverPipeline::opus_frame_config(self)
     }
 }
 

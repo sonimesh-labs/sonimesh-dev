@@ -28,6 +28,8 @@ use crate::{
 pub enum DesktopControlOwnerError {
     /// The requested stream does not match the configured media pipeline.
     MediaContextMismatch,
+    /// The requested audio shape does not match the configured Opus worker.
+    MediaFormatMismatch,
     /// Pairing lifecycle or snapshot clock failure.
     Pairing(PairingInvitationError),
     /// Diagnostic export serialization or retention failure.
@@ -94,6 +96,9 @@ impl core::fmt::Display for DesktopControlOwnerError {
                 formatter,
                 "receiver media pipeline is not configured for the requested stream"
             ),
+            Self::MediaFormatMismatch => {
+                formatter.write_str("receiver Opus format does not match the requested stream")
+            }
             Self::Pairing(error) => write!(formatter, "desktop control pairing failure: {error}"),
             Self::Diagnostics(error) => {
                 write!(formatter, "desktop control diagnostics failure: {error}")
@@ -110,7 +115,7 @@ impl core::fmt::Display for DesktopControlOwnerError {
 impl std::error::Error for DesktopControlOwnerError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::MediaContextMismatch => None,
+            Self::MediaContextMismatch | Self::MediaFormatMismatch => None,
             Self::Pairing(error) => Some(error),
             Self::Diagnostics(error) => Some(error),
             Self::Mixer(error) => Some(error),
