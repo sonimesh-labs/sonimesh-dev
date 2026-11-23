@@ -92,7 +92,11 @@ also has a **Start paired UDP capture** mode: start `paired-audio-lab` without
 `--require-tone`, paste its printed SPKI_HEX in the app, select that mode,
 grant capture consent, and play a capturable source or use **Toggle test tone**.
 **Stop capture** requests the desktop to stop the stream. This mode uses the
-same fixed public lab invitation and ADB-reversed control connection; the
+same fixed public lab invitation and ADB-reversed control connection. The
+Android sender first gives its already encoded, bounded UDP queue a short time
+to drain before requesting stop; it does not flush partially captured PCM or
+pending MediaCodec output. The wait and desktop tail drain are best effort, so
+network loss or slow shutdown can still truncate audio. The
 desktop defaults to a software PCM check. On Windows, add `--features playback`
 before `--` and pass `--play` after it to use the default output device; add
 `--select-output` to choose a device. `--require-tone` checks decoded audio,

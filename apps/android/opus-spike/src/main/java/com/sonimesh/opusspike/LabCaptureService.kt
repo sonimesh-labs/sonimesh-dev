@@ -101,6 +101,8 @@ class LabCaptureService : Service() {
         var pairedIdentity: StreamIdentity? = null
         var connected = false
         var pairedControlFailed = false
+        val pairedProducerFinished = AtomicBoolean(false)
+        var pairedSender: Thread? = null
         try {
             val packets = ArrayBlockingQueue<EncodedPacket>(8)
             if (invitation != null) {
@@ -125,7 +127,8 @@ class LabCaptureService : Service() {
                 check(setupSocket.handoff()) { "capture stopped while starting stream" }
                 check(running.get()) { "capture stopped while starting stream" }
                 val sealer = LabMediaSealer(connection.mediaRoot, session, 1, 0)
-                Thread({ sendDatagrams(sealer, packets, requireNotNull(destination)) }, "audio-lab-sender").start()
+                pairedSender = Thread({ sendDatagrams(sealer, packets, requireNotNull(destination), pairedProducerFinished) }, "audio-lab-sender")
+                    .also { it.start() }
             } else {
                 val connection = Socket()
                 synchronized(socketLock) {
@@ -254,6 +257,7 @@ class LabCaptureService : Service() {
             record?.release()
             codec?.release()
             if (paired != null) {
+                finishPairedSender(pairedProducerFinished, pairedSender)
                 try {
                     pairedIdentity?.takeUnless { pairedControlFailed }?.let { identity ->
                         val stopped = paired.stopStream(identity)
@@ -289,14 +293,26 @@ class LabCaptureService : Service() {
         }
     }
 
-    private fun sendDatagrams(sealer: LabMediaSealer, packets: ArrayBlockingQueue<EncodedPacket>, destination: java.net.Inet4Address) {
+    private fun sendDatagrams(
+        sealer: LabMediaSealer,
+        packets: ArrayBlockingQueue<EncodedPacket>,
+        destination: java.net.Inet4Address,
+        producerFinished: AtomicBoolean? = null,
+    ) {
         try {
             DatagramSocket().use { udp ->
                 udp.connect(destination, 39093)
-                while (running.get()) {
-                    val packet = packets.poll(100, TimeUnit.MILLISECONDS) ?: continue
+                val send = { packet: EncodedPacket ->
                     val datagram = sealer.seal(packet.sequence, packet.sequence * 960, 0, packet.bytes)
                     udp.send(DatagramPacket(datagram, datagram.size))
+                }
+                if (producerFinished != null) {
+                    sendUntilProducerFinished(packets, producerFinished, send)
+                } else {
+                    while (running.get()) {
+                        val packet = packets.poll(100, TimeUnit.MILLISECONDS) ?: continue
+                        send(packet)
+                    }
                 }
             }
         } catch (error: Exception) {
