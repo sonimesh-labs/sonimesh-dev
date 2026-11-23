@@ -135,6 +135,8 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   capturing status when signal resumes; this does not establish desktop delivery.
   An optional paired-listener status report exposes in-session packet and decode
   counts, decoded peak, and output recovery state for controlled-lab diagnosis.
+  Its fixed startup wait is configurable from 20 to 120 ms for network experiments;
+  it does not implement adaptive jitter control or measure end-to-end latency.
   A seeded property walk and a byte-driven libFuzzer target drive in-order
   deliveries, duplicates, tampered ciphertext, retired-epoch packets, and
   rotations against an independent replay oracle and counter model,

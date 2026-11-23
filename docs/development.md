@@ -93,6 +93,11 @@ desktop defaults to a software PCM check. On Windows, add `--features playback`
 before `--` and pass `--play` after it to use the default output device; add
 `--select-output` to choose a device. `--require-tone` checks decoded audio,
 not whether it was audible. Output callback counts are not a listening test.
+For controlled network experiments, `--startup-buffer-ms` selects the initial
+wait after the first packet, in 20 ms steps from 20 to 120 ms (default 60 ms).
+The same wait is used after output recovery or decoder resynchronization. This is
+a fixed startup delay, not an adaptive jitter target or an end-to-end latency
+measurement; a longer wait can overflow the bounded packet buffer under bursts.
 Add `--status` to print packet counts, decode counts and peak, jitter occupancy,
 and output recovery state every five seconds during a session. This can help
 distinguish missing media from decoded silence; counts and peak are cumulative

@@ -174,6 +174,7 @@ struct Options {
     keep_listening: bool,
     control: bool,
     status: bool,
+    startup_buffer: Duration,
     bind: Ipv4Addr,
     host: Ipv4Addr,
 }
@@ -187,6 +188,7 @@ impl Default for Options {
             keep_listening: false,
             control: false,
             status: false,
+            startup_buffer: Duration::from_millis(60),
             bind: Ipv4Addr::LOCALHOST,
             host: Ipv4Addr::LOCALHOST,
         }
@@ -199,6 +201,7 @@ impl Options {
         let mut args = args.into_iter();
         let mut bind_set = false;
         let mut host_set = false;
+        let mut startup_buffer_set = false;
         while let Some(arg) = args.next() {
             match arg.as_str() {
                 "--require-tone" if !result.require_tone => result.require_tone = true,
@@ -207,6 +210,18 @@ impl Options {
                 "--keep-listening" if !result.keep_listening => result.keep_listening = true,
                 "--control" if !result.control => result.control = true,
                 "--status" if !result.status => result.status = true,
+                "--startup-buffer-ms" if !startup_buffer_set => {
+                    let value = args
+                        .next()
+                        .ok_or("--startup-buffer-ms requires a value")?
+                        .parse::<u64>()
+                        .map_err(|_| "startup buffer must be 20 to 120 ms in 20 ms steps")?;
+                    if !(20..=120).contains(&value) || value % 20 != 0 {
+                        return Err("startup buffer must be 20 to 120 ms in 20 ms steps".into());
+                    }
+                    result.startup_buffer = Duration::from_millis(value);
+                    startup_buffer_set = true;
+                }
                 "--bind" if !bind_set => {
                     result.bind = args
                         .next()
@@ -223,7 +238,7 @@ impl Options {
                 }
                 _ => {
                     return Err(
-                        "usage: paired-audio-lab [--require-tone] [--play [--select-output] [--control]] [--status] [--keep-listening] [--bind IPv4 --host IPv4]"
+                        "usage: paired-audio-lab [--require-tone] [--play [--select-output] [--control]] [--status] [--startup-buffer-ms 20-120] [--keep-listening] [--bind IPv4 --host IPv4]"
                             .into(),
                     );
                 }
@@ -700,7 +715,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                     Some(UdpPollOutcome::Empty) => break,
                     Some(UdpPollOutcome::Processed { .. }) => {
                         if next_playout.is_none() && retry_at.is_none() {
-                            next_playout = Some(Instant::now() + Duration::from_millis(60));
+                            next_playout = Some(Instant::now() + options.startup_buffer);
                         }
                     }
                 }
@@ -1148,6 +1163,27 @@ mod tests {
         let defaults = Options::parse(args(&[])).unwrap();
         assert!(!defaults.play && !defaults.require_tone);
         assert!(!defaults.status);
+        assert_eq!(defaults.startup_buffer, Duration::from_millis(60));
+        for value in ["20", "40", "60", "80", "100", "120"] {
+            let options = Options::parse(args(&["--startup-buffer-ms", value])).unwrap();
+            assert_eq!(
+                options.startup_buffer.as_millis(),
+                value.parse::<u128>().unwrap()
+            );
+        }
+        for value in ["0", "19", "30", "140", "invalid"] {
+            assert!(Options::parse(args(&["--startup-buffer-ms", value])).is_err());
+        }
+        assert!(Options::parse(args(&["--startup-buffer-ms"])).is_err());
+        assert!(
+            Options::parse(args(&[
+                "--startup-buffer-ms",
+                "20",
+                "--startup-buffer-ms",
+                "40"
+            ]))
+            .is_err()
+        );
         assert!(Options::parse(args(&["--status"])).unwrap().status);
         assert!(Options::parse(args(&["--status", "--status"])).is_err());
         let playback =
