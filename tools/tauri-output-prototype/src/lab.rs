@@ -5,6 +5,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 
 const MAX_LAB_EVENTS: usize = 32;
+const MAX_LAB_EVENT_CHARS: usize = 256;
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -332,7 +333,17 @@ fn record_event(snapshot: &mut LabSnapshot, line: &str) {
     if snapshot.events.len() == MAX_LAB_EVENTS {
         snapshot.events.remove(0);
     }
-    snapshot.events.push(line.to_owned());
+    snapshot.events.push(bound_event(line));
+}
+
+fn bound_event(line: &str) -> String {
+    let mut chars = line.chars();
+    let bounded: String = chars.by_ref().take(MAX_LAB_EVENT_CHARS).collect();
+    if chars.next().is_some() {
+        format!("{bounded}...")
+    } else {
+        bounded
+    }
 }
 
 fn parse_metrics(line: &str) -> Option<LabMetrics> {
@@ -796,6 +807,17 @@ mod tests {
             lab.snapshot.events.last().map(String::as_str),
             Some("RESULT event 35")
         );
+    }
+
+    #[test]
+    fn lifecycle_events_are_bounded_without_splitting_utf8() {
+        let mut snapshot = LabSnapshot::default();
+        let long = format!("RESULT {}", "界".repeat(MAX_LAB_EVENT_CHARS));
+        record_event(&mut snapshot, &long);
+        let event = snapshot.events.first().unwrap();
+        assert!(event.ends_with("..."));
+        assert!(event.chars().count() <= MAX_LAB_EVENT_CHARS + 3);
+        assert!(event.is_char_boundary(event.len() - 3));
     }
 
     #[test]
