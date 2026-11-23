@@ -182,7 +182,12 @@ async function pollLab(retryUnknown = false) {
     const snapshot = await window.__TAURI__.core.invoke<LabSnapshot>('lab_status')
     if (disposed || request !== labRequest) return
     const wasRunning = lab.value.running
+    const wasSessionActive = lab.value.sessionActive
+    const hadMetrics = lab.value.metrics !== null
     lab.value = snapshot
+    if ((snapshot.sessionActive && !wasSessionActive) || (snapshot.metrics === null && hadMetrics)) {
+      labEvidenceMessage.value = null
+    }
     confirmControl(snapshot)
     labError.value = null
     if (reconciling) {

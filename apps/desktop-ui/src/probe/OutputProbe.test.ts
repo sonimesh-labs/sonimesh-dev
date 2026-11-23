@@ -575,6 +575,32 @@ describe('desktop output probe', () => {
     wrapper.unmount()
   })
 
+  it('clears a copied evidence notice when a new session starts', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    const metrics = { packets: '1', rejected: '0', decoded: '1', peak: '0.1', plc: '0', decodeErrors: '0', buffered: '0', output: 'active', media: 'receiving', adaptive: null }
+    const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [] })
+      .mockResolvedValueOnce({ running: true, sessionActive: false, status: 'Starting', invitation: null, metrics: null })
+      .mockResolvedValueOnce({ running: true, sessionActive: true, status: 'Session active', invitation: '01ab', metrics })
+      .mockResolvedValueOnce({ running: true, sessionActive: false, status: 'Waiting for Android', invitation: '01ab', metrics: null })
+      .mockResolvedValueOnce({ running: true, sessionActive: true, status: 'New session active', invitation: '01ab', metrics })
+    window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+    const wrapper = mountStoppedProbe()
+    await flushPromises()
+    vi.useFakeTimers()
+    await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
+    await vi.advanceTimersByTimeAsync(1000)
+    await wrapper.findAll('button').find(button => button.text() === 'Copy session evidence')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Session evidence copied.')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(wrapper.text()).not.toContain('Session evidence copied.')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(wrapper.text()).toContain('New session active')
+    expect(wrapper.text()).not.toContain('Session evidence copied.')
+    wrapper.unmount()
+  })
+
   it('shows live and final session observations, then clears them on the next client', async () => {
     const metrics = { packets: '120', rejected: '3', decoded: '115', peak: '0.250', plc: '2', decodeErrors: '1', buffered: '4', output: 'recovering', late: '9007199254740993', resyncDropped: '4', media: 'receiving' }
     const finalMetrics = { ...metrics, decoded: '120', output: 'stopped', late: '9007199254740994', resyncDropped: '5', media: 'interrupted' }
