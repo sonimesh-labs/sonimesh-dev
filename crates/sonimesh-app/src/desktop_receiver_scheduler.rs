@@ -8,7 +8,7 @@ use std::io::{Read, Write};
 
 use sonimesh_audio::FrameDecoder;
 use sonimesh_network::PinnedServerChannel;
-use sonimesh_network::UntrustedControlWrite;
+use sonimesh_network::{UntrustedControlStream, UntrustedControlWrite};
 use sonimesh_platform::{AudioOutput, OutputHealth};
 
 use crate::{
@@ -178,7 +178,7 @@ pub struct DesktopReceiverScheduler<
         MAX_SOURCES,
         PCM_SAMPLES_PER_BLOCK,
     >,
-    control: Option<(ControlSessionToken, S)>,
+    control: Option<(ControlSessionToken, UntrustedControlStream<S>)>,
 }
 
 impl<
@@ -265,13 +265,15 @@ where
         if self.control.is_some() {
             return Err(DesktopReceiverSchedulerError::ControlAlreadyAttached);
         }
-        self.control = Some((session, channel));
+        self.control = Some((session, UntrustedControlStream::from_io(channel)));
         Ok(())
     }
 
-    /// Detaches the current channel, if one is attached.
+    /// Detaches the current channel, discarding any partial frame or reply.
     pub fn detach_control(&mut self) -> Option<(ControlSessionToken, S)> {
-        self.control.take()
+        self.control
+            .take()
+            .map(|(session, framed)| (session, framed.into_inner()))
     }
 
     /// Retires the control transport and starts a bounded reconnect window.
@@ -319,7 +321,7 @@ where
         let session = owner
             .install_authenticated_control_session()
             .map_err(DesktopReceiverSchedulerReconnectError::Lifecycle)?;
-        self.control = Some((session, channel));
+        self.control = Some((session, UntrustedControlStream::from_io(channel)));
         Ok(session)
     }
 
@@ -332,29 +334,29 @@ where
     ///
     /// Returns [`ControlSessionError`] when the attached session cannot progress.
     pub fn poll_control_once(&mut self) -> Result<Option<ControlSessionPoll>, ControlSessionError> {
-        let Some((session, channel)) = self.control.take() else {
+        let Some((session, framed)) = self.control.take() else {
             return Ok(None);
         };
-        let mut control = DesktopControlSession::new(&mut self.receiver, session, channel);
+        let mut control = DesktopControlSession::from_framed(&mut self.receiver, session, framed);
 
         // Finish a previously queued reply before accepting another command.
         // This keeps a transiently full socket from turning into WritePending.
         match control.flush()? {
             UntrustedControlWrite::Complete => {}
             UntrustedControlWrite::Pending => {
-                let channel = control.into_inner();
-                self.control = Some((session, channel));
+                let framed = control.into_framed();
+                self.control = Some((session, framed));
                 return Ok(Some(ControlSessionPoll::Empty));
             }
             UntrustedControlWrite::Closed => return Ok(Some(ControlSessionPoll::Closed)),
         }
 
         let result = control.poll_once();
-        let channel = control.into_inner();
+        let framed = control.into_framed();
         match result {
             Ok(ControlSessionPoll::Closed) => Ok(Some(ControlSessionPoll::Closed)),
             Ok(poll) => {
-                self.control = Some((session, channel));
+                self.control = Some((session, framed));
                 Ok(Some(poll))
             }
             Err(error) => Err(error),
@@ -378,7 +380,7 @@ mod tests {
     };
     use sonimesh_protocol::{
         CONTROL_PROTOCOL_VERSION, Capability, Envelope, Hello, MediaDirection, MediaKeyContext,
-        SessionSecret, StartStream, encode_control_frame, envelope,
+        SessionSecret, StartStream, decode_control_frame, encode_control_frame, envelope,
     };
 
     use super::{DesktopReceiverScheduler, DesktopReceiverSchedulerError};
@@ -468,6 +470,7 @@ mod tests {
     struct PartialWriteIo {
         input: VecDeque<u8>,
         writes: usize,
+        output: Vec<u8>,
     }
 
     impl io::Read for PartialWriteIo {
@@ -486,11 +489,16 @@ mod tests {
     impl io::Write for PartialWriteIo {
         fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
             self.writes += 1;
-            if self.writes == 1 {
-                Ok(1.min(buffer.len()))
-            } else {
-                Ok(buffer.len())
+            if self.writes == 2 {
+                return Err(io::ErrorKind::WouldBlock.into());
             }
+            let count = if self.writes == 1 {
+                1.min(buffer.len())
+            } else {
+                buffer.len()
+            };
+            self.output.extend_from_slice(&buffer[..count]);
+            Ok(count)
         }
 
         fn flush(&mut self) -> io::Result<()> {
@@ -594,7 +602,14 @@ mod tests {
         input.extend(encode_control_frame(&hello).unwrap());
         input.extend(encode_control_frame(&start).unwrap());
         scheduler
-            .attach_control(session, PartialWriteIo { input, writes: 0 })
+            .attach_control(
+                session,
+                PartialWriteIo {
+                    input,
+                    writes: 0,
+                    output: Vec::new(),
+                },
+            )
             .unwrap();
         assert!(matches!(
             scheduler.poll_control_once().unwrap(),
@@ -614,7 +629,72 @@ mod tests {
             scheduler.poll_control_once().unwrap(),
             Some(crate::ControlSessionPoll::Empty)
         ));
-        assert!(scheduler.detach_control().is_some());
+        assert!(matches!(
+            scheduler.poll_control_once().unwrap(),
+            Some(crate::ControlSessionPoll::Empty)
+        ));
+        let (_, channel) = scheduler.detach_control().unwrap();
+        let reply = decode_control_frame(&channel.output).unwrap();
+        assert_eq!(reply.request_id, 2);
+        assert!(matches!(
+            reply.payload,
+            Some(envelope::Payload::StreamStatus(_))
+        ));
+    }
+
+    #[test]
+    fn scheduler_preserves_fragmented_control_frame_across_polls() {
+        struct FragmentedIo(VecDeque<u8>);
+        impl io::Read for FragmentedIo {
+            fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+                match self.0.pop_front() {
+                    Some(byte) => {
+                        buffer[0] = byte;
+                        Ok(1)
+                    }
+                    None => Err(io::ErrorKind::WouldBlock.into()),
+                }
+            }
+        }
+        impl io::Write for FragmentedIo {
+            fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+                Ok(buffer.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        let hello = Envelope {
+            protocol_version: CONTROL_PROTOCOL_VERSION,
+            request_id: 1,
+            payload: Some(envelope::Payload::Hello(Hello {
+                supported_versions: vec![CONTROL_PROTOCOL_VERSION],
+                capabilities: vec![Capability::FrameDuration10Ms as i32],
+                display_name: "test sender".to_owned(),
+            })),
+        };
+        let bytes = encode_control_frame(&hello).unwrap();
+        let mut scheduler = DesktopReceiverScheduler::new(receiver());
+        let session = scheduler
+            .receiver_mut()
+            .owner_mut()
+            .install_authenticated_control_session()
+            .unwrap();
+        scheduler
+            .attach_control(session, FragmentedIo(bytes.clone().into()))
+            .unwrap();
+        let mut processed = false;
+        for _ in 0..=bytes.len() {
+            match scheduler.poll_control_once().unwrap() {
+                Some(crate::ControlSessionPoll::Processed { .. }) => {
+                    processed = true;
+                    break;
+                }
+                Some(crate::ControlSessionPoll::Empty) => {}
+                other => panic!("unexpected poll: {other:?}"),
+            }
+        }
+        assert!(processed, "fragmented hello must eventually be processed");
     }
 
     #[test]

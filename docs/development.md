@@ -734,7 +734,10 @@ channel, automatically retires a closed/error channel, and exposes the UDP
 `tick_media` operation through the same scheduling boundary.
 Before each control poll it flushes any reply left by a previous nonblocking
 write; a full socket therefore pauses command intake for one tick instead of
-turning a recoverable `Pending` write into a dropped session.
+turning a recoverable `Pending` write into a dropped session. The scheduler
+retains its framing buffers across polls, so fragmented incoming frames and
+partially written replies resume where the previous poll stopped. Explicitly
+detaching a channel discards any unfinished frame or reply.
 The UDP specialization also exposes `tick`, which runs one control poll and one
 media poll/decode together while returning their results independently, so a
 control transport failure does not suppress the media tick.

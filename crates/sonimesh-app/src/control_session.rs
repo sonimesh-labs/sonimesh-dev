@@ -183,10 +183,27 @@ where
         session: ControlSessionToken,
         channel: S,
     ) -> Self {
+        Self::from_framed(receiver, session, UntrustedControlStream::from_io(channel))
+    }
+
+    /// Attaches an existing framing owner, preserving partial reads and writes.
+    #[must_use]
+    pub(crate) fn from_framed(
+        receiver: &'a mut DesktopReceiverOwner<
+            O,
+            P,
+            SLOTS,
+            OUTPUT_SAMPLES_PER_BLOCK,
+            MAX_SOURCES,
+            PCM_SAMPLES_PER_BLOCK,
+        >,
+        session: ControlSessionToken,
+        framed: UntrustedControlStream<S>,
+    ) -> Self {
         Self {
             receiver,
             session,
-            framed: UntrustedControlStream::from_io(channel),
+            framed,
         }
     }
 
@@ -224,6 +241,12 @@ where
     #[must_use]
     pub fn into_inner(self) -> S {
         self.framed.into_inner()
+    }
+
+    /// Returns the framing owner, retaining any partial read or pending reply.
+    #[must_use]
+    pub(crate) fn into_framed(self) -> UntrustedControlStream<S> {
+        self.framed
     }
 
     fn process(&mut self, envelope: &Envelope) -> Result<ControlSessionPoll, ControlSessionError> {

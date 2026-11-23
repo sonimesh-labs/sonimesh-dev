@@ -89,7 +89,8 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   scheduler;
 - a shell-neutral `DesktopReceiverScheduler` that owns the receiver and one
   optional framed control channel, preserving channel ownership across ticks and
-  retiring it on closure or transport failure. Its UDP specialization also
+  retaining partial control frames and replies across nonblocking polls, and
+  retiring the channel on closure or transport failure. Its UDP specialization also
   provides one combined control/media tick with independent results, so a
   control transport failure does not suppress media polling or decode;
   `mark_control_lost` centralizes the follow-up lifecycle transition and arms
