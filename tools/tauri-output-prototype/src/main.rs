@@ -1,4 +1,5 @@
 use serde::Serialize;
+mod lab;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
@@ -8,6 +9,37 @@ use std::sync::{
 struct ProbeState {
     snapshot: Mutex<SelectionSnapshot>,
     playing: Arc<AtomicBool>,
+    lab: Mutex<lab::Lab>,
+}
+
+#[tauri::command]
+fn start_lab(
+    state: tauri::State<'_, ProbeState>,
+    host: String,
+) -> Result<lab::LabSnapshot, String> {
+    state
+        .lab
+        .lock()
+        .map_err(|_| "Could not access listener state.")?
+        .start(&host)
+}
+
+#[tauri::command]
+fn lab_status(state: tauri::State<'_, ProbeState>) -> Result<lab::LabSnapshot, &'static str> {
+    Ok(state
+        .lab
+        .lock()
+        .map_err(|_| "Could not access listener state.")?
+        .refresh())
+}
+
+#[tauri::command]
+fn stop_lab(state: tauri::State<'_, ProbeState>) -> Result<lab::LabSnapshot, &'static str> {
+    Ok(state
+        .lab
+        .lock()
+        .map_err(|_| "Could not access listener state.")?
+        .stop())
 }
 
 #[derive(Default)]
@@ -325,9 +357,23 @@ mod tests {
 }
 
 fn main() {
+    use tauri::Manager;
     tauri::Builder::default()
         .manage(ProbeState::default())
-        .invoke_handler(tauri::generate_handler![probe_outputs, play_test_tone])
-        .run(tauri::generate_context!())
-        .expect("desktop output probe failed");
+        .invoke_handler(tauri::generate_handler![
+            probe_outputs,
+            play_test_tone,
+            start_lab,
+            lab_status,
+            stop_lab
+        ])
+        .build(tauri::generate_context!())
+        .expect("desktop output probe failed")
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::Exit)
+                && let Ok(mut lab) = app.state::<ProbeState>().lab.lock()
+            {
+                lab.stop();
+            }
+        });
 }

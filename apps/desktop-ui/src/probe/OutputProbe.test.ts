@@ -2,9 +2,59 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import OutputProbe from './OutputProbe.vue'
 
-afterEach(() => { delete window.__TAURI__ })
+afterEach(() => { vi.useRealTimers(); delete window.__TAURI__ })
 
 describe('desktop output probe', () => {
+  it('starts and stops the lab listener with the specified control address', async () => {
+    const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [] })
+      .mockResolvedValueOnce({ running: true, status: 'Starting listener…', invitation: null })
+      .mockResolvedValueOnce({ running: false, status: 'Stopped', invitation: null })
+    window.__TAURI__ = { core: { invoke } }
+    const wrapper = mount(OutputProbe)
+    await flushPromises()
+    await wrapper.get('#lab-host').setValue('10.0.2.2')
+    await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
+    await flushPromises()
+    expect(invoke).toHaveBeenCalledWith('start_lab', { host: '10.0.2.2' })
+    expect(wrapper.text()).toContain('Starting listener')
+    await wrapper.findAll('button').find(button => button.text() === 'Stop listener')!.trigger('click')
+    await flushPromises()
+    expect(invoke).toHaveBeenCalledWith('stop_lab')
+    expect(wrapper.text()).toContain('Stopped')
+    wrapper.unmount()
+  })
+
+  it('shows listener launch errors and permits retry', async () => {
+    const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [] })
+      .mockRejectedValueOnce('Enter a valid IPv4 address.')
+      .mockResolvedValueOnce({ running: true, status: 'Starting listener…', invitation: null })
+    window.__TAURI__ = { core: { invoke } }
+    const wrapper = mount(OutputProbe)
+    await flushPromises()
+    const start = wrapper.findAll('button').find(button => button.text() === 'Start listener')!
+    await start.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Enter a valid IPv4 address.')
+    await start.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Starting listener')
+    wrapper.unmount()
+  })
+
+  it('displays the invitation returned by the running listener', async () => {
+    const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [] })
+      .mockResolvedValueOnce({ running: true, status: 'Starting listener…', invitation: null })
+      .mockResolvedValueOnce({ running: true, status: 'Waiting for Android', invitation: '01ab' })
+    window.__TAURI__ = { core: { invoke } }
+    const wrapper = mount(OutputProbe)
+    await flushPromises()
+    vi.useFakeTimers()
+    await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect((wrapper.get('#lab-invitation').element as HTMLTextAreaElement).value).toBe('01ab')
+    expect(wrapper.text()).toContain('Waiting for Android')
+    wrapper.unmount()
+  })
   it('loads real probe results and refreshes them on request', async () => {
     const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [
       { label: 'Speakers', sampleRateHz: 48_000, channels: 2, isDefault: true },

@@ -357,7 +357,20 @@ button:focus-visible, select:focus-visible, a:focus-visible { outline: 3px solid
   max-width: 760px;
   margin: 0 auto;
   padding: 32px 24px;
+  display: grid;
+  gap: 20px;
 }
+
+.probe-shell label { display: block; margin: 16px 0 6px; font-weight: 600; }
+.probe-shell input, .probe-shell textarea {
+  display: block;
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #b4bfc8;
+  border-radius: 6px;
+  font: inherit;
+}
+.probe-shell textarea { overflow-wrap: anywhere; resize: vertical; }
 
 .probe-list {
   display: grid;

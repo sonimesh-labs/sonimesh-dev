@@ -70,8 +70,15 @@ request a two-second, low-amplitude test tone on a listed endpoint. The test
 re-probes that endpoint, owns the CPAL stream on a worker, and stops it after
 the test. It waits for samples to be generated and estimates drain time from the
 largest observed callback; this is not proof that the device played every sample.
-It does not alter the system default or establish a receiver session, audibility,
-latency, or device-recovery evidence.
+It does not alter the system default or establish audibility, latency, or
+device-recovery evidence.
+
+For controlled experiments, the desktop probe may launch the separately built
+paired audio lab as a child process, display its public lab invitation and
+low-rate status, and stop it when requested or when the probe exits. The child
+owns pairing, UDP, decoding, and default-device playback; the UI carries no
+audio. This is a development-only process boundary, not the product receiver,
+device selection, persistent trust, or evidence of audible playback.
 The UDP lab may retry the selected endpoint after a reported output fault while
 its media session remains connected. Recovery recreates the PCM endpoint outside
 the callback and preserves the local gain and mute settings. It does not follow a

@@ -382,8 +382,23 @@ cargo +1.98.1 run --manifest-path tools/tauri-output-prototype/Cargo.toml --lock
 ~~~
 
 This separate prototype uses Rust 1.98.1 for its locked Tauri dependencies; the
-shared workspace remains on Rust 1.85.0. Windows WebView2 is required. The window
-is not the receiver control UI and does not verify receiver playback, latency, or pairing.
+shared workspace remains on Rust 1.85.0. Windows WebView2 is required. To use
+its **Paired audio lab**, first build the child listener from the repository root:
+
+~~~powershell
+cargo build -p opus-codec-prototype --bin paired-audio-lab --features playback
+~~~
+
+The probe expects `target/debug/paired-audio-lab.exe` in this checkout. Start the
+listener in the window, copy the displayed invitation to the Android audio lab,
+and enter the UDP address separately on Android. The control address defaults to
+`127.0.0.1` for ADB reverse; for a controlled LAN use an address Android can
+reach. The listener binds TCP 47610 on all IPv4 interfaces and uses UDP 39093;
+it plays through the default Windows output. Stopping the listener terminates the
+experiment immediately, including any active session; closing the probe also
+stops its child. This development-only UI uses
+the public test invitation and does not establish product pairing, audibility,
+or latency evidence.
 Its application icon uses the Feather `headphones` icon (MIT license).
 On 2026-11-22, a Windows desktop debug build opened this window and displayed
 five CPAL output endpoints, their formats, and the default marker through the
