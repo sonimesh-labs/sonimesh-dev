@@ -2,6 +2,7 @@ package com.sonimesh.opusspike
 
 /** Process-local, main-thread status for the interactive lab. */
 internal object LabStatus {
+    val captureAdmission = LabCaptureAdmission()
     private var message = "Idle"
     private val observers = mutableSetOf<(String) -> Unit>()
 

@@ -211,6 +211,10 @@ class LabActivity : Activity() {
     }
 
     private fun startCapture(udp: Boolean, paired: Boolean = false) {
+        if (!LabStatus.captureAdmission.canBegin()) {
+            LabStatus.publish("Capture is already starting, running, or stopping.")
+            return
+        }
         if (udp) {
             val parsed = parseLabAddress(address.text.toString())
             if (parsed == null) {
@@ -242,8 +246,18 @@ class LabActivity : Activity() {
         udpMode = udp
         pairedMode = paired
         pendingUsage = selectedUsage()
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 1)
+        val needsPermission = checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED
+        if (!LabStatus.captureAdmission.begin(needsPermission)) {
+            LabStatus.publish("Capture is already starting, running, or stopping.")
+            return
+        }
+        if (needsPermission) {
+            try {
+                requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 1)
+            } catch (_: RuntimeException) {
+                LabStatus.captureAdmission.launchFailed()
+                LabStatus.publish("Unable to request microphone permission. Try again.")
+            }
         } else requestProjection()
     }
 
@@ -298,14 +312,21 @@ class LabActivity : Activity() {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == 1) {
-            if (grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED) requestProjection()
+            val granted = grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED
+            if (!LabStatus.captureAdmission.permissionResult(granted)) return
+            if (granted) requestProjection()
             else LabStatus.publish("Microphone permission is required for playback capture.")
         }
     }
 
     private fun requestProjection() {
-        val manager = getSystemService(MediaProjectionManager::class.java)
-        startActivityForResult(manager.createScreenCaptureIntent(), 2)
+        try {
+            val manager = getSystemService(MediaProjectionManager::class.java)
+            startActivityForResult(manager.createScreenCaptureIntent(), 2)
+        } catch (_: RuntimeException) {
+            LabStatus.captureAdmission.launchFailed()
+            LabStatus.publish("Unable to request screen capture. Try again.")
+        }
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
@@ -314,24 +335,33 @@ class LabActivity : Activity() {
             if (resultCode == RESULT_OK) applyScannedInvitation(data?.getStringExtra("SCAN_RESULT"))
             return
         }
-        if (requestCode == 2 && resultCode == RESULT_OK && data != null) {
-            startForegroundService(Intent(this, LabCaptureService::class.java).apply {
-                putExtra("resultCode", resultCode)
-                putExtra("resultData", data)
-                putExtra("udpMode", udpMode)
-                putExtra("udpAddress", pendingAddress)
-                putExtra("pairedMode", pairedMode)
-                putExtra("captureUsage", pendingUsage.value)
-                if (pairedMode) {
-                    putExtra("pairedPin", pendingPin)
-                    putExtra("pairedHost", pendingHost)
-                    importedInvitation?.let { putExtra("pairedInvitation", it.copyOf()) }
-                }
-            })
+        if (requestCode == 2) {
+            val granted = resultCode == RESULT_OK && data != null
+            if (!LabStatus.captureAdmission.projectionResult(granted)) return
+            if (!granted) {
+                LabStatus.publish("Screen capture consent was not granted.")
+                return
+            }
+            try {
+                startForegroundService(Intent(this, LabCaptureService::class.java).apply {
+                    putExtra("resultCode", resultCode)
+                    putExtra("resultData", data)
+                    putExtra("udpMode", udpMode)
+                    putExtra("udpAddress", pendingAddress)
+                    putExtra("pairedMode", pairedMode)
+                    putExtra("captureUsage", pendingUsage.value)
+                    if (pairedMode) {
+                        putExtra("pairedPin", pendingPin)
+                        putExtra("pairedHost", pendingHost)
+                        importedInvitation?.let { putExtra("pairedInvitation", it.copyOf()) }
+                    }
+                })
+            } catch (_: RuntimeException) {
+                LabStatus.captureAdmission.launchFailed()
+                LabStatus.publish("Unable to start capture. Try again.")
+            }
             importedInvitation?.fill(0)
             importedInvitation = null
-        } else if (requestCode == 2) {
-            LabStatus.publish("Screen capture consent was not granted.")
         }
     }
 

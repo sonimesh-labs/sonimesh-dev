@@ -117,8 +117,11 @@ desktop tail drain are best effort, so
 network loss or slow shutdown can still truncate audio. The
 foreground service stays in a stopping state until this cleanup completes;
 repeated start requests during that interval are ignored. A stalled control
-reply can delay completion until the control command times out. The desktop
-defaults to a software PCM check. On Windows, add `--features playback`
+reply can delay completion until the control command times out. The Android
+lab activity also ignores repeated start requests while permission or screen
+capture consent is pending, or while its service is active or stopping. Once
+the service finishes, starting again requests fresh screen-capture consent.
+The desktop defaults to a software PCM check. On Windows, add `--features playback`
 before `--` and pass `--play` after it to use the default output device; add
 `--select-output` to choose a device. `--require-tone` checks decoded audio,
 not whether it was audible. Output callback counts are not a listening test.

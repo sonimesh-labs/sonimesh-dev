@@ -64,6 +64,13 @@ class PairedCaptureTest {
                 if (!capturing) SystemClock.sleep(100)
             }
             assertTrue("capture did not start", capturing)
+            scenario.onActivity { activity ->
+                find(activity.window.decorView) { it is Button && it.text.toString().equals("Start paired UDP capture", true) }.performClick()
+                assertTrue(
+                    "duplicate capture request was not rejected",
+                    containsStatus(activity.window.decorView, "Status: Capture is already starting, running, or stopping."),
+                )
+            }
             if (expectDisconnect) {
                 instrumentation.sendStatus(1, Bundle().apply { putString("pairedCapture", "ready") })
                 var disconnected = false

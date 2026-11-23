@@ -45,6 +45,8 @@ class LabCaptureService : Service() {
     private var terminalStatus = false
     private var started = false
     private var workerStarted = false
+    private var workerFinished = false
+    private var destroyed = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -56,6 +58,7 @@ class LabCaptureService : Service() {
         }
         if (started) return START_NOT_STICKY
         started = true
+        LabStatus.captureAdmission.serviceStarted()
         running.set(true)
         LabStatus.publish("Connecting to the desktop listener…")
         var pendingInvitation: ByteArray? = null
@@ -296,7 +299,13 @@ class LabCaptureService : Service() {
                     paired.close()
                 }
             }
-            handler.post { stopSelf() }
+            handler.post {
+                workerFinished = true
+                if (destroyed) {
+                    LabStatus.captureAdmission.serviceFinished()
+                    if (!terminalStatus) LabStatus.publish("Capture stopped.")
+                } else stopSelf()
+            }
         }
     }
 
@@ -382,7 +391,11 @@ class LabCaptureService : Service() {
 
     override fun onDestroy() {
         requestStop()
-        if (!terminalStatus) LabStatus.publish("Capture stopped.")
+        if (!terminalStatus) {
+            LabStatus.publish(if (workerStarted && !workerFinished) "Stopping capture…" else "Capture stopped.")
+        }
+        destroyed = true
+        if (started && (!workerStarted || workerFinished)) LabStatus.captureAdmission.serviceFinished()
         super.onDestroy()
     }
 }

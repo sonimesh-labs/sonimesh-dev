@@ -138,6 +138,11 @@ behavior remain unverified.
 The lab activity presents the service's current connection and capture state,
 including a terminal reason on connection failure or projection revocation;
 this process-local status is not a production diagnostics interface.
+The lab activity admits one permission/consent flow at a time and rejects another
+start while its foreground service is active or finishing cleanup. The guard
+survives activity recreation within the process; denial or completed service
+and worker cleanup allows a fresh request. The projection result itself is never
+retained by it.
 The lab reports no capturable audio after two seconds of completed silent
 capture frames and restores the capturing status when a non-silent read arrives.
 Partial reads count by frames rather than calls; this observation does not identify
