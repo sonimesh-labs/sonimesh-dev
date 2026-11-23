@@ -58,7 +58,8 @@ pub use desktop_receiver_owner::UdpMediaTick;
 pub use desktop_receiver_scheduler::{
     DesktopReceiverScheduler, DesktopReceiverSchedulerError,
     DesktopReceiverSchedulerMaintenanceTick, DesktopReceiverSchedulerReconnectError,
-    DesktopReceiverSchedulerTick,
+    DesktopReceiverSchedulerTick, MAX_SCHEDULED_UDP_POLLS, ScheduledPlayoutError,
+    ScheduledReceiverState, ScheduledReceiverTick,
 };
 pub use diagnostic_export_action::{
     DEFAULT_MAX_RETAINED_EXPORT_BYTES, DEFAULT_MAX_RETAINED_EXPORTS, DiagnosticExportAction,

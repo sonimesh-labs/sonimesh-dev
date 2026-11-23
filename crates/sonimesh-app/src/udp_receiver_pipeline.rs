@@ -263,6 +263,12 @@ where
         self.receiver.local_addr()
     }
 
+    /// Returns the media identity currently configured for this receiver.
+    #[must_use]
+    pub const fn context(&self) -> MediaKeyContext {
+        self.pipeline.context()
+    }
+
     /// Returns the source endpoint pinned by the first protected packet outcome.
     ///
     /// A fresh pipeline or successfully installed fresh session is unbound

@@ -50,9 +50,17 @@ an adapter at underflow or when its bounded output queue is full, and reports
 conversion errors independently from control and UDP results. A
 combined UDP poll/decode tick uses the immediate-drain path: a received packet
 does not establish whether further packets are in flight. Callers that enable
-target-gated playout must supply that signal explicitly. The caller still paces
-combined ticks at the stream frame duration; independent packet and playout
-scheduling remains an integration gap.
+target-gated playout must supply that signal explicitly. The combined tick
+still requires external frame pacing. A separate monotonic-time scheduler path
+polls a bounded packet burst on each call and performs at most one immediate
+drain decode per call. It preserves frame-clock phase, skips missed deadlines,
+and spaces decode decisions by at least half a frame. It resets its cadence when
+the matching stream or output is unavailable. The host must drive it more often
+than the frame interval; a live platform host still needs to adopt this path.
+The scheduling result distinguishes idle, mismatched media identity, output
+failure, pending stream re-admission, and a ready media path. The preconfigured
+pipeline is not yet built or validated from Start before its reply, so a
+successful control reply does not by itself establish media readiness.
 A `DesktopControlSession` can now attach a trusted post-pairing channel to that
 owner. It polls the existing bounded control framing, executes at most one
 envelope per tick, and sends correlated `StreamStatus` replies for start,

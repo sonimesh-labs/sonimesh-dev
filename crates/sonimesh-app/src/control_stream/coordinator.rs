@@ -423,6 +423,14 @@ impl ControlStreamCoordinator {
         self.active.iter().flatten().map(|request| request.identity)
     }
 
+    pub(crate) fn active_request_exact(
+        &self,
+        identity: MediaStreamIdentity,
+    ) -> Option<StreamStartRequest> {
+        self.active_request(identity)
+            .filter(|request| request.identity == identity)
+    }
+
     /// Returns the one-time negotiated control capability set, if available.
     #[must_use]
     pub const fn negotiation(&self) -> Option<sonimesh_protocol::NegotiatedControl> {

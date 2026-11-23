@@ -26,8 +26,20 @@ chooses and supplies the in-flight-arrival signal.
 The desktop combined UDP tick cannot infer that signal from a successful socket
 poll: a received packet says nothing about future arrivals. It therefore uses
 the immediate-drain path even when target gating is enabled. An explicit caller
-that knows the arrival state may still use the gated decode boundary. Separating
-packet polling from frame-paced playout remains future integration work.
+that knows the arrival state may still use the gated decode boundary.
+
+The desktop receiver also exposes a monotonic-time scheduling path. Each call
+polls at most 16 UDP datagrams, services control and maintenance independently,
+and makes at most one immediate-drain decode decision per call when the matching
+active stream's negotiated frame deadline is due. It preserves frame-clock
+phase, skips missed deadlines, and spaces decisions at least half a frame apart
+to bound catch-up. The caller must poll more often than the frame interval;
+otherwise a single decision per call cannot sustain the sender's frame rate.
+The scheduler does not discard stale encoded frames after a long stall, so
+buffered audio may remain delayed until another resynchronization occurs. A
+regressing clock suppresses decode until time catches up. Stopped, unmatched, or
+output-unavailable streams reset their cadence. This is software scheduling
+behavior, not a latency or physical playback measurement.
 
 ## Decision
 

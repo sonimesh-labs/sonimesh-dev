@@ -6,7 +6,7 @@
 
 use std::io::{Read, Write};
 
-use sonimesh_audio::FrameDecoder;
+use sonimesh_audio::{DecodeStep, DecodeWorkerError, FrameDecoder};
 use sonimesh_network::PinnedServerChannel;
 use sonimesh_network::{UntrustedControlStream, UntrustedControlWrite};
 use sonimesh_platform::{AudioOutput, OutputHealth};
@@ -14,9 +14,60 @@ use sonimesh_platform::{AudioOutput, OutputHealth};
 use crate::{
     ControlSessionError, ControlSessionPoll, ControlSessionToken, DesktopControlOwnerError,
     DesktopControlSession, DesktopReceiverOwner, ReceiverPcmProducerInstaller,
-    ReconnectGraceObservation, SessionEvent, TrustedControlChannel, UdpMediaTick, UdpReceiverError,
-    UdpReceiverPipeline,
+    ReconnectGraceObservation, SessionEvent, TrustedControlChannel, UdpMediaTick, UdpPollOutcome,
+    UdpReceiverError, UdpReceiverPipeline,
 };
+
+/// Maximum UDP polls performed by one clock-driven scheduler call.
+pub const MAX_SCHEDULED_UDP_POLLS: usize = 16;
+
+/// Media readiness observed by the clock-driven receiver.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ScheduledReceiverState {
+    /// No control stream is active.
+    Idle,
+    /// An active control stream does not match the configured media pipeline.
+    IdentityMismatch,
+    /// The matching stream is active, but its output is unavailable.
+    OutputUnavailable,
+    /// Output was recreated, but the matching stream has not rejoined it.
+    AwaitingStreamRecovery,
+    /// The matching stream is admitted to a running output.
+    Active,
+}
+
+/// Independent results from a clock-driven receiver scheduler call.
+#[derive(Debug)]
+pub struct ScheduledReceiverTick<DecoderError> {
+    /// Readiness of the media pipeline and output for this call.
+    pub state: ScheduledReceiverState,
+    /// One control transport observation.
+    pub control: Result<Option<ControlSessionPoll>, ControlSessionError>,
+    /// Number of processed packets, or the first UDP error.
+    pub packets: Result<usize, UdpReceiverError<DecoderError>>,
+    /// One due decode decision, no decision if not due, or its failure.
+    pub playout: Result<Option<DecodeStep>, ScheduledPlayoutError<DecoderError>>,
+    /// PCM conversion result, independent of the other operations.
+    pub pump: Result<(), crate::MixerStreamSessionError>,
+    /// Reconnect-grace observation.
+    pub reconnect: Result<ReconnectGraceObservation, DesktopControlOwnerError>,
+    /// Output-health observation.
+    pub output: Result<Option<OutputHealth>, DesktopControlOwnerError>,
+}
+
+/// A clock-driven playout decision could not be performed.
+#[derive(Debug)]
+pub enum ScheduledPlayoutError<DecoderError> {
+    /// The supplied monotonic timestamp is earlier than the previous one.
+    ClockRegression {
+        /// Last accepted timestamp in milliseconds.
+        previous_ms: u64,
+        /// Regressed timestamp in milliseconds.
+        now_ms: u64,
+    },
+    /// The stream-local decoder failed.
+    Decode(DecodeWorkerError<DecoderError>),
+}
 
 /// Failure while attaching a control channel to a receiver scheduler.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -194,6 +245,8 @@ pub struct DesktopReceiverScheduler<
         PCM_SAMPLES_PER_BLOCK,
     >,
     control: Option<(ControlSessionToken, UntrustedControlStream<S>)>,
+    scheduled_clock_ms: Option<u64>,
+    scheduled_playout: Option<(crate::StreamStartRequest, u128, u128)>,
 }
 
 impl<
@@ -234,6 +287,8 @@ where
         Self {
             receiver,
             control: None,
+            scheduled_clock_ms: None,
+            scheduled_playout: None,
         }
     }
 
@@ -908,6 +963,251 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)] // Exercises timing, UDP, output recovery, and control lifecycle.
+    fn scheduled_receiver_paces_playout_and_respects_stream_lifecycle() {
+        use sonimesh_audio::DecodeStep;
+        use sonimesh_network::MediaSessionSender;
+        use sonimesh_protocol::StopStream;
+
+        let (producer, _) = realtime_pcm_queue::<SOURCE_SAMPLES>(8).unwrap();
+        let secret = SessionSecret::new([7; 32]);
+        let context = MediaKeyContext::new(7, 1, 0, MediaDirection::AndroidToDesktop).unwrap();
+        let counters = Arc::new(StreamCounters::default());
+        let pipeline = crate::UdpReceiverPipeline::<ByteDecoder, 32, 256, SOURCE_SAMPLES>::bind(
+            "127.0.0.1:0".parse().unwrap(),
+            &secret,
+            context,
+            ByteDecoder,
+            producer,
+            Arc::clone(&counters),
+            0,
+        )
+        .unwrap();
+        let address = pipeline.local_addr().unwrap();
+        let bridge = ControlToMixerBridge::new(
+            SessionState::READY,
+            &[Capability::FrameDuration10Ms],
+            TestOutput::default(),
+            OutputSelection {
+                device: None,
+                config: OutputConfig {
+                    sample_rate_hz: 48_000,
+                    channels: 2,
+                    sample_format: SampleFormat::Float32,
+                    requested_callback_frames: Some(480),
+                    maximum_callback_frames: 1_024,
+                },
+            },
+            8,
+            8,
+        )
+        .unwrap();
+        let owner = DesktopControlOwner::new(bridge).unwrap();
+        let mut scheduler: DesktopReceiverScheduler<
+            _,
+            _,
+            SLOTS,
+            OUTPUT_SAMPLES,
+            1,
+            SOURCE_SAMPLES,
+            IdleIo,
+        > = DesktopReceiverScheduler::new(DesktopReceiverOwner::new(
+            owner,
+            pipeline,
+            Some(counters),
+        ));
+        let session = scheduler
+            .receiver_mut()
+            .owner_mut()
+            .install_authenticated_control_session()
+            .unwrap();
+        let hello = Envelope {
+            protocol_version: CONTROL_PROTOCOL_VERSION,
+            request_id: 1,
+            payload: Some(envelope::Payload::Hello(Hello {
+                supported_versions: vec![CONTROL_PROTOCOL_VERSION],
+                capabilities: vec![Capability::FrameDuration10Ms as i32],
+                display_name: "test sender".to_owned(),
+            })),
+        };
+        let start = Envelope {
+            protocol_version: CONTROL_PROTOCOL_VERSION,
+            request_id: 2,
+            payload: Some(envelope::Payload::StartStream(StartStream {
+                media_session_id: 7,
+                stream_id: 1,
+                sample_rate_hz: 48_000,
+                channels: 1,
+                frame_duration_ms: 10,
+                media_key_epoch: 0,
+            })),
+        };
+        scheduler
+            .receiver_mut()
+            .accept_and_execute(session, &hello)
+            .unwrap();
+        let idle = scheduler.tick_scheduled_at(90);
+        assert_eq!(idle.state, super::ScheduledReceiverState::Idle);
+        assert!(matches!(idle.playout, Ok(None)));
+        scheduler
+            .receiver_mut()
+            .accept_and_execute(session, &start)
+            .unwrap();
+
+        let mut sender =
+            MediaSessionSender::bind("127.0.0.1:0".parse().unwrap(), &secret, context, address)
+                .unwrap();
+        for timestamp in [0, 480, 960] {
+            sender.send_frame(0, timestamp, &[1]).unwrap();
+        }
+        let tick = scheduler.tick_scheduled_at(100);
+        assert_eq!(tick.state, super::ScheduledReceiverState::Active);
+        assert_eq!(tick.packets.unwrap(), 3);
+        assert!(matches!(
+            tick.playout,
+            Ok(Some(DecodeStep::Decoded { sequence: 0, .. }))
+        ));
+        assert!(
+            tick.control.is_ok()
+                && tick.output.is_ok()
+                && tick.reconnect.is_ok()
+                && tick.pump.is_ok()
+        );
+        for now in [100, 101, 109] {
+            assert!(matches!(scheduler.tick_scheduled_at(now).playout, Ok(None)));
+        }
+        assert!(matches!(
+            scheduler.tick_scheduled_at(110).playout,
+            Ok(Some(DecodeStep::Decoded { sequence: 1, .. }))
+        ));
+        assert!(matches!(
+            scheduler.tick_scheduled_at(159).playout,
+            Ok(Some(DecodeStep::Decoded { sequence: 2, .. }))
+        ));
+        assert!(matches!(scheduler.tick_scheduled_at(159).playout, Ok(None)));
+        assert!(matches!(
+            scheduler.tick_scheduled_at(158).playout,
+            Err(super::ScheduledPlayoutError::ClockRegression {
+                previous_ms: 159,
+                now_ms: 158
+            })
+        ));
+        assert!(matches!(scheduler.tick_scheduled_at(160).playout, Ok(None)));
+        assert!(matches!(scheduler.tick_scheduled_at(163).playout, Ok(None)));
+        assert!(matches!(
+            scheduler.tick_scheduled_at(164).playout,
+            Ok(Some(DecodeStep::Concealed { sequence: 3, .. }))
+        ));
+
+        let output = scheduler
+            .receiver_mut()
+            .owner_mut()
+            .bridge_mut()
+            .mixer_mut()
+            .output_mut();
+        let mut samples = [0.0; OUTPUT_SAMPLES];
+        output.source.as_mut().unwrap().render(&mut samples);
+        assert!(samples.iter().any(|sample| *sample > 0.1));
+
+        // A busy socket is drained in bounded batches even between deadlines.
+        for index in 4..24 {
+            sender.send_frame(0, index * 480, &[1]).unwrap();
+        }
+        assert_eq!(scheduler.tick_scheduled_at(165).packets.unwrap(), 16);
+        let tick = scheduler.tick_scheduled_at(165);
+        assert_eq!(tick.packets.unwrap(), 4);
+        assert!(matches!(tick.playout, Ok(None)));
+
+        scheduler
+            .receiver_mut()
+            .owner_mut()
+            .bridge_mut()
+            .mixer_mut()
+            .output_mut()
+            .health = OutputHealth::StreamError;
+        let fault = scheduler.tick_scheduled_at(170);
+        assert_eq!(
+            fault.state,
+            super::ScheduledReceiverState::OutputUnavailable
+        );
+        assert!(matches!(fault.output, Ok(Some(OutputHealth::StreamError))));
+        assert!(matches!(fault.playout, Ok(None)));
+        scheduler
+            .receiver_mut()
+            .owner_mut()
+            .bridge_mut()
+            .mixer_mut()
+            .output_mut()
+            .health = OutputHealth::Healthy;
+        let identities = scheduler
+            .receiver_mut()
+            .owner_mut()
+            .bridge_mut()
+            .recover_output()
+            .unwrap();
+        let awaiting = scheduler.tick_scheduled_at(171);
+        assert_eq!(
+            awaiting.state,
+            super::ScheduledReceiverState::AwaitingStreamRecovery
+        );
+        assert!(
+            matches!(awaiting.playout, Ok(None)),
+            "recovered output must wait for stream re-admission"
+        );
+        scheduler
+            .receiver_mut()
+            .recover_stream(identities[0])
+            .unwrap();
+        assert!(matches!(
+            scheduler.tick_scheduled_at(171).playout,
+            Ok(Some(_))
+        ));
+        // Alternating one-millisecond wakeup jitter must not shift the frame
+        // clock permanently after every late call.
+        for frame in 1..=100_u64 {
+            let now = 171 + frame * 10 + frame % 2;
+            assert!(matches!(
+                scheduler.tick_scheduled_at(now).playout,
+                Ok(Some(_))
+            ));
+        }
+
+        let stop = Envelope {
+            protocol_version: CONTROL_PROTOCOL_VERSION,
+            request_id: 3,
+            payload: Some(envelope::Payload::StopStream(StopStream {
+                media_session_id: 7,
+                stream_id: 1,
+                media_key_epoch: 0,
+            })),
+        };
+        scheduler
+            .receiver_mut()
+            .accept_and_execute(session, &stop)
+            .unwrap();
+        assert!(matches!(
+            scheduler.tick_scheduled_at(1180).playout,
+            Ok(None)
+        ));
+        let mut other_start = start.clone();
+        if let Some(envelope::Payload::StartStream(start)) = &mut other_start.payload {
+            start.stream_id = 2;
+        }
+        other_start.request_id = 4;
+        scheduler
+            .receiver_mut()
+            .accept_and_execute(session, &other_start)
+            .unwrap();
+        let mismatch = scheduler.tick_scheduled_at(1181);
+        assert_eq!(
+            mismatch.state,
+            super::ScheduledReceiverState::IdentityMismatch
+        );
+        assert_eq!(mismatch.packets.unwrap(), 0);
+        assert!(matches!(mismatch.playout, Ok(None)));
+    }
+
+    #[test]
     #[allow(clippy::too_many_lines)]
     fn combined_tick_reports_control_and_media_results_together() {
         const JITTER_CAPACITY: usize = 8;
@@ -1097,6 +1397,118 @@ where
         DesktopReceiverSchedulerMaintenanceTick {
             control,
             media,
+            pump,
+            reconnect,
+            output,
+        }
+    }
+
+    /// Services control and UDP independently from the stream's playout cadence.
+    ///
+    /// Call frequently with a monotonic millisecond clock. Up to
+    /// [`MAX_SCHEDULED_UDP_POLLS`] datagrams are polled per call; at most one
+    /// decode is attempted per call. Late calls skip missed deadlines, preserve
+    /// the frame clock phase, and space decisions at least half a frame apart.
+    /// Playout uses immediate drain and starts only for a matching active media
+    /// identity admitted to the running output. Do not interleave this method
+    /// with the unpaced `tick`, `tick_at`, or `tick_media` methods for a stream.
+    /// All results must be inspected separately.
+    pub fn tick_scheduled_at(&mut self, now_ms: u64) -> ScheduledReceiverTick<D::Error> {
+        let reconnect = self.receiver.owner_mut().observe_reconnect_grace(now_ms);
+        let output = self.receiver.owner_mut().monitor();
+        let control = self.poll_control_once();
+
+        let context = self.receiver.pipeline_mut().context();
+        let identity = crate::MediaStreamIdentity {
+            session_id: context.session_id,
+            stream_id: context.stream_id,
+            key_epoch: context.key_epoch,
+        };
+        let bridge = self.receiver.owner().bridge();
+        let matching = bridge.coordinator().active_request_exact(identity);
+        let state = if matching.is_none() {
+            if bridge.coordinator().active().is_some() {
+                ScheduledReceiverState::IdentityMismatch
+            } else {
+                ScheduledReceiverState::Idle
+            }
+        } else if !bridge.output_active() {
+            ScheduledReceiverState::OutputUnavailable
+        } else if !bridge.mixer().removal_requires_membership_command(identity) {
+            ScheduledReceiverState::AwaitingStreamRecovery
+        } else {
+            ScheduledReceiverState::Active
+        };
+        let request = if state == ScheduledReceiverState::Active {
+            matching
+        } else {
+            None
+        };
+        if request.is_none() {
+            self.scheduled_playout = None;
+        }
+
+        let packets = if request.is_some() {
+            let mut count = 0;
+            let mut result = Ok(());
+            for _ in 0..MAX_SCHEDULED_UDP_POLLS {
+                match self.receiver.poll_media() {
+                    Ok(UdpPollOutcome::Empty) => break,
+                    Ok(UdpPollOutcome::Processed { .. }) => count += 1,
+                    Err(error) => {
+                        result = Err(error);
+                        break;
+                    }
+                }
+            }
+            result.map(|()| count)
+        } else {
+            Ok(0)
+        };
+
+        let clock_error = self
+            .scheduled_clock_ms
+            .filter(|previous| now_ms < *previous);
+        let playout = if let Some(previous_ms) = clock_error {
+            Err(ScheduledPlayoutError::ClockRegression {
+                previous_ms,
+                now_ms,
+            })
+        } else {
+            self.scheduled_clock_ms = Some(now_ms);
+            if let Some(request) = request {
+                let now = u128::from(now_ms);
+                let (deadline, earliest) = self
+                    .scheduled_playout
+                    .filter(|(previous, _, _)| *previous == request)
+                    .map_or((now, now), |(_, deadline, earliest)| (deadline, earliest));
+                if now < deadline || now < earliest {
+                    Ok(None)
+                } else {
+                    let interval = u128::from(request.frame_duration_ms);
+                    let next = deadline + ((now - deadline) / interval + 1) * interval;
+                    self.scheduled_playout = Some((request, next, now + interval / 2));
+                    self.receiver
+                        .decode_media(false)
+                        .map(Some)
+                        .map_err(ScheduledPlayoutError::Decode)
+                }
+            } else {
+                self.scheduled_playout = None;
+                Ok(None)
+            }
+        };
+        let pump = self
+            .receiver
+            .owner_mut()
+            .bridge_mut()
+            .mixer_mut()
+            .pump_available();
+        ScheduledReceiverTick {
+            state,
+            control,
+            packets,
+            playout,
             pump,
             reconnect,
             output,
