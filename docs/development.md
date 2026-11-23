@@ -228,6 +228,16 @@ repeated start requests during that interval are ignored. A stalled control
 reply can delay completion until the control command times out. The Android
 lab reports when capture has stopped locally but the desktop did not confirm
 the stop; in that case check or restart the listener before trying again.
+The isolated codec tail check can be run after installing the lab and test APKs:
+
+~~~powershell
+adb shell am instrument -r -w -e class com.sonimesh.opusspike.EncoderTailDrainInstrumentedTest com.sonimesh.opusspike.test/androidx.test.runner.AndroidJUnitRunner
+~~~
+
+On 2026-11-23 this passed on an API 37 x86_64 emulator: the tail-drain helper
+observed encoder end-of-stream and at least one audio packet. It did not check
+the final packet's content, the capture service, network delivery, or a physical
+device's codec.
 The lab activity also ignores repeated start requests while permission or screen
 capture consent is pending, or while its service is active or stopping. It shows
 a brief message without replacing the current session status. Once

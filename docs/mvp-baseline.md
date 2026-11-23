@@ -145,7 +145,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   cover socket cancellation and ownership handoff, not Android device behavior.
   On normal paired shutdown it also attempts a bounded MediaCodec end-of-stream
   drain before finishing the UDP sender. A partial PCM frame is padded with
-  silence; codec tail behavior still needs device verification.
+  silence. An API 37 x86_64 emulator test observes MediaCodec end-of-stream and
+  at least one audio packet using the tail-drain helper; it does not verify the
+  content of the final packet, the full service path, or a physical codec.
   Its MediaCodec encoder now lives in a reusable experimental Android module;
   the main capture-only application does not yet use it.
   The Android lab also reports sustained silent capture and returns to its
