@@ -200,6 +200,10 @@ class PairedCaptureTest {
             } else {
                 scenario.onActivity { activity ->
                     assertTrue("capture did not publish completion", containsStatus(activity.window.decorView, "Status: Capture stopped."))
+                    val rate = find(activity.window.decorView) {
+                        it is TextView && it.text.toString().matches(Regex("Encoded payload average: [0-9]+ kbps"))
+                    } as TextView
+                    instrumentation.sendStatus(1, Bundle().apply { putString("encodedPayload", rate.text.toString()) })
                 }
             }
         }

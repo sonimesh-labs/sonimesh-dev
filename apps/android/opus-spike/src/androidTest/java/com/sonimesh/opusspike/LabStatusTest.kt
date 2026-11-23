@@ -18,12 +18,16 @@ class LabStatusTest {
         ActivityScenario.launch(LabActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
                 LabStatus.publishSenderQueueDrops(7)
+                LabStatus.publishEncoderRate(73)
                 assertTrue(hasStatus(activity.window.decorView, "Sender queue drops: 7"))
+                assertTrue(hasStatus(activity.window.decorView, "Encoded payload average: 73 kbps"))
             }
             scenario.recreate()
             scenario.onActivity { activity ->
                 assertTrue(hasStatus(activity.window.decorView, "Sender queue drops: 7"))
+                assertTrue(hasStatus(activity.window.decorView, "Encoded payload average: 73 kbps"))
                 LabStatus.publishSenderQueueDrops(null)
+                LabStatus.publishEncoderRate(null)
             }
         }
     }

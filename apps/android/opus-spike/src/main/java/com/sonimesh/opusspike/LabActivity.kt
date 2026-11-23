@@ -44,11 +44,15 @@ class LabActivity : Activity() {
     private lateinit var host: EditText
     private lateinit var status: TextView
     private lateinit var senderQueueDrops: TextView
+    private lateinit var encoderRate: TextView
     private lateinit var usage: Spinner
     private lateinit var bitrate: Spinner
     private val statusObserver: (String) -> Unit = { status.text = "Status: $it" }
     private val dropsObserver: (Long?) -> Unit = { count ->
         senderQueueDrops.text = if (count == null) "Sender queue drops: —" else "Sender queue drops: $count"
+    }
+    private val rateObserver: (Long?) -> Unit = { rate ->
+        encoderRate.text = if (rate == null) "Encoded payload average: —" else "Encoded payload average: $rate kbps"
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -83,6 +87,8 @@ class LabActivity : Activity() {
         layout.addView(status)
         senderQueueDrops = TextView(this)
         layout.addView(senderQueueDrops)
+        encoderRate = TextView(this)
+        layout.addView(encoderRate)
         layout.addView(TextView(this).apply { text = "Playback usage for the next capture" })
         usage = Spinner(this).apply {
             contentDescription = "Playback usage for capture"
@@ -211,11 +217,13 @@ class LabActivity : Activity() {
         super.onStart()
         LabStatus.observe(statusObserver)
         LabStatus.observeSenderQueueDrops(dropsObserver)
+        LabStatus.observeEncoderRate(rateObserver)
     }
 
     override fun onStop() {
         LabStatus.remove(statusObserver)
         LabStatus.removeSenderQueueDrops(dropsObserver)
+        LabStatus.removeEncoderRate(rateObserver)
         super.onStop()
     }
 

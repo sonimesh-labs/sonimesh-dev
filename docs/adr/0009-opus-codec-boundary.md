@@ -52,6 +52,12 @@ capture; 96 kb/s remains the default. This changes neither the negotiated frame
 shape nor the packet-size limit. The requested bitrate is an encoder setting,
 not a guarantee of actual bitrate, quality, device support, or network usage.
 The selection is fixed for a capture and can be changed for the next session.
+The lab may report a cumulative average of encoded Opus payload bytes divided by
+monotonic elapsed time since capture started, including the bounded encoder tail
+drain. It updates at most once per second during capture and retains a final
+update until the next capture; short sessions under one second have no rate
+estimate. This is an encoder-output observation, including packets later dropped locally; it excludes
+transport overhead and does not establish actual network throughput or quality.
 
 Keep `sonimesh-audio::FrameDecoder` as the stable boundary. A future optional
 `opus-codec` feature may add a `FrameDecoder` implementation only after:

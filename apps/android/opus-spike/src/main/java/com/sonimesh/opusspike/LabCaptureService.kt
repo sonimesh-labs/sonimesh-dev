@@ -65,6 +65,7 @@ class LabCaptureService : Service() {
         LabStatus.captureAdmission.serviceStarted()
         running.set(true)
         LabStatus.publishSenderQueueDrops(null)
+        LabStatus.publishEncoderRate(null)
         LabStatus.publish("Connecting to the desktop listener…")
         var pendingInvitation: ByteArray? = null
         try {
@@ -133,6 +134,8 @@ class LabCaptureService : Service() {
         var senderQueueDrops = 0L
         var lastDropPublication = 0L
         var captureStarted = false
+        var rateMeter: EncoderRateMeter? = null
+        var lastRatePublication = 0L
         try {
             val packets = ArrayBlockingQueue<EncodedPacket>(8)
             if (invitation != null) {
@@ -200,6 +203,10 @@ class LabCaptureService : Service() {
             codec = activeCodec
             activeRecord.startRecording()
             captureStarted = true
+            val captureStartMillis = SystemClock.elapsedRealtime()
+            val activeRateMeter = EncoderRateMeter(captureStartMillis)
+            rateMeter = activeRateMeter
+            lastRatePublication = captureStartMillis
             handler.post {
                 if (running.get() && !terminalStatus) {
                     LabStatus.publishSenderQueueDrops(0)
@@ -216,10 +223,16 @@ class LabCaptureService : Service() {
             fun pollEncodedOutput(): EncoderTailOutput {
                 return when (activeCodec.poll { packet ->
                     check(outputSequence <= 0xffff_ffffL) { "media sequence exhausted" }
+                    activeRateMeter.record(packet.size)
+                    val now = SystemClock.elapsedRealtime()
+                    if (now - lastRatePublication >= 1_000) {
+                        lastRatePublication = now
+                        val rate = activeRateMeter.averageKbps(now)
+                        handler.post { LabStatus.publishEncoderRate(rate) }
+                    }
                     val encoded = EncodedPacket(outputSequence++, packet)
                     if (enqueueLatest(packets, encoded)) {
                         if (senderQueueDrops < Long.MAX_VALUE) senderQueueDrops++
-                        val now = SystemClock.elapsedRealtime()
                         if (lastDropPublication == 0L || now - lastDropPublication >= 1_000) {
                             lastDropPublication = now
                             val count = senderQueueDrops
@@ -316,7 +329,11 @@ class LabCaptureService : Service() {
             }
             if (captureStarted) {
                 val count = senderQueueDrops
-                handler.post { LabStatus.publishSenderQueueDrops(count) }
+                val rate = rateMeter?.averageKbps(SystemClock.elapsedRealtime())
+                handler.post {
+                    LabStatus.publishSenderQueueDrops(count)
+                    LabStatus.publishEncoderRate(rate)
+                }
             }
             codec?.close()
             if (paired != null) {

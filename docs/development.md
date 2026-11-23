@@ -115,6 +115,14 @@ control whether playback can be captured; the selector does not select apps.
 The lab also lets the operator request 64, 96 (default), or 128 kbps Opus for
 the next capture. This is a MediaCodec target, not a measured or guaranteed
 bitrate; changing the selector does not reconfigure an active capture.
+**Encoded payload average** shows cumulative Opus bytes divided by elapsed
+capture time, including encoder tail drain and packets later discarded locally.
+It becomes available after one second, excludes packet and network overhead,
+and is retained until the next capture; it is not network throughput.
+On 2026-11-23, separate approximately three-second API 37 x86_64 emulator tone
+captures reported 60 kbps for a 64 kbps target and 121 kbps for a 128 kbps
+target. These short-run encoded-payload averages include startup and tail time;
+they are not physical-device, network-throughput, or audio-quality measurements.
 On 2026-11-23, separate API 37 x86_64 emulator paired-capture runs selected 64
 and 128 kbps and decoded 154 and 150 frames respectively on the software
 listener, with peaks 0.100 and 0.093. These are interoperability checks, not
