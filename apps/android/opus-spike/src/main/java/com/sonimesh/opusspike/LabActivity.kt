@@ -49,6 +49,7 @@ class LabActivity : Activity() {
     private lateinit var host: EditText
     private lateinit var status: TextView
     private lateinit var signal: TextView
+    private lateinit var duration: TextView
     private lateinit var senderQueueDrops: TextView
     private lateinit var sentPackets: TextView
     private lateinit var encoderRate: TextView
@@ -58,6 +59,9 @@ class LabActivity : Activity() {
     private val statusObserver: (String) -> Unit = { status.text = "Status: $it" }
     private val signalObserver: (LabSignalState?) -> Unit = { state ->
         signal.text = "Capture signal: ${state?.label ?: "—"}"
+    }
+    private val durationObserver: (Long?) -> Unit = { seconds ->
+        duration.text = "Capture duration: ${seconds?.let { "${it}s" } ?: "—"}"
     }
     private val dropsObserver: (Long?) -> Unit = { count ->
         senderQueueDrops.text = if (count == null) "Sender queue drops: —" else "Sender queue drops: $count"
@@ -113,6 +117,8 @@ class LabActivity : Activity() {
         layout.addView(status)
         signal = TextView(this)
         layout.addView(signal)
+        duration = TextView(this)
+        layout.addView(duration)
         senderQueueDrops = TextView(this)
         layout.addView(senderQueueDrops)
         sentPackets = TextView(this)
@@ -314,6 +320,7 @@ class LabActivity : Activity() {
         super.onStart()
         LabStatus.observe(statusObserver)
         LabStatus.observeSignal(signalObserver)
+        LabStatus.observeCaptureDuration(durationObserver)
         LabStatus.observeSenderQueueDrops(dropsObserver)
         LabStatus.observeSentPackets(sentPacketsObserver)
         LabStatus.observeEncoderRate(rateObserver)
@@ -323,6 +330,7 @@ class LabActivity : Activity() {
     override fun onStop() {
         LabStatus.remove(statusObserver)
         LabStatus.removeSignal(signalObserver)
+        LabStatus.removeCaptureDuration(durationObserver)
         LabStatus.removeSenderQueueDrops(dropsObserver)
         LabStatus.removeSentPackets(sentPacketsObserver)
         LabStatus.removeEncoderRate(rateObserver)

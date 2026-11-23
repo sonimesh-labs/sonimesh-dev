@@ -47,14 +47,18 @@ internal object LabStatus {
     private val sessionObservers = mutableSetOf<(LabSessionConfig?) -> Unit>()
     private var signalState: LabSignalState? = null
     private val signalObservers = mutableSetOf<(LabSignalState?) -> Unit>()
+    private var captureDurationSeconds: Long? = null
+    private val durationObservers = mutableSetOf<(Long?) -> Unit>()
 
     fun serviceStarted(usage: LabCaptureUsage, bitrate: OpusBitrate, transport: LabTransport = LabTransport.Adb) {
         captureUsage = usage
         captureAdmission.serviceStarted()
         sessionConfig = LabSessionConfig(usage, bitrate, transport)
         signalState = null
+        captureDurationSeconds = null
         sessionObservers.toList().forEach { it(sessionConfig) }
         signalObservers.toList().forEach { it(null) }
+        durationObservers.toList().forEach { it(null) }
     }
 
     fun serviceFinished() {
@@ -83,6 +87,20 @@ internal object LabStatus {
     fun publishSignal(value: LabSignalState?) {
         signalState = value
         signalObservers.toList().forEach { it(value) }
+    }
+
+    fun observeCaptureDuration(observer: (Long?) -> Unit) {
+        durationObservers.add(observer)
+        observer(captureDurationSeconds)
+    }
+
+    fun removeCaptureDuration(observer: (Long?) -> Unit) {
+        durationObservers.remove(observer)
+    }
+
+    fun publishCaptureDuration(value: Long?) {
+        captureDurationSeconds = value?.coerceAtLeast(0)
+        durationObservers.toList().forEach { it(captureDurationSeconds) }
     }
 
     fun observe(observer: (String) -> Unit) {
@@ -155,6 +173,7 @@ internal object LabStatus {
             appendLine("Transport: ${config.transport.label}")
         }
         appendLine("Capture signal: ${signalState?.label ?: "—"}")
+        appendLine("Capture duration: ${captureDurationSeconds?.let { "${it}s" } ?: "—"}")
         appendLine("Sender queue drops: ${senderQueueDrops ?: "—"}")
         appendLine("Media packets sent: ${sentPackets ?: "—"}")
         appendLine("Encoded payload average: ${encoderRate?.let { "$it kbps" } ?: "—"}")

@@ -143,6 +143,8 @@ class LabCaptureService : Service() {
         var senderQueueDrops = 0L
         var lastDropPublication = 0L
         var captureStarted = false
+        var captureStartMillis = 0L
+        var lastDurationPublication = 0L
         var rateMeter: EncoderRateMeter? = null
         var lastRatePublication = 0L
         val sentPackets = AtomicLong(0)
@@ -227,7 +229,9 @@ class LabCaptureService : Service() {
             codec = activeCodec
             activeRecord.startRecording()
             captureStarted = true
-            val captureStartMillis = SystemClock.elapsedRealtime()
+            captureStartMillis = SystemClock.elapsedRealtime()
+            lastDurationPublication = captureStartMillis
+            handler.post { LabStatus.publishCaptureDuration(0) }
             val activeRateMeter = EncoderRateMeter(captureStartMillis)
             rateMeter = activeRateMeter
             lastRatePublication = captureStartMillis
@@ -284,6 +288,12 @@ class LabCaptureService : Service() {
             paired?.socket?.soTimeout = 1
             var nextControlPoll = SystemClock.elapsedRealtime()
             while (running.get()) {
+                val now = SystemClock.elapsedRealtime()
+                if (now - lastDurationPublication >= 1_000) {
+                    lastDurationPublication = now
+                    val duration = (now - captureStartMillis) / 1_000
+                    handler.post { LabStatus.publishCaptureDuration(duration) }
+                }
                 if (paired != null && SystemClock.elapsedRealtime() >= nextControlPoll) {
                     try {
                         val value = paired.socket.inputStream.read()
@@ -366,6 +376,7 @@ class LabCaptureService : Service() {
                 handler.post {
                     LabStatus.publishSenderQueueDrops(count)
                     LabStatus.publishEncoderRate(rate)
+                    LabStatus.publishCaptureDuration((SystemClock.elapsedRealtime() - captureStartMillis) / 1_000)
                 }
             }
             codec?.close()
