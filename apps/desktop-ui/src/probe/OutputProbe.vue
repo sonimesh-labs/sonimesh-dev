@@ -24,10 +24,10 @@ const playing = ref<number | null>(null)
 const message = ref<string | null>(null)
 interface LabMetrics {
   packets: string; rejected: string; decoded: string; peak: string
-  plc: string; decodeErrors: string; buffered: string; output: 'active' | 'recovering' | 'software-check'
+  plc: string; decodeErrors: string; buffered: string; output: 'active' | 'recovering' | 'software-check' | 'stopped'
 }
-interface LabSnapshot { running: boolean; status: string; invitation: string | null; metrics: LabMetrics | null; volume: number | null; muted: boolean | null }
-const lab = ref<LabSnapshot>({ running: false, status: 'Stopped', invitation: null, metrics: null, volume: null, muted: null })
+interface LabSnapshot { running: boolean; sessionActive: boolean; status: string; invitation: string | null; metrics: LabMetrics | null; volume: number | null; muted: boolean | null }
+const lab = ref<LabSnapshot>({ running: false, sessionActive: false, status: 'Stopped', invitation: null, metrics: null, volume: null, muted: null })
 const invitationQr = ref<string | null>(null)
 const invitationQrError = ref(false)
 watch(() => lab.value.invitation, async (invitation, _previous, onCleanup) => {
@@ -244,7 +244,7 @@ onBeforeUnmount(() => { disposed = true; labRequest++; clearTimeout(timer) })
         <p v-if="controlError" class="command-error" role="alert">{{ controlError }}</p>
       </div>
       <section v-if="lab.metrics" aria-labelledby="lab-metrics-title">
-        <h3 id="lab-metrics-title">Session observations</h3>
+        <h3 id="lab-metrics-title">{{ lab.sessionActive ? 'Session observations' : 'Last session observations' }}</h3>
         <dl class="lab-metrics">
           <div><dt>Accepted packets</dt><dd>{{ lab.metrics.packets }}</dd></div>
           <div><dt>Packets rejected</dt><dd>{{ lab.metrics.rejected }}</dd></div>
@@ -253,9 +253,9 @@ onBeforeUnmount(() => { disposed = true; labRequest++; clearTimeout(timer) })
           <div><dt>Concealed frames</dt><dd>{{ lab.metrics.plc }}</dd></div>
           <div><dt>Decode errors</dt><dd>{{ lab.metrics.decodeErrors }}</dd></div>
           <div><dt>Buffered frames</dt><dd>{{ lab.metrics.buffered }}</dd></div>
-          <div><dt>Output</dt><dd>{{ lab.metrics.output === 'recovering' ? 'Recovering' : lab.metrics.output === 'active' ? 'Active' : 'Software check' }}</dd></div>
+          <div><dt>Output</dt><dd>{{ !lab.sessionActive && lab.metrics.output !== 'stopped' ? 'Last reported: ' : '' }}{{ lab.metrics.output === 'recovering' ? 'Recovering' : lab.metrics.output === 'active' ? 'Active' : lab.metrics.output === 'stopped' ? 'Stopped' : 'Software check' }}</dd></div>
         </dl>
-        <p class="preview-note">Updated at session start and every five seconds. Counts and peak are cumulative; they do not confirm audible playback.</p>
+        <p class="preview-note">{{ lab.sessionActive ? 'Updated at session start and every five seconds.' : lab.metrics.output === 'stopped' ? 'Final update after the stop drain.' : 'Last available update; the session may have ended before its final report.' }} Counts and peak are cumulative; they do not confirm audible playback.</p>
       </section>
       <template v-if="lab.invitation">
         <img v-if="invitationQr" class="lab-invitation-qr" :src="invitationQr" alt="QR code for the public lab invitation" />

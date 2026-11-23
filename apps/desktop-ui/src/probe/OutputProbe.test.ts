@@ -138,12 +138,14 @@ describe('desktop output probe', () => {
     wrapper.unmount()
   })
 
-  it('shows live observations and clears them when the session ends', async () => {
+  it('shows live and final session observations, then clears them on the next client', async () => {
     const metrics = { packets: '120', rejected: '3', decoded: '115', peak: '0.250', plc: '2', decodeErrors: '1', buffered: '4', output: 'recovering' }
+    const finalMetrics = { ...metrics, decoded: '120', output: 'stopped' }
     const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [] })
       .mockResolvedValueOnce({ running: true, status: 'Starting listener…', invitation: null, metrics: null })
-      .mockResolvedValueOnce({ running: true, status: 'Session active', invitation: '01ab', metrics })
-      .mockResolvedValueOnce({ running: true, status: 'Waiting for Android', invitation: '01ab', metrics: null })
+      .mockResolvedValueOnce({ running: true, sessionActive: true, status: 'Session active', invitation: '01ab', metrics })
+      .mockResolvedValueOnce({ running: true, sessionActive: false, status: 'Session ended; waiting for Android', invitation: '01ab', metrics: finalMetrics })
+      .mockResolvedValueOnce({ running: true, sessionActive: false, status: 'Android connecting', invitation: '01ab', metrics: null })
     window.__TAURI__ = { core: { invoke } }
     const wrapper = mount(OutputProbe)
     await flushPromises()
@@ -154,8 +156,29 @@ describe('desktop output probe', () => {
     expect(wrapper.get('.lab-metrics').text()).toContain('Decoded peak0.250')
     expect(wrapper.get('.lab-metrics').text()).toContain('OutputRecovering')
     await vi.advanceTimersByTimeAsync(1000)
+    expect(wrapper.text()).toContain('Last session observations')
+    expect(wrapper.text()).toContain('Final update after the stop drain')
+    expect(wrapper.get('.lab-metrics').text()).toContain('Decoded frames120')
+    expect(wrapper.get('.lab-metrics').text()).toContain('OutputStopped')
+    await vi.advanceTimersByTimeAsync(1000)
     expect(wrapper.find('.lab-metrics').exists()).toBe(false)
-    expect(wrapper.text()).toContain('Waiting for Android')
+    expect(wrapper.text()).toContain('Android connecting')
+    wrapper.unmount()
+  })
+
+  it('labels a failed session’s last update as potentially incomplete', async () => {
+    const metrics = { packets: '5', rejected: '0', decoded: '4', peak: '0.100', plc: '1', decodeErrors: '0', buffered: '0', output: 'active' }
+    const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [] })
+      .mockResolvedValueOnce({ running: true, sessionActive: false, status: 'Starting', invitation: null, metrics: null })
+      .mockResolvedValueOnce({ running: true, sessionActive: false, status: 'Session failed; waiting for Android', invitation: null, metrics })
+    window.__TAURI__ = { core: { invoke } }
+    const wrapper = mount(OutputProbe)
+    await flushPromises()
+    vi.useFakeTimers()
+    await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(wrapper.text()).toContain('Last available update; the session may have ended before its final report.')
+    expect(wrapper.get('.lab-metrics').text()).toContain('OutputLast reported: Active')
     wrapper.unmount()
   })
 

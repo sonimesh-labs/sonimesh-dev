@@ -84,6 +84,7 @@ fn run() -> LabResult<()> {
             }
             std::thread::sleep(Duration::from_millis(10));
         };
+        println!("RESULT client connected");
         let result = run_session(stream, Arc::clone(&tls), &pin, &options, &mut playback);
         playback.abort();
         if !options.keep_listening {
@@ -365,14 +366,18 @@ fn status_if_due(
         return None;
     }
     *next = Some(now + STATUS_PERIOD);
-    Some(format!(
+    Some(format_status(metrics, decoded, peak, output))
+}
+
+fn format_status(metrics: StreamMetricsSnapshot, decoded: u64, peak: f32, output: &str) -> String {
+    format!(
         "STATUS packets {} rejected {} decoded {decoded} peak {peak:.3} plc {} decode_errors {} buffered {} output {output}",
         metrics.authenticated_packets,
         metrics.rejected_packets,
         metrics.plc_frames,
         metrics.decode_errors,
         metrics.jitter_frames,
-    ))
+    )
 }
 
 fn poll_media(receiver: &mut Receiver) -> LabResult<Option<UdpPollOutcome>> {
@@ -788,8 +793,14 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                         let output_result = playback.stop();
                         drop(receiver.take());
                         drop(consumer.take());
+                        if playing {
+                            peak = f32::from_bits(decoded_peak.load(Ordering::Relaxed));
+                        }
                         if let Some(metrics) = counters.take() {
                             let snapshot = metrics.snapshot();
+                            if options.status {
+                                println!("{}", format_status(snapshot, decoded, peak, "stopped"));
+                            }
                             println!(
                                 "RESULT packets {} rejected {} late {} resync_dropped {} plc {} decode_errors {} buffered {}",
                                 snapshot.authenticated_packets,
@@ -815,9 +826,6 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                             );
                         }
                         output_result?;
-                        if playing {
-                            peak = f32::from_bits(decoded_peak.load(Ordering::Relaxed));
-                        }
                         println!("RESULT decoded {decoded} peak {peak:.3}");
                         if decoded == 0 || peak < 0.001 {
                             if options.require_tone {

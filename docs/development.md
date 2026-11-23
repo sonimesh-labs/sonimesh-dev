@@ -133,7 +133,11 @@ measurement; a longer wait can overflow the bounded packet buffer under bursts.
 Add `--status` to print packet counts, decode counts and peak, jitter occupancy,
 and output recovery state at session start and every five seconds afterward. This can help
 distinguish missing media from decoded silence; counts and peak are cumulative
-for the session, and they do not prove audible output.
+for the session, and they do not prove audible output. On a normal stop, the
+listener emits a final snapshot after its tail drain. The desktop probe retains
+the most recent session's observations while waiting; if a session fails before
+a final snapshot, it labels the retained values as the last update. A new client
+attempt clears the prior observations.
 Add `--control` alongside `--play` to adjust playback from the listener console:
 enter `volume 0` through `volume 100`, `mute`, or `unmute`. These local settings
 survive output recovery and successive sessions while the listener is running.
@@ -164,9 +168,9 @@ interfaces. This is not evidence of physical WLAN interoperability.
 Add `--keep-listening` to accept successive sessions without restarting the
 desktop listener or changing its displayed pin. It handles one client at a time;
 each connection uses a fresh pairing exchange and media session. An unsuccessful
-session returns to listening. The desktop probe clears the previous session's
-observations and keeps a completion or failure notice while waiting for the next
-client. This notice does not identify the cause of a failure. Stop the listener
+session returns to listening. The desktop probe keeps a completion or failure
+notice and any available observations while waiting for the next client. This
+notice does not identify the cause of a failure. Stop the listener
 with Ctrl+C. To exercise two
 successive synthetic sessions, run the instrumentation method
 `PairedAudioInteropTest#pairs_twice_with_continuous_listener` with the listener

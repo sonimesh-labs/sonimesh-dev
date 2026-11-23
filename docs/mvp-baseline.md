@@ -152,6 +152,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   capturing status when signal resumes; this does not establish desktop delivery.
   An optional paired-listener status report exposes in-session packet and decode
   counts, decoded peak, and output recovery state for controlled-lab diagnosis.
+  On normal stop it also reports a final post-drain snapshot; the desktop probe
+  retains that snapshot, or the last available update after failure, until the
+  next client attempt. These observations do not establish audible playback.
   Its fixed startup wait is configurable from 20 to 120 ms for network experiments;
   the desktop probe exposes this setting before listener startup. It does not
   implement adaptive jitter control or measure end-to-end latency.

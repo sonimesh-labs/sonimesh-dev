@@ -13,8 +13,7 @@ pub struct LabSnapshot {
     pub metrics: Option<LabMetrics>,
     pub volume: Option<u8>,
     pub muted: Option<bool>,
-    #[serde(skip)]
-    session_active: bool,
+    pub session_active: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -245,6 +244,9 @@ fn update_snapshot(snapshot: &mut LabSnapshot, line: &str) {
         ) {
             snapshot.status = "Waiting for Android".into();
         }
+        snapshot.session_active = false;
+    } else if line == "RESULT client connected" {
+        snapshot.status = "Android connecting".into();
         snapshot.metrics = None;
         snapshot.session_active = false;
     } else if line == "RESULT pairing verified" {
@@ -259,11 +261,9 @@ fn update_snapshot(snapshot: &mut LabSnapshot, line: &str) {
         snapshot.metrics = Some(metrics);
     } else if line == "RESULT session complete" {
         snapshot.status = "Session ended; waiting for Android".into();
-        snapshot.metrics = None;
         snapshot.session_active = false;
     } else if line == "RESULT session failed" {
         snapshot.status = "Session failed; waiting for Android".into();
-        snapshot.metrics = None;
         snapshot.session_active = false;
     }
 }
@@ -298,7 +298,10 @@ fn parse_metrics(line: &str) -> Option<LabMetrics> {
     let value: f32 = peak.parse().ok()?;
     if !value.is_finite()
         || value < 0.0
-        || !matches!(*output, "active" | "recovering" | "software-check")
+        || !matches!(
+            *output,
+            "active" | "recovering" | "software-check" | "stopped"
+        )
     {
         return None;
     }
@@ -359,17 +362,17 @@ mod tests {
         assert_eq!(metrics.packets, "120");
         assert_eq!(metrics.output, "recovering");
         update_snapshot(&mut snapshot, "STATUS packets invalid");
-        assert_eq!(snapshot.metrics, Some(metrics));
+        assert_eq!(snapshot.metrics, Some(metrics.clone()));
         update_snapshot(&mut snapshot, "READY");
-        assert!(snapshot.metrics.is_none());
+        assert_eq!(snapshot.metrics, Some(metrics.clone()));
         update_snapshot(&mut snapshot, status);
-        assert!(snapshot.metrics.is_none());
+        assert_eq!(snapshot.metrics, Some(metrics));
         assert!(parse_metrics(&status.replace("0.250", "NaN")).is_none());
         assert!(parse_metrics(&status.replace("recovering", "unknown")).is_none());
     }
 
     #[test]
-    fn session_results_clear_observations_and_remain_visible_until_next_pairing() {
+    fn session_results_retain_observations_until_next_client() {
         let status = "STATUS packets 120 rejected 3 decoded 115 peak 0.250 plc 2 decode_errors 1 buffered 4 output active";
         for (result, expected) in [
             (
@@ -387,9 +390,12 @@ mod tests {
             assert!(snapshot.metrics.is_some());
             update_snapshot(&mut snapshot, result);
             assert!(!snapshot.session_active);
-            assert!(snapshot.metrics.is_none());
+            assert!(snapshot.metrics.is_some());
             update_snapshot(&mut snapshot, "READY");
             assert_eq!(snapshot.status, expected);
+            assert!(snapshot.metrics.is_some());
+            update_snapshot(&mut snapshot, "RESULT client connected");
+            assert!(snapshot.metrics.is_none());
             update_snapshot(&mut snapshot, "RESULT pairing verified");
             update_snapshot(&mut snapshot, "Session ended: delayed stderr");
             assert_eq!(snapshot.status, "Paired; negotiating session");
@@ -397,6 +403,26 @@ mod tests {
             update_snapshot(&mut snapshot, status);
             assert!(snapshot.metrics.is_some());
         }
+    }
+
+    #[test]
+    fn final_status_is_retained_with_the_post_drain_counts() {
+        let mut snapshot = LabSnapshot::default();
+        update_snapshot(&mut snapshot, "RESULT receiver started");
+        update_snapshot(
+            &mut snapshot,
+            "STATUS packets 10 rejected 0 decoded 9 peak 0.125 plc 1 decode_errors 0 buffered 2 output active",
+        );
+        update_snapshot(
+            &mut snapshot,
+            "STATUS packets 12 rejected 0 decoded 12 peak 0.250 plc 1 decode_errors 0 buffered 0 output stopped",
+        );
+        update_snapshot(&mut snapshot, "RESULT session complete");
+        update_snapshot(&mut snapshot, "READY");
+        let metrics = snapshot.metrics.unwrap();
+        assert_eq!(metrics.decoded, "12");
+        assert_eq!(metrics.output, "stopped");
+        assert!(!snapshot.session_active);
     }
 
     #[test]
