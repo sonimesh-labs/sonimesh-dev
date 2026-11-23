@@ -391,6 +391,23 @@ struct ResyncObservations {
 }
 
 impl ResyncObservations {
+    fn observe_admission(
+        &mut self,
+        admission: InsertOutcome,
+        loop_gap: Option<Duration>,
+        previous_decision: Option<(Instant, Duration)>,
+        now: Instant,
+    ) {
+        if let InsertOutcome::Resynchronized { dropped_frames } = admission {
+            self.record(ResyncObservation {
+                dropped: dropped_frames,
+                loop_gap,
+                previous_decision: previous_decision
+                    .map(|(when, lateness)| (now.duration_since(when), lateness)),
+            });
+        }
+    }
+
     fn record(&mut self, observation: ResyncObservation) {
         if let Some(slot) = usize::try_from(self.total)
             .ok()
@@ -1000,15 +1017,13 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                     None => continue,
                     Some(UdpPollOutcome::Empty) => break,
                     Some(UdpPollOutcome::Processed { admission, .. }) => {
-                        if let InsertOutcome::Resynchronized { dropped_frames } = admission {
-                            let observed_at = Instant::now();
-                            resyncs.record(ResyncObservation {
-                                dropped: dropped_frames,
+                        if matches!(admission, InsertOutcome::Resynchronized { .. }) {
+                            resyncs.observe_admission(
+                                admission,
                                 loop_gap,
-                                previous_decision: previous_decision.map(|(when, lateness)| {
-                                    (observed_at.duration_since(when), lateness)
-                                }),
-                            });
+                                previous_decision,
+                                Instant::now(),
+                            );
                         }
                         if next_playout.is_none() && retry_at.is_none() {
                             next_playout = Some(Instant::now() + options.startup_buffer);
@@ -1708,6 +1723,70 @@ mod tests {
         assert_eq!(
             last.previous_decision,
             Some((Duration::from_millis(5), Duration::from_millis(2)))
+        );
+    }
+
+    #[test]
+    fn resync_observations_capture_real_udp_buffer_overflow() {
+        use sonimesh_protocol::{MediaKeyContext, MediaSealer};
+        use std::net::UdpSocket;
+
+        let secret = SessionSecret::new([7; 32]);
+        let context = MediaKeyContext::new(1, 1, 0, MediaDirection::AndroidToDesktop).unwrap();
+        let metrics = Arc::new(StreamCounters::default());
+        let (producer, _) = realtime_pcm_queue::<SAMPLES>(8).unwrap();
+        let worker = StreamDecodeWorker::new_for_opus(
+            ObservedDecoder {
+                decoder: lab_decoder::Decoder::new().unwrap(),
+                peak: Arc::new(AtomicU32::new(0)),
+            },
+            producer,
+            0,
+            OpusFrameConfig::new(48_000, 2, 20).unwrap(),
+        )
+        .unwrap();
+        let mut receiver = Receiver::bind_with_worker(
+            "127.0.0.1:0".parse().unwrap(),
+            &secret,
+            context,
+            worker,
+            Arc::clone(&metrics),
+        )
+        .unwrap();
+        let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let mut sealer = MediaSealer::new(&secret, context).unwrap();
+        let mut observations = ResyncObservations::default();
+        let now = Instant::now();
+        for sequence in 0..9 {
+            let packet = sealer.seal(0, sequence * 960, &[1]).unwrap();
+            sender
+                .send_to(&packet.datagram, receiver.local_addr().unwrap())
+                .unwrap();
+            let deadline = Instant::now() + Duration::from_secs(2);
+            loop {
+                if let Some(UdpPollOutcome::Processed { admission, .. }) =
+                    poll_media(&mut receiver).unwrap()
+                {
+                    observations.observe_admission(
+                        admission,
+                        Some(Duration::from_millis(3)),
+                        Some((now, Duration::from_millis(1))),
+                        now + Duration::from_millis(5),
+                    );
+                    break;
+                }
+                assert!(Instant::now() < deadline, "UDP packet was not received");
+                std::thread::yield_now();
+            }
+        }
+        assert_eq!(metrics.snapshot().jitter_resync_dropped_frames, 8);
+        assert_eq!(observations.total, 1);
+        let event = observations.first[0].unwrap();
+        assert_eq!(event.dropped, 8);
+        assert_eq!(event.loop_gap, Some(Duration::from_millis(3)));
+        assert_eq!(
+            event.previous_decision,
+            Some((Duration::from_millis(5), Duration::from_millis(1)))
         );
     }
 

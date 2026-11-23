@@ -212,6 +212,15 @@ These observations are captured in memory and printed after the stop drain; they
 exclude resynchronizations during that drain. Loop intervals are not packet
 arrival times, and a nearby delay does not establish why a resynchronization
 occurred.
+On 2026-11-23, two separate API 37 x86_64 emulator sessions exercised the new
+report with ADB-reversed control and software output. The notification-return
+test decoded 192 frames, with zero resynchronizations and no frame-late
+decisions among 196 (maximum lateness 13,208 microseconds). The screen-off test
+decoded 408 frames, with zero resynchronizations, two late packets, and no
+frame-late decisions among 414 (maximum lateness 7,187 microseconds). Both
+instrumentation tests passed. These runs verify the zero-event report only;
+they do not verify nonzero event details, explain earlier drops, or establish
+physical WLAN or audible playback behavior.
 In one 2026-11-23 API 37 emulator software session, the notification-return
 capture test completed with 193 live decisions, one at least 20 ms late, and
 26,122 microseconds maximum lateness; the listener decoded 177 frames and
