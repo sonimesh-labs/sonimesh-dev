@@ -54,7 +54,9 @@ target-gated playout must supply that signal explicitly. The combined tick
 still requires external frame pacing. A separate monotonic-time scheduler path
 polls a bounded packet burst on each call and performs at most one immediate
 drain decode per call. It preserves frame-clock phase, skips missed deadlines,
-and spaces decode decisions by at least half a frame. It resets its cadence when
+and spaces decode decisions by at least half a frame. After a long scheduler
+stall it retires queued audio and drains accumulated UDP in bounded batches
+before resuming from fresh packets. It resets its cadence when
 the matching stream or output is unavailable. The host must drive it more often
 than the frame interval; a live platform host still needs to adopt this path.
 The scheduling result distinguishes idle, mismatched media identity, output

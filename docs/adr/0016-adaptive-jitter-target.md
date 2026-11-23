@@ -35,9 +35,16 @@ active stream's negotiated frame deadline is due. It preserves frame-clock
 phase, skips missed deadlines, and spaces decisions at least half a frame apart
 to bound catch-up. The caller must poll more often than the frame interval;
 otherwise a single decision per call cannot sustain the sender's frame rate.
-The scheduler does not discard stale encoded frames after a long stall, so
-buffered audio may remain delayed until another resynchronization occurs. A
-regressing clock suppresses decode until time catches up. Stopped, unmatched, or
+When an active stream's scheduling calls pause for at least 100 ms (or eight
+frame durations, whichever is longer), the scheduler retires its decoder,
+source and mixer queue epochs and drains the UDP socket in bounded batches.
+It discards the accumulated encoded frames when the socket becomes empty and
+resumes on subsequent packets. A continuously backlogged socket delays recovery;
+the host must keep polling. This deliberately sacrifices some audio around a
+stall to avoid retaining the accumulated delay. A regressing clock suppresses
+decode until time catches up, and an ongoing drain waits for that point before
+finishing. Other admitted streams continue to be pumped during the drain. Audio
+already handed to an output callback or device cannot be withdrawn. Stopped, unmatched, or
 output-unavailable streams reset their cadence. This is software scheduling
 behavior, not a latency or physical playback measurement.
 

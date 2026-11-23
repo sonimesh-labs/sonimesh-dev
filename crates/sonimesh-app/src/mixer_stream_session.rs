@@ -316,9 +316,16 @@ where
     ///
     /// Returns the first adapter failure after servicing the other streams.
     pub fn pump_available(&mut self) -> Result<(), MixerStreamSessionError> {
+        self.pump_available_except(None)
+    }
+
+    pub(crate) fn pump_available_except(
+        &mut self,
+        excluded: Option<MediaStreamIdentity>,
+    ) -> Result<(), MixerStreamSessionError> {
         let mut first_error = None;
         for record in self.records.iter_mut().flatten() {
-            if record.membership_slot.is_none() {
+            if record.membership_slot.is_none() || Some(record.identity) == excluded {
                 continue;
             }
             for _ in 0..self.queue_capacity {
@@ -1128,6 +1135,9 @@ mod tests {
             RealtimePcmPushOutcome::Inserted
         );
 
+        session.pump_available_except(Some(identity(1))).unwrap();
+        assert_eq!(session.queued_output_blocks(identity(1)).unwrap(), 0);
+        assert!(session.queued_output_blocks(identity(2)).unwrap() > 1);
         session.pump_available().unwrap();
         assert_eq!(session.queued_output_blocks(identity(1)).unwrap(), 8);
         let remaining = session.queued_source_blocks(identity(1)).unwrap();

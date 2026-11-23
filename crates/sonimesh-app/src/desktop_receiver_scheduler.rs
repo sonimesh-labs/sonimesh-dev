@@ -7,7 +7,7 @@
 use std::io::{Read, Write};
 
 use sonimesh_audio::{DecodeStep, DecodeWorkerError, FrameDecoder};
-use sonimesh_network::PinnedServerChannel;
+use sonimesh_network::{PinnedServerChannel, UdpReceiveError};
 use sonimesh_network::{UntrustedControlStream, UntrustedControlWrite};
 use sonimesh_platform::{AudioOutput, OutputHealth};
 
@@ -21,6 +21,9 @@ use crate::{
 /// Maximum UDP polls performed by one clock-driven scheduler call.
 pub const MAX_SCHEDULED_UDP_POLLS: usize = 16;
 
+const MIN_SCHEDULED_STALL_MS: u64 = 100;
+const SCHEDULED_STALL_FRAMES: u64 = 8;
+
 /// Media readiness observed by the clock-driven receiver.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ScheduledReceiverState {
@@ -32,6 +35,8 @@ pub enum ScheduledReceiverState {
     OutputUnavailable,
     /// Output was recreated, but the matching stream has not rejoined it.
     AwaitingStreamRecovery,
+    /// Stale UDP and buffered audio are being retired after a scheduling stall.
+    DrainingStaleMedia,
     /// The matching stream is admitted to a running output.
     Active,
 }
@@ -247,6 +252,7 @@ pub struct DesktopReceiverScheduler<
     control: Option<(ControlSessionToken, UntrustedControlStream<S>)>,
     scheduled_clock_ms: Option<u64>,
     scheduled_playout: Option<(crate::StreamStartRequest, u128, u128)>,
+    scheduled_drain: Option<crate::StreamStartRequest>,
 }
 
 impl<
@@ -289,6 +295,7 @@ where
             control: None,
             scheduled_clock_ms: None,
             scheduled_playout: None,
+            scheduled_drain: None,
         }
     }
 
@@ -1172,6 +1179,104 @@ mod tests {
             ));
         }
 
+        // A long scheduling pause retires queued audio and drains the socket
+        // across bounded calls before admitting fresh playout.
+        for index in 24..42 {
+            sender.send_frame(0, index * 480, &[1]).unwrap();
+        }
+        let stalled = scheduler.tick_scheduled_at(1271);
+        assert_eq!(
+            stalled.state,
+            super::ScheduledReceiverState::DrainingStaleMedia
+        );
+        assert_eq!(stalled.packets.unwrap(), 16);
+        assert!(matches!(stalled.playout, Ok(None)));
+        assert!(stalled.pump.is_ok());
+        let identity = crate::MediaStreamIdentity {
+            session_id: 7,
+            stream_id: 1,
+            key_epoch: 0,
+        };
+        assert_eq!(
+            scheduler
+                .receiver()
+                .owner()
+                .bridge()
+                .mixer()
+                .queued_output_blocks(identity)
+                .unwrap(),
+            0
+        );
+        let drained = scheduler.tick_scheduled_at(1200);
+        assert_eq!(
+            drained.state,
+            super::ScheduledReceiverState::DrainingStaleMedia
+        );
+        assert_eq!(drained.packets.unwrap(), 2);
+        assert!(matches!(
+            drained.playout,
+            Err(super::ScheduledPlayoutError::ClockRegression { .. })
+        ));
+        let invalid_sender = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        for _ in 0..2 {
+            invalid_sender.send_to(&[0], address).unwrap();
+        }
+        sender.send_frame(0, 42 * 480, &[1]).unwrap();
+        let rejected = scheduler.tick_scheduled_at(1201);
+        assert!(rejected.packets.is_err());
+        assert!(matches!(
+            rejected.playout,
+            Err(super::ScheduledPlayoutError::ClockRegression { .. })
+        ));
+        scheduler
+            .receiver_mut()
+            .owner_mut()
+            .bridge_mut()
+            .mixer_mut()
+            .output_mut()
+            .health = OutputHealth::StreamError;
+        assert_eq!(
+            scheduler.tick_scheduled_at(1271).state,
+            super::ScheduledReceiverState::OutputUnavailable
+        );
+        sender.send_frame(0, 43 * 480, &[1]).unwrap();
+        scheduler
+            .receiver_mut()
+            .owner_mut()
+            .bridge_mut()
+            .mixer_mut()
+            .output_mut()
+            .health = OutputHealth::Healthy;
+        let identities = scheduler
+            .receiver_mut()
+            .owner_mut()
+            .bridge_mut()
+            .recover_output()
+            .unwrap();
+        scheduler
+            .receiver_mut()
+            .recover_stream(identities[0])
+            .unwrap();
+        let resumed = scheduler.tick_scheduled_at(1271);
+        assert_eq!(
+            resumed.state,
+            super::ScheduledReceiverState::DrainingStaleMedia
+        );
+        assert_eq!(resumed.packets.unwrap(), 1);
+        assert!(matches!(resumed.playout, Ok(None)));
+        sender.send_frame(0, 44 * 480, &[1]).unwrap();
+        let fresh = scheduler.tick_scheduled_at(1272);
+        assert_eq!(fresh.state, super::ScheduledReceiverState::Active);
+        assert!(
+            matches!(
+                fresh.playout,
+                Ok(Some(DecodeStep::Decoded { sequence: 43, .. }))
+            ),
+            "fresh playout: {:?}; packets: {:?}",
+            fresh.playout,
+            fresh.packets
+        );
+
         let stop = Envelope {
             protocol_version: CONTROL_PROTOCOL_VERSION,
             request_id: 3,
@@ -1186,7 +1291,7 @@ mod tests {
             .accept_and_execute(session, &stop)
             .unwrap();
         assert!(matches!(
-            scheduler.tick_scheduled_at(1180).playout,
+            scheduler.tick_scheduled_at(1280).playout,
             Ok(None)
         ));
         let mut other_start = start.clone();
@@ -1202,7 +1307,7 @@ mod tests {
             Err(crate::DesktopControlOwnerError::MediaContextMismatch)
         ));
         assert_eq!(
-            scheduler.tick_scheduled_at(1181).state,
+            scheduler.tick_scheduled_at(1281).state,
             super::ScheduledReceiverState::Idle
         );
         scheduler
@@ -1417,6 +1522,7 @@ where
     /// identity admitted to the running output. Do not interleave this method
     /// with the unpaced `tick`, `tick_at`, or `tick_media` methods for a stream.
     /// All results must be inspected separately.
+    #[allow(clippy::too_many_lines)] // Keeps the ordered recovery and scheduling decisions together.
     pub fn tick_scheduled_at(&mut self, now_ms: u64) -> ScheduledReceiverTick<D::Error> {
         let reconnect = self.receiver.owner_mut().observe_reconnect_grace(now_ms);
         let output = self.receiver.owner_mut().monitor();
@@ -1430,7 +1536,7 @@ where
         };
         let bridge = self.receiver.owner().bridge();
         let matching = bridge.coordinator().active_request_exact(identity);
-        let state = if matching.is_none() {
+        let mut state = if matching.is_none() {
             if bridge.coordinator().active().is_some() {
                 ScheduledReceiverState::IdentityMismatch
             } else {
@@ -1451,17 +1557,70 @@ where
         if request.is_none() {
             self.scheduled_playout = None;
         }
+        if self.scheduled_drain.is_some() && self.scheduled_drain != matching {
+            self.scheduled_drain = None;
+        }
 
+        let clock_error = self
+            .scheduled_clock_ms
+            .filter(|previous| now_ms < *previous);
+        if let Some(request) = request {
+            let stalled = clock_error.is_none()
+                && self
+                    .scheduled_playout
+                    .is_some_and(|(previous, _, _)| previous == request)
+                && self.scheduled_clock_ms.is_some_and(|previous| {
+                    now_ms - previous
+                        >= MIN_SCHEDULED_STALL_MS
+                            .max(u64::from(request.frame_duration_ms) * SCHEDULED_STALL_FRAMES)
+                });
+            if stalled && self.scheduled_drain != Some(request) {
+                self.receiver.pipeline_mut().hard_resynchronize();
+                self.scheduled_playout = None;
+                self.scheduled_drain = Some(request);
+            }
+            if self
+                .scheduled_drain
+                .is_some_and(|draining| draining != request)
+            {
+                self.scheduled_drain = None;
+            }
+        }
+
+        let draining = request.is_some() && self.scheduled_drain == request;
+        let reset = if draining {
+            state = ScheduledReceiverState::DrainingStaleMedia;
+            Some(
+                self.receiver
+                    .owner_mut()
+                    .bridge_mut()
+                    .mixer_mut()
+                    .begin_epoch(identity),
+            )
+        } else {
+            None
+        };
+
+        let mut socket_empty = false;
         let packets = if request.is_some() {
             let mut count = 0;
             let mut result = Ok(());
             for _ in 0..MAX_SCHEDULED_UDP_POLLS {
                 match self.receiver.poll_media() {
-                    Ok(UdpPollOutcome::Empty) => break,
+                    Ok(UdpPollOutcome::Empty) => {
+                        socket_empty = true;
+                        break;
+                    }
                     Ok(UdpPollOutcome::Processed { .. }) => count += 1,
                     Err(error) => {
-                        result = Err(error);
-                        break;
+                        let retry = draining
+                            && !matches!(error, UdpReceiverError::Socket(UdpReceiveError::Io(_)));
+                        if result.is_ok() {
+                            result = Err(error);
+                        }
+                        if !retry {
+                            break;
+                        }
                     }
                 }
             }
@@ -1470,9 +1629,15 @@ where
             Ok(0)
         };
 
-        let clock_error = self
-            .scheduled_clock_ms
-            .filter(|previous| now_ms < *previous);
+        if draining
+            && clock_error.is_none()
+            && socket_empty
+            && reset.as_ref().is_some_and(Result::is_ok)
+        {
+            self.receiver.pipeline_mut().hard_resynchronize();
+            self.scheduled_drain = None;
+            self.scheduled_playout = None;
+        }
         let playout = if let Some(previous_ms) = clock_error {
             Err(ScheduledPlayoutError::ClockRegression {
                 previous_ms,
@@ -1480,7 +1645,9 @@ where
             })
         } else {
             self.scheduled_clock_ms = Some(now_ms);
-            if let Some(request) = request {
+            if draining {
+                Ok(None)
+            } else if let Some(request) = request {
                 let now = u128::from(now_ms);
                 let (deadline, earliest) = self
                     .scheduled_playout
@@ -1502,12 +1669,13 @@ where
                 Ok(None)
             }
         };
-        let pump = self
+        let pump_result = self
             .receiver
             .owner_mut()
             .bridge_mut()
             .mixer_mut()
-            .pump_available();
+            .pump_available_except(draining.then_some(identity));
+        let pump = reset.unwrap_or(Ok(())).and(pump_result);
         ScheduledReceiverTick {
             state,
             control,
