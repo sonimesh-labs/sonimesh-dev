@@ -9,7 +9,7 @@ use std::io::{Read, Write};
 use sonimesh_audio::FrameDecoder;
 use sonimesh_network::PinnedServerChannel;
 use sonimesh_network::UntrustedControlWrite;
-use sonimesh_platform::AudioOutput;
+use sonimesh_platform::{AudioOutput, OutputHealth};
 
 use crate::{
     ControlSessionError, ControlSessionPoll, ControlSessionToken, DesktopControlOwnerError,
@@ -110,6 +110,7 @@ pub struct DesktopReceiverSchedulerMaintenanceTick<DecoderError> {
     control: Result<Option<ControlSessionPoll>, ControlSessionError>,
     media: Result<UdpMediaTick, UdpReceiverError<DecoderError>>,
     reconnect: Result<ReconnectGraceObservation, DesktopControlOwnerError>,
+    output: Result<Option<OutputHealth>, DesktopControlOwnerError>,
 }
 
 impl<DecoderError> DesktopReceiverSchedulerMaintenanceTick<DecoderError> {
@@ -131,8 +132,14 @@ impl<DecoderError> DesktopReceiverSchedulerMaintenanceTick<DecoderError> {
         &self.reconnect
     }
 
-    /// Splits the maintenance tick into the regular tick and grace result.
-    #[must_use = "handle all scheduler results"]
+    /// Returns the output-health observation for this tick.
+    #[must_use = "inspect the output-health result"]
+    pub const fn output(&self) -> &Result<Option<OutputHealth>, DesktopControlOwnerError> {
+        &self.output
+    }
+
+    /// Splits out the regular tick and reconnect result after inspecting output.
+    #[must_use = "handle both scheduler results"]
     pub fn into_parts(
         self,
     ) -> (
@@ -384,8 +391,17 @@ mod tests {
     const OUTPUT_SAMPLES: usize = 256;
     const SOURCE_SAMPLES: usize = 480;
 
-    #[derive(Default)]
-    struct TestOutput;
+    struct TestOutput {
+        health: OutputHealth,
+    }
+
+    impl Default for TestOutput {
+        fn default() -> Self {
+            Self {
+                health: OutputHealth::Healthy,
+            }
+        }
+    }
 
     impl AudioOutput for TestOutput {
         fn devices(&self) -> Result<Vec<OutputDeviceInfo>, OutputError> {
@@ -404,7 +420,7 @@ mod tests {
         fn stop(&mut self) {}
 
         fn health(&self) -> OutputHealth {
-            OutputHealth::Healthy
+            self.health
         }
     }
 
@@ -488,7 +504,7 @@ mod tests {
         let bridge = ControlToMixerBridge::new(
             SessionState::READY,
             &[Capability::FrameDuration10Ms],
-            TestOutput,
+            TestOutput::default(),
             OutputSelection {
                 device: None,
                 config: OutputConfig {
@@ -651,6 +667,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)]
     fn combined_tick_reports_control_and_media_results_together() {
         const JITTER_CAPACITY: usize = 8;
         const MAX_ENCODED_BYTES: usize = 256;
@@ -678,7 +695,7 @@ mod tests {
         let bridge = ControlToMixerBridge::new(
             SessionState::READY,
             &[Capability::FrameDuration10Ms],
-            TestOutput,
+            TestOutput::default(),
             OutputSelection {
                 device: None,
                 config: OutputConfig {
@@ -724,16 +741,55 @@ mod tests {
             Ok(media) if matches!(media.poll(), crate::UdpPollOutcome::Empty)
         ));
 
-        scheduler.mark_control_lost(1_000, 10).unwrap();
-        let maintenance = scheduler.tick_at(1_010);
+        let hello = Envelope {
+            protocol_version: CONTROL_PROTOCOL_VERSION,
+            request_id: 1,
+            payload: Some(envelope::Payload::Hello(Hello {
+                supported_versions: vec![CONTROL_PROTOCOL_VERSION],
+                capabilities: vec![Capability::FrameDuration10Ms as i32],
+                display_name: "test sender".to_owned(),
+            })),
+        };
+        let start = Envelope {
+            protocol_version: CONTROL_PROTOCOL_VERSION,
+            request_id: 2,
+            payload: Some(envelope::Payload::StartStream(StartStream {
+                media_session_id: 7,
+                stream_id: 1,
+                sample_rate_hz: 48_000,
+                channels: 1,
+                frame_duration_ms: 10,
+                media_key_epoch: 0,
+            })),
+        };
+        scheduler
+            .receiver_mut()
+            .accept_and_execute(session, &hello)
+            .unwrap();
+        scheduler
+            .receiver_mut()
+            .accept_and_execute(session, &start)
+            .unwrap();
+        scheduler
+            .receiver_mut()
+            .owner_mut()
+            .bridge_mut()
+            .mixer_mut()
+            .output_mut()
+            .health = OutputHealth::StreamError;
+        let maintenance = scheduler.tick_at(999);
         assert!(matches!(
-            maintenance.reconnect(),
-            Ok(crate::ReconnectGraceObservation::Expired)
+            maintenance.output(),
+            Ok(Some(OutputHealth::StreamError))
         ));
-        assert!(matches!(
-            maintenance.media(),
-            Ok(media) if matches!(media.poll(), crate::UdpPollOutcome::Empty)
-        ));
+        assert!(maintenance.media().is_ok());
+        assert_eq!(
+            scheduler.receiver().owner().bridge().state().phase(),
+            crate::SessionPhase::OutputUnavailable
+        );
+
+        let maintenance = scheduler.tick_at(1_000);
+        assert!(matches!(maintenance.output(), Ok(None)));
     }
 }
 
@@ -772,19 +828,21 @@ where
         DesktopReceiverSchedulerTick { control, media }
     }
 
-    /// Runs one control/media tick and services reconnect grace at `now_ms`.
+    /// Runs one control/media tick and observes reconnect grace and output health.
     ///
     /// Reconnect observation runs before control and media work, so expiry can
-    /// retire output and pending stream state before the rest of the tick. All
-    /// three results remain independent: a clock error does not suppress media
-    /// polling, and a transport error does not suppress grace observation.
+    /// retire output and pending stream state before the rest of the tick.
+    /// Results remain independent: a clock or output error does not suppress
+    /// media polling, and a transport error does not suppress grace observation.
     pub fn tick_at(&mut self, now_ms: u64) -> DesktopReceiverSchedulerMaintenanceTick<D::Error> {
         let reconnect = self.receiver.owner_mut().observe_reconnect_grace(now_ms);
+        let output = self.receiver.owner_mut().monitor();
         let DesktopReceiverSchedulerTick { control, media } = self.tick();
         DesktopReceiverSchedulerMaintenanceTick {
             control,
             media,
             reconnect,
+            output,
         }
     }
 

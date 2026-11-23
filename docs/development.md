@@ -745,9 +745,9 @@ the bounded reconnect window while leaving the UDP receiver available for the
 same scheduler loop.
 The UDP specialization also exposes `tick_at(now_ms)`, which observes reconnect
 grace before running that same control/media work and returns the lifecycle,
-control, and media results independently. A grace expiry therefore retires the
-output before the tick continues, while a clock error still does not suppress
-the media poll.
+control, media, and output-health results independently. A grace expiry therefore
+retires the output before the tick continues, while a clock error or output
+observation failure still does not suppress the media poll.
 After a fresh trusted channel is accepted, call `attach_reconnected_control`
 (`attach_trusted_reconnected_control` for the TLS wrapper). It clears the grace
 window, returns the lifecycle to `Ready`, issues a fresh control token, and gives
