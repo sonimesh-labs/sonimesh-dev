@@ -156,6 +156,9 @@ of the current status, session request, sender queue drops, sent packet count,
 and encoded payload average. It excludes the invitation, SPKI, and audio data.
 **Share lab evidence** sends that same text summary through the Android share
 sheet; if no share target is installed, the activity reports that locally.
+The displayed status message is bounded before it reaches the screen or the
+evidence summary, so an unexpectedly long listener error cannot expand the
+operator report without limit.
 After a valid invitation is applied, the lab keeps the invitation, desktop SPKI,
 control address, and last UDP address in the app's private preferences so the
 next activity launch can resume the same controlled-lab setup. The screen shows
