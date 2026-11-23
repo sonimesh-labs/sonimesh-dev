@@ -156,6 +156,12 @@ of the current status, session request, sender queue drops, sent packet count,
 and encoded payload average. It excludes the invitation, SPKI, and audio data.
 **Share lab evidence** sends that same text summary through the Android share
 sheet; if no share target is installed, the activity reports that locally.
+After a valid invitation is applied, the lab keeps the invitation, desktop SPKI,
+control address, and last UDP address in the app's private preferences so the
+next activity launch can resume the same controlled-lab setup. The screen shows
+that the setup was restored and provides **Clear saved lab setup** to remove
+those values and reset the address fields. This convenience is for the public
+lab fixture; it is not a persistent product trust store.
 On 2026-11-23, an API 37 x86_64 emulator test checked all four
 choices and confirmed the playing tone retains its usage across activity
 recreation; this checks audio attributes, not audible output. Android and the source application still
@@ -714,6 +720,10 @@ When metrics are available, **Copy session evidence** copies a bounded text
 summary of the displayed status and counters without including the invitation or
 audio data. If clipboard access is unavailable, the visible metrics remain
 available for manual selection.
+**Share session evidence** sends the same bounded summary through the browser
+share API when the Tauri web view exposes it, and otherwise copies it to the
+clipboard. A cancelled share leaves the current notice unchanged; neither path
+includes the invitation or audio data.
 For adaptive playout the observations also show the current target and range,
 smoothed arrival jitter, gated ticks and forced playouts. These values describe
 the current stream epoch: a decoder or jitter reset clears their history, while
