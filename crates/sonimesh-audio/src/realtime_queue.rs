@@ -282,6 +282,7 @@ fn active_block_count<const SAMPLES_PER_BLOCK: usize>(
         .min(state.queue.capacity())
 }
 
+#[allow(deprecated)] // fetch_update supports the workspace's Rust 1.85 baseline.
 fn increment_active_blocks(active_blocks: &AtomicUsize, capacity: usize) {
     // One transient extra count preserves occupancy when `force_push` replaces
     // an active oldest block immediately after this pre-insertion increment.
@@ -291,6 +292,7 @@ fn increment_active_blocks(active_blocks: &AtomicUsize, capacity: usize) {
     });
 }
 
+#[allow(deprecated)] // fetch_update supports the workspace's Rust 1.85 baseline.
 fn decrement_active_blocks(active_blocks: &AtomicUsize) {
     let _ = active_blocks.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |count| {
         count.checked_sub(1)

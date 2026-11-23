@@ -26,6 +26,8 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -206,6 +208,8 @@ jobs:
           java-version: '21'
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
       - name: Install Android build components
@@ -214,4 +218,4 @@ jobs:
           sdkmanager "platform-tools" "platforms;android-36" "platforms;android-37.0" "build-tools;35.0.0"
       - name: Build Android capture and discovery spikes
         working-directory: apps/android
-        run: ./gradlew lintDebug testDebugUnitTest assembleDebug :discovery-spike:lintDebug :discovery-spike:assembleDebugAndroidTest :tls-provider-spike:assembleDebugAndroidTest --no-daemon
+        run: ./gradlew lintDebug testDebugUnitTest assembleDebug :pairing-protocol:lint :pairing-protocol:assemble :pairing-client:lint :pairing-client:testDebugUnitTest :discovery-spike:lintDebug :discovery-spike:assembleDebugAndroidTest :tls-provider-spike:assembleDebugAndroidTest --no-daemon

@@ -639,6 +639,8 @@ npm run build
 Pop-Location
 ~~~
 
+## Android device checks
+
 With an Android device or emulator connected, run the pairing codec's published
 vector and copy-ownership tests with
 `./gradlew.bat :pairing-protocol:connectedDebugAndroidTest` from `apps/android`.

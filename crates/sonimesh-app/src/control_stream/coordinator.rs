@@ -798,6 +798,7 @@ fn same_stream_key(left: MediaStreamIdentity, right: MediaStreamIdentity) -> boo
     left.session_id == right.session_id && left.stream_id == right.stream_id
 }
 
+#[allow(deprecated)] // fetch_update supports the workspace's Rust 1.85 baseline.
 fn issue_process_unique_token(
     counter: &AtomicU64,
     exhausted: ControlStreamError,

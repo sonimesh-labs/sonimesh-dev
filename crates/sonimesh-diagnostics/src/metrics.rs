@@ -218,6 +218,7 @@ impl StreamCounters {
     }
 
     /// Publishes the current count of PCM blocks in the active stream epoch.
+    #[allow(deprecated)] // fetch_update supports the workspace's Rust 1.85 baseline.
     pub fn set_queued_pcm_blocks(&self, blocks: u16) {
         let _ = self
             .queued_pcm_state
@@ -238,6 +239,7 @@ impl StreamCounters {
     /// Publishes the current encoded-frame count in the stream jitter buffer.
     ///
     /// The high-water mark never decreases within an active jitter epoch.
+    #[allow(deprecated)] // fetch_update supports the workspace's Rust 1.85 baseline.
     pub fn set_jitter_frames(&self, frames: u16) {
         let _ = self
             .jitter_state
@@ -478,6 +480,7 @@ fn saturating_increment(counter: &AtomicU64) {
     saturating_add(counter, 1);
 }
 
+#[allow(deprecated)] // fetch_update supports the workspace's Rust 1.85 baseline.
 fn saturating_add(counter: &AtomicU64, amount: u64) {
     if amount == 0 {
         return;

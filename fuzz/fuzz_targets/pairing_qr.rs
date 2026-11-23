@@ -59,8 +59,8 @@ fuzz_target!(|data: &[u8]| {
 
         // The re-encoded payload must decode to the same fields again, with
         // the zeroed secret substituted back before comparison.
-        let redecoded = parse_pairing_qr_payload(&encoded[..written])
-            .expect("the encoder output must decode");
+        let redecoded =
+            parse_pairing_qr_payload(&encoded[..written]).expect("the encoder output must decode");
         assert_eq!(redecoded.pairing_id, view.pairing_id);
         assert_eq!(redecoded.control_host, view.control_host);
         assert_eq!(redecoded.control_port, view.control_port);
