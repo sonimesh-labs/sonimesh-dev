@@ -2,6 +2,10 @@
 
 use std::io::{ErrorKind, Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use std::thread;
 
 use sonimesh_network::{
@@ -39,6 +43,54 @@ fn connected_reader() -> (TcpStream, UntrustedControlStream<TcpStream>) {
         sender,
         UntrustedControlStream::from_stream(receiver).unwrap(),
     )
+}
+
+struct BackpressuredStream {
+    socket: TcpStream,
+    released: Arc<AtomicBool>,
+    wrote_prefix: bool,
+}
+
+impl Read for BackpressuredStream {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        self.socket.read(buffer)
+    }
+}
+
+impl Write for BackpressuredStream {
+    fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+        if self.released.load(Ordering::SeqCst) {
+            return self.socket.write(buffer);
+        }
+        if self.wrote_prefix {
+            return Err(ErrorKind::WouldBlock.into());
+        }
+        let written = self.socket.write(&buffer[..buffer.len().min(4)])?;
+        self.wrote_prefix = written > 0;
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.socket.flush()
+    }
+}
+
+fn backpressured_writer() -> (
+    TcpStream,
+    UntrustedControlStream<BackpressuredStream>,
+    Arc<AtomicBool>,
+) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let peer = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+    let (socket, _) = listener.accept().unwrap();
+    socket.set_nonblocking(true).unwrap();
+    let released = Arc::new(AtomicBool::new(false));
+    let writer = UntrustedControlStream::from_io(BackpressuredStream {
+        socket,
+        released: Arc::clone(&released),
+        wrote_prefix: false,
+    });
+    (peer, writer, released)
 }
 
 #[test]
@@ -108,7 +160,7 @@ fn invalid_outbound_frame_does_not_retire_or_block_the_writer() {
 
 #[test]
 fn writer_rejects_a_second_frame_while_the_first_is_pending() {
-    let (_peer, mut writer) = connected_reader();
+    let (_peer, mut writer, _released) = backpressured_writer();
     let mut pending = false;
 
     for _ in 0..100_000 {
@@ -131,11 +183,11 @@ fn writer_rejects_a_second_frame_while_the_first_is_pending() {
 
 #[test]
 fn pending_write_resumes_after_the_peer_drains() {
-    let (mut peer, mut writer) = connected_reader();
+    let (mut peer, mut writer, released) = backpressured_writer();
     let frame = hello_frame();
     let mut completed_sends = 0_u32;
 
-    // Fill the loopback send buffer until the writer reports backpressure.
+    // The adapter writes a prefix to the real socket and then reports WouldBlock.
     let mut pending = false;
     for _ in 0..100_000 {
         match writer.send(&hello_envelope()).unwrap() {
@@ -148,7 +200,7 @@ fn pending_write_resumes_after_the_peer_drains() {
         }
     }
     assert!(pending, "loopback socket never applied backpressure");
-    assert!(completed_sends > 0);
+    released.store(true, Ordering::SeqCst);
 
     peer.set_nonblocking(true).unwrap();
     let mut drain = [0_u8; 8_192];
