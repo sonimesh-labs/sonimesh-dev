@@ -71,6 +71,29 @@ describe('DiagnosticsPanel', () => {
     vi.unstubAllGlobals()
   })
 
+  it('copies an allowlisted preview diagnostics bundle', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal('navigator', { clipboard: { writeText } })
+
+    const wrapper = mount(DiagnosticsPanel, {
+      props: {
+        metrics: metrics({ authenticatedPackets: '42' }),
+        preview: true,
+        diagnosticExports: [{ sequence: '3', bytes: '16384' }],
+      },
+    })
+
+    await wrapper.findAll('.export-section button')[2].trigger('click')
+
+    expect(writeText).toHaveBeenCalledTimes(1)
+    const payload = JSON.parse(writeText.mock.calls[0][0] as string) as { format: string; metrics: StreamMetrics }
+    expect(payload.format).toBe('sonimesh-preview-diagnostics/v1')
+    expect(payload.metrics.authenticatedPackets).toBe('42')
+    expect(wrapper.text()).toContain('Preview diagnostics copied.')
+
+    vi.unstubAllGlobals()
+  })
+
   it('labels synthetic metrics as preview values instead of measurements', () => {
     const wrapper = mount(DiagnosticsPanel, {
       props: {
