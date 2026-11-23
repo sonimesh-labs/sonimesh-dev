@@ -183,8 +183,10 @@ Android recreates the activity, so it can still be reviewed and applied.
 The lab also lets the operator request 64, 96 (default), or 128 kbps Opus for
 the next capture. This is a MediaCodec target, not a measured or guaranteed
 bitrate; changing the selector does not reconfigure an active capture.
-The lab displays the usage and target bitrate requested for the current or most
-recent session separately from the selectors for the next session. This is the
+The lab displays the usage, target bitrate, and transport requested for the
+current or most recent session separately from the selectors for the next
+session. Transport is shown as **ADB TCP**, **UDP**, or **paired UDP** so an
+operator can distinguish the bootstrap path while diagnosing a run. This is the
 requested configuration, not confirmation that capture or encoding succeeded;
 it remains until the next service start and is lost if the app process ends.
 On 2026-11-23, an API 37 x86_64 emulator paired-capture test requested Media
