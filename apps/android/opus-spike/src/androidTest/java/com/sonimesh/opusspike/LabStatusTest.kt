@@ -136,6 +136,7 @@ class LabStatusTest {
             scenario.onActivity { activity ->
                 try {
                     LabStatus.serviceStarted(LabCaptureUsage.Game, OpusBitrate.fromBitsPerSecond(128_000))
+                    LabStatus.publishSignal(LabSignalState.Silent)
                     LabStatus.publishSenderQueueDrops(7)
                     LabStatus.publishSentPackets(12)
                     LabStatus.publishEncoderRate(73)
@@ -147,6 +148,7 @@ class LabStatusTest {
                     val text = requireNotNull(clip.getItemAt(0).coerceToText(activity)).toString()
                     assertTrue(text.contains("Session request: Game, 128 kbps target"))
                     assertTrue(text.contains("Transport: ADB TCP"))
+                    assertTrue(text.contains("Capture signal: no capturable audio"))
                     assertTrue(text.contains("Sender queue drops: 7"))
                     assertTrue(text.contains("Media packets sent: 12"))
                     assertTrue(text.contains("Encoded payload average: 73 kbps"))
@@ -155,7 +157,23 @@ class LabStatusTest {
                     LabStatus.publishSenderQueueDrops(null)
                     LabStatus.publishSentPackets(null)
                     LabStatus.publishEncoderRate(null)
+                    LabStatus.publishSignal(null)
                 }
+            }
+        }
+    }
+
+    @Test
+    fun captureSignalSurvivesActivityRecreation() {
+        ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                LabStatus.publishSignal(LabSignalState.Detected)
+                assertTrue(hasStatus(activity.window.decorView, "Capture signal: signal detected"))
+            }
+            scenario.recreate()
+            scenario.onActivity { activity ->
+                assertTrue(hasStatus(activity.window.decorView, "Capture signal: signal detected"))
+                LabStatus.publishSignal(null)
             }
         }
     }
