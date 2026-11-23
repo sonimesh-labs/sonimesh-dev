@@ -121,6 +121,21 @@ function writeLabSettings(settings: StoredLabSettings) {
   }
 }
 
+function clearLabSettings() {
+  try {
+    localStorage.removeItem(LAB_SETTINGS_KEY)
+  } catch {
+    // Browser storage is a convenience; resetting the visible fields still works.
+  }
+  labHost.value = '127.0.0.1'
+  androidHost.value = ''
+  labOutput.value = ''
+  startupBufferMs.value = 60
+  adaptive.value = false
+  suggestedHost.value = null
+  suggestError.value = null
+}
+
 const storedLabSettings = readLabSettings()
 
 const labEvidenceMessage = ref<string | null>(null)
@@ -458,6 +473,7 @@ onBeforeUnmount(() => { disposed = true; labRequest++; clearTimeout(timer); clea
         <option :value="true">Adaptive (experimental)</option>
       </select>
       <p class="preview-note">Adaptive mode may pause audio while buffering; restart the listener to change modes.</p>
+      <button type="button" class="preview-action" :disabled="lab.running || labBusy || busy" @click="clearLabSettings">Reset lab settings</button>
       <button type="button" class="preview-action" :disabled="labBusy || suggestBusy || (!lab.running && (playing !== null || busy || labOutput === 'unavailable'))" @click="toggleLab">{{ lab.running ? 'Stop listener' : 'Start listener' }}</button>
       <p v-if="playing !== null" class="preview-note">Wait for the test sound to finish before starting the listener.</p>
       <p v-else-if="lab.running" class="preview-note">Stop the listener before testing an output.</p>

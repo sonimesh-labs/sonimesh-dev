@@ -841,6 +841,25 @@ describe('desktop output probe', () => {
     wrapper.unmount()
   })
 
+  it('resets persisted lab settings without touching listener state', async () => {
+    localStorage.setItem('sonimesh.outputProbe.labSettings', JSON.stringify({
+      labHost: '192.168.1.7', androidHost: '192.168.1.22', labOutput: '1', startupBufferMs: 100, adaptive: true,
+    }))
+    const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [] })
+    window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+    const wrapper = mountStoppedProbe()
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'Reset lab settings')!.trigger('click')
+    expect((wrapper.get('#lab-host').element as HTMLInputElement).value).toBe('127.0.0.1')
+    expect((wrapper.get('#android-host').element as HTMLInputElement).value).toBe('')
+    expect((wrapper.get('#lab-buffer').element as HTMLSelectElement).value).toBe('60')
+    expect((wrapper.get('#lab-playout').element as HTMLSelectElement).value).toBe('false')
+    expect((wrapper.get('#lab-output').element as HTMLSelectElement).value).toBe('')
+    expect(localStorage.getItem('sonimesh.outputProbe.labSettings')).toContain('127.0.0.1')
+    expect(invoke).not.toHaveBeenCalledWith('stop_lab')
+    wrapper.unmount()
+  })
+
   it('reports failure and allows a retry', async () => {
     const invoke = vi.fn().mockRejectedValueOnce(new Error('unavailable')).mockResolvedValueOnce({ generation: 1, devices: [] })
     window.__TAURI__ = { core: { invoke } }
