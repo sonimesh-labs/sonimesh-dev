@@ -774,6 +774,7 @@ mod tests {
     #[test]
     #[allow(clippy::too_many_lines)] // Exercises control, UDP, decode, and output together.
     fn scheduler_drives_authenticated_udp_audio_to_the_output_source() {
+        use sonimesh_audio::{JitterMode, JitterTargetConfig, TargetGatedPlayoutConfig};
         use sonimesh_network::MediaSessionSender;
 
         type Pipeline = crate::UdpReceiverPipeline<ByteDecoder, 8, 256, SOURCE_SAMPLES>;
@@ -781,7 +782,7 @@ mod tests {
         let secret = SessionSecret::new([7; 32]);
         let context = MediaKeyContext::new(7, 1, 0, MediaDirection::AndroidToDesktop).unwrap();
         let counters = Arc::new(StreamCounters::default());
-        let pipeline = Pipeline::bind(
+        let mut pipeline = Pipeline::bind_with_adaptive_target(
             "127.0.0.1:0".parse().unwrap(),
             &secret,
             context,
@@ -789,8 +790,16 @@ mod tests {
             producer,
             Arc::clone(&counters),
             0,
+            crate::AdaptiveTargetConfig {
+                target: JitterTargetConfig::preset(JitterMode::Balanced, 10, 8),
+                arrival_ticks_per_second: 1_000,
+                tick_source: Box::new(|| 0),
+            },
         )
         .unwrap();
+        pipeline
+            .enable_target_gated_playout(TargetGatedPlayoutConfig { max_gate_ticks: 2 })
+            .unwrap();
         let address = pipeline.local_addr().unwrap();
         let bridge = ControlToMixerBridge::new(
             SessionState::READY,

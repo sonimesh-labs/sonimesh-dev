@@ -48,7 +48,12 @@ output backend. The receiver scheduler also pumps decoded PCM through the
 per-stream format adapters outside the output callback. Each tick stops pumping
 an adapter at underflow or when its bounded output queue is full, and reports
 conversion errors independently from control and UDP results. A
-`DesktopControlSession` can now attach a trusted post-pairing channel to that
+combined UDP poll/decode tick uses the immediate-drain path: a received packet
+does not establish whether further packets are in flight. Callers that enable
+target-gated playout must supply that signal explicitly. The caller still paces
+combined ticks at the stream frame duration; independent packet and playout
+scheduling remains an integration gap.
+A `DesktopControlSession` can now attach a trusted post-pairing channel to that
 owner. It polls the existing bounded control framing, executes at most one
 envelope per tick, and sends correlated `StreamStatus` replies for start,
 rotation, and stop actions. Owner rejections become correlated `ControlError`

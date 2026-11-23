@@ -1,8 +1,7 @@
 //! Target-gated playout driven by caller-owned arrival-pending signals.
 //!
-//! These tests model the scheduling loop the production owner must run:
-//! derive the pending-arrival signal from real loopback socket polls, feed
-//! it into `decode_next_with_arrivals_pending`, and assert the alternating
+//! These tests feed explicit pending-arrival signals into
+//! `decode_next_with_arrivals_pending` and assert the alternating
 //! signal semantics, the streak reset on a drained-arrival play, the
 //! enable/disable/re-enable counter lifecycle, and the fact that an
 //! empty-buffer gated tick still advances the scheduler counters.
@@ -87,15 +86,13 @@ fn admit(pipeline: &mut Pipeline, sealer: &mut MediaSealer) {
     );
 }
 
-/// Polls until the loopback socket drains, returning whether any datagram
-/// arrived. This is the live pending-arrival signal a production scheduler
-/// derives from its own poll loop.
+/// Polls until the loopback socket drains, returning whether any datagram arrived.
 fn poll_until_empty(pipeline: &mut UdpPipeline) -> bool {
-    let mut pending = false;
+    let mut received = false;
     loop {
         match pipeline.poll() {
-            Ok(UdpPollOutcome::Empty) => break pending,
-            Ok(UdpPollOutcome::Processed { .. }) => pending = true,
+            Ok(UdpPollOutcome::Empty) => break received,
+            Ok(UdpPollOutcome::Processed { .. }) => received = true,
             other => panic!("unexpected poll outcome: {other:?}"),
         }
     }
@@ -276,7 +273,7 @@ fn empty_buffer_gated_ticks_still_advance_the_scheduler() {
 }
 
 #[test]
-fn udp_wrapper_derives_the_signal_from_real_socket_polls() {
+fn udp_wrapper_accepts_explicit_arrival_signals_after_socket_polls() {
     let counters = Arc::new(StreamCounters::default());
     let secret = SessionSecret::new([0xA5; 32]);
     let (producer, mut consumer) = realtime_pcm_queue::<PCM_SAMPLES_PER_BLOCK>(4).unwrap();
@@ -303,14 +300,13 @@ fn udp_wrapper_derives_the_signal_from_real_socket_polls() {
     let mut sealer = MediaSealer::new(&secret, context(1)).unwrap();
     let destination = pipeline.local_addr().unwrap();
 
-    // The freshly delivered datagram is itself the in-flight signal: the
-    // first tick must gate on it, and only a drained socket ends the streak
-    // with an immediate, non-forced play.
+    // Feed an explicit pending signal after the first delivery, then switch
+    // to the drain signal and verify immediate, non-forced playout.
     let packet = sealer.seal(0, 0, &[7]).unwrap();
     sender.send_to(&packet.datagram, destination).unwrap();
     assert!(
         poll_until_empty(&mut pipeline),
-        "an admitted in-flight datagram must report pending arrivals"
+        "the datagram must be admitted"
     );
     assert_eq!(
         pipeline.decode_next_with_arrivals_pending(true).unwrap(),
@@ -318,7 +314,7 @@ fn udp_wrapper_derives_the_signal_from_real_socket_polls() {
     );
     assert!(
         !poll_until_empty(&mut pipeline),
-        "the consumed datagram must report no pending arrivals"
+        "the socket must be drained"
     );
     assert!(matches!(
         pipeline.decode_next_with_arrivals_pending(false).unwrap(),
@@ -330,13 +326,13 @@ fn udp_wrapper_derives_the_signal_from_real_socket_polls() {
         RealtimePcmPopOutcome::Filled { .. }
     ));
 
-    // Deliver a second frame and keep it in flight: the gate must hold until
-    // the deadline forces the below-target playout.
+    // Deliver a second frame and supply a persistent pending signal: the gate
+    // must hold until the deadline forces below-target playout.
     let packet = sealer.seal(0, 960, &[9]).unwrap();
     sender.send_to(&packet.datagram, destination).unwrap();
     assert!(
         poll_until_empty(&mut pipeline),
-        "an unconsumed datagram must report pending arrivals"
+        "the second datagram must be admitted"
     );
     assert_eq!(
         pipeline.decode_next_with_arrivals_pending(true).unwrap(),

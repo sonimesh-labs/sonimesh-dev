@@ -23,6 +23,12 @@ No hardware jitter evidence is selected by this record. The bounded
 single-stream default path remains unchanged until a production scheduler
 chooses and supplies the in-flight-arrival signal.
 
+The desktop combined UDP tick cannot infer that signal from a successful socket
+poll: a received packet says nothing about future arrivals. It therefore uses
+the immediate-drain path even when target gating is enabled. An explicit caller
+that knows the arrival state may still use the gated decode boundary. Separating
+packet polling from frame-paced playout remains future integration work.
+
 ## Decision
 
 Each stream owns a non-realtime `AdaptiveJitterTarget` controller in

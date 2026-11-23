@@ -174,8 +174,8 @@ where
 
     /// Runs one decode or PLC decision outside the output callback.
     ///
-    /// The caller supplies whether the preceding packet poll observed an
-    /// authenticated arrival, which keeps target-gated scheduling explicit.
+    /// The caller supplies whether further authenticated arrivals are pending;
+    /// a successful packet poll alone does not establish that condition.
     ///
     /// # Errors
     ///
@@ -190,9 +190,9 @@ where
 
     /// Polls one datagram and immediately runs one decode or PLC decision.
     ///
-    /// The packet result controls the target-gated `arrivals_pending` input,
-    /// keeping the scheduling decision in one low-rate call outside the output
-    /// callback.
+    /// A packet poll cannot establish whether further arrivals are pending, so
+    /// this convenience path drains immediately. Call [`Self::poll_media`] and
+    /// [`Self::decode_media`] separately when that signal is available.
     ///
     /// # Errors
     ///
@@ -200,10 +200,9 @@ where
     /// this tick.
     pub fn tick_media(&mut self) -> Result<UdpMediaTick, UdpReceiverError<D::Error>> {
         let poll = self.pipeline.poll()?;
-        let arrivals_pending = matches!(poll, UdpPollOutcome::Processed { .. });
         let decode = self
             .pipeline
-            .decode_next_with_arrivals_pending(arrivals_pending)
+            .decode_next_with_arrivals_pending(false)
             .map_err(|error| UdpReceiverError::Pipeline(ReceiverPipelineError::Decode(error)))?;
         Ok(UdpMediaTick { poll, decode })
     }
