@@ -639,6 +639,27 @@ describe('desktop output probe', () => {
     noEventsWrapper.unmount()
   })
 
+  it('copies event-only evidence when a session ends before metrics arrive', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [] })
+      .mockResolvedValueOnce({ running: true, status: 'Starting listener…', invitation: null })
+      .mockResolvedValueOnce({ running: true, sessionActive: false, status: 'Session failed; waiting for Android', invitation: null, events: ['RESULT client connected', 'RESULT session failed'], metrics: null })
+    window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+    const wrapper = mountStoppedProbe()
+    await flushPromises()
+    vi.useFakeTimers()
+    await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(wrapper.text()).toContain('Session evidence')
+    expect(wrapper.find('.lab-metrics').exists()).toBe(false)
+    await wrapper.findAll('button').find(button => button.text() === 'Copy session evidence')!.trigger('click')
+    await flushPromises()
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining('Status: Session failed; waiting for Android'))
+    expect(writeText.mock.calls[0][0]).toContain('- RESULT session failed')
+    wrapper.unmount()
+  })
+
   it('falls back to copying session evidence when system sharing is unavailable', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     Object.defineProperty(navigator, 'share', { configurable: true, value: undefined })

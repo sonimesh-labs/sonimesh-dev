@@ -142,34 +142,37 @@ const labEvidenceMessage = ref<string | null>(null)
 
 function labEvidenceText(): string | null {
   const metrics = lab.value.metrics
-  if (!metrics) return null
+  const events = lab.value.events ?? []
+  if (!metrics && events.length === 0) return null
   const lines = [
     'SoniMesh paired audio lab',
     `Status: ${evidenceValue(lab.value.status)}`,
     `Session: ${lab.value.sessionActive ? 'active' : 'last reported'}`,
-    `Accepted packets: ${evidenceValue(metrics.packets)}`,
-    `Packets rejected: ${evidenceValue(metrics.rejected)}`,
-    `Decoded frames: ${evidenceValue(metrics.decoded)}`,
-    `Decoded peak: ${evidenceValue(metrics.peak)}`,
-    `Concealed frames: ${evidenceValue(metrics.plc)}`,
-    `Decode errors: ${evidenceValue(metrics.decodeErrors)}`,
-    `Buffered frames: ${evidenceValue(metrics.buffered)}`,
-    `Output: ${evidenceValue(metrics.output)}`,
   ]
-  if (metrics.media) lines.push(`Media arrival: ${evidenceValue(metrics.media)}`)
-  if (metrics.late != null) lines.push(`Late packets: ${evidenceValue(metrics.late)}`)
-  if (metrics.resyncDropped != null) lines.push(`Frames dropped on resync: ${evidenceValue(metrics.resyncDropped)}`)
-  if (metrics.playout) lines.push(`Playout mode: ${evidenceValue(metrics.playout)}`)
-  if (metrics.adaptive) {
-    lines.push(`Adaptive target: ${evidenceValue(metrics.adaptive.target)}`)
-    lines.push(`Adaptive jitter: ${evidenceValue(metrics.adaptive.jitterMs)} ms`)
-    lines.push(`Gated ticks: ${evidenceValue(metrics.adaptive.gated)}`)
-    lines.push(`Forced playouts: ${evidenceValue(metrics.adaptive.forced)}`)
-    lines.push(`Stream resets: ${evidenceValue(metrics.adaptive.resets)}`)
+  if (metrics) {
+    lines.push(`Accepted packets: ${evidenceValue(metrics.packets)}`)
+    lines.push(`Packets rejected: ${evidenceValue(metrics.rejected)}`)
+    lines.push(`Decoded frames: ${evidenceValue(metrics.decoded)}`)
+    lines.push(`Decoded peak: ${evidenceValue(metrics.peak)}`)
+    lines.push(`Concealed frames: ${evidenceValue(metrics.plc)}`)
+    lines.push(`Decode errors: ${evidenceValue(metrics.decodeErrors)}`)
+    lines.push(`Buffered frames: ${evidenceValue(metrics.buffered)}`)
+    lines.push(`Output: ${evidenceValue(metrics.output)}`)
+    if (metrics.media) lines.push(`Media arrival: ${evidenceValue(metrics.media)}`)
+    if (metrics.late != null) lines.push(`Late packets: ${evidenceValue(metrics.late)}`)
+    if (metrics.resyncDropped != null) lines.push(`Frames dropped on resync: ${evidenceValue(metrics.resyncDropped)}`)
+    if (metrics.playout) lines.push(`Playout mode: ${evidenceValue(metrics.playout)}`)
+    if (metrics.adaptive) {
+      lines.push(`Adaptive target: ${evidenceValue(metrics.adaptive.target)}`)
+      lines.push(`Adaptive jitter: ${evidenceValue(metrics.adaptive.jitterMs)} ms`)
+      lines.push(`Gated ticks: ${evidenceValue(metrics.adaptive.gated)}`)
+      lines.push(`Forced playouts: ${evidenceValue(metrics.adaptive.forced)}`)
+      lines.push(`Stream resets: ${evidenceValue(metrics.adaptive.resets)}`)
+    }
   }
-  if (lab.value.events?.length) {
+  if (events.length) {
     lines.push('Recent listener events:')
-    for (const event of lab.value.events) lines.push(`- ${evidenceValue(event)}`)
+    for (const event of events) lines.push(`- ${evidenceValue(event)}`)
   }
   return lines.join('\n')
 }
@@ -491,9 +494,9 @@ onBeforeUnmount(() => { disposed = true; labRequest++; clearTimeout(timer); clea
         <p class="preview-note">The displayed values are confirmed by the listener; system volume is unchanged.</p>
         <p v-if="controlError" class="command-error" role="alert">{{ controlError }}</p>
       </div>
-      <section v-if="lab.metrics" aria-labelledby="lab-metrics-title">
-        <h3 id="lab-metrics-title">{{ lab.sessionActive ? 'Session observations' : 'Last session observations' }}</h3>
-        <dl class="lab-metrics">
+      <section v-if="lab.metrics || lab.events?.length" aria-labelledby="lab-evidence-title">
+        <h3 id="lab-evidence-title">{{ lab.metrics ? (lab.sessionActive ? 'Session observations' : 'Last session observations') : 'Session evidence' }}</h3>
+        <dl v-if="lab.metrics" class="lab-metrics">
           <div><dt>Accepted packets</dt><dd>{{ lab.metrics.packets }}</dd></div>
           <div v-if="lab.metrics.media"><dt>Media arrival</dt><dd>{{ !lab.sessionActive ? 'Last reported: ' : '' }}{{ lab.metrics.media === 'waiting' ? 'Waiting for first packet' : lab.metrics.media === 'receiving' ? 'Receiving packets' : 'No recent packets' }}</dd></div>
           <div><dt>Packets rejected</dt><dd>{{ lab.metrics.rejected }}</dd></div>
@@ -517,10 +520,10 @@ onBeforeUnmount(() => { disposed = true; labRequest++; clearTimeout(timer); clea
         <button type="button" class="preview-action" @click="copyLabEvidence">Copy session evidence</button>
         <button type="button" class="preview-action" @click="shareLabEvidence">Share session evidence</button>
         <p v-if="labEvidenceMessage" role="status">{{ labEvidenceMessage }}</p>
-        <p class="preview-note">{{ lab.sessionActive ? 'Updated at session start, on media or output state changes, and every five seconds.' : lab.metrics.output === 'stopped' ? 'Final update after the stop drain.' : 'Last available update; the session may have ended before its final report.' }} Packet and decode counts and peak are cumulative; they do not confirm audible playback.</p>
-        <p v-if="lab.metrics.media" class="preview-note">Media arrival reports accepted packets within the past two seconds; a gap does not identify its cause.</p>
-        <p v-if="lab.metrics.late != null" class="preview-note">Late packets missed their playout deadline; resync drops are buffered frames discarded when the jitter buffer resynchronizes.</p>
-        <p v-if="lab.metrics.adaptive" class="preview-note">Adaptive target, jitter, gated ticks and forced playouts reset with the stream epoch; stream resets count the session's resets.</p>
+        <p v-if="lab.metrics" class="preview-note">{{ lab.sessionActive ? 'Updated at session start, on media or output state changes, and every five seconds.' : lab.metrics.output === 'stopped' ? 'Final update after the stop drain.' : 'Last available update; the session may have ended before its final report.' }} Packet and decode counts and peak are cumulative; they do not confirm audible playback.</p>
+        <p v-if="lab.metrics?.media" class="preview-note">Media arrival reports accepted packets within the past two seconds; a gap does not identify its cause.</p>
+        <p v-if="lab.metrics?.late != null" class="preview-note">Late packets missed their playout deadline; resync drops are buffered frames discarded when the jitter buffer resynchronizes.</p>
+        <p v-if="lab.metrics?.adaptive" class="preview-note">Adaptive target, jitter, gated ticks and forced playouts reset with the stream epoch; stream resets count the session's resets.</p>
       </section>
       <section v-if="lab.events?.length" aria-labelledby="lab-events-title">
         <h3 id="lab-events-title">Recent listener events</h3>
