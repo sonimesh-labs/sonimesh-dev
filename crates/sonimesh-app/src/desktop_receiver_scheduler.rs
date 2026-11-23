@@ -23,6 +23,7 @@ pub const MAX_SCHEDULED_UDP_POLLS: usize = 16;
 
 const MIN_SCHEDULED_STALL_MS: u64 = 100;
 const SCHEDULED_STALL_FRAMES: u64 = 8;
+const MAX_CONSECUTIVE_EMPTY_PLC: u8 = 3;
 
 /// Media readiness observed by the clock-driven receiver.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -253,6 +254,7 @@ pub struct DesktopReceiverScheduler<
     scheduled_clock_ms: Option<u64>,
     scheduled_playout: Option<(crate::StreamStartRequest, u128, u128)>,
     scheduled_drain: Option<crate::StreamStartRequest>,
+    scheduled_concealment: u8,
 }
 
 impl<
@@ -296,6 +298,7 @@ where
             scheduled_clock_ms: None,
             scheduled_playout: None,
             scheduled_drain: None,
+            scheduled_concealment: 0,
         }
     }
 
@@ -1519,7 +1522,9 @@ where
     /// decode is attempted per call. Late calls skip missed deadlines, preserve
     /// the frame clock phase, and space decisions at least half a frame apart.
     /// Playout uses immediate drain and starts only for a matching active media
-    /// identity admitted to the running output. Do not interleave this method
+    /// identity admitted to the running output. Three concealed frames followed
+    /// by an empty buffer retire the playout epoch at the next deadline so that
+    /// a later packet can re-establish its sequence. Do not interleave this method
     /// with the unpaced `tick`, `tick_at`, or `tick_media` methods for a stream.
     /// All results must be inspected separately.
     #[allow(clippy::too_many_lines)] // Keeps the ordered recovery and scheduling decisions together.
@@ -1556,6 +1561,7 @@ where
         };
         if request.is_none() {
             self.scheduled_playout = None;
+            self.scheduled_concealment = 0;
         }
         if self.scheduled_drain.is_some() && self.scheduled_drain != matching {
             self.scheduled_drain = None;
@@ -1578,6 +1584,7 @@ where
                 self.receiver.pipeline_mut().hard_resynchronize();
                 self.scheduled_playout = None;
                 self.scheduled_drain = Some(request);
+                self.scheduled_concealment = 0;
             }
             if self
                 .scheduled_drain
@@ -1588,8 +1595,21 @@ where
         }
 
         let draining = request.is_some() && self.scheduled_drain == request;
-        let reset = if draining {
-            state = ScheduledReceiverState::DrainingStaleMedia;
+        let due = self
+            .scheduled_playout
+            .is_some_and(|(previous, deadline, earliest)| {
+                Some(previous) == request && u128::from(now_ms) >= deadline.max(earliest)
+            });
+        let interrupted = request.is_some()
+            && !draining
+            && clock_error.is_none()
+            && due
+            && self.scheduled_concealment >= MAX_CONSECUTIVE_EMPTY_PLC
+            && self.receiver.pipeline_mut().jitter_len() == 0;
+        let reset = if draining || interrupted {
+            if draining {
+                state = ScheduledReceiverState::DrainingStaleMedia;
+            }
             Some(
                 self.receiver
                     .owner_mut()
@@ -1600,6 +1620,11 @@ where
         } else {
             None
         };
+        if interrupted && reset.as_ref().is_some_and(Result::is_ok) {
+            self.receiver.pipeline_mut().hard_resynchronize();
+            self.scheduled_playout = None;
+            self.scheduled_concealment = 0;
+        }
 
         let mut socket_empty = false;
         let packets = if request.is_some() {
@@ -1669,6 +1694,16 @@ where
                 Ok(None)
             }
         };
+        match &playout {
+            Ok(Some(DecodeStep::Concealed { .. })) => {
+                self.scheduled_concealment = self.scheduled_concealment.saturating_add(1);
+            }
+            Ok(Some(DecodeStep::Decoded { .. } | DecodeStep::NotReady))
+            | Err(ScheduledPlayoutError::Decode(_)) => {
+                self.scheduled_concealment = 0;
+            }
+            Ok(None) | Err(ScheduledPlayoutError::ClockRegression { .. }) => {}
+        }
         let pump_result = self
             .receiver
             .owner_mut()

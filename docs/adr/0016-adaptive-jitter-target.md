@@ -48,6 +48,13 @@ already handed to an output callback or device cannot be withdrawn. Stopped, unm
 output-unavailable streams reset their cadence. This is software scheduling
 behavior, not a latency or physical playback measurement.
 
+The scheduled desktop receiver also retires its stream-local decode and mixer
+epochs after three consecutive concealed frames when the jitter buffer is empty.
+It does so at the next playout deadline before polling new packets, allowing the
+next authenticated packet to establish a fresh sequence after an interruption.
+Buffered future frames remain eligible for normal PLC traversal. This fixed
+recovery policy is provisional and is not an adaptive jitter target.
+
 The separate paired audio lab schedules Opus PLC at each live playout deadline,
 including when its jitter buffer is empty. After three consecutive concealed
 frames, it resets an empty stream on the next deadline and waits for a fresh

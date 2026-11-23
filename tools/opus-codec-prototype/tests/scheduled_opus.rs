@@ -213,4 +213,46 @@ fn scheduled_protected_opus_reaches_memory_output_and_conceals_loss() {
             .fold(peak, |peak, sample| peak.max(sample.abs()));
     }
     assert!(peak > 0.001, "decoded audio must reach the output");
+
+    for (now, expected) in [(180, 4), (200, 5)] {
+        assert!(matches!(
+            scheduler.tick_scheduled_at(now).playout,
+            Ok(Some(DecodeStep::Concealed { sequence, .. })) if sequence == expected
+        ));
+    }
+    for now in (220..=400).step_by(20) {
+        let tick = scheduler.tick_scheduled_at(now);
+        assert!(tick.pump.is_ok());
+        assert!(matches!(tick.playout, Ok(Some(DecodeStep::NotReady))));
+    }
+    let len = encoder.encode_float(&pcm, &mut packet).unwrap();
+    sender.send_frame(0, 3 * 960, &packet[..len]).unwrap();
+    let resumed = scheduler.tick_scheduled_at(420);
+    assert!(resumed.packets.is_ok() && resumed.pump.is_ok());
+    assert!(matches!(
+        resumed.playout,
+        Ok(Some(DecodeStep::Decoded { sequence: 3, .. }))
+    ));
+
+    let sink = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    sender.set_peer(sink.local_addr().unwrap());
+    for sequence in 4..8 {
+        let len = encoder.encode_float(&pcm, &mut packet).unwrap();
+        sender
+            .send_frame(0, sequence * 960, &packet[..len])
+            .unwrap();
+    }
+    sender.set_peer(address);
+    let len = encoder.encode_float(&pcm, &mut packet).unwrap();
+    sender.send_frame(0, 8 * 960, &packet[..len]).unwrap();
+    for (now, expected) in [(440, 4), (460, 5), (480, 6), (500, 7)] {
+        assert!(matches!(
+            scheduler.tick_scheduled_at(now).playout,
+            Ok(Some(DecodeStep::Concealed { sequence, .. })) if sequence == expected
+        ));
+    }
+    assert!(matches!(
+        scheduler.tick_scheduled_at(520).playout,
+        Ok(Some(DecodeStep::Decoded { sequence: 8, .. }))
+    ));
 }

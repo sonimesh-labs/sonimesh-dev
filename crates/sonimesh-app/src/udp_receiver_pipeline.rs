@@ -367,6 +367,12 @@ where
         self.pipeline.disable_target_gated_playout();
     }
 
+    /// Returns the current number of encoded frames waiting for playout.
+    #[must_use]
+    pub fn jitter_len(&self) -> usize {
+        self.pipeline.jitter_len()
+    }
+
     /// Rotates this stream to a newer authenticated media epoch.
     ///
     /// # Errors

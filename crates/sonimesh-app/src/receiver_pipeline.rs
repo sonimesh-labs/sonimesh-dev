@@ -431,6 +431,12 @@ where
         self.decode_next_with_arrivals_pending(false)
     }
 
+    /// Returns the current number of encoded frames waiting for playout.
+    #[must_use]
+    pub fn jitter_len(&self) -> usize {
+        self.decode.jitter_len()
+    }
+
     /// Runs one target-gated decode or PLC decision outside the output callback.
     ///
     /// When target gating is enabled, a below-target stream waits only while
