@@ -510,7 +510,8 @@ describe('desktop output probe', () => {
     const metrics = {
       packets: '120', rejected: '3', decoded: '115', peak: '0.250', plc: '2',
       decodeErrors: '1', buffered: '4', output: 'active', media: 'receiving',
-      late: '5', resyncDropped: '1', playout: 'fixed', adaptive: null,
+      late: '5', resyncDropped: '1', playout: 'adaptive',
+      adaptive: { target: 3, min: 2, max: 4, jitterMs: 17, gated: '9', forced: '1', resets: '2' },
     }
     const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [] })
       .mockResolvedValueOnce({ running: true, status: 'Starting listener…', invitation: null })
@@ -526,6 +527,8 @@ describe('desktop output probe', () => {
     const copied = writeText.mock.calls[0][0] as string
     expect(copied).toContain('Accepted packets: 120')
     expect(copied).toContain('Output: active')
+    expect(copied).toContain('Adaptive target: 3')
+    expect(copied).toContain('Gated ticks: 9')
     expect(copied).not.toContain('secret-invitation')
     expect(wrapper.text()).toContain('Session evidence copied.')
     wrapper.unmount()

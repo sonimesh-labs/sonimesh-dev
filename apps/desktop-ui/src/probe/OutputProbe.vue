@@ -89,6 +89,13 @@ async function copyLabEvidence() {
   if (metrics.late != null) lines.push(`Late packets: ${evidenceValue(metrics.late)}`)
   if (metrics.resyncDropped != null) lines.push(`Frames dropped on resync: ${evidenceValue(metrics.resyncDropped)}`)
   if (metrics.playout) lines.push(`Playout mode: ${evidenceValue(metrics.playout)}`)
+  if (metrics.adaptive) {
+    lines.push(`Adaptive target: ${evidenceValue(metrics.adaptive.target)}`)
+    lines.push(`Adaptive jitter: ${evidenceValue(metrics.adaptive.jitterMs)} ms`)
+    lines.push(`Gated ticks: ${evidenceValue(metrics.adaptive.gated)}`)
+    lines.push(`Forced playouts: ${evidenceValue(metrics.adaptive.forced)}`)
+    lines.push(`Stream resets: ${evidenceValue(metrics.adaptive.resets)}`)
+  }
   try {
     if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable')
     await navigator.clipboard.writeText(lines.join('\n'))
