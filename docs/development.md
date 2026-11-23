@@ -44,6 +44,21 @@ silent-frame counts, and zero read errors. No playback source was exercised in
 that run, so it does not verify signal capture for each usage or on a physical
 device.
 
+For the device-side all-usage check, use an isolated English-language API 37
+emulator with no other audio playing. From `apps/android`, build and install
+`:app:assembleDebug` and `:app:assembleDebugAndroidTest`, grant `RECORD_AUDIO`
+and `POST_NOTIFICATIONS` to `com.sonimesh.sender`, then run:
+
+~~~powershell
+adb shell am instrument -r -w -e class com.sonimesh.sender.AllUsagesCaptureTest com.sonimesh.sender.test/androidx.test.runner.AndroidJUnitRunner
+~~~
+
+The test grants fresh projection consent through the system UI and plays a
+generated tone for each usage in one capture session. It waits for silence
+between tones and checks for new non-silent captured frames. On 2026-11-23 it
+passed twice on an API 37 x86_64 emulator; this is not a physical-device or
+source-app compatibility claim. CI builds the test APK but does not run it.
+
 ### Android Opus interoperability lab
 
 The paired-audio interoperability lab exercises the real pairing, Hello and
