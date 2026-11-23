@@ -138,6 +138,11 @@ behavior remain unverified.
 The lab activity presents the service's current connection and capture state,
 including a terminal reason on connection failure or projection revocation;
 this process-local status is not a production diagnostics interface.
+The experimental lab foreground service holds a partial CPU wake lock while its
+capture service is active and releases it when the service is destroyed. This
+supports screen-off experiments without keeping the display on; it is not a
+claim of uninterrupted capture, network delivery, or acceptable battery use on
+physical devices. The capture-only app's behavior is unchanged.
 The lab activity admits one permission/consent flow at a time and rejects another
 start while its foreground service is active or finishing cleanup. The guard
 survives activity recreation within the process; denial or completed service

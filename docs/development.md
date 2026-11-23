@@ -112,6 +112,18 @@ The lab's capture usage selector applies to the next capture session: **All**
 includes media, game and unknown usage, while the other choices select one
 usage. The test tone uses media usage. Android and the source application still
 control whether playback can be captured; the selector does not select apps.
+The lab foreground service holds a partial CPU wake lock until the service is
+destroyed so it can be evaluated with the screen off. Physical-device screen-off
+continuity and power consumption remain unmeasured.
+For an emulator check, run the paired capture instrumentation with the method
+`keeps_service_active_while_screen_is_off` and the listener's `--status` option.
+The test checks that the screen remains off and the service remains present;
+check listener status separately for media progress. On 2026-11-23 an API 37
+x86_64 emulator with ADB-reversed control and emulator UDP remained noninteractive
+for eight seconds; a listener update during that interval reported 224 decoded
+frames and a 0.095 PCM peak. The system power log showed the lab wake lock being
+acquired and released after stop. This is not a physical-device, power, listening,
+or latency result.
 When the encoder temporarily cannot accept a complete capture frame, the lab
 retains it and continues polling output. It pauses briefly if neither side can
 progress; after two seconds without accepting that frame, it stops the session

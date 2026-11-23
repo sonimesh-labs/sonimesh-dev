@@ -16,6 +16,7 @@ import android.media.projection.MediaProjectionManager
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import android.os.SystemClock
 import android.util.Log
 import com.sonimesh.sender.encoder.OpusEncoder
@@ -41,6 +42,7 @@ class LabCaptureService : Service() {
     private var socket: Socket? = null
     private val setupSocket = SetupSocket()
     private var projection: MediaProjection? = null
+    private var wakeLock: PowerManager.WakeLock? = null
     private val handler = Handler(Looper.getMainLooper())
     private var terminalStatus = false
     private var started = false
@@ -51,6 +53,7 @@ class LabCaptureService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     @Suppress("DEPRECATION")
+    @SuppressLint("WakelockTimeout") // Released when this foreground service is destroyed.
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == "stop") {
             if (started) requestStop() else stopSelf()
@@ -71,6 +74,8 @@ class LabCaptureService : Service() {
                 .setSmallIcon(android.R.drawable.ic_btn_speak_now)
                 .setContentTitle("SoniMesh audio lab capturing")
                 .addAction(Notification.Action.Builder(null, "Stop", stop).build()).build())
+            wakeLock = getSystemService(PowerManager::class.java)
+                .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SoniMesh:LabCapture").also { it.acquire() }
             val result = intent?.getParcelableExtra<Intent>("resultData") ?: error("missing consent")
             val code = intent.getIntExtra("resultCode", Activity.RESULT_CANCELED)
             val current = getSystemService(MediaProjectionManager::class.java).getMediaProjection(code, result)
@@ -391,7 +396,12 @@ class LabCaptureService : Service() {
     }
 
     override fun onDestroy() {
-        requestStop()
+        try {
+            requestStop()
+        } finally {
+            wakeLock?.let { if (it.isHeld) it.release() }
+            wakeLock = null
+        }
         if (!terminalStatus) {
             LabStatus.publish(if (workerStarted && !workerFinished) "Stopping capture…" else "Capture stopped.")
         }

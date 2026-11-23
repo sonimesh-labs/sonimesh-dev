@@ -2,6 +2,7 @@ package com.sonimesh.opusspike
 
 import android.app.ActivityManager
 import android.os.Bundle
+import android.os.PowerManager
 import android.os.SystemClock
 import android.view.View
 import android.view.ViewGroup
@@ -26,9 +27,12 @@ class PairedCaptureTest {
     }
 
     @Test
+    fun keeps_service_active_while_screen_is_off() = runCapture(expectDisconnect = false, screenOff = true)
+
+    @Test
     fun stops_capture_when_desktop_disconnects() = runCapture(expectDisconnect = true)
 
-    private fun runCapture(expectDisconnect: Boolean) {
+    private fun runCapture(expectDisconnect: Boolean, screenOff: Boolean = false) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val args = InstrumentationRegistry.getArguments()
         assumeTrue(
@@ -91,7 +95,28 @@ class PairedCaptureTest {
                 }
                 assertTrue("desktop disconnect was not reported", disconnectStatus != null)
             } else {
-                SystemClock.sleep(3_000)
+                if (screenOff) {
+                    val power = instrumentation.targetContext.getSystemService(PowerManager::class.java)
+                    try {
+                        automation.executeShellCommand("input keyevent KEYCODE_SLEEP").close()
+                        val sleepDeadline = SystemClock.elapsedRealtime() + 5_000
+                        while (power.isInteractive && SystemClock.elapsedRealtime() < sleepDeadline) SystemClock.sleep(100)
+                        assertTrue("screen did not turn off", !power.isInteractive)
+                        instrumentation.sendStatus(1, Bundle().apply { putString("pairedCapture", "screen-off") })
+                        SystemClock.sleep(8_000)
+                        assertTrue("screen became interactive during capture", !power.isInteractive)
+                        @Suppress("DEPRECATION")
+                        val services = instrumentation.targetContext.getSystemService(ActivityManager::class.java)
+                            .getRunningServices(Int.MAX_VALUE)
+                        assertTrue("capture service stopped with the screen off", services.any {
+                            it.service.className == LabCaptureService::class.java.name
+                        })
+                    } finally {
+                        automation.executeShellCommand("input keyevent KEYCODE_WAKEUP").close()
+                    }
+                } else {
+                    SystemClock.sleep(3_000)
+                }
                 scenario.onActivity { activity ->
                     val stop = find(activity.window.decorView) { it is Button && it.text.toString().equals("Stop capture", true) }
                     stop.performClick()
