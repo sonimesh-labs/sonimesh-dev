@@ -169,8 +169,8 @@ describe('desktop output probe', () => {
     vi.useFakeTimers()
     const metrics = { packets: '120', rejected: '3', decoded: '115', peak: '0.250', plc: '2', decodeErrors: '1', buffered: '4', output: 'active', late: '0', resyncDropped: '0', playout: 'fixed', adaptive: null }
     const invoke = vi.fn()
-      .mockResolvedValueOnce({ running: true, sessionActive: true, status: 'Session active', invitation: '01ab', metrics, volume: 50, muted: false })
-      .mockResolvedValueOnce({ running: false, sessionActive: false, status: 'Listener exited', invitation: null, metrics, volume: null, muted: null })
+      .mockResolvedValueOnce({ running: true, sessionActive: true, status: 'Session active', invitation: '01ab', events: ['READY', 'RESULT receiver started'], metrics, volume: 50, muted: false })
+      .mockResolvedValueOnce({ running: false, sessionActive: false, status: 'Listener exited', invitation: null, events: ['READY', 'RESULT receiver started', 'OUTPUT stopped'], metrics, volume: null, muted: null })
       .mockResolvedValueOnce({ generation: 1, devices: [] })
     window.__TAURI__ = { core: { invoke } }
     const wrapper = mount(OutputProbe)
@@ -181,6 +181,8 @@ describe('desktop output probe', () => {
     expect(wrapper.text()).toContain('115')
     expect(wrapper.text()).toContain('Last available update')
     expect(wrapper.text()).toContain('Last reported: Active')
+    expect(wrapper.text()).toContain('RESULT receiver started')
+    expect(wrapper.text()).toContain('OUTPUT stopped')
     expect(wrapper.find('#lab-invitation').exists()).toBe(false)
     wrapper.unmount()
   })

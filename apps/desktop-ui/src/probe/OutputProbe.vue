@@ -30,7 +30,7 @@ interface LabMetrics {
   playout: 'fixed' | 'adaptive' | null
   adaptive: { target: number; min: number; max: number; jitterMs: number; gated: string; forced: string; resets: string } | null
 }
-interface LabSnapshot { running: boolean; sessionActive: boolean; status: string; invitation: string | null; metrics: LabMetrics | null; volume: number | null; muted: boolean | null }
+interface LabSnapshot { running: boolean; sessionActive: boolean; status: string; invitation: string | null; events?: string[]; metrics: LabMetrics | null; volume: number | null; muted: boolean | null }
 const lab = ref<LabSnapshot>({ running: false, sessionActive: false, status: 'Checking listener…', invitation: null, metrics: null, volume: null, muted: null })
 const invitationQr = ref<string | null>(null)
 const invitationQrError = ref(false)
@@ -346,6 +346,13 @@ onBeforeUnmount(() => { disposed = true; labRequest++; clearTimeout(timer); clea
         <p v-if="lab.metrics.media" class="preview-note">Media arrival reports accepted packets within the past two seconds; a gap does not identify its cause.</p>
         <p v-if="lab.metrics.late != null" class="preview-note">Late packets missed their playout deadline; resync drops are buffered frames discarded when the jitter buffer resynchronizes.</p>
         <p v-if="lab.metrics.adaptive" class="preview-note">Adaptive target, jitter, gated ticks and forced playouts reset with the stream epoch; stream resets count the session's resets.</p>
+      </section>
+      <section v-if="lab.events?.length" aria-labelledby="lab-events-title">
+        <h3 id="lab-events-title">Recent listener events</h3>
+        <ol class="lab-events">
+          <li v-for="(event, index) in lab.events" :key="`${index}-${event}`"><code>{{ event }}</code></li>
+        </ol>
+        <p class="preview-note">The probe retains the latest 32 lifecycle transitions in arrival order.</p>
       </section>
       <template v-if="lab.invitation">
         <img v-if="invitationQr" class="lab-invitation-qr" :src="invitationQr" alt="QR code for the public lab invitation" />
