@@ -26,9 +26,7 @@ class AllUsagesCaptureTest {
         ActivityScenario.launch(MainActivity::class.java).use {
             try {
                 assertTrue("usage selector missing", clickText(automation, "All supported", scroll = true))
-                assertTrue("usage selection did not update", waitUntil(5_000) {
-                    automation.rootInActiveWindow?.findText("All supported")?.parent?.isChecked == true
-                })
+                // Start immediately, before waiting for the selection to redraw.
                 assertTrue("start button missing", clickText(automation, "Start capture", scroll = true))
                 assertTrue("projection chooser missing", clickText(automation, "Share one app"))
                 assertTrue("entire screen option missing", clickText(automation, "Share entire screen"))

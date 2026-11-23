@@ -202,6 +202,8 @@ All supported usages before each session. The last option requests
 filters the playback-capture request for that session; it does not identify the source
 application or override the source application's capture policy. The observed
 `AudioRecord` format remains the authoritative local measurement.
+The start action reads the current selection even if the UI has not yet redrawn
+after the operator changes it.
 
 Android 14 and later require the mediaProjection foreground-service type and
 single-session consent handling. Android 17 makes local-network protection

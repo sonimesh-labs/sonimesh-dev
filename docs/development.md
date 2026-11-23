@@ -55,7 +55,9 @@ adb shell am instrument -r -w -e class com.sonimesh.sender.AllUsagesCaptureTest 
 
 The test grants fresh projection consent through the system UI and plays a
 generated tone for each usage in one capture session. It waits for silence
-between tones and checks for new non-silent captured frames. On 2026-11-23 it
+between tones and checks for new non-silent captured frames. It also starts
+immediately after selecting the usage to check that the selection reaches the
+service without waiting for a redraw. On 2026-11-23 it
 passed twice on an API 37 x86_64 emulator; this is not a physical-device or
 source-app compatibility claim. CI builds the test APK but does not run it.
 

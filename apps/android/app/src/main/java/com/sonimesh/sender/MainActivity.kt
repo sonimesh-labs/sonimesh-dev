@@ -52,7 +52,7 @@ class MainActivity : ComponentActivity() {
                         state = state,
                         selectedSource = selectedSource,
                         onSourceSelected = { selectedSourceWire = it.wireValue },
-                        onStart = { requestCapture(selectedSource) },
+                        onStart = { requestCapture(CaptureSource.fromWireValue(selectedSourceWire)) },
                         onStop = { sendStopCommand() },
                         onCopyEvidence = ::copyCaptureEvidence,
                         onShareEvidence = ::shareCaptureEvidence,
