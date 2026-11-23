@@ -624,7 +624,12 @@ reach. The listener binds TCP 47610 on all IPv4 interfaces and uses UDP 39093;
 it plays through the selected output, or the default output when no device is
 selected. Refreshing the device list retains an explicitly selected output when
 the same endpoint remains available. If it disappears or its format is unavailable,
-choose another output or the system default before starting the listener. Set the startup buffer before
+choose another output or the system default before starting the listener. On
+2026-11-23, an explicitly selected endpoint remained selected after a refresh in
+the Windows Tauri probe. This check did not cover device removal, reordered
+devices, or audible playback.
+
+Set the startup buffer before
 starting the listener (20–120 ms in 20 ms steps, default 60 ms); it controls the
 initial playout wait, not adaptive jitter or measured end-to-end latency.
 The optional **Adaptive (experimental)** playout mode uses the Balanced target
