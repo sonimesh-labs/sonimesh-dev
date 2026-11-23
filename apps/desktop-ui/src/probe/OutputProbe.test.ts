@@ -241,6 +241,7 @@ describe('desktop output probe', () => {
     const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [] })
       .mockResolvedValueOnce({ running: true, status: 'Waiting', invitation: null, metrics: null, volume: 100, muted: false })
       .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce({ running: true, status: 'Waiting', invitation: null, metrics: null, volume: 35, muted: false })
       .mockResolvedValueOnce(undefined)
       .mockResolvedValueOnce({ running: true, status: 'Waiting', invitation: null, metrics: null, volume: 35, muted: true })
     window.__TAURI__ = { core: { invoke } }
@@ -253,13 +254,91 @@ describe('desktop output probe', () => {
     expect(invoke).toHaveBeenCalledWith('control_lab', { volume: 35, muted: null })
     expect(wrapper.text()).toContain('Receiver volume: 100%')
     expect((wrapper.get('#lab-volume').element as HTMLInputElement).value).toBe('100')
+    expect(wrapper.get('#lab-volume').attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('Waiting for the listener to confirm')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(wrapper.text()).toContain('Receiver volume: 35%')
     await wrapper.findAll('button').find(button => button.text() === 'Mute')!.trigger('click')
     await flushPromises()
     expect(invoke).toHaveBeenCalledWith('control_lab', { volume: null, muted: true })
+    expect(wrapper.findAll('button').find(button => button.text() === 'Mute')!.attributes('disabled')).toBeDefined()
     await vi.advanceTimersByTimeAsync(1000)
     expect(wrapper.text()).toContain('Receiver volume: 35%')
     expect((wrapper.get('#lab-volume').element as HTMLInputElement).value).toBe('35')
     expect(wrapper.findAll('button').some(button => button.text() === 'Unmute')).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('allows retry after an unconfirmed adjustment without inventing a confirmed value', async () => {
+    vi.useFakeTimers()
+    const running = { running: true, sessionActive: false, status: 'Waiting', invitation: null, metrics: null, volume: 100, muted: false }
+    const invoke = vi.fn((command: string) => {
+      if (command === 'probe_outputs') return Promise.resolve({ generation: 1, devices: [] })
+      if (command === 'control_lab') return Promise.resolve(undefined)
+      return Promise.resolve(running)
+    })
+    window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+    const wrapper = mountStoppedProbe()
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text() === 'Mute')!.trigger('click')
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(wrapper.text()).toContain('Listener did not confirm the adjustment')
+    expect(wrapper.findAll('button').find(button => button.text() === 'Mute')!.attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('#lab-volume').element).toHaveProperty('value', '100')
+    await wrapper.findAll('button').find(button => button.text() === 'Mute')!.trigger('click')
+    expect(invoke.mock.calls.filter(([command]) => command === 'control_lab')).toHaveLength(2)
+    wrapper.unmount()
+  })
+
+  it('shows a control send failure and immediately permits retry', async () => {
+    const running = { running: true, sessionActive: false, status: 'Waiting', invitation: null, metrics: null, volume: 100, muted: false }
+    const invoke = vi.fn((command: string) => {
+      if (command === 'probe_outputs') return Promise.resolve({ generation: 1, devices: [] })
+      if (command === 'control_lab') return Promise.reject('Could not send audio control.')
+      return Promise.resolve(running)
+    })
+    window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+    const wrapper = mountStoppedProbe()
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text() === 'Mute')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Could not send audio control.')
+    expect(wrapper.findAll('button').find(button => button.text() === 'Mute')!.attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('ignores a pending control response after stopping and restarting the listener', async () => {
+    let rejectControl!: (cause: string) => void
+    const pending = new Promise((_resolve, reject) => { rejectControl = reject })
+    let resolveStop!: (snapshot: unknown) => void
+    const pendingStop = new Promise(resolve => { resolveStop = resolve })
+    const stopped = { running: false, sessionActive: false, status: 'Stopped', invitation: null, metrics: null, volume: null, muted: null }
+    const running = { ...stopped, running: true, status: 'Waiting', volume: 100, muted: false }
+    const invoke = vi.fn((command: string) => {
+      if (command === 'probe_outputs') return Promise.resolve({ generation: 1, devices: [] })
+      if (command === 'control_lab') return pending
+      if (command === 'stop_lab') return pendingStop
+      return Promise.resolve(running)
+    })
+    window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+    const wrapper = mountStoppedProbe()
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text() === 'Mute')!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text() === 'Stop listener')!.trigger('click')
+    expect(wrapper.findAll('button').find(button => button.text() === 'Mute')!.attributes('disabled')).toBeDefined()
+    await wrapper.findAll('button').find(button => button.text() === 'Mute')!.trigger('click')
+    expect(invoke.mock.calls.filter(([command]) => command === 'control_lab')).toHaveLength(1)
+    resolveStop(stopped)
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
+    rejectControl('Old listener failed')
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('Old listener failed')
+    expect(wrapper.findAll('button').find(button => button.text() === 'Mute')!.attributes('disabled')).toBeUndefined()
     wrapper.unmount()
   })
   it('uses the selected device snapshot for the listener and resets it on refresh', async () => {

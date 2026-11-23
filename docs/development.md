@@ -595,7 +595,10 @@ and no forced playouts. This short emulator observation does not establish WLAN,
 latency, or audio-quality behavior.
 The probe's volume and mute controls apply to the lab receiver, including
 successive sessions and output recovery while the listener remains running.
-They do not change the system volume.
+They do not change the system volume. The controls wait for the listener's
+reported value before accepting another adjustment. If confirmation does not
+arrive within five seconds, the probe allows a retry and reports that the result
+is unknown; the displayed value remains the last one received from the listener.
 The probe prevents its test tone and listener from playing at the same time,
 including across a page reload. Finish the test tone before starting the
 listener, and stop the listener before testing an output. This does not control

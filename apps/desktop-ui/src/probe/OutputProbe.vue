@@ -64,6 +64,26 @@ let timer: ReturnType<typeof setTimeout> | undefined
 let disposed = false
 let labRequest = 0
 let reconciling = false
+let controlRequest = 0
+let controlTimer: ReturnType<typeof setTimeout> | undefined
+let pendingControl: { volume: number | null; muted: boolean | null; sent: boolean } | null = null
+
+function clearControl() {
+  controlRequest++
+  clearTimeout(controlTimer)
+  pendingControl = null
+  controlBusy.value = false
+}
+
+function confirmControl(snapshot: LabSnapshot) {
+  if (!snapshot.running) {
+    clearControl()
+    return
+  }
+  if (pendingControl?.sent &&
+      (pendingControl.volume === null || pendingControl.volume === snapshot.volume) &&
+      (pendingControl.muted === null || pendingControl.muted === snapshot.muted)) clearControl()
+}
 
 async function suggestHost() {
   if (!window.__TAURI__ || suggestBusy.value) return
@@ -87,6 +107,7 @@ async function pollLab(retryUnknown = false) {
     if (disposed || request !== labRequest) return
     const wasRunning = lab.value.running
     lab.value = snapshot
+    confirmControl(snapshot)
     labError.value = null
     if (reconciling) {
       reconciling = false
@@ -114,6 +135,8 @@ async function toggleLab() {
   if (labBusy.value || !window.__TAURI__ || (!lab.value.running && (playing.value !== null || busy.value))) return
   labBusy.value = true
   labError.value = null
+  clearControl()
+  controlError.value = null
   labRequest++
   clearTimeout(timer)
   try {
@@ -133,15 +156,25 @@ async function toggleLab() {
 }
 
 async function controlLab(volume: number | null, muted: boolean | null) {
-  if (!window.__TAURI__ || controlBusy.value || !lab.value.running) return
+  if (!window.__TAURI__ || controlBusy.value || labBusy.value || !lab.value.running) return
   controlBusy.value = true
   controlError.value = null
+  const request = ++controlRequest
+  pendingControl = { volume, muted, sent: false }
+  controlTimer = setTimeout(() => {
+    if (request !== controlRequest || disposed) return
+    clearControl()
+    controlError.value = 'Listener did not confirm the adjustment. Check the displayed value and try again.'
+  }, 5000)
   try {
     await window.__TAURI__.core.invoke('control_lab', { volume, muted })
+    if (disposed || request !== controlRequest || !pendingControl) return
+    pendingControl.sent = true
+    confirmControl(lab.value)
   } catch (cause) {
+    if (disposed || request !== controlRequest) return
+    clearControl()
     controlError.value = typeof cause === 'string' ? cause : 'Could not change audio control.'
-  } finally {
-    controlBusy.value = false
   }
 }
 
@@ -203,7 +236,7 @@ async function play(index: number) {
 }
 
 onMounted(pollLab)
-onBeforeUnmount(() => { disposed = true; labRequest++; clearTimeout(timer) })
+onBeforeUnmount(() => { disposed = true; labRequest++; clearTimeout(timer); clearControl() })
 </script>
 
 <template>
@@ -272,8 +305,9 @@ onBeforeUnmount(() => { disposed = true; labRequest++; clearTimeout(timer) })
       <p v-if="labError" class="command-error" role="alert">{{ labError }}</p>
       <div v-if="lab.running && lab.volume != null && lab.muted != null">
         <label for="lab-volume">Receiver volume: {{ lab.volume }}%</label>
-        <input id="lab-volume" type="range" min="0" max="100" :value="lab.volume" :disabled="controlBusy" @change="changeLabVolume" />
-        <button type="button" class="preview-action" :disabled="controlBusy" :aria-pressed="lab.muted" @click="controlLab(null, !lab.muted)">{{ lab.muted ? 'Unmute' : 'Mute' }}</button>
+        <input id="lab-volume" type="range" min="0" max="100" :value="lab.volume" :disabled="controlBusy || labBusy" @change="changeLabVolume" />
+        <button type="button" class="preview-action" :disabled="controlBusy || labBusy" :aria-pressed="lab.muted" @click="controlLab(null, !lab.muted)">{{ lab.muted ? 'Unmute' : 'Mute' }}</button>
+        <p v-if="controlBusy" role="status">Waiting for the listener to confirm the adjustment…</p>
         <p class="preview-note">The displayed values are confirmed by the listener; system volume is unchanged.</p>
         <p v-if="controlError" class="command-error" role="alert">{{ controlError }}</p>
       </div>
