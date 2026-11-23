@@ -40,11 +40,14 @@ pub(crate) struct CallbackStatus {
 
 impl CallbackStatus {
     pub(crate) fn callback(&self, samples: usize, frames: u32) {
-        let offset_ns = self.elapsed_ns();
+        self.callback_at(samples, frames, self.elapsed_ns());
+    }
+
+    fn callback_at(&self, samples: usize, frames: u32, offset_ns: u64) {
         let previous_offset_ns = self
             .last_callback_offset_ns
             .swap(offset_ns, Ordering::Relaxed);
-        saturating_increment(&self.callback_count);
+        let previous_count = saturating_increment(&self.callback_count);
         self.last_callback_samples.store(samples, Ordering::Relaxed);
         self.maximum_callback_samples
             .fetch_max(samples, Ordering::Relaxed);
@@ -52,7 +55,7 @@ impl CallbackStatus {
             .store(u64::from(frames), Ordering::Relaxed);
         self.maximum_callback_frames
             .fetch_max(u64::from(frames), Ordering::Relaxed);
-        if previous_offset_ns > 0 {
+        if previous_count > 0 {
             self.maximum_callback_gap_ns.fetch_max(
                 offset_ns.saturating_sub(previous_offset_ns),
                 Ordering::Relaxed,
@@ -95,10 +98,12 @@ impl CallbackStatus {
     }
 }
 
-fn saturating_increment(counter: &AtomicU64) {
-    let _ = counter.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
-        value.checked_add(1)
-    });
+fn saturating_increment(counter: &AtomicU64) -> u64 {
+    counter
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+            value.checked_add(1)
+        })
+        .unwrap_or(u64::MAX)
 }
 
 fn narrow_frames(frames: u64) -> u32 {
@@ -165,12 +170,25 @@ mod tests {
     #[test]
     fn first_callback_records_no_callback_gap() {
         let status = CallbackStatus::default();
-        status.callback(480, 240);
+        status.callback_at(480, 240, 0);
 
         let snapshot = status.snapshot();
         assert_eq!(snapshot.callback_count, 1);
         assert_eq!(snapshot.maximum_callback_gap_ns, 0);
-        assert!(snapshot.last_callback_offset_ns > 0);
+        assert_eq!(snapshot.last_callback_offset_ns, 0);
+    }
+
+    #[test]
+    fn callback_gap_includes_first_callback_at_zero_offset() {
+        let status = CallbackStatus::default();
+        status.callback_at(480, 240, 0);
+        status.callback_at(480, 240, 100);
+        status.callback_at(480, 240, 150);
+
+        let snapshot = status.snapshot();
+        assert_eq!(snapshot.callback_count, 3);
+        assert_eq!(snapshot.last_callback_offset_ns, 150);
+        assert_eq!(snapshot.maximum_callback_gap_ns, 100);
     }
 
     #[test]
