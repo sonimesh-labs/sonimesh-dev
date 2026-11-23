@@ -27,6 +27,10 @@ device clipboard for attaching to a local test report. The text is an operator
 summary, not a raw-audio export or a production diagnostic bundle; it is cleared
 when a new capture request begins. **Share evidence** sends the same bounded text
 summary through the platform share sheet; it does not share PCM or an audio file.
+On 2026-11-23, an API 37 x86_64 emulator capture was stopped after 27.7 seconds;
+the screen retained the observed 48 kHz stereo format, buffer sizes, and final
+frame counters. This silent emulator run checks the display and lifecycle path,
+not physical-device capture or audio playback.
 
 Before starting, the capture-only screen lets the operator choose one playback
 usage group: **Media**, **Game**, or **Other**. The choice is passed to the
