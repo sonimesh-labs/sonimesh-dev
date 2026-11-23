@@ -84,7 +84,7 @@ class PairedCaptureTest {
                     (find(root) { it is EditText && it.contentDescription == "Desktop IPv4 address for UDP" } as EditText)
                         .setText(mediaHost)
                 }
-                find(root) { it is Button && it.text.toString().equals("Toggle test tone", true) }.performClick()
+                find(root) { it is Button && it.text.toString().equals("Start test tone", true) }.performClick()
                 if (startFromScan) {
                     deliverScannerResult(activity, 4, Activity.RESULT_OK, args.getString("pairingInvitationHex"))
                 } else {

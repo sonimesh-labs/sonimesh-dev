@@ -107,7 +107,7 @@ been characterized. This is not playback-capture, physical WLAN, listening,
 latency, persistent trust, or production UI evidence. The interactive audio lab
 also has a **Start paired UDP capture** mode: start `paired-audio-lab` without
 `--require-tone`, paste its printed SPKI_HEX in the app, select that mode,
-grant capture consent, and play a capturable source or use **Toggle test tone**.
+grant capture consent, and play a capturable source or use **Start test tone**.
 The lab's capture usage selector applies to the next capture session: **All**
 includes media, game and unknown usage, while the other choices select one
 usage. The test tone uses media usage. Android and the source application still
@@ -337,7 +337,9 @@ cargo run -p opus-codec-prototype --features playback --bin android-live -- --pl
 Alternatively use `--check` without the playback feature to render into a
 software check. Open **SoniMesh audio lab**, select **Start ADB capture**, grant
 audio permission and fresh screen-capture consent, and play an eligible media
-source. **Toggle test tone** provides a local synthetic source; **Stop capture**
+source. **Start test tone** provides a local synthetic source; its button changes
+to **Stop test tone** while it plays. The tone stops if the lab activity is
+destroyed or recreated. **Stop capture**
 or the notification action ends the stream. Restart the desktop listener for
 each session. Remove the ADB mapping afterwards with `adb reverse --remove
 tcp:39091`. Select the device with `adb -s SERIAL` if several are connected.

@@ -206,8 +206,11 @@ class LabActivity : Activity() {
             }
         })
         layout.addView(Button(this).apply {
-            text = "Toggle test tone"
-            setOnClickListener { toggleTone() }
+            text = "Start test tone"
+            setOnClickListener {
+                toggleTone()
+                text = if (tone == null) "Start test tone" else "Stop test tone"
+            }
         })
         setContentView(ScrollView(this).apply { addView(layout) })
     }
