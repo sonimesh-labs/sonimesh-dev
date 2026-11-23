@@ -42,6 +42,13 @@ const LAB_ID: [u8; 16] = [0x71; 16];
 const LAB_SECRET: [u8; 32] = [0x42; 32];
 type LabResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
+macro_rules! lab_println {
+    ($($argument:tt)*) => {{
+        println!($($argument)*);
+        let _ = std::io::stdout().flush();
+    }};
+}
+
 fn main() {
     if let Err(error) = run() {
         eprintln!("pairing-lab: {error}");
@@ -70,13 +77,13 @@ fn run() -> LabResult<()> {
         write!(pin_hex, "{byte:02x}")?;
     }
     let invitation = render_lab_invitation(pin.as_ref(), options.host)?;
-    println!("SPKI_HEX {pin_hex}");
-    println!("INVITATION_HEX {}", bytes_to_hex(&invitation));
-    println!("LISTENING {address}");
-    println!("INVITATION_HOST {}", options.host);
+    lab_println!("SPKI_HEX {pin_hex}");
+    lab_println!("INVITATION_HEX {}", bytes_to_hex(&invitation));
+    lab_println!("LISTENING {address}");
+    lab_println!("INVITATION_HOST {}", options.host);
     std::io::stdout().flush()?;
     loop {
-        println!("READY");
+        lab_println!("READY");
         let started = Instant::now();
         let stream = loop {
             if let Some(stream) = listener.try_accept()? {
@@ -87,16 +94,16 @@ fn run() -> LabResult<()> {
             }
             std::thread::sleep(Duration::from_millis(10));
         };
-        println!("RESULT client connected");
+        lab_println!("RESULT client connected");
         let result = run_session(stream, Arc::clone(&tls), &pin, &options, &mut playback);
         playback.abort();
         if !options.keep_listening {
             return result;
         }
         match result {
-            Ok(()) => println!("RESULT session complete"),
+            Ok(()) => lab_println!("RESULT session complete"),
             Err(error) => {
-                println!("RESULT session failed");
+                lab_println!("RESULT session failed");
                 eprintln!("Session ended: {error}");
             }
         }
@@ -169,7 +176,7 @@ fn run_session(
             scanned_payload: &payload,
         },
     )?;
-    println!("RESULT pairing verified");
+    lab_println!("RESULT pairing verified");
     negotiate_hello(channel, session, root, options, playback)
 }
 
@@ -338,7 +345,7 @@ fn negotiate_hello(
     if state != UntrustedControlWrite::Complete {
         return Err("control channel closed during hello reply".into());
     }
-    println!("RESULT hello negotiated");
+    lab_println!("RESULT hello negotiated");
     socket.set_read_timeout(None)?;
     socket.set_write_timeout(None)?;
     socket.set_nonblocking(true)?;
@@ -361,6 +368,7 @@ const MAX_CONSECUTIVE_PLC: u8 = 3;
 const MAX_MEDIA_POLLS: usize = 32;
 const PLAYOUT_STALL: Duration = Duration::from_millis(160);
 const MEDIA_IDLE: Duration = Duration::from_secs(2);
+
 type Receiver = UdpReceiverPipeline<ObservedDecoder, 8, 1_148, SAMPLES>;
 type PreparedReceiver = (Receiver, RealtimePcmConsumer<SAMPLES>, Arc<StreamCounters>);
 
@@ -478,7 +486,7 @@ impl ResyncObservations {
     }
 
     fn print(&self) {
-        println!("RESULT resync events {}", self.total);
+        lab_println!("RESULT resync events {}", self.total);
         for (index, event) in self.first.iter().flatten().enumerate() {
             let loop_gap = event
                 .loop_gap
@@ -492,7 +500,7 @@ impl ResyncObservations {
                     )
                 },
             );
-            println!(
+            lab_println!(
                 "RESULT resync event {} dropped {} loop_gap_us {loop_gap} decision_age_us {age} decision_lateness_us {lateness}",
                 index + 1,
                 event.dropped,
@@ -832,9 +840,11 @@ impl Playback {
         if let Some((controller, _)) = &mut self.0 {
             let status = controller.output().status();
             controller.stop();
-            println!(
+            lab_println!(
                 "RESULT output callbacks {} stream errors {} oversized {}",
-                status.callback_count, status.stream_errors, status.oversized_callbacks
+                status.callback_count,
+                status.stream_errors,
+                status.oversized_callbacks
             );
             if status.callback_count == 0
                 || status.stream_errors != 0
@@ -862,7 +872,7 @@ fn maintain_output<O: sonimesh_platform::AudioOutput>(
         match output.recover(receiver) {
             Ok(()) => {
                 *retry_at = None;
-                println!("Output recovered; waiting for fresh audio.");
+                lab_println!("Output recovered; waiting for fresh audio.");
                 return true;
             }
             Err(error) => {
@@ -1029,7 +1039,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                             counters = Some(metrics);
                             coordinator.complete_start(token, request)?;
                             next_status = options.status.then(Instant::now);
-                            println!("RESULT receiver started");
+                            lab_println!("RESULT receiver started");
                             ControlReply::stream_status(
                                 request.identity,
                                 StreamState::Streaming,
@@ -1062,7 +1072,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                             let now = Instant::now();
                             activity.observe(now, snapshot.authenticated_packets);
                             if options.status {
-                                println!(
+                                lab_println!(
                                     "{}",
                                     format_status(
                                         snapshot,
@@ -1072,9 +1082,9 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                                         options.adaptive
                                     )
                                 );
-                                println!("MEDIA {}", activity.status(now));
+                                lab_println!("MEDIA {}", activity.status(now));
                             }
-                            println!(
+                            lab_println!(
                                 "RESULT packets {} rejected {} late {} resync_dropped {} plc {} decode_errors {} buffered {}",
                                 snapshot.authenticated_packets,
                                 snapshot.rejected_packets,
@@ -1099,17 +1109,19 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                             );
                         }
                         output_result?;
-                        println!("RESULT decoded {decoded} peak {peak:.3}");
-                        println!(
+                        lab_println!("RESULT decoded {decoded} peak {peak:.3}");
+                        lab_println!(
                             "RESULT schedule decisions {} frame_late {} max_lateness_us {}",
-                            schedule.decisions, schedule.frame_late, schedule.max_lateness_us
+                            schedule.decisions,
+                            schedule.frame_late,
+                            schedule.max_lateness_us
                         );
                         resyncs.print();
                         if decoded == 0 || peak < 0.001 {
                             if options.require_tone {
                                 return Err("no non-silent audio decoded".into());
                             }
-                            println!(
+                            lab_println!(
                                 "No capturable audio detected; the source may be silent or capture-limited, or media packets may not have arrived."
                             );
                         }
@@ -1133,7 +1145,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
             }
             let current_output_state = output_state(playing, retry_at);
             if last_output_state != Some(current_output_state) {
-                println!("OUTPUT {current_output_state}");
+                lab_println!("OUTPUT {current_output_state}");
                 last_output_state = Some(current_output_state);
             }
             if draining_stale {
@@ -1193,11 +1205,11 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                     output,
                     options.adaptive,
                 ) {
-                    println!("{status}");
+                    lab_println!("{status}");
                 }
             }
             if let Some(state) = activity.changed(now) {
-                println!("MEDIA {state}");
+                lab_println!("MEDIA {state}");
             }
         }
         std::thread::sleep(Duration::from_millis(1));
