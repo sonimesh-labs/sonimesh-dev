@@ -372,7 +372,9 @@ consume the listener's stdout as a live event stream instead of waiting for the
 session to finish. The Tauri probe forwards those lines through a bounded
 128-event channel and applies backpressure when snapshot polling is delayed, so
 state transitions stay ordered instead of being silently dropped; the reader
-exits when the probe closes the channel.
+exits when the probe closes the channel. The probe also retains the latest 32
+`READY`, `RESULT`, `MEDIA`, and `OUTPUT` transitions in arrival order for quick
+session diagnosis; periodic `STATUS` counters remain in the metrics view.
 
 On 2026-11-22, a malformed TLS handshake was followed by two successful API 37
 emulator sessions against one continuously running Windows listener using CPAL.
