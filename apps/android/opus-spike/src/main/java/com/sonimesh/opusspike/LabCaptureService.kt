@@ -113,6 +113,7 @@ class LabCaptureService : Service() {
         var pairedIdentity: StreamIdentity? = null
         var connected = false
         var pairedControlFailed = false
+        var stopResult: Result<StreamControlResult>? = null
         val pairedProducerFinished = AtomicBoolean(false)
         var pairedSender: Thread? = null
         var flushEncoderTail: (() -> Boolean)? = null
@@ -289,18 +290,18 @@ class LabCaptureService : Service() {
             if (paired != null) {
                 finishPairedSender(pairedProducerFinished, pairedSender)
                 try {
-                    pairedIdentity?.takeUnless { pairedControlFailed }?.let { identity ->
-                        val stopped = paired.stopStream(identity)
-                        check(stopped is StreamControlResult.Status && stopped.state == 4) { "desktop did not stop stream" }
-                    }
-                } catch (error: Exception) {
-                    Log.e("SoniMeshLab", "Paired stream stop failed", error)
+                    stopResult = attemptPairedStop(pairedIdentity, pairedControlFailed, paired::stopStream)
+                    stopResult?.exceptionOrNull()?.let { Log.e("SoniMeshLab", "Paired stream stop failed", it) }
                 } finally {
                     paired.close()
                 }
             }
             handler.post {
                 workerFinished = true
+                captureStopWarning(terminalStatus, stopResult)?.let {
+                    terminalStatus = true
+                    LabStatus.publish(it)
+                }
                 if (destroyed) {
                     LabStatus.captureAdmission.serviceFinished()
                     if (!terminalStatus) LabStatus.publish("Capture stopped.")
