@@ -101,9 +101,10 @@ usage. The test tone uses media usage. Android and the source application still
 control whether playback can be captured; the selector does not select apps.
 **Stop capture** requests the desktop to stop the stream. This mode uses the
 same fixed public lab invitation and ADB-reversed control connection. The
-Android sender first gives its already encoded, bounded UDP queue a short time
-to drain before requesting stop; it does not flush partially captured PCM or
-pending MediaCodec output. The wait and desktop tail drain are best effort, so
+Android sender first gives its encoder a bounded opportunity to flush pending
+packets, padding a partial final PCM frame with silence, and then gives its
+bounded UDP queue a short time to drain before requesting stop. The waits and
+desktop tail drain are best effort, so
 network loss or slow shutdown can still truncate audio. The
 desktop defaults to a software PCM check. On Windows, add `--features playback`
 before `--` and pass `--play` after it to use the default output device; add

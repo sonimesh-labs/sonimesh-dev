@@ -109,6 +109,7 @@ class LabCaptureService : Service() {
         var pairedControlFailed = false
         val pairedProducerFinished = AtomicBoolean(false)
         var pairedSender: Thread? = null
+        var flushEncoderTail: (() -> Boolean)? = null
         try {
             val packets = ArrayBlockingQueue<EncodedPacket>(8)
             if (invitation != null) {
@@ -188,6 +189,49 @@ class LabCaptureService : Service() {
             var filled = 0
             var frame = 0L
             var outputSequence = 0L
+            fun pollEncodedOutput(): EncoderTailOutput {
+                val index = activeCodec.dequeueOutputBuffer(info, 0)
+                if (index < 0) return EncoderTailOutput.Empty
+                if (info.size > 0 && info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0) {
+                    require(info.size <= 1_148)
+                    val packet = ByteArray(info.size)
+                    requireNotNull(activeCodec.getOutputBuffer(index)).apply { position(info.offset); get(packet) }
+                    check(outputSequence <= 0xffff_ffffL) { "media sequence exhausted" }
+                    val encoded = EncodedPacket(outputSequence++, packet)
+                    if (!packets.offer(encoded)) {
+                        packets.poll()
+                        packets.offer(encoded)
+                    }
+                }
+                val end = info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
+                activeCodec.releaseOutputBuffer(index, false)
+                return if (end) EncoderTailOutput.End else EncoderTailOutput.Progress
+            }
+            flushEncoderTail = {
+                drainEncoderTail(
+                    nowMillis = SystemClock::elapsedRealtime,
+                    submitEnd = {
+                        val index = activeCodec.dequeueInputBuffer(0)
+                        if (index < 0) {
+                            false
+                        } else {
+                            val size = if (filled > 0) {
+                                pcm.fill(0, filled, pcm.size)
+                                val input = requireNotNull(activeCodec.getInputBuffer(index))
+                                input.clear()
+                                input.order(ByteOrder.LITTLE_ENDIAN).asShortBuffer().put(pcm)
+                                pcm.size * Short.SIZE_BYTES
+                            } else {
+                                0
+                            }
+                            activeCodec.queueInputBuffer(index, 0, size, frame * 20_000, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                            true
+                        }
+                    },
+                    pollOutput = ::pollEncodedOutput,
+                    idle = { Thread.sleep(2) },
+                )
+            }
             paired?.socket?.soTimeout = 1
             var nextControlPoll = SystemClock.elapsedRealtime()
             while (running.get()) {
@@ -234,21 +278,7 @@ class LabCaptureService : Service() {
                         filled = 0
                     }
                 }
-                val index = activeCodec.dequeueOutputBuffer(info, 0)
-                if (index >= 0) {
-                    if (info.size > 0 && info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0) {
-                        require(info.size <= 1_148)
-                        val packet = ByteArray(info.size)
-                        requireNotNull(activeCodec.getOutputBuffer(index)).apply { position(info.offset); get(packet) }
-                        check(outputSequence <= 0xffff_ffffL) { "media sequence exhausted" }
-                        val encoded = EncodedPacket(outputSequence++, packet)
-                        if (!packets.offer(encoded)) {
-                            packets.poll()
-                            packets.offer(encoded)
-                        }
-                    }
-                    activeCodec.releaseOutputBuffer(index, false)
-                }
+                pollEncodedOutput()
             }
         } catch (error: Exception) {
             if (running.get()) {
@@ -260,6 +290,14 @@ class LabCaptureService : Service() {
         } finally {
             try { record?.stop() } catch (_: IllegalStateException) { }
             record?.release()
+            if (!running.get() && paired != null && !pairedControlFailed && pairedSender?.isAlive == true) {
+                try {
+                    if (flushEncoderTail?.invoke() == false) Log.w("SoniMeshLab", "Encoder tail drain timed out")
+                } catch (error: Exception) {
+                    if (error is InterruptedException) Thread.currentThread().interrupt()
+                    Log.w("SoniMeshLab", "Encoder tail drain failed", error)
+                }
+            }
             codec?.release()
             if (paired != null) {
                 finishPairedSender(pairedProducerFinished, pairedSender)

@@ -34,6 +34,13 @@ desktop libopus interoperability checks. This is a lab fixture, not a transport,
 production encoder selection, Android capture, or evidence of device coverage.
 The capture application's production boundary remains unchanged.
 
+On a normal paired-lab stop, the Android spike gives MediaCodec a bounded
+opportunity to accept end-of-stream and emit pending output before the UDP
+sender is drained and StopStream is sent. An incomplete final PCM frame is
+zero-padded to the lab's 20 ms frame size. If the encoder does not finish within
+the deadline, shutdown continues; this is best effort and does not prove tail
+delivery or physical playback.
+
 Keep `sonimesh-audio::FrameDecoder` as the stable boundary. A future optional
 `opus-codec` feature may add a `FrameDecoder` implementation only after:
 

@@ -135,6 +135,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   Its Android service can cancel an in-progress paired connection before stream
   startup; after startup, normal shutdown still attempts StopStream. Host tests
   cover socket cancellation and ownership handoff, not Android device behavior.
+  On normal paired shutdown it also attempts a bounded MediaCodec end-of-stream
+  drain before finishing the UDP sender. A partial PCM frame is padded with
+  silence; codec tail behavior still needs device verification.
   The Android lab also reports sustained silent capture and returns to its
   capturing status when signal resumes; this does not establish desktop delivery.
   An optional paired-listener status report exposes in-session packet and decode
