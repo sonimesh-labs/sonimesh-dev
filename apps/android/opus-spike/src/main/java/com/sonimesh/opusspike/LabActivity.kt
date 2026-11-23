@@ -172,6 +172,10 @@ class LabActivity : Activity() {
             setOnClickListener { scanInvitation(startAfterScan = true) }
         })
         layout.addView(Button(this).apply {
+            text = "Paste lab invitation"
+            setOnClickListener { pasteInvitation() }
+        })
+        layout.addView(Button(this).apply {
             text = "Apply invitation payload"
             setOnClickListener { applyInvitation() }
         })
@@ -386,6 +390,23 @@ class LabActivity : Activity() {
             .setPrompt("Scan the lab invitation on the desktop")
             .setBeepEnabled(false)
         startActivityForResult(options.createScanIntent(this), if (startAfterScan) 4 else 3)
+    }
+
+    private fun pasteInvitation() {
+        val text = getSystemService(ClipboardManager::class.java).primaryClip
+            ?.takeIf { it.itemCount > 0 }
+            ?.getItemAt(0)
+            ?.coerceToText(this)
+            ?.toString()
+            ?.trim()
+        when {
+            text.isNullOrEmpty() -> LabStatus.publish("Copy the lab invitation first.")
+            text.length > PairingQr.MAX_PAYLOAD_BYTES * 2 -> LabStatus.publish("The copied lab invitation is too long.")
+            else -> {
+                invitation.setText(text)
+                LabStatus.publish("Invitation pasted. Apply it to continue.")
+            }
+        }
     }
 
     private fun applyInvitation(useAddressForUdp: Boolean = false): Boolean {

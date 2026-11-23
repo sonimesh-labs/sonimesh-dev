@@ -1,6 +1,7 @@
 package com.sonimesh.opusspike
 
 import android.app.Activity
+import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
 import android.os.SystemClock
@@ -150,6 +151,20 @@ class LabStatusTest {
     }
 
     @Test
+    fun pasteLabInvitationFillsTheInvitationField() {
+        ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                activity.getSystemService(ClipboardManager::class.java).setPrimaryClip(
+                    ClipData.newPlainText("invitation", "01ab"),
+                )
+                requireNotNull(findButton(activity.window.decorView, "Paste lab invitation")).performClick()
+                assertTrue(findTextField(activity.window.decorView, "Lab invitation payload")?.text?.toString() == "01ab")
+                assertTrue(hasStatus(activity.window.decorView, "Status: Invitation pasted. Apply it to continue."))
+            }
+        }
+    }
+
+    @Test
     fun failedServiceStartSurvivesActivityRecreation() {
         ActivityScenario.launch(LabActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
@@ -176,6 +191,16 @@ class LabStatusTest {
         if (view is ViewGroup) {
             for (index in 0 until view.childCount) {
                 findButton(view.getChildAt(index), label)?.let { return it }
+            }
+        }
+        return null
+    }
+
+    private fun findTextField(view: View, description: String): TextView? {
+        if (view is TextView && view.contentDescription == description) return view
+        if (view is ViewGroup) {
+            for (index in 0 until view.childCount) {
+                findTextField(view.getChildAt(index), description)?.let { return it }
             }
         }
         return null

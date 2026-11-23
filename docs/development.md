@@ -81,6 +81,9 @@ tap **Apply invitation payload** to fill the SPKI and paired control address.
 The desktop output probe also provides **Copy invitation** beside the displayed
 payload so the operator can paste it directly into the Android lab; if the
 clipboard is unavailable, the read-only payload can still be selected manually.
+The Android lab's **Paste lab invitation** button reads the current clipboard,
+rejects empty or oversized text, and fills the invitation field for review before
+the operator applies it.
 For a LAN where both routes use the same address, **Apply invitation and use
 address for UDP** also fills the UDP destination. A loopback invitation leaves
 the UDP destination unchanged for ADB reverse; enter the emulator host alias
