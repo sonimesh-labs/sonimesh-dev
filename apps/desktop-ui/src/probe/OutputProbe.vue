@@ -87,9 +87,9 @@ function evidenceValue(value: unknown): string {
 
 const labEvidenceMessage = ref<string | null>(null)
 
-async function copyLabEvidence() {
+function labEvidenceText(): string | null {
   const metrics = lab.value.metrics
-  if (!metrics) return
+  if (!metrics) return null
   const lines = [
     'SoniMesh paired audio lab',
     `Status: ${evidenceValue(lab.value.status)}`,
@@ -114,12 +114,36 @@ async function copyLabEvidence() {
     lines.push(`Forced playouts: ${evidenceValue(metrics.adaptive.forced)}`)
     lines.push(`Stream resets: ${evidenceValue(metrics.adaptive.resets)}`)
   }
+  return lines.join('\n')
+}
+
+async function copyLabEvidence() {
+  const text = labEvidenceText()
+  if (!text) return
   try {
     if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable')
-    await navigator.clipboard.writeText(lines.join('\n'))
+    await navigator.clipboard.writeText(text)
     labEvidenceMessage.value = 'Session evidence copied.'
   } catch {
     labEvidenceMessage.value = 'Could not copy session evidence. Select the visible metrics instead.'
+  }
+}
+
+async function shareLabEvidence() {
+  const text = labEvidenceText()
+  if (!text) return
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: 'SoniMesh session evidence', text })
+      labEvidenceMessage.value = 'Session evidence shared.'
+      return
+    }
+    if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable')
+    await navigator.clipboard.writeText(text)
+    labEvidenceMessage.value = 'System sharing is unavailable; session evidence copied instead.'
+  } catch (cause) {
+    if (cause instanceof DOMException && cause.name === 'AbortError') return
+    labEvidenceMessage.value = 'Could not share session evidence. Select the visible metrics instead.'
   }
 }
 const labHost = ref('127.0.0.1')
@@ -423,6 +447,7 @@ onBeforeUnmount(() => { disposed = true; labRequest++; clearTimeout(timer); clea
           <div><dt>Output</dt><dd>{{ !lab.sessionActive && lab.metrics.output !== 'stopped' ? 'Last reported: ' : '' }}{{ lab.metrics.output === 'recovering' ? 'Recovering' : lab.metrics.output === 'active' ? 'Active' : lab.metrics.output === 'stopped' ? 'Stopped' : 'Software check' }}</dd></div>
         </dl>
         <button type="button" class="preview-action" @click="copyLabEvidence">Copy session evidence</button>
+        <button type="button" class="preview-action" @click="shareLabEvidence">Share session evidence</button>
         <p v-if="labEvidenceMessage" role="status">{{ labEvidenceMessage }}</p>
         <p class="preview-note">{{ lab.sessionActive ? 'Updated at session start, on media or output state changes, and every five seconds.' : lab.metrics.output === 'stopped' ? 'Final update after the stop drain.' : 'Last available update; the session may have ended before its final report.' }} Packet and decode counts and peak are cumulative; they do not confirm audible playback.</p>
         <p v-if="lab.metrics.media" class="preview-note">Media arrival reports accepted packets within the past two seconds; a gap does not identify its cause.</p>

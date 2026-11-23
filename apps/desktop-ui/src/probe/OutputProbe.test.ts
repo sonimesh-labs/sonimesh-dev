@@ -575,6 +575,49 @@ describe('desktop output probe', () => {
     wrapper.unmount()
   })
 
+  it('shares bounded session evidence through the system share API', async () => {
+    const share = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'share', { configurable: true, value: share })
+    const metrics = { packets: '8', rejected: '1', decoded: '7', peak: '0.125', plc: '0', decodeErrors: '0', buffered: '2', output: 'active', media: 'receiving', adaptive: null }
+    const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [] })
+      .mockResolvedValueOnce({ running: true, status: 'Starting listener…', invitation: null })
+      .mockResolvedValueOnce({ running: true, sessionActive: true, status: 'Session active', invitation: 'secret-invitation', metrics })
+    window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+    const wrapper = mountStoppedProbe()
+    await flushPromises()
+    vi.useFakeTimers()
+    await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
+    await vi.advanceTimersByTimeAsync(1000)
+    await wrapper.findAll('button').find(button => button.text() === 'Share session evidence')!.trigger('click')
+    await flushPromises()
+    expect(share).toHaveBeenCalledWith(expect.objectContaining({ title: 'SoniMesh session evidence' }))
+    expect(share.mock.calls[0][0].text).toContain('Accepted packets: 8')
+    expect(share.mock.calls[0][0].text).not.toContain('secret-invitation')
+    expect(wrapper.text()).toContain('Session evidence shared.')
+    wrapper.unmount()
+  })
+
+  it('falls back to copying session evidence when system sharing is unavailable', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'share', { configurable: true, value: undefined })
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    const metrics = { packets: '4', rejected: '0', decoded: '4', peak: '0.200', plc: '0', decodeErrors: '0', buffered: '1', output: 'active', media: 'receiving', adaptive: null }
+    const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [] })
+      .mockResolvedValueOnce({ running: true, status: 'Starting listener…', invitation: null })
+      .mockResolvedValueOnce({ running: true, sessionActive: true, status: 'Session active', invitation: null, metrics })
+    window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+    const wrapper = mountStoppedProbe()
+    await flushPromises()
+    vi.useFakeTimers()
+    await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
+    await vi.advanceTimersByTimeAsync(1000)
+    await wrapper.findAll('button').find(button => button.text() === 'Share session evidence')!.trigger('click')
+    await flushPromises()
+    expect(writeText.mock.calls[0][0]).toContain('Decoded frames: 4')
+    expect(wrapper.text()).toContain('session evidence copied instead')
+    wrapper.unmount()
+  })
+
   it('clears a copied evidence notice when a new session starts', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
