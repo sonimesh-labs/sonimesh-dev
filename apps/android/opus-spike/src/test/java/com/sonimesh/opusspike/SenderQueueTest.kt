@@ -19,4 +19,11 @@ class SenderQueueTest {
         assertFalse(enqueueLatest(queue, 5))
         assertEquals(5, queue.poll())
     }
+
+    @Test
+    fun sentPacketCounterSaturatesAtLongMaximum() {
+        assertEquals(1L, incrementSaturated(0))
+        assertEquals(Long.MAX_VALUE, incrementSaturated(Long.MAX_VALUE - 1))
+        assertEquals(Long.MAX_VALUE, incrementSaturated(Long.MAX_VALUE))
+    }
 }

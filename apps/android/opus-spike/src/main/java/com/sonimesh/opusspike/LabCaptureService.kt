@@ -38,6 +38,9 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
+internal fun incrementSaturated(value: Long): Long =
+    if (value == Long.MAX_VALUE) value else value + 1
+
 class LabCaptureService : Service() {
     private val running = AtomicBoolean(false)
     private val socketLock = Any()
@@ -141,9 +144,7 @@ class LabCaptureService : Service() {
         val sentPackets = AtomicLong(0)
         val lastSentPublication = AtomicLong(0)
         val packetSent: () -> Unit = {
-            val count = sentPackets.updateAndGet { value ->
-                if (value == Long.MAX_VALUE) value else value + 1
-            }
+            val count = sentPackets.updateAndGet(::incrementSaturated)
             val now = SystemClock.elapsedRealtime()
             val previous = lastSentPublication.get()
             if (now - previous >= 1_000 && lastSentPublication.compareAndSet(previous, now)) {
