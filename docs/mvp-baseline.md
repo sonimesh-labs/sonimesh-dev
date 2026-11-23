@@ -127,6 +127,8 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   The lab remembers the last valid destination and can keep its desktop listener
   available for successive independent sessions. Optional console commands
   adjust the receiver's local gain and mute during and across those sessions.
+  The desktop output probe also controls this lab receiver's gain and mute,
+  showing values confirmed by the listener without changing system volume.
   The UDP lab also retries its selected output after a reported runtime fault;
   simulated recovery is tested, while physical device-removal behavior remains open.
   The paired lab also resumes after an authenticated Opus packet rejected as

@@ -404,6 +404,9 @@ stops its child. During an active session the probe shows the listener's
 initial and five-second cumulative packet and decode counters, decoded peak, buffered frames,
 and output recovery state. These are software observations, not proof of audible
 playback. The observations clear when the listener returns to waiting.
+The probe's volume and mute controls apply to the lab receiver, including
+successive sessions and output recovery while the listener remains running.
+They do not change the system volume.
 This development-only UI uses
 the public test invitation and does not establish product pairing, audibility,
 or latency evidence.

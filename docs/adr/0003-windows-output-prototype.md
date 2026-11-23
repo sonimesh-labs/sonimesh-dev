@@ -83,6 +83,9 @@ the listener returns to waiting. They do not establish audibility or latency.
 The probe resolves a selection from its device snapshot and passes the opaque
 endpoint ID to the child through its standard input; the child probes that exact
 endpoint before listening. Refreshing the list invalidates a pending selection.
+The same control-domain pipe carries bounded local gain and mute commands after
+startup. The probe displays values acknowledged by the child; its per-stream
+gain handle retains these values through output recovery and successive sessions.
 This is a development-only process boundary, not the product receiver,
 persistent trust, or evidence of audible playback.
 The UDP lab may retry the selected endpoint after a reported output fault while

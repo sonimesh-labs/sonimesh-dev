@@ -5,6 +5,31 @@ import OutputProbe from './OutputProbe.vue'
 afterEach(() => { vi.useRealTimers(); delete window.__TAURI__ })
 
 describe('desktop output probe', () => {
+  it('sends audio controls and displays the listener-confirmed values', async () => {
+    const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [] })
+      .mockResolvedValueOnce({ running: true, status: 'Waiting', invitation: null, metrics: null, volume: 100, muted: false })
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce({ running: true, status: 'Waiting', invitation: null, metrics: null, volume: 35, muted: true })
+    window.__TAURI__ = { core: { invoke } }
+    const wrapper = mount(OutputProbe)
+    await flushPromises()
+    vi.useFakeTimers()
+    await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
+    await wrapper.get('#lab-volume').setValue('35')
+    await flushPromises()
+    expect(invoke).toHaveBeenCalledWith('control_lab', { volume: 35, muted: null })
+    expect(wrapper.text()).toContain('Receiver volume: 100%')
+    expect((wrapper.get('#lab-volume').element as HTMLInputElement).value).toBe('100')
+    await wrapper.findAll('button').find(button => button.text() === 'Mute')!.trigger('click')
+    await flushPromises()
+    expect(invoke).toHaveBeenCalledWith('control_lab', { volume: null, muted: true })
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(wrapper.text()).toContain('Receiver volume: 35%')
+    expect((wrapper.get('#lab-volume').element as HTMLInputElement).value).toBe('35')
+    expect(wrapper.findAll('button').some(button => button.text() === 'Unmute')).toBe(true)
+    wrapper.unmount()
+  })
   it('uses the selected device snapshot for the listener and resets it on refresh', async () => {
     const invoke = vi.fn().mockResolvedValueOnce({ generation: 4, devices: [
       { label: 'Speakers', sampleRateHz: 48_000, channels: 2, isDefault: true },

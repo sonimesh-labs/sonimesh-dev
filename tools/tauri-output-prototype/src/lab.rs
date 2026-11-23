@@ -11,6 +11,8 @@ pub struct LabSnapshot {
     pub status: String,
     pub invitation: Option<String>,
     pub metrics: Option<LabMetrics>,
+    pub volume: Option<u8>,
+    pub muted: Option<bool>,
     #[serde(skip)]
     session_active: bool,
 }
@@ -35,6 +37,8 @@ impl Default for LabSnapshot {
             status: "Stopped".into(),
             invitation: None,
             metrics: None,
+            volume: None,
+            muted: None,
             session_active: false,
         }
     }
@@ -65,20 +69,17 @@ impl Lab {
                 "--play",
                 "--keep-listening",
                 "--status",
+                "--control",
                 "--bind",
                 "0.0.0.0",
                 "--host",
                 &host.to_string(),
             ])
-            .stdin(if output_id.is_some() {
-                Stdio::piped()
-            } else {
-                Stdio::null()
-            })
+            .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         if output_id.is_some() {
-            command.arg("--output-id-stdin");
+            command.arg("--output-id-framed");
         }
         #[cfg(windows)]
         {
@@ -89,11 +90,17 @@ impl Lab {
             |_| "Could not launch the lab listener. Build it with playback support first.",
         )?;
         if let Some(id) = output_id {
-            let result = child
-                .stdin
-                .take()
-                .expect("piped stdin")
-                .write_all(id.as_bytes());
+            let result = u32::try_from(id.len())
+                .ok()
+                .filter(|size| *size > 0 && *size <= 4096)
+                .ok_or(())
+                .and_then(|size| {
+                    let stdin = child.stdin.as_mut().expect("piped stdin");
+                    stdin
+                        .write_all(&size.to_be_bytes())
+                        .and_then(|()| stdin.write_all(id.as_bytes()))
+                        .map_err(|_| ())
+                });
             if result.is_err() {
                 let _ = child.kill();
                 let _ = child.wait();
@@ -110,6 +117,8 @@ impl Lab {
             status: "Starting listener…".into(),
             invitation: None,
             metrics: None,
+            volume: None,
+            muted: None,
             session_active: false,
         };
         Ok(self.snapshot.clone())
@@ -127,6 +136,8 @@ impl Lab {
                     self.snapshot.running = false;
                     self.snapshot.invitation = None;
                     self.snapshot.metrics = None;
+                    self.snapshot.volume = None;
+                    self.snapshot.muted = None;
                     self.snapshot.session_active = false;
                     self.snapshot.status = "Listener exited. Check the selected output device and whether port 47610 is in use.".into();
                     self.child = None;
@@ -147,6 +158,23 @@ impl Lab {
         self.events = None;
         self.snapshot = LabSnapshot::default();
         self.snapshot.clone()
+    }
+
+    pub fn control(&mut self, volume: Option<u8>, muted: Option<bool>) -> Result<(), &'static str> {
+        let command = match (volume, muted) {
+            (Some(value @ 0..=100), None) => format!("volume {value}\n"),
+            (None, Some(true)) => "mute\n".into(),
+            (None, Some(false)) => "unmute\n".into(),
+            _ => return Err("Invalid audio control."),
+        };
+        self.refresh();
+        let child = self.child.as_mut().ok_or("Listener is not running.")?;
+        child
+            .stdin
+            .as_mut()
+            .ok_or("Audio control is unavailable.")?
+            .write_all(command.as_bytes())
+            .map_err(|_| "Could not send audio control.")
     }
 }
 
@@ -189,7 +217,14 @@ fn read_output(output: impl Read + Send + 'static, sender: SyncSender<String>) {
 }
 
 fn update_snapshot(snapshot: &mut LabSnapshot, line: &str) {
-    if let Some(invitation) = line.strip_prefix("INVITATION_HEX ") {
+    if let ["CONTROL", "volume", volume, "muted", muted] =
+        line.split_whitespace().collect::<Vec<_>>().as_slice()
+    {
+        if let (Ok(volume @ 0..=100), Ok(muted)) = (volume.parse::<u8>(), muted.parse::<bool>()) {
+            snapshot.volume = Some(volume);
+            snapshot.muted = Some(muted);
+        }
+    } else if let Some(invitation) = line.strip_prefix("INVITATION_HEX ") {
         if invitation.len() <= 1024 && invitation.bytes().all(|byte| byte.is_ascii_hexdigit()) {
             snapshot.invitation = Some(invitation.to_owned());
         }
@@ -282,6 +317,10 @@ mod tests {
             assert!(lab.start(host, None).is_err());
         }
         assert!(!lab.refresh().running);
+        assert!(lab.control(Some(101), None).is_err());
+        assert!(lab.control(None, None).is_err());
+        assert!(lab.control(Some(50), Some(true)).is_err());
+        assert!(lab.control(Some(50), None).is_err());
     }
 
     #[test]
@@ -326,6 +365,20 @@ mod tests {
             snapshot.invitation.is_some(),
             "listener did not publish an invitation"
         );
+        lab.control(Some(35), None).unwrap();
+        lab.control(None, Some(true)).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let state = lab.refresh();
+            if state.volume == Some(35) && state.muted == Some(true) {
+                break;
+            }
+            assert!(
+                state.running && Instant::now() < deadline,
+                "control was not acknowledged"
+            );
+            std::thread::sleep(Duration::from_millis(25));
+        }
         assert!(lab.start("127.0.0.1", None).is_err());
         assert!(!lab.stop().running);
         assert!(lab.child.is_none());

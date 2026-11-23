@@ -49,8 +49,7 @@ fn main() {
 
 fn run() -> LabResult<()> {
     let options = Options::parse(std::env::args().skip(1))?;
-    let mut playback =
-        Playback::prepare(options.play, options.select_output, options.output_id_stdin)?;
+    let mut playback = Playback::prepare(&options)?;
     if options.control {
         playback.start_controls()?;
     }
@@ -173,6 +172,7 @@ struct Options {
     play: bool,
     select_output: bool,
     output_id_stdin: bool,
+    output_id_framed: bool,
     keep_listening: bool,
     control: bool,
     status: bool,
@@ -188,6 +188,7 @@ impl Default for Options {
             play: false,
             select_output: false,
             output_id_stdin: false,
+            output_id_framed: false,
             keep_listening: false,
             control: false,
             status: false,
@@ -211,6 +212,7 @@ impl Options {
                 "--play" if !result.play => result.play = true,
                 "--select-output" if !result.select_output => result.select_output = true,
                 "--output-id-stdin" if !result.output_id_stdin => result.output_id_stdin = true,
+                "--output-id-framed" if !result.output_id_framed => result.output_id_framed = true,
                 "--keep-listening" if !result.keep_listening => result.keep_listening = true,
                 "--control" if !result.control => result.control = true,
                 "--status" if !result.status => result.status = true,
@@ -242,17 +244,26 @@ impl Options {
                 }
                 _ => {
                     return Err(
-                        "usage: paired-audio-lab [--require-tone] [--play [--select-output | --output-id-stdin] [--control]] [--status] [--startup-buffer-ms 20-120] [--keep-listening] [--bind IPv4 --host IPv4]"
+                        "usage: paired-audio-lab [--require-tone] [--play [--select-output | --output-id-stdin | --output-id-framed] [--control]] [--status] [--startup-buffer-ms 20-120] [--keep-listening] [--bind IPv4 --host IPv4]"
                             .into(),
                     );
                 }
             }
         }
-        if (result.select_output || result.output_id_stdin) && !result.play {
+        if (result.select_output || result.output_id_stdin || result.output_id_framed)
+            && !result.play
+        {
             return Err("output selection requires --play".into());
         }
-        if result.select_output && result.output_id_stdin {
+        if u8::from(result.select_output)
+            + u8::from(result.output_id_stdin)
+            + u8::from(result.output_id_framed)
+            > 1
+        {
             return Err("choose one output selection method".into());
+        }
+        if result.output_id_stdin && result.control {
+            return Err("--output-id-stdin cannot be combined with --control".into());
         }
         if result.control && !result.play {
             return Err("--control requires --play".into());
@@ -530,15 +541,28 @@ impl Playback {
         }
     }
 
-    fn prepare(play: bool, select: bool, output_id_stdin: bool) -> LabResult<Self> {
+    fn prepare(options: &Options) -> LabResult<Self> {
         #[cfg(all(windows, feature = "playback"))]
         {
-            if play {
-                let (output, selection) = if output_id_stdin {
+            if options.play {
+                let (output, selection) = if options.output_id_stdin || options.output_id_framed {
                     use sonimesh_platform::{CpalOutput, OutputDeviceId};
                     use std::io::Read;
                     let mut id = String::new();
-                    std::io::stdin().take(4097).read_to_string(&mut id)?;
+                    if options.output_id_framed {
+                        let mut stdin = std::io::stdin().lock();
+                        let mut length = [0_u8; 4];
+                        stdin.read_exact(&mut length)?;
+                        let length = u32::from_be_bytes(length) as usize;
+                        if length == 0 || length > 4096 {
+                            return Err("invalid output ID".into());
+                        }
+                        let mut bytes = vec![0; length];
+                        stdin.read_exact(&mut bytes)?;
+                        id = String::from_utf8(bytes)?;
+                    } else {
+                        std::io::stdin().take(4097).read_to_string(&mut id)?;
+                    }
                     if id.is_empty() || id.len() > 4096 {
                         return Err("invalid output ID".into());
                     }
@@ -553,7 +577,7 @@ impl Playback {
                         },
                     )
                 } else {
-                    common::prepare_output(select).map_err(|e| e.to_string())?
+                    common::prepare_output(options.select_output).map_err(|e| e.to_string())?
                 };
                 let factory = sonimesh_app::ReceiverPcmEndpointFactory::new(
                     8,
@@ -569,8 +593,7 @@ impl Playback {
         }
         #[cfg(not(all(windows, feature = "playback")))]
         {
-            let _ = (select, output_id_stdin);
-            if play {
+            if options.play {
                 return Err("--play requires Windows and the playback feature".into());
             }
             Ok(Self)
@@ -1461,6 +1484,12 @@ mod tests {
         assert!(playback.play && playback.require_tone && playback.select_output);
         assert!(Options::parse(args(&["--select-output"])).is_err());
         assert!(Options::parse(args(&["--output-id-stdin"])).is_err());
+        assert!(Options::parse(args(&["--output-id-framed"])).is_err());
+        assert!(Options::parse(args(&["--play", "--output-id-framed", "--control"])).is_ok());
+        assert!(Options::parse(args(&["--play", "--output-id-stdin", "--control"])).is_err());
+        assert!(
+            Options::parse(args(&["--play", "--output-id-framed", "--output-id-stdin"])).is_err()
+        );
         assert!(
             Options::parse(args(&["--play", "--output-id-stdin"]))
                 .unwrap()

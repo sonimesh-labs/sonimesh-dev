@@ -54,6 +54,19 @@ fn stop_lab(state: tauri::State<'_, ProbeState>) -> Result<lab::LabSnapshot, &'s
         .stop())
 }
 
+#[tauri::command]
+fn control_lab(
+    state: tauri::State<'_, ProbeState>,
+    volume: Option<u8>,
+    muted: Option<bool>,
+) -> Result<(), &'static str> {
+    state
+        .lab
+        .lock()
+        .map_err(|_| "Could not access listener state.")?
+        .control(volume, muted)
+}
+
 #[derive(Default)]
 struct SelectionSnapshot {
     generation: u32,
@@ -377,7 +390,8 @@ fn main() {
             play_test_tone,
             start_lab,
             lab_status,
-            stop_lab
+            stop_lab,
+            control_lab
         ])
         .build(tauri::generate_context!())
         .expect("desktop output probe failed")

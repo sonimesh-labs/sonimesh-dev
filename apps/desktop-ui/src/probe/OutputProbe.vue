@@ -25,12 +25,14 @@ interface LabMetrics {
   packets: string; rejected: string; decoded: string; peak: string
   plc: string; decodeErrors: string; buffered: string; output: 'active' | 'recovering' | 'software-check'
 }
-interface LabSnapshot { running: boolean; status: string; invitation: string | null; metrics: LabMetrics | null }
-const lab = ref<LabSnapshot>({ running: false, status: 'Stopped', invitation: null, metrics: null })
+interface LabSnapshot { running: boolean; status: string; invitation: string | null; metrics: LabMetrics | null; volume: number | null; muted: boolean | null }
+const lab = ref<LabSnapshot>({ running: false, status: 'Stopped', invitation: null, metrics: null, volume: null, muted: null })
 const labHost = ref('127.0.0.1')
 const labOutput = ref('')
 const labBusy = ref(false)
 const labError = ref<string | null>(null)
+const controlError = ref<string | null>(null)
+const controlBusy = ref(false)
 let timer: ReturnType<typeof setTimeout> | undefined
 let disposed = false
 let labRequest = 0
@@ -69,6 +71,26 @@ async function toggleLab() {
   } finally {
     labBusy.value = false
   }
+}
+
+async function controlLab(volume: number | null, muted: boolean | null) {
+  if (!window.__TAURI__ || controlBusy.value || !lab.value.running) return
+  controlBusy.value = true
+  controlError.value = null
+  try {
+    await window.__TAURI__.core.invoke('control_lab', { volume, muted })
+  } catch (cause) {
+    controlError.value = typeof cause === 'string' ? cause : 'Could not change audio control.'
+  } finally {
+    controlBusy.value = false
+  }
+}
+
+function changeLabVolume(event: Event) {
+  const input = event.target as HTMLInputElement
+  const volume = Number(input.value)
+  input.value = String(lab.value.volume)
+  void controlLab(volume, null)
 }
 const playbackErrors = new Set([
   'Could not select output.',
@@ -168,6 +190,13 @@ onBeforeUnmount(() => { disposed = true; labRequest++; clearTimeout(timer) })
       <button type="button" class="preview-action" :disabled="labBusy" @click="toggleLab">{{ lab.running ? 'Stop listener' : 'Start listener' }}</button>
       <p role="status">{{ lab.status }}</p>
       <p v-if="labError" class="command-error" role="alert">{{ labError }}</p>
+      <div v-if="lab.running && lab.volume != null && lab.muted != null">
+        <label for="lab-volume">Receiver volume: {{ lab.volume }}%</label>
+        <input id="lab-volume" type="range" min="0" max="100" :value="lab.volume" :disabled="controlBusy" @change="changeLabVolume" />
+        <button type="button" class="preview-action" :disabled="controlBusy" :aria-pressed="lab.muted" @click="controlLab(null, !lab.muted)">{{ lab.muted ? 'Unmute' : 'Mute' }}</button>
+        <p class="preview-note">The displayed values are confirmed by the listener; system volume is unchanged.</p>
+        <p v-if="controlError" class="command-error" role="alert">{{ controlError }}</p>
+      </div>
       <section v-if="lab.metrics" aria-labelledby="lab-metrics-title">
         <h3 id="lab-metrics-title">Session observations</h3>
         <dl class="lab-metrics">
