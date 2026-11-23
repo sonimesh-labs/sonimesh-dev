@@ -81,6 +81,15 @@ adb shell pm grant com.sonimesh.opusspike android.permission.RECORD_AUDIO
 adb shell am instrument -w -e pairingInvitationHex $invitationHex -e mediaHost 10.0.2.2 -e class 'com.sonimesh.opusspike.PairedCaptureTest#captures_tone_after_pairing_and_stops' com.sonimesh.opusspike.test/androidx.test.runner.AndroidJUnitRunner
 ~~~
 
+To check another capture after stopping, start the listener with
+`--keep-listening --require-tone` and run the same command with the test method
+`captures_again_after_stopping`. It starts and stops two capture sessions in
+separate activity launches, granting fresh screen-capture consent each time.
+On 2026-11-23, an API 37 x86_64 emulator using the manual SPKI, ADB-reversed
+control, and emulator UDP decoded 154 frames in each session with nonzero PCM
+peaks; this is software evidence, not a physical WLAN, audible playback, or
+latency measurement.
+
 The test synthesizes and encodes a tone; the desktop acknowledges start only
 after binding its UDP receiver with the pairing-derived root and acknowledges
 stop after retiring it. Successful runs report the decoded frame count and

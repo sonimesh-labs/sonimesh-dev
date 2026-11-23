@@ -20,6 +20,12 @@ class PairedCaptureTest {
     fun captures_tone_after_pairing_and_stops() = runCapture(expectDisconnect = false)
 
     @Test
+    fun captures_again_after_stopping() {
+        runCapture(expectDisconnect = false)
+        runCapture(expectDisconnect = false)
+    }
+
+    @Test
     fun stops_capture_when_desktop_disconnects() = runCapture(expectDisconnect = true)
 
     private fun runCapture(expectDisconnect: Boolean) {
