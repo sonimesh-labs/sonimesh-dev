@@ -358,6 +358,25 @@ const STOP_DRAIN_LIMIT: Duration = Duration::from_millis(500);
 const MAX_CONSECUTIVE_PLC: u8 = 3;
 type Receiver = UdpReceiverPipeline<ObservedDecoder, 8, 1_148, SAMPLES>;
 
+#[derive(Default)]
+struct ScheduleObservations {
+    decisions: u64,
+    frame_late: u64,
+    max_lateness_us: u64,
+}
+
+impl ScheduleObservations {
+    fn observe(&mut self, due: Instant, now: Instant) {
+        let lateness = now.duration_since(due);
+        self.decisions = self.decisions.saturating_add(1);
+        if lateness >= PLAYOUT_PERIOD {
+            self.frame_late = self.frame_late.saturating_add(1);
+        }
+        let micros = u64::try_from(lateness.as_micros()).unwrap_or(u64::MAX);
+        self.max_lateness_us = self.max_lateness_us.max(micros);
+    }
+}
+
 fn status_if_due(
     next: &mut Option<Instant>,
     now: Instant,
@@ -726,6 +745,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
     let mut retry_at = None;
     let mut decoded = 0_u64;
     let mut peak = 0_f32;
+    let mut schedule = ScheduleObservations::default();
     let mut playing = false;
     let decoded_peak = Arc::new(AtomicU32::new(0));
     let deadline = Instant::now() + Duration::from_secs(40);
@@ -890,6 +910,10 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                         }
                         output_result?;
                         println!("RESULT decoded {decoded} peak {peak:.3}");
+                        println!(
+                            "RESULT schedule decisions {} frame_late {} max_lateness_us {}",
+                            schedule.decisions, schedule.frame_late, schedule.max_lateness_us
+                        );
                         if decoded == 0 || peak < 0.001 {
                             if options.require_tone {
                                 return Err("no non-silent audio decoded".into());
@@ -929,6 +953,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
             }
             let now = Instant::now();
             if let Some(due) = next_playout.filter(|due| now >= *due) {
+                schedule.observe(due, now);
                 match decode_live_playout(pipeline, metrics, &mut consecutive_plc)? {
                     Some(DecodeStep::Decoded { .. }) => decoded += 1,
                     Some(_) => {}
@@ -1582,6 +1607,18 @@ mod tests {
             decode_playout(&mut receiver, false).unwrap(),
             Some(DecodeStep::Decoded { sequence: 1, .. })
         ));
+    }
+
+    #[test]
+    fn schedule_observations_record_late_decisions_and_maximum() {
+        let due = Instant::now();
+        let mut observations = ScheduleObservations::default();
+        observations.observe(due, due + Duration::from_millis(19));
+        observations.observe(due, due + Duration::from_millis(20));
+        observations.observe(due, due + Duration::from_micros(41_500));
+        assert_eq!(observations.decisions, 3);
+        assert_eq!(observations.frame_late, 2);
+        assert_eq!(observations.max_lateness_us, 41_500);
     }
 
     #[test]

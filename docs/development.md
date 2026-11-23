@@ -200,6 +200,10 @@ measurement; a longer wait can overflow the bounded packet buffer under bursts.
 After a delayed playout decision the lab skips missed frame deadlines and waits
 at least 10 ms before another decision. This bounds catch-up pacing; it does not
 prevent loss caused by a host stall or establish physical audio continuity.
+On a normal stop, `RESULT schedule` reports the number of live playout
+decisions, decisions at least one frame late, and the maximum lateness in
+microseconds. These measure the lab loop against its own deadlines, exclude
+the stop drain, and do not measure packet arrival time or physical playback.
 On 2026-11-23, separate API 37 emulator sessions completed with the revised
 schedule: fixed mode decoded 199 frames with 8 resynchronization drops;
 adaptive mode decoded 160 frames with 16 drops. Both reported zero late packets.
