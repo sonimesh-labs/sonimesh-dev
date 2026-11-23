@@ -8,6 +8,7 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
 import android.media.projection.MediaProjectionManager
+import android.os.Build
 import android.os.Bundle
 import android.text.method.DigitsKeyListener
 import android.view.WindowInsets
@@ -286,7 +287,9 @@ class LabActivity : Activity() {
         pendingUsage = selectedUsage()
         pendingBitrate = selectedBitrate()
         val needsPermission = checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED
-        if (!LabStatus.captureAdmission.begin(needsPermission)) {
+        val needsNotification = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        if (!LabStatus.captureAdmission.begin(needsPermission, needsNotification)) {
             showCaptureBusy()
             return
         }
@@ -297,7 +300,7 @@ class LabActivity : Activity() {
                 LabStatus.captureAdmission.launchFailed()
                 LabStatus.publish("Unable to request microphone permission. Try again.")
             }
-        } else requestProjection()
+        } else if (needsNotification) requestNotificationPermission() else requestProjection()
     }
 
     private fun selectedUsage(): LabCaptureUsage =
@@ -378,8 +381,25 @@ class LabActivity : Activity() {
         if (requestCode == 1) {
             val granted = grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED
             if (!LabStatus.captureAdmission.permissionResult(granted)) return
-            if (granted) requestProjection()
+            if (granted) {
+                if (LabStatus.captureAdmission.awaitingNotification()) requestNotificationPermission() else requestProjection()
+            }
             else LabStatus.publish("Microphone permission is required for playback capture.")
+        } else if (requestCode == 5) {
+            val granted = grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED
+            if (!LabStatus.captureAdmission.notificationResult(granted)) return
+            if (granted) requestProjection()
+            else LabStatus.publish("Notification permission is required to show capture controls. Enable it in app settings and try again.")
+        }
+    }
+
+    private fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        try {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 5)
+        } catch (_: RuntimeException) {
+            LabStatus.captureAdmission.launchFailed()
+            LabStatus.publish("Unable to request notification permission. Try again.")
         }
     }
 

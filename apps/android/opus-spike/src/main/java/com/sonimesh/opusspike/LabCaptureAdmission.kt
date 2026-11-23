@@ -2,19 +2,28 @@ package com.sonimesh.opusspike
 
 /** Main-thread admission for one interactive capture request. */
 internal class LabCaptureAdmission {
-    private enum class Phase { Idle, Permission, Projection, Starting, Service }
+    private enum class Phase { Idle, Permission, Notification, Projection, Starting, Service }
     private var phase = Phase.Idle
+    private var needsNotification = false
 
     fun canBegin(): Boolean = phase == Phase.Idle
+    fun awaitingNotification(): Boolean = phase == Phase.Notification
 
-    fun begin(needsPermission: Boolean): Boolean {
+    fun begin(needsPermission: Boolean, needsNotification: Boolean = false): Boolean {
         if (phase != Phase.Idle) return false
-        phase = if (needsPermission) Phase.Permission else Phase.Projection
+        this.needsNotification = needsNotification
+        phase = if (needsPermission) Phase.Permission else if (needsNotification) Phase.Notification else Phase.Projection
         return true
     }
 
     fun permissionResult(granted: Boolean): Boolean {
         if (phase != Phase.Permission) return false
+        phase = if (!granted) Phase.Idle else if (needsNotification) Phase.Notification else Phase.Projection
+        return true
+    }
+
+    fun notificationResult(granted: Boolean): Boolean {
+        if (phase != Phase.Notification) return false
         phase = if (granted) Phase.Projection else Phase.Idle
         return true
     }
@@ -26,7 +35,7 @@ internal class LabCaptureAdmission {
     }
 
     fun launchFailed() {
-        if (phase == Phase.Permission || phase == Phase.Projection || phase == Phase.Starting) {
+        if (phase == Phase.Permission || phase == Phase.Notification || phase == Phase.Projection || phase == Phase.Starting) {
             phase = Phase.Idle
         }
     }

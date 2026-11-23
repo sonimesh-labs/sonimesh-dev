@@ -6,6 +6,24 @@ import org.junit.Test
 
 class LabCaptureAdmissionTest {
     @Test
+    fun notificationPermissionIsOrderedAndDenialAllowsRetry() {
+        val admission = LabCaptureAdmission()
+        assertTrue(admission.begin(needsPermission = true, needsNotification = true))
+        assertFalse(admission.notificationResult(true))
+        assertTrue(admission.permissionResult(true))
+        assertFalse(admission.projectionResult(true))
+        assertTrue(admission.notificationResult(false))
+        assertTrue(admission.canBegin())
+        assertTrue(admission.begin(needsPermission = false, needsNotification = true))
+        assertTrue(admission.notificationResult(true))
+        assertTrue(admission.projectionResult(true))
+        admission.launchFailed()
+        assertTrue(admission.canBegin())
+        assertTrue(admission.begin(needsPermission = false, needsNotification = true))
+        admission.launchFailed()
+        assertTrue(admission.canBegin())
+    }
+    @Test
     fun admitsOnlyOneFlowUntilTheServiceFinishes() {
         val admission = LabCaptureAdmission()
         assertTrue(admission.begin(needsPermission = true))

@@ -4,6 +4,7 @@ import android.app.Activity
 import android.app.ActivityManager
 import android.app.NotificationManager
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.PowerManager
 import android.os.SystemClock
@@ -30,6 +31,43 @@ internal fun deliverScannerResult(activity: LabActivity, requestCode: Int, resul
 }
 
 class PairedCaptureTest {
+    @Test
+    fun notificationDenialDoesNotStartCapture() {
+        assumeTrue("notification permission is available on Android 13+", android.os.Build.VERSION.SDK_INT >= 33)
+        val automation = InstrumentationRegistry.getInstrumentation().uiAutomation
+        val packageName = InstrumentationRegistry.getInstrumentation().targetContext.packageName
+        automation.executeShellCommand("pm grant $packageName android.permission.RECORD_AUDIO").close()
+        automation.executeShellCommand("pm revoke $packageName android.permission.POST_NOTIFICATIONS").close()
+        automation.executeShellCommand("pm clear-permission-flags $packageName android.permission.POST_NOTIFICATIONS user-set user-fixed").close()
+        try {
+            ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    find(activity.window.decorView) { it is Button && it.text.toString() == "Start ADB capture" }.performClick()
+                }
+                assertTrue("notification permission dialog missing", clickNodeById(automation, "com.android.permissioncontroller:id/permission_deny_button"))
+                var denied = false
+                val deadline = SystemClock.elapsedRealtime() + 5_000
+                while (!denied && SystemClock.elapsedRealtime() < deadline) {
+                    scenario.onActivity { activity ->
+                        denied = containsStatus(activity.window.decorView, "Status: Notification permission is required")
+                        if (denied) assertTrue("capture remained busy after denial", LabStatus.captureAdmission.canBegin())
+                    }
+                    if (!denied) SystemClock.sleep(50)
+                }
+                assertTrue("notification denial not reported", denied)
+                scenario.onActivity { activity ->
+                    find(activity.window.decorView) { it is Button && it.text.toString() == "Start ADB capture" }.performClick()
+                }
+                assertTrue("notification permission retry missing", clickNodeById(automation, "com.android.permissioncontroller:id/permission_allow_button"))
+                assertTrue("screen-capture consent missing after notification grant", clickNode(automation, "Share one app"))
+                automation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
+                automation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
+            }
+        } finally {
+            automation.executeShellCommand("pm grant $packageName android.permission.POST_NOTIFICATIONS").close()
+        }
+    }
+
     @Test
     fun captures_tone_after_pairing_and_stops() = runCapture(expectDisconnect = false)
 
@@ -103,6 +141,11 @@ class PairedCaptureTest {
                 }
             }
             val automation = instrumentation.uiAutomation
+            if (android.os.Build.VERSION.SDK_INT >= 33 &&
+                instrumentation.targetContext.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+            ) {
+                assertTrue("notification permission dialog missing", clickNodeById(automation, "com.android.permissioncontroller:id/permission_allow_button"))
+            }
             assertTrue("screen-capture selector missing", clickNode(automation, "Share one app"))
             assertTrue("entire-screen option missing", clickNode(automation, "Share entire screen"))
             assertTrue("screen-capture consent missing", clickNode(automation, "Share screen"))
@@ -239,6 +282,16 @@ class PairedCaptureTest {
                 while (target != null && !target.isClickable) target = target.parent
                 if (target?.performAction(AccessibilityNodeInfo.ACTION_CLICK) == true) return true
             }
+            SystemClock.sleep(100)
+        }
+        return false
+    }
+
+    private fun clickNodeById(automation: android.app.UiAutomation, id: String): Boolean {
+        val deadline = SystemClock.elapsedRealtime() + 10_000
+        while (SystemClock.elapsedRealtime() < deadline) {
+            val node = automation.rootInActiveWindow?.findAccessibilityNodeInfosByViewId(id)?.firstOrNull()
+            if (node != null && node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
             SystemClock.sleep(100)
         }
         return false

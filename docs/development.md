@@ -137,7 +137,14 @@ synthetic count. Neither run injected sender-queue congestion.
 The lab foreground service holds a partial CPU wake lock until the service is
 destroyed so it can be evaluated with the screen off. Physical-device screen-off
 continuity and power consumption remain unmeasured.
-The capture notification opens the lab activity and retains its stop action.
+On Android 13 and newer the lab requests notification permission before screen
+capture consent, so the capture notification and its stop action can appear in
+the notification drawer. If permission is denied, enable it in app settings
+and retry; capture does not start. The notification opens the lab activity.
+On 2026-11-23, an API 37 emulator rejected notification permission, retried and
+granted it, then reached screen-capture consent. A separate paired capture
+granted permission during startup, returned through the notification, and decoded 182 frames in
+the software listener; this does not verify physical notification presentation.
 On 2026-11-23, an API 37 x86_64 emulator test returned home during paired
 capture, invoked the published notification's content action, observed the
 active capture screen, and stopped normally; the software listener decoded
