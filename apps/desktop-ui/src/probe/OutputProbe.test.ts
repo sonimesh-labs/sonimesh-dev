@@ -92,6 +92,7 @@ describe('desktop output probe', () => {
     const invoke = vi.fn()
       .mockResolvedValueOnce({ generation: 1, devices: [{ label: 'Speakers', sampleRateHz: 48000, channels: 2, isDefault: true }] })
       .mockRejectedValueOnce('Could not launch the lab listener.')
+      .mockResolvedValueOnce({ running: false, sessionActive: false, status: 'Stopped', invitation: null, metrics: null, volume: null, muted: null })
     window.__TAURI__ = { core: { invoke } }
     const wrapper = mountStoppedProbe()
     await flushPromises()
@@ -289,6 +290,7 @@ describe('desktop output probe', () => {
   it('shows listener launch errors and permits retry', async () => {
     const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [] })
       .mockRejectedValueOnce('Enter a valid IPv4 address.')
+      .mockResolvedValueOnce({ running: false, sessionActive: false, status: 'Stopped', invitation: null, metrics: null, volume: null, muted: null })
       .mockResolvedValueOnce({ running: true, status: 'Starting listener…', invitation: null })
     window.__TAURI__ = { core: { invoke } }
     const wrapper = mountStoppedProbe()
@@ -411,6 +413,51 @@ describe('desktop output probe', () => {
     await vi.advanceTimersByTimeAsync(1000)
     expect(wrapper.text()).toContain('Waiting for Android')
     expect(wrapper.text()).not.toContain('Retrying')
+    wrapper.unmount()
+  })
+
+  it('reconciles listener state after a failed start, retrying an unavailable status', async () => {
+    const running = { running: true, sessionActive: false, status: 'Waiting for Android', invitation: null, metrics: null, volume: 100, muted: false }
+    const invoke = vi.fn((command: string) => {
+      if (command === 'probe_outputs') return Promise.resolve({ generation: 1, devices: [] })
+      if (command === 'start_lab') return Promise.reject('Start response lost.')
+      if (command === 'lab_status') return invoke.mock.calls.filter(([name]) => name === 'lab_status').length === 1
+        ? Promise.reject(new Error('temporary')) : Promise.resolve(running)
+      return Promise.reject(new Error('unexpected command'))
+    })
+    window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+    const wrapper = mountStoppedProbe()
+    await flushPromises()
+    vi.useFakeTimers()
+    await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Retrying')
+    expect(wrapper.findAll('button').find(button => button.text() === 'Start listener')!.attributes('disabled')).toBeDefined()
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(wrapper.text()).toContain('Waiting for Android')
+    expect(wrapper.findAll('button').some(button => button.text() === 'Stop listener')).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('resumes status updates after a failed stop', async () => {
+    const running = { running: true, sessionActive: true, status: 'Session active', invitation: null, metrics: null, volume: 100, muted: false }
+    const stopped = { ...running, running: false, sessionActive: false, status: 'Stopped' }
+    const invoke = vi.fn((command: string) => {
+      if (command === 'probe_outputs') return Promise.resolve({ generation: 1, devices: [] })
+      if (command === 'start_lab') return Promise.resolve(running)
+      if (command === 'stop_lab') return Promise.reject('Stop response lost.')
+      if (command === 'lab_status') return Promise.resolve(stopped)
+      return Promise.reject(new Error('unexpected command'))
+    })
+    window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+    const wrapper = mountStoppedProbe()
+    await flushPromises()
+    vi.useFakeTimers()
+    await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text() === 'Stop listener')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Stopped')
+    expect(wrapper.findAll('button').some(button => button.text() === 'Start listener')).toBe(true)
     wrapper.unmount()
   })
   it('loads real probe results and refreshes them on request', async () => {

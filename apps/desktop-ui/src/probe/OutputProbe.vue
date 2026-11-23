@@ -63,6 +63,7 @@ const controlBusy = ref(false)
 let timer: ReturnType<typeof setTimeout> | undefined
 let disposed = false
 let labRequest = 0
+let reconciling = false
 
 async function suggestHost() {
   if (!window.__TAURI__ || suggestBusy.value) return
@@ -78,7 +79,7 @@ async function suggestHost() {
   }
 }
 
-async function pollLab() {
+async function pollLab(retryUnknown = false) {
   const request = labRequest
   try {
     if (!window.__TAURI__) throw new Error('Desktop probe unavailable')
@@ -87,6 +88,10 @@ async function pollLab() {
     const wasRunning = lab.value.running
     lab.value = snapshot
     labError.value = null
+    if (reconciling) {
+      reconciling = false
+      labBusy.value = false
+    }
     if (!labKnown) {
       labKnown = true
       restoredLab.value = snapshot.running
@@ -100,7 +105,7 @@ async function pollLab() {
   } catch {
     if (!disposed && request === labRequest) {
       labError.value = 'Could not check the listener. Retrying…'
-      if (!labKnown || lab.value.running) timer = setTimeout(pollLab, 1000)
+      if (retryUnknown || !labKnown || lab.value.running) timer = setTimeout(() => pollLab(retryUnknown), 1000)
     }
   }
 }
@@ -118,10 +123,11 @@ async function toggleLab() {
     restoredLab.value = false
     if (!disposed && lab.value.running) timer = setTimeout(pollLab, 1000)
   } catch (cause) {
-    labError.value = typeof cause === 'string' ? cause : 'Could not change listener state.'
-    if (cause === 'The listener is already running.') await pollLab()
+    reconciling = true
+    await pollLab(true)
+    if (!reconciling) labError.value = typeof cause === 'string' ? cause : 'Could not change listener state.'
   } finally {
-    labBusy.value = false
+    if (!reconciling) labBusy.value = false
     if (!disposed && labKnown && !lab.value.running && !loaded.value) void refresh()
   }
 }
