@@ -16,6 +16,7 @@ import android.os.Bundle
 import android.text.method.DigitsKeyListener
 import android.view.WindowInsets
 import android.widget.ArrayAdapter
+import android.widget.AdapterView
 import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -130,8 +131,17 @@ class LabActivity : Activity() {
                 android.R.layout.simple_spinner_dropdown_item,
                 LabCaptureUsage.entries.map { it.label },
             )
-            val selected = LabCaptureUsage.fromValue(savedInstanceState?.getString("selectedUsage"))
+            val selected = LabCaptureUsage.fromValue(
+                savedInstanceState?.getString("selectedUsage") ?: labPreferences.getString(PREF_USAGE, null),
+            )
             setSelection(LabCaptureUsage.entries.indexOf(selected))
+            onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(parent: AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
+                    labPreferences.edit().putString(PREF_USAGE, LabCaptureUsage.entries.getOrElse(position) { LabCaptureUsage.All }.value).apply()
+                }
+
+                override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+            }
         }
         layout.addView(usage)
         layout.addView(TextView(this).apply { text = "Opus target bitrate for the next capture" })
@@ -142,8 +152,18 @@ class LabActivity : Activity() {
                 android.R.layout.simple_spinner_dropdown_item,
                 OpusBitrate.entries.map { "${it.bitsPerSecond / 1_000} kbps" },
             )
-            val selected = OpusBitrate.fromBitsPerSecond(savedInstanceState?.getInt("selectedBitrate", defaultBitrate) ?: defaultBitrate)
+            val selected = OpusBitrate.fromBitsPerSecond(
+                savedInstanceState?.getInt("selectedBitrate", defaultBitrate)
+                    ?: labPreferences.getInt(PREF_BITRATE, defaultBitrate),
+            )
             setSelection(OpusBitrate.entries.indexOf(selected))
+            onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(parent: AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
+                    labPreferences.edit().putInt(PREF_BITRATE, OpusBitrate.entries.getOrElse(position) { OpusBitrate.STANDARD }.bitsPerSecond).apply()
+                }
+
+                override fun onNothingSelected(parent: AdapterView<*>?) = Unit
+            }
         }
         layout.addView(bitrate)
         layout.addView(Button(this).apply {
@@ -667,3 +687,5 @@ internal fun buildLabEvidenceShareIntent(evidence: String): Intent =
 private const val PREF_INVITATION = "labInvitation"
 private const val PREF_PIN = "labPin"
 private const val PREF_HOST = "labHost"
+private const val PREF_USAGE = "labCaptureUsage"
+private const val PREF_BITRATE = "labBitrate"
