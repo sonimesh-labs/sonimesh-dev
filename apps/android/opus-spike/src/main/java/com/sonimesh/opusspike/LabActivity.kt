@@ -261,6 +261,13 @@ class LabActivity : Activity() {
             }
         })
         setContentView(ScrollView(this).apply { addView(layout) })
+        handleIncomingInvitation(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIncomingInvitation(intent)
     }
 
     override fun onStart() {
@@ -402,13 +409,26 @@ class LabActivity : Activity() {
             ?.getItemAt(0)
             ?.coerceToText(this)
             ?.toString()
-            ?.trim()
+        setInvitationText(text, "Invitation pasted. Apply it to continue.", "Copy the lab invitation first.")
+    }
+
+    private fun handleIncomingInvitation(source: Intent?) {
+        if (source?.action != Intent.ACTION_SEND || source.type != "text/plain") return
+        setInvitationText(
+            source.getStringExtra(Intent.EXTRA_TEXT),
+            "Invitation received from share. Apply it to continue.",
+            "The shared invitation is empty.",
+        )
+    }
+
+    private fun setInvitationText(value: String?, successMessage: String, emptyMessage: String) {
+        val text = value?.trim()
         when {
-            text.isNullOrEmpty() -> LabStatus.publish("Copy the lab invitation first.")
-            text.length > PairingQr.MAX_PAYLOAD_BYTES * 2 -> LabStatus.publish("The copied lab invitation is too long.")
+            text.isNullOrEmpty() -> LabStatus.publish(emptyMessage)
+            text.length > PairingQr.MAX_PAYLOAD_BYTES * 2 -> LabStatus.publish("The lab invitation is too long.")
             else -> {
                 invitation.setText(text)
-                LabStatus.publish("Invitation pasted. Apply it to continue.")
+                LabStatus.publish(successMessage)
             }
         }
     }

@@ -10,6 +10,7 @@ import android.view.ViewGroup
 import android.widget.Button
 import android.widget.TextView
 import androidx.test.core.app.ActivityScenario
+import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.sonimesh.sender.encoder.OpusBitrate
 import org.junit.Assert.assertEquals
@@ -175,6 +176,22 @@ class LabStatusTest {
                 requireNotNull(findButton(activity.window.decorView, "Paste desktop SPKI")).performClick()
                 assertTrue(findTextField(activity.window.decorView, "Paired lab desktop SPKI")?.text?.toString() == spki)
                 assertTrue(hasStatus(activity.window.decorView, "Status: Desktop SPKI pasted."))
+            }
+        }
+    }
+
+    @Test
+    fun sharedInvitationFillsTheFieldWithoutStartingCapture() {
+        val intent = Intent(ApplicationProvider.getApplicationContext(), LabActivity::class.java).apply {
+            action = Intent.ACTION_SEND
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, "01ab")
+        }
+        ActivityScenario.launch<LabActivity>(intent).use { scenario ->
+            scenario.onActivity { activity ->
+                assertTrue(findTextField(activity.window.decorView, "Lab invitation payload")?.text?.toString() == "01ab")
+                assertTrue(hasStatus(activity.window.decorView, "Status: Invitation received from share."))
+                assertTrue(LabStatus.captureAdmission.canBegin())
             }
         }
     }
