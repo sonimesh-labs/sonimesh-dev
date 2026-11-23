@@ -381,6 +381,10 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   revocation, notification stop, and process recreation are recorded in the
   [Android capture matrix](./measurements/android-capture-matrix.md). The
   remaining lifecycle, power, source-policy, and OEM matrix is still open.
+  On 2026-11-23, an API 37 x86_64 emulator reopened the capture activity during
+  an All supported session and observed that usage selected both during capture
+  and after stop. This is UI and service lifecycle evidence, not physical-device
+  compatibility evidence.
 - a buildable Vue/Vite receiver-control preview with a single low-rate bridge
   boundary, session controls, output selection, per-stream volume and mute,
   pairing-invitation state, and diagnostics presentation for packet,

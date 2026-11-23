@@ -20,6 +20,45 @@ import kotlin.math.sin
 
 class AllUsagesCaptureTest {
     @Test
+    fun reopening_activity_shows_active_capture_usage() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val automation = instrumentation.uiAutomation
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use {
+                assertTrue("usage selector missing", clickText(automation, "All supported", scroll = true))
+                assertTrue("start button missing", clickText(automation, "Start capture", scroll = true))
+                assertTrue("projection chooser missing", clickText(automation, "Share one app"))
+                assertTrue("entire screen option missing", clickText(automation, "Share entire screen"))
+                assertTrue("projection confirmation missing", clickText(automation, "Share screen"))
+                assertTrue("capture did not start", waitUntil(10_000) {
+                    CaptureStateStore.state.value.evidence.captureSource == CaptureSource.AllSupported
+                })
+            }
+            ActivityScenario.launch(MainActivity::class.java).use {
+                val selected = waitUntil(8_000) {
+                    val root = automation.rootInActiveWindow ?: return@waitUntil false
+                    if (root.hasSelectedText("All supported")) return@waitUntil true
+                    root.findScrollable()?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+                    false
+                }
+                assertTrue("reopened activity did not show the active usage", selected)
+                assertTrue("stop button missing", clickText(automation, "Stop capture", scroll = true))
+                assertTrue("capture did not stop", waitUntil(8_000) {
+                    CaptureStateStore.state.value.status is CaptureStatus.Stopped
+                })
+                assertTrue("usage was not retained after stop", waitUntil(8_000) {
+                    automation.rootInActiveWindow?.hasSelectedText("All supported") == true
+                })
+            }
+        } finally {
+            instrumentation.targetContext.startService(
+                Intent(instrumentation.targetContext, CaptureService::class.java).setAction(CaptureService.ACTION_STOP),
+            )
+            waitUntil(5_000) { CaptureStateStore.state.value.status is CaptureStatus.Stopped }
+        }
+    }
+
+    @Test
     fun captures_each_supported_usage_in_one_session() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val automation = instrumentation.uiAutomation
@@ -115,6 +154,20 @@ class AllUsagesCaptureTest {
             if (found != null) return found
         }
         return null
+    }
+
+    private fun AccessibilityNodeInfo.hasSelectedText(text: String): Boolean {
+        if (this.text?.toString() == text) {
+            var current: AccessibilityNodeInfo? = this
+            while (current != null) {
+                if (current.isSelected || current.isChecked) return true
+                current = current.parent
+            }
+        }
+        for (index in 0 until childCount) {
+            if (getChild(index)?.hasSelectedText(text) == true) return true
+        }
+        return false
     }
 
     private fun AccessibilityNodeInfo.findScrollable(): AccessibilityNodeInfo? {

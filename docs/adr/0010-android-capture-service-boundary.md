@@ -59,6 +59,10 @@ The latest observed capture format remains in the process-local evidence after
 stop or failure, so an operator can review or share it with the final counters.
 A fresh capture request clears it with the previous evidence. It is not persisted
 across process death and does not identify a source application.
+When an activity is opened during an active capture, its disabled usage selector
+shows the usage owned by that capture session. A newly opened activity also
+initializes its next choice from that usage; after capture stops, the operator
+can select a different usage for the next session.
 
 `MediaProjection.Callback.onStop()` and the notification stop action use the
 same idempotent teardown path. That path stops capture admission, releases

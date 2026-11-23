@@ -29,6 +29,7 @@ import com.sonimesh.sender.capture.CaptureSource
 import com.sonimesh.sender.capture.CaptureStateStore
 import com.sonimesh.sender.capture.CaptureStatus
 import com.sonimesh.sender.capture.canStart
+import com.sonimesh.sender.capture.isActive
 import com.sonimesh.sender.capture.isAwaitingAuthorization
 
 class MainActivity : ComponentActivity() {
@@ -43,14 +44,16 @@ class MainActivity : ComponentActivity() {
         setContent {
             val state by CaptureStateStore.state.collectAsState()
             var selectedSourceWire by rememberSaveable {
-                mutableStateOf(CaptureSource.Media.wireValue)
+                mutableStateOf(
+                    (state.evidence.captureSource.takeIf { state.status.isActive() } ?: CaptureSource.Media).wireValue,
+                )
             }
             val selectedSource = CaptureSource.fromWireValue(selectedSourceWire)
             SoniMeshTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     CaptureScreen(
                         state = state,
-                        selectedSource = selectedSource,
+                        selectedSource = state.evidence.captureSource.takeIf { state.status.isActive() } ?: selectedSource,
                         onSourceSelected = { selectedSourceWire = it.wireValue },
                         onStart = { requestCapture(CaptureSource.fromWireValue(selectedSourceWire)) },
                         onStop = { sendStopCommand() },
