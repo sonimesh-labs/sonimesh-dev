@@ -2,6 +2,7 @@ package com.sonimesh.opusspike
 
 import android.app.Activity
 import android.app.ActivityManager
+import android.app.Notification
 import android.app.NotificationManager
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -272,6 +273,7 @@ class PairedCaptureTest {
                     assertTrue("home screen did not appear", homeVisible)
                     val notification = instrumentation.targetContext.getSystemService(NotificationManager::class.java)
                         .activeNotifications.firstOrNull { it.id == 1 }?.notification
+                    assertEquals("Transport: paired UDP", notification?.extras?.getString(Notification.EXTRA_TEXT))
                     requireNotNull(notification?.contentIntent) { "capture notification has no open action" }.send()
                     val returnDeadline = SystemClock.elapsedRealtime() + 10_000
                     var returned = false
