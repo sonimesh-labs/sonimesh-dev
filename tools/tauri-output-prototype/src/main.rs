@@ -18,6 +18,7 @@ fn start_lab(
     host: String,
     generation: u32,
     index: Option<usize>,
+    startup_buffer_ms: u16,
 ) -> Result<lab::LabSnapshot, String> {
     let output = match index {
         Some(index) => Some(
@@ -33,7 +34,11 @@ fn start_lab(
         .lab
         .lock()
         .map_err(|_| "Could not access listener state.")?
-        .start(&host, output.as_ref().map(|id| id.as_str()))
+        .start(
+            &host,
+            output.as_ref().map(|id| id.as_str()),
+            startup_buffer_ms,
+        )
 }
 
 #[tauri::command]

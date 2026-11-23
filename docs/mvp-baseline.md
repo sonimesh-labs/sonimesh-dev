@@ -145,7 +145,8 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   An optional paired-listener status report exposes in-session packet and decode
   counts, decoded peak, and output recovery state for controlled-lab diagnosis.
   Its fixed startup wait is configurable from 20 to 120 ms for network experiments;
-  it does not implement adaptive jitter control or measure end-to-end latency.
+  the desktop probe exposes this setting before listener startup. It does not
+  implement adaptive jitter control or measure end-to-end latency.
   During live playout the paired lab conceals short gaps even when no later
   packet is buffered, then resets an empty stream after three consecutive PLC
   frames to permit fresh audio after an extended interruption. A real UDP and

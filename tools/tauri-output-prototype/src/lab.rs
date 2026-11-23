@@ -52,10 +52,18 @@ pub struct Lab {
 }
 
 impl Lab {
-    pub fn start(&mut self, host: &str, output_id: Option<&str>) -> Result<LabSnapshot, String> {
+    pub fn start(
+        &mut self,
+        host: &str,
+        output_id: Option<&str>,
+        startup_buffer_ms: u16,
+    ) -> Result<LabSnapshot, String> {
         self.refresh();
         if self.child.is_some() {
             return Err("The listener is already running.".into());
+        }
+        if !(20..=120).contains(&startup_buffer_ms) || !startup_buffer_ms.is_multiple_of(20) {
+            return Err("Startup buffer must be 20 to 120 ms in 20 ms steps.".into());
         }
         let host: Ipv4Addr = host.parse().map_err(|_| "Enter a valid IPv4 address.")?;
         if host.is_unspecified() || host.is_multicast() || host.is_broadcast() {
@@ -74,6 +82,8 @@ impl Lab {
                 "0.0.0.0",
                 "--host",
                 &host.to_string(),
+                "--startup-buffer-ms",
+                &startup_buffer_ms.to_string(),
             ])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -314,7 +324,10 @@ mod tests {
     fn rejects_invalid_host_before_launch() {
         let mut lab = Lab::default();
         for host in ["invalid", "0.0.0.0", "224.0.0.1", "255.255.255.255"] {
-            assert!(lab.start(host, None).is_err());
+            assert!(lab.start(host, None, 60).is_err());
+        }
+        for value in [0, 19, 30, 121, 140] {
+            assert!(lab.start("127.0.0.1", None, value).is_err());
         }
         assert!(!lab.refresh().running);
         assert!(lab.control(Some(101), None).is_err());
@@ -351,7 +364,7 @@ mod tests {
         let output = sonimesh_platform::CpalOutput::new();
         let device = output.default_device_probe().unwrap().device.id;
         let mut lab = Lab::default();
-        lab.start("127.0.0.1", Some(device.as_str())).unwrap();
+        lab.start("127.0.0.1", Some(device.as_str()), 40).unwrap();
         let deadline = Instant::now() + Duration::from_secs(10);
         let snapshot = loop {
             let snapshot = lab.refresh();
@@ -379,11 +392,11 @@ mod tests {
             );
             std::thread::sleep(Duration::from_millis(25));
         }
-        assert!(lab.start("127.0.0.1", None).is_err());
+        assert!(lab.start("127.0.0.1", None, 60).is_err());
         assert!(!lab.stop().running);
         assert!(lab.child.is_none());
 
-        lab.start("127.0.0.1", Some("unavailable-output-id"))
+        lab.start("127.0.0.1", Some("unavailable-output-id"), 60)
             .unwrap();
         let deadline = Instant::now() + Duration::from_secs(10);
         while lab.refresh().running && Instant::now() < deadline {

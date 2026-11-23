@@ -29,6 +29,7 @@ interface LabSnapshot { running: boolean; status: string; invitation: string | n
 const lab = ref<LabSnapshot>({ running: false, status: 'Stopped', invitation: null, metrics: null, volume: null, muted: null })
 const labHost = ref('127.0.0.1')
 const labOutput = ref('')
+const startupBufferMs = ref(60)
 const labBusy = ref(false)
 const labError = ref<string | null>(null)
 const controlError = ref<string | null>(null)
@@ -63,7 +64,7 @@ async function toggleLab() {
   try {
     lab.value = lab.value.running
       ? await window.__TAURI__.core.invoke<LabSnapshot>('stop_lab')
-      : await window.__TAURI__.core.invoke<LabSnapshot>('start_lab', { host: labHost.value.trim(), generation: generation.value, index: labOutput.value === '' ? null : Number(labOutput.value) })
+      : await window.__TAURI__.core.invoke<LabSnapshot>('start_lab', { host: labHost.value.trim(), generation: generation.value, index: labOutput.value === '' ? null : Number(labOutput.value), startupBufferMs: startupBufferMs.value })
     if (!disposed && lab.value.running) timer = setTimeout(pollLab, 1000)
   } catch (cause) {
     labError.value = typeof cause === 'string' ? cause : 'Could not change listener state.'
@@ -187,6 +188,11 @@ onBeforeUnmount(() => { disposed = true; labRequest++; clearTimeout(timer) })
       <label for="lab-host">Desktop address for Android control</label>
       <input id="lab-host" v-model="labHost" :disabled="lab.running || labBusy" autocomplete="off" />
       <p class="preview-note">For ADB reverse use 127.0.0.1 here; enter the UDP address separately in Android (typically 10.0.2.2 for an emulator).</p>
+      <label for="lab-buffer">Startup buffer</label>
+      <select id="lab-buffer" v-model.number="startupBufferMs" :disabled="lab.running || labBusy">
+        <option v-for="value in [20, 40, 60, 80, 100, 120]" :key="value" :value="value">{{ value }} ms</option>
+      </select>
+      <p class="preview-note">Initial playout wait; restart the listener to change it. This is not an end-to-end latency measurement.</p>
       <button type="button" class="preview-action" :disabled="labBusy" @click="toggleLab">{{ lab.running ? 'Stop listener' : 'Start listener' }}</button>
       <p role="status">{{ lab.status }}</p>
       <p v-if="labError" class="command-error" role="alert">{{ labError }}</p>
