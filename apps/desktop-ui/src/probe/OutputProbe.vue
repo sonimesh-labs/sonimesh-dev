@@ -25,6 +25,8 @@ const message = ref<string | null>(null)
 interface LabMetrics {
   packets: string; rejected: string; decoded: string; peak: string
   plc: string; decodeErrors: string; buffered: string; output: 'active' | 'recovering' | 'software-check' | 'stopped'
+  playout: 'fixed' | 'adaptive' | null
+  adaptive: { target: number; min: number; max: number; jitterMs: number; gated: string; forced: string; resets: string } | null
 }
 interface LabSnapshot { running: boolean; sessionActive: boolean; status: string; invitation: string | null; metrics: LabMetrics | null; volume: number | null; muted: boolean | null }
 const lab = ref<LabSnapshot>({ running: false, sessionActive: false, status: 'Checking listener…', invitation: null, metrics: null, volume: null, muted: null })
@@ -278,9 +280,18 @@ onBeforeUnmount(() => { disposed = true; labRequest++; clearTimeout(timer) })
           <div><dt>Concealed frames</dt><dd>{{ lab.metrics.plc }}</dd></div>
           <div><dt>Decode errors</dt><dd>{{ lab.metrics.decodeErrors }}</dd></div>
           <div><dt>Buffered frames</dt><dd>{{ lab.metrics.buffered }}</dd></div>
+          <div v-if="lab.metrics.playout"><dt>Playout mode</dt><dd>{{ lab.metrics.playout === 'adaptive' ? 'Adaptive (experimental)' : 'Fixed' }}</dd></div>
+          <template v-if="lab.metrics.adaptive">
+            <div><dt>Adaptive target</dt><dd>{{ lab.metrics.adaptive.target ? `${lab.metrics.adaptive.target} frames (${lab.metrics.adaptive.min}–${lab.metrics.adaptive.max})` : 'Awaiting packet for this epoch' }}</dd></div>
+            <div><dt>Smoothed arrival jitter</dt><dd>{{ lab.metrics.adaptive.jitterMs }} ms</dd></div>
+            <div><dt>Gated ticks</dt><dd>{{ lab.metrics.adaptive.gated }}</dd></div>
+            <div><dt>Forced playouts</dt><dd>{{ lab.metrics.adaptive.forced }}</dd></div>
+            <div><dt>Stream resets</dt><dd>{{ lab.metrics.adaptive.resets }}</dd></div>
+          </template>
           <div><dt>Output</dt><dd>{{ !lab.sessionActive && lab.metrics.output !== 'stopped' ? 'Last reported: ' : '' }}{{ lab.metrics.output === 'recovering' ? 'Recovering' : lab.metrics.output === 'active' ? 'Active' : lab.metrics.output === 'stopped' ? 'Stopped' : 'Software check' }}</dd></div>
         </dl>
-        <p class="preview-note">{{ lab.sessionActive ? 'Updated at session start and every five seconds.' : lab.metrics.output === 'stopped' ? 'Final update after the stop drain.' : 'Last available update; the session may have ended before its final report.' }} Counts and peak are cumulative; they do not confirm audible playback.</p>
+        <p class="preview-note">{{ lab.sessionActive ? 'Updated at session start and every five seconds.' : lab.metrics.output === 'stopped' ? 'Final update after the stop drain.' : 'Last available update; the session may have ended before its final report.' }} Packet and decode counts and peak are cumulative; they do not confirm audible playback.</p>
+        <p v-if="lab.metrics.adaptive" class="preview-note">Adaptive target, jitter, gated ticks and forced playouts reset with the stream epoch; stream resets count the session's resets.</p>
       </section>
       <template v-if="lab.invitation">
         <img v-if="invitationQr" class="lab-invitation-qr" :src="invitationQr" alt="QR code for the public lab invitation" />

@@ -27,6 +27,20 @@ pub struct LabMetrics {
     decode_errors: String,
     buffered: String,
     output: String,
+    playout: Option<String>,
+    adaptive: Option<AdaptiveMetrics>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AdaptiveMetrics {
+    target: u16,
+    min: u16,
+    max: u16,
+    jitter_ms: u32,
+    gated: String,
+    forced: String,
+    resets: String,
 }
 
 impl Default for LabSnapshot {
@@ -297,6 +311,7 @@ fn parse_metrics(line: &str) -> Option<LabMetrics> {
         buffered,
         "output",
         output,
+        rest @ ..,
     ] = parts.as_slice()
     else {
         return None;
@@ -314,6 +329,56 @@ fn parse_metrics(line: &str) -> Option<LabMetrics> {
     {
         return None;
     }
+    let (playout, adaptive) = match rest {
+        [] => (None, None),
+        ["playout", "fixed"] => (Some("fixed".into()), None),
+        [
+            "playout",
+            "adaptive",
+            "target",
+            target,
+            "min",
+            min,
+            "max",
+            max,
+            "jitter_ms",
+            jitter_ms,
+            "gated",
+            gated,
+            "forced",
+            forced,
+            "resets",
+            resets,
+        ] => {
+            let (target, min, max) = (
+                target.parse::<u16>().ok()?,
+                min.parse::<u16>().ok()?,
+                max.parse::<u16>().ok()?,
+            );
+            if !((target == 0 && min == 0 && max == 0)
+                || (min > 0 && min <= target && target <= max && max <= 8))
+            {
+                return None;
+            }
+            let jitter_ms = jitter_ms.parse::<u32>().ok()?;
+            for value in [gated, forced, resets] {
+                value.parse::<u64>().ok()?;
+            }
+            (
+                Some("adaptive".into()),
+                Some(AdaptiveMetrics {
+                    target,
+                    min,
+                    max,
+                    jitter_ms,
+                    gated: (*gated).into(),
+                    forced: (*forced).into(),
+                    resets: (*resets).into(),
+                }),
+            )
+        }
+        _ => return None,
+    };
     Some(LabMetrics {
         packets: (*packets).into(),
         rejected: (*rejected).into(),
@@ -323,6 +388,8 @@ fn parse_metrics(line: &str) -> Option<LabMetrics> {
         decode_errors: (*decode_errors).into(),
         buffered: (*buffered).into(),
         output: (*output).into(),
+        playout,
+        adaptive,
     })
 }
 
@@ -378,6 +445,78 @@ mod tests {
         assert_eq!(snapshot.metrics, Some(metrics));
         assert!(parse_metrics(&status.replace("0.250", "NaN")).is_none());
         assert!(parse_metrics(&status.replace("recovering", "unknown")).is_none());
+    }
+
+    #[test]
+    fn adaptive_observations_follow_epoch_and_session_lifecycle() {
+        let prefix = "STATUS packets 120 rejected 3 decoded 115 peak 0.250 plc 2 decode_errors 1 buffered 4 output active";
+        let mut snapshot = LabSnapshot::default();
+        update_snapshot(&mut snapshot, "RESULT receiver started");
+        update_snapshot(
+            &mut snapshot,
+            &format!(
+                "{prefix} playout adaptive target 3 min 2 max 4 jitter_ms 17 gated 9007199254740993 forced 2 resets 1"
+            ),
+        );
+        let metrics = snapshot.metrics.clone().unwrap();
+        assert_eq!(metrics.playout.as_deref(), Some("adaptive"));
+        let adaptive = metrics.adaptive.unwrap();
+        assert_eq!(
+            (
+                adaptive.target,
+                adaptive.min,
+                adaptive.max,
+                adaptive.jitter_ms
+            ),
+            (3, 2, 4, 17)
+        );
+        assert_eq!(adaptive.gated, "9007199254740993");
+        assert_eq!(adaptive.resets, "1");
+        let before = snapshot.metrics.clone();
+        update_snapshot(
+            &mut snapshot,
+            &format!(
+                "{prefix} playout adaptive target 9 min 2 max 4 jitter_ms 17 gated 3 forced 2 resets 1"
+            ),
+        );
+        assert_eq!(snapshot.metrics, before);
+        update_snapshot(
+            &mut snapshot,
+            &format!(
+                "{prefix} playout adaptive target 0 min 0 max 0 jitter_ms 0 gated 0 forced 0 resets 2"
+            ),
+        );
+        let reset = snapshot
+            .metrics
+            .as_ref()
+            .unwrap()
+            .adaptive
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            (reset.target, reset.gated.as_str(), reset.resets.as_str()),
+            (0, "0", "2")
+        );
+        update_snapshot(&mut snapshot, "RESULT session complete");
+        update_snapshot(&mut snapshot, "READY");
+        assert_eq!(
+            snapshot
+                .metrics
+                .as_ref()
+                .unwrap()
+                .adaptive
+                .as_ref()
+                .unwrap()
+                .resets,
+            "2"
+        );
+        update_snapshot(&mut snapshot, "RESULT client connected");
+        assert!(snapshot.metrics.is_none());
+        let fixed = parse_metrics(&format!("{prefix} playout fixed")).unwrap();
+        assert_eq!(fixed.playout.as_deref(), Some("fixed"));
+        assert!(fixed.adaptive.is_none());
+        assert!(parse_metrics(prefix).unwrap().playout.is_none());
+        assert!(parse_metrics(&format!("{prefix} playout adaptive target 3 min 2 max 4 jitter_ms 17 gated invalid forced 2 resets 1")).is_none());
     }
 
     #[test]

@@ -365,23 +365,47 @@ fn status_if_due(
     decoded: u64,
     peak: f32,
     output: &str,
+    adaptive: bool,
 ) -> Option<String> {
     if next.is_none_or(|due| now < due) {
         return None;
     }
     *next = Some(now + STATUS_PERIOD);
-    Some(format_status(metrics, decoded, peak, output))
+    Some(format_status(metrics, decoded, peak, output, adaptive))
 }
 
-fn format_status(metrics: StreamMetricsSnapshot, decoded: u64, peak: f32, output: &str) -> String {
-    format!(
+fn format_status(
+    metrics: StreamMetricsSnapshot,
+    decoded: u64,
+    peak: f32,
+    output: &str,
+    adaptive: bool,
+) -> String {
+    let mut status = format!(
         "STATUS packets {} rejected {} decoded {decoded} peak {peak:.3} plc {} decode_errors {} buffered {} output {output}",
         metrics.authenticated_packets,
         metrics.rejected_packets,
         metrics.plc_frames,
         metrics.decode_errors,
         metrics.jitter_frames,
-    )
+    );
+    if adaptive {
+        write!(
+            status,
+            " playout adaptive target {} min {} max {} jitter_ms {} gated {} forced {} resets {}",
+            metrics.target_frames,
+            metrics.target_min_frames,
+            metrics.target_max_frames,
+            metrics.target_smoothed_jitter_ms,
+            metrics.target_gated_ticks,
+            metrics.target_forced_playouts,
+            metrics.stream_resets
+        )
+        .expect("writing to a String cannot fail");
+    } else {
+        status.push_str(" playout fixed");
+    }
+    status
 }
 
 fn poll_media(receiver: &mut Receiver) -> LabResult<Option<UdpPollOutcome>> {
@@ -828,7 +852,16 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                         if let Some(metrics) = counters.take() {
                             let snapshot = metrics.snapshot();
                             if options.status {
-                                println!("{}", format_status(snapshot, decoded, peak, "stopped"));
+                                println!(
+                                    "{}",
+                                    format_status(
+                                        snapshot,
+                                        decoded,
+                                        peak,
+                                        "stopped",
+                                        options.adaptive
+                                    )
+                                );
                             }
                             println!(
                                 "RESULT packets {} rejected {} late {} resync_dropped {} plc {} decode_errors {} buffered {}",
@@ -928,6 +961,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                     decoded,
                     decoded_peak,
                     output,
+                    options.adaptive,
                 ) {
                     println!("{status}");
                 }
@@ -1672,17 +1706,24 @@ mod tests {
             plc_frames: 2,
             decode_errors: 1,
             jitter_frames: 4,
+            target_frames: 3,
+            target_min_frames: 2,
+            target_max_frames: 4,
+            target_smoothed_jitter_ms: 17,
+            target_gated_ticks: 7,
+            target_forced_playouts: 2,
+            stream_resets: 1,
             ..StreamMetricsSnapshot::default()
         };
-        assert!(status_if_due(&mut next, now, metrics, 115, 0.25, "recovering").is_none());
+        assert!(status_if_due(&mut next, now, metrics, 115, 0.25, "recovering", true).is_none());
         let late = now + STATUS_PERIOD * 3;
         assert_eq!(
-            status_if_due(&mut next, late, metrics, 115, 0.25, "recovering").as_deref(),
+            status_if_due(&mut next, late, metrics, 115, 0.25, "recovering", true).as_deref(),
             Some(
-                "STATUS packets 120 rejected 3 decoded 115 peak 0.250 plc 2 decode_errors 1 buffered 4 output recovering"
+                "STATUS packets 120 rejected 3 decoded 115 peak 0.250 plc 2 decode_errors 1 buffered 4 output recovering playout adaptive target 3 min 2 max 4 jitter_ms 17 gated 7 forced 2 resets 1"
             )
         );
-        assert!(status_if_due(&mut next, late, metrics, 115, 0.25, "recovering").is_none());
+        assert!(status_if_due(&mut next, late, metrics, 115, 0.25, "recovering", true).is_none());
         assert_eq!(
             status_if_due(
                 &mut next,
@@ -1690,14 +1731,15 @@ mod tests {
                 StreamMetricsSnapshot::default(),
                 0,
                 0.0,
-                "software-check"
+                "software-check",
+                false
             )
             .as_deref(),
             Some(
-                "STATUS packets 0 rejected 0 decoded 0 peak 0.000 plc 0 decode_errors 0 buffered 0 output software-check"
+                "STATUS packets 0 rejected 0 decoded 0 peak 0.000 plc 0 decode_errors 0 buffered 0 output software-check playout fixed"
             )
         );
-        assert!(status_if_due(&mut None, late, metrics, 0, 0.0, "active").is_none());
+        assert!(status_if_due(&mut None, late, metrics, 0, 0.0, "active", false).is_none());
     }
 
     #[test]

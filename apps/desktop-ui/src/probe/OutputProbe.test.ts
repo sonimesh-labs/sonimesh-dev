@@ -347,6 +347,33 @@ describe('desktop output probe', () => {
     wrapper.unmount()
   })
 
+  it('shows the listener’s adaptive epoch and keeps the last update until the next session', async () => {
+    const base = { packets: '120', rejected: '3', decoded: '115', peak: '0.250', plc: '2', decodeErrors: '1', buffered: '4', output: 'active', playout: 'adaptive' }
+    const first = { ...base, adaptive: { target: 3, min: 2, max: 4, jitterMs: 17, gated: '9007199254740993', forced: '2', resets: '1' } }
+    const reset = { ...base, output: 'stopped', adaptive: { target: 0, min: 0, max: 0, jitterMs: 0, gated: '0', forced: '0', resets: '2' } }
+    const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [] })
+      .mockResolvedValueOnce({ running: true, status: 'Starting', invitation: null, metrics: null })
+      .mockResolvedValueOnce({ running: true, sessionActive: true, status: 'Session active', invitation: null, metrics: first })
+      .mockResolvedValueOnce({ running: true, sessionActive: false, status: 'Waiting', invitation: null, metrics: reset })
+      .mockResolvedValueOnce({ running: true, sessionActive: false, status: 'Android connecting', invitation: null, metrics: null })
+    window.__TAURI__ = { core: { invoke } }
+    const wrapper = mountStoppedProbe()
+    await flushPromises()
+    vi.useFakeTimers()
+    await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(wrapper.get('.lab-metrics').text()).toContain('Playout modeAdaptive (experimental)')
+    expect(wrapper.get('.lab-metrics').text()).toContain('Adaptive target3 frames (2–4)')
+    expect(wrapper.get('.lab-metrics').text()).toContain('Gated ticks9007199254740993')
+    expect(wrapper.text()).toContain('reset with the stream epoch')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(wrapper.get('.lab-metrics').text()).toContain('Adaptive targetAwaiting packet for this epoch')
+    expect(wrapper.get('.lab-metrics').text()).toContain('Stream resets2')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(wrapper.find('.lab-metrics').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('labels a failed session’s last update as potentially incomplete', async () => {
     const metrics = { packets: '5', rejected: '0', decoded: '4', peak: '0.100', plc: '1', decodeErrors: '0', buffered: '0', output: 'active' }
     const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [] })

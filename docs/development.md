@@ -512,7 +512,18 @@ experiment immediately, including any active session; closing the probe also
 stops its child. During an active session the probe shows the listener's
 initial and five-second cumulative packet and decode counters, decoded peak, buffered frames,
 and output recovery state. These are software observations, not proof of audible
-playback. The observations clear when the listener returns to waiting.
+playback. The last observations remain while waiting and clear on the next
+client attempt.
+For adaptive playout the observations also show the current target and range,
+smoothed arrival jitter, gated ticks and forced playouts. These values describe
+the current stream epoch: a decoder or jitter reset clears their history, while
+the separate session counter tracks stream resets. A zero target means no adaptive
+target has yet been published for that epoch. Session observations report the
+actual playout mode independently of the next-start selection in the window.
+In a second API 37 software-only capture on 2026-11-23, the final report showed
+153 decoded frames, an adaptive target of 2 frames (range 2–4), 6 gated ticks,
+and no forced playouts. This short emulator observation does not establish WLAN,
+latency, or audio-quality behavior.
 The probe's volume and mute controls apply to the lab receiver, including
 successive sessions and output recovery while the listener remains running.
 They do not change the system volume.
