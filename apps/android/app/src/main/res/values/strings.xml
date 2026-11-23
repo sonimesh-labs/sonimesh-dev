@@ -4,6 +4,7 @@
     <string name="capture_channel_name">SoniMesh capture</string>
     <string name="capture_notification_title">SoniMesh capture is active</string>
     <string name="capture_notification_text">Audio playback capture feasibility run</string>
+    <string name="capture_notification_duration">Capture duration: %1$ds</string>
     <string name="stop_capture">Stop capture</string>
     <string name="copy_capture_evidence">Copy capture evidence</string>
     <string name="share_capture_evidence">Share evidence</string>

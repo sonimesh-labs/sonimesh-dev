@@ -28,6 +28,8 @@ import com.sonimesh.sender.R
 class CaptureService : Service() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val teardownGate = CaptureTeardownGate()
+    private var notificationManager: NotificationManager? = null
+    private var notificationBuilder: NotificationCompat.Builder? = null
 
     @Volatile
     private var audioRecord: AudioRecord? = null
@@ -98,6 +100,8 @@ class CaptureService : Service() {
 
     override fun onDestroy() {
         teardown(TerminalOutcome.Stopped(CaptureStopReason.ServiceDestroyed))
+        notificationManager = null
+        notificationBuilder = null
         super.onDestroy()
     }
 
@@ -366,6 +370,7 @@ class CaptureService : Service() {
                     mainHandler.post {
                         if (!teardownGate.isTeardownStarted()) {
                             CaptureStateStore.publishEvidence()
+                            updateForegroundDuration()
                         }
                     }
                 }
@@ -403,10 +408,11 @@ class CaptureService : Service() {
     }
 
     private fun startForegroundServiceNotification() {
-        val notification = NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
+        val builder = NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentTitle(getString(R.string.capture_notification_title))
             .setContentText(getString(R.string.capture_notification_text))
+            .setSubText(getString(R.string.capture_notification_duration, 0))
             .setOngoing(true)
             .addAction(
                 NotificationCompat.Action.Builder(
@@ -415,13 +421,22 @@ class CaptureService : Service() {
                     stopPendingIntent(),
                 ).build(),
             )
-            .build()
+        notificationManager = getSystemService(NotificationManager::class.java)
+        notificationBuilder = builder
         ServiceCompat.startForeground(
             this,
             NOTIFICATION_ID,
-            notification,
+            builder.build(),
             ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION,
         )
+    }
+
+    private fun updateForegroundDuration() {
+        val builder = notificationBuilder ?: return
+        val manager = notificationManager ?: return
+        val seconds = CaptureStateStore.evidence.snapshot(SystemClock.elapsedRealtime()).captureDurationMillis / 1_000
+        builder.setSubText(getString(R.string.capture_notification_duration, seconds))
+        manager.notify(NOTIFICATION_ID, builder.build())
     }
 
     private fun stopPendingIntent(): PendingIntent = PendingIntent.getService(
