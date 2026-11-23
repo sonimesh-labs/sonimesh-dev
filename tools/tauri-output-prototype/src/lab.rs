@@ -4,12 +4,15 @@ use std::net::Ipv4Addr;
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 
+const MAX_LAB_EVENTS: usize = 32;
+
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LabSnapshot {
     pub running: bool,
     pub status: String,
     pub invitation: Option<String>,
+    pub events: Vec<String>,
     pub metrics: Option<LabMetrics>,
     pub volume: Option<u8>,
     pub muted: Option<bool>,
@@ -52,6 +55,7 @@ impl Default for LabSnapshot {
             running: false,
             status: "Stopped".into(),
             invitation: None,
+            events: Vec::new(),
             metrics: None,
             volume: None,
             muted: None,
@@ -151,6 +155,7 @@ impl Lab {
             running: true,
             status: "Starting listener…".into(),
             invitation: None,
+            events: Vec::new(),
             metrics: None,
             volume: None,
             muted: None,
@@ -162,6 +167,7 @@ impl Lab {
     pub fn refresh(&mut self) -> LabSnapshot {
         if let Some(events) = &self.events {
             for line in events.try_iter().take(128) {
+                record_event(&mut self.snapshot, &line);
                 update_snapshot(&mut self.snapshot, &line);
             }
         }
@@ -313,6 +319,20 @@ fn update_snapshot(snapshot: &mut LabSnapshot, line: &str) {
         snapshot.status = "Session failed; waiting for Android".into();
         snapshot.session_active = false;
     }
+}
+
+fn record_event(snapshot: &mut LabSnapshot, line: &str) {
+    let is_event = matches!(line, "READY")
+        || line.starts_with("RESULT ")
+        || line.starts_with("MEDIA ")
+        || line.starts_with("OUTPUT ");
+    if !is_event {
+        return;
+    }
+    if snapshot.events.len() == MAX_LAB_EVENTS {
+        snapshot.events.remove(0);
+    }
+    snapshot.events.push(line.to_owned());
 }
 
 fn parse_metrics(line: &str) -> Option<LabMetrics> {
@@ -734,6 +754,48 @@ mod tests {
                 expected
             );
         }
+    }
+
+    #[test]
+    fn refresh_retains_a_bounded_ordered_lifecycle_event_log() {
+        let (sender, events) = mpsc::sync_channel(8);
+        for line in [
+            "READY",
+            "RESULT client connected",
+            "MEDIA receiving",
+            "OUTPUT recovering",
+        ] {
+            sender.send(line.to_owned()).unwrap();
+        }
+        drop(sender);
+
+        let mut lab = Lab::default();
+        lab.events = Some(events);
+        let snapshot = lab.refresh();
+
+        assert_eq!(
+            snapshot.events,
+            vec![
+                "READY",
+                "RESULT client connected",
+                "MEDIA receiving",
+                "OUTPUT recovering",
+            ]
+        );
+        assert_eq!(snapshot.status, "Android connecting");
+
+        for index in 0..(MAX_LAB_EVENTS + 4) {
+            record_event(&mut lab.snapshot, &format!("RESULT event {index}"));
+        }
+        assert_eq!(lab.snapshot.events.len(), MAX_LAB_EVENTS);
+        assert_eq!(
+            lab.snapshot.events.first().map(String::as_str),
+            Some("RESULT event 4")
+        );
+        assert_eq!(
+            lab.snapshot.events.last().map(String::as_str),
+            Some("RESULT event 35")
+        );
     }
 
     #[test]
