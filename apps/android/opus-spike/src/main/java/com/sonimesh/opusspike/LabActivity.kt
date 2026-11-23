@@ -426,6 +426,8 @@ class LabActivity : Activity() {
         when {
             text.isNullOrEmpty() -> LabStatus.publish(emptyMessage)
             text.length > PairingQr.MAX_PAYLOAD_BYTES * 2 -> LabStatus.publish("The lab invitation is too long.")
+            text.length % 2 != 0 || text.any { it.digitToIntOrNull(16) == null } ->
+                LabStatus.publish("The lab invitation must be hexadecimal text.")
             else -> {
                 invitation.setText(text)
                 LabStatus.publish(successMessage)

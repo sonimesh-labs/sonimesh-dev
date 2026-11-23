@@ -197,6 +197,21 @@ class LabStatusTest {
     }
 
     @Test
+    fun sharedNonHexTextIsRejectedBeforeFilling() {
+        val intent = Intent(ApplicationProvider.getApplicationContext(), LabActivity::class.java).apply {
+            action = Intent.ACTION_SEND
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, "not-an-invitation")
+        }
+        ActivityScenario.launch<LabActivity>(intent).use { scenario ->
+            scenario.onActivity { activity ->
+                assertTrue(findTextField(activity.window.decorView, "Lab invitation payload")?.text?.isEmpty() == true)
+                assertTrue(hasStatus(activity.window.decorView, "Status: The lab invitation must be hexadecimal text."))
+            }
+        }
+    }
+
+    @Test
     fun failedServiceStartSurvivesActivityRecreation() {
         ActivityScenario.launch(LabActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->

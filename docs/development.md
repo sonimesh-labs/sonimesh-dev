@@ -86,7 +86,8 @@ The Android lab's **Paste lab invitation** button reads the current clipboard,
 rejects empty or oversized text, and fills the invitation field for review before
 the operator applies it.
 It also accepts a shared `text/plain` invitation from the Android share sheet and
-fills the same field without starting capture automatically.
+fills the same field without starting capture automatically. Both paths reject
+empty, oversized, or non-hexadecimal text before filling the field.
 For a LAN where both routes use the same address, **Apply invitation and use
 address for UDP** also fills the UDP destination. A loopback invitation leaves
 the UDP destination unchanged for ADB reverse; enter the emulator host alias
