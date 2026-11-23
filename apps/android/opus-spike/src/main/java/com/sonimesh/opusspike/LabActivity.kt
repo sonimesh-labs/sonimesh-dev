@@ -142,6 +142,17 @@ class LabActivity : Activity() {
             }
         })
         layout.addView(Button(this).apply {
+            text = "Use control address for UDP"
+            setOnClickListener {
+                val parsed = parseLabAddress(host.text.toString())
+                if (parsed == null) {
+                    LabStatus.publish("Enter a non-loopback control IPv4 address before copying it to UDP.")
+                } else {
+                    address.setText(parsed.hostAddress)
+                }
+            }
+        })
+        layout.addView(Button(this).apply {
             text = "Start paired UDP capture"
             setOnClickListener { startCapture(true, paired = true) }
         })

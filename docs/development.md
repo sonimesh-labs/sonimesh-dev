@@ -53,7 +53,9 @@ Android lab activity, paste `INVITATION_HEX` into **Lab invitation payload** and
 tap **Apply invitation payload** to fill the SPKI and paired control address.
 Enter the UDP address separately; the payload does not replace it. The payload
 contains the fixed public lab fixture secret and is not a production QR or a
-persistent trust record. If using the older manual setup, copy the printed
+persistent trust record. When control and UDP use the same LAN address, **Use
+control address for UDP** copies it explicitly; loopback is rejected because
+ADB reverse does not forward UDP. If using the older manual setup, copy the printed
 `SPKI_HEX` into `$pin` and run:
 
 ~~~powershell

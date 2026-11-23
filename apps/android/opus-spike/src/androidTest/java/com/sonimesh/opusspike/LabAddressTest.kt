@@ -86,6 +86,27 @@ class LabAddressTest {
         }
     }
 
+    @Test
+    fun controlAddressCanBeCopiedToUdpButLoopbackCannot() {
+        ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                val root = activity.window.decorView
+                val udp = requireNotNull(findField(root))
+                val control = requireNotNull(findField(root, "Paired control IPv4 address"))
+                val copy = requireNotNull(findButton(root, "Use control address for UDP"))
+                udp.setText("10.0.2.2")
+                control.setText("127.0.0.1")
+                copy.performClick()
+                assertEquals("10.0.2.2", udp.text.toString())
+                control.setText("192.168.1.7")
+                copy.performClick()
+                assertEquals("192.168.1.7", udp.text.toString())
+                control.setText("192.168.1.8")
+                assertEquals("192.168.1.7", udp.text.toString())
+            }
+        }
+    }
+
     private fun findButton(view: View, text: String): Button? {
         if (view is Button && view.text == text) return view
         if (view is ViewGroup) for (index in 0 until view.childCount) {
