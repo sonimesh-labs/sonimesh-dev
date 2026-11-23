@@ -305,8 +305,8 @@ observations; these identify different causes of missing frames, not the cause
 of network delay. An older listener omits these values and the probe hides them.
 The media-arrival observation distinguishes waiting for the first accepted
 packet, a packet received within the last two seconds, and a longer gap after
-reception. It is sampled with the five-second status report, so it may lag a
-transition. A gap can have several causes and does not by itself establish that
+reception. State changes are reported as the listener observes them; the probe
+polls its listener snapshot once per second. A gap can have several causes and does not by itself establish that
 the sender, network, or listener is responsible. Older listeners omit it.
 On 2026-11-23, an API 37 emulator and software listener reported 7 late packets
 and 24 resynchronization drops in both the final status and result; 174 frames

@@ -392,6 +392,7 @@ struct ScheduleObservations {
 struct MediaActivity {
     packets: u64,
     last_packet: Option<Instant>,
+    last_reported: Option<&'static str>,
 }
 
 impl MediaActivity {
@@ -407,6 +408,16 @@ impl MediaActivity {
             None => "waiting",
             Some(last) if now.duration_since(last) < MEDIA_IDLE => "receiving",
             Some(_) => "interrupted",
+        }
+    }
+
+    fn changed(&mut self, now: Instant) -> Option<&'static str> {
+        let status = self.status(now);
+        if self.last_reported == Some(status) {
+            None
+        } else {
+            self.last_reported = Some(status);
+            Some(status)
         }
     }
 }
@@ -1164,8 +1175,10 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                     options.adaptive,
                 ) {
                     println!("{status}");
-                    println!("MEDIA {}", activity.status(now));
                 }
+            }
+            if let Some(state) = activity.changed(now) {
+                println!("MEDIA {state}");
             }
         }
         std::thread::sleep(Duration::from_millis(1));
@@ -2236,19 +2249,26 @@ mod tests {
         let now = Instant::now();
         let mut activity = MediaActivity::default();
         activity.observe(now, 0);
-        assert_eq!(activity.status(now + Duration::from_secs(20)), "waiting");
+        assert_eq!(
+            activity.changed(now + Duration::from_secs(20)),
+            Some("waiting")
+        );
+        assert_eq!(activity.changed(now + Duration::from_secs(20)), None);
         activity.observe(now + Duration::from_secs(20), 1);
         assert_eq!(
-            activity.status(now + Duration::from_millis(21_999)),
-            "receiving"
+            activity.changed(now + Duration::from_millis(21_999)),
+            Some("receiving")
         );
         activity.observe(now + Duration::from_secs(22), 1);
         assert_eq!(
-            activity.status(now + Duration::from_secs(22)),
-            "interrupted"
+            activity.changed(now + Duration::from_secs(22)),
+            Some("interrupted")
         );
         activity.observe(now + Duration::from_secs(23), 2);
-        assert_eq!(activity.status(now + Duration::from_secs(23)), "receiving");
+        assert_eq!(
+            activity.changed(now + Duration::from_secs(23)),
+            Some("receiving")
+        );
     }
 
     #[test]

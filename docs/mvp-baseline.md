@@ -167,7 +167,8 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   next client attempt. These observations do not establish audible playback.
   The probe also reports whether the listener is waiting for its first accepted
   packet, has received one recently, or has seen no new accepted packet for two
-  seconds. It updates with the existing five-second status report and does not
+  seconds. State changes are reported promptly while the other metrics retain
+  their five-second cadence. This observation does not
   identify the cause of an interruption or establish that audio was decoded.
   Its fixed startup wait is configurable from 20 to 120 ms for network experiments;
   the desktop probe exposes this setting before listener startup. An opt-in

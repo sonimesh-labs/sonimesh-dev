@@ -29,6 +29,15 @@ class PairedAudioInteropTest {
 
     @Test
     fun pairs_starts_sends_opus_and_stops() {
+        runPairedAudio(false)
+    }
+
+    @Test
+    fun resumes_after_media_pause() {
+        runPairedAudio(true)
+    }
+
+    private fun runPairedAudio(pauseMedia: Boolean) {
         val args = InstrumentationRegistry.getArguments()
         assumeTrue(
             "paired audio lab requires pairingInvitationHex or pairingSpkiHex",
@@ -51,7 +60,7 @@ class PairedAudioInteropTest {
             assertEquals(2, (start as StreamControlResult.Status).state)
             val sealer = LabMediaSealer(connection.mediaRoot, identity.sessionId, identity.streamId.toInt(), 0)
             try {
-                sendTone(sealer, args.getString("mediaHost") ?: "10.0.2.2")
+                sendTone(sealer, args.getString("mediaHost") ?: "10.0.2.2", pauseMedia)
             } finally {
                 sealer.clear()
             }
@@ -61,7 +70,7 @@ class PairedAudioInteropTest {
         }
     }
 
-    private fun sendTone(sealer: LabMediaSealer, mediaHost: String) {
+    private fun sendTone(sealer: LabMediaSealer, mediaHost: String, pauseMedia: Boolean) {
         val codec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_OPUS)
         try {
             val format = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_OPUS, 48_000, 2)
@@ -76,6 +85,7 @@ class PairedAudioInteropTest {
                 var finished = false
                 val deadline = SystemClock.elapsedRealtime() + 20_000
                 var nextSend: Long? = null
+                if (pauseMedia) Thread.sleep(1_500)
                 while (!finished && SystemClock.elapsedRealtime() < deadline) {
                     if (submitted <= 100) {
                         val index = codec.dequeueInputBuffer(10_000)
@@ -104,6 +114,7 @@ class PairedAudioInteropTest {
                             socket.send(DatagramPacket(packet, packet.size))
                             sent++
                             nextSend = nextSendDeadline(due, SystemClock.elapsedRealtime())
+                            if (pauseMedia && sent == 50L) Thread.sleep(4_000)
                         }
                         finished = info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
                         codec.releaseOutputBuffer(index, false)
