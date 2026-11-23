@@ -146,6 +146,7 @@ const playbackErrors = new Set([
   'Device list changed. Refresh and try again.',
   'Device is no longer available.',
   'A test tone is already playing.',
+  'Stop the listener before testing an output.',
   'Could not inspect this output.',
   'This output format is not supported.',
   'Could not start this output.',

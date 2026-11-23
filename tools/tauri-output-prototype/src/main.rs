@@ -43,7 +43,7 @@ fn suggest_lab_host(android_host: &str) -> Result<String, &'static str> {
 
 #[cfg(test)]
 mod route_tests {
-    use super::suggest_lab_host;
+    use super::{ProbeState, suggest_lab_host};
 
     #[test]
     fn rejects_addresses_that_cannot_identify_an_android_peer() {
@@ -58,6 +58,47 @@ mod route_tests {
         ] {
             assert!(suggest_lab_host(address).is_err(), "{address}");
         }
+    }
+
+    #[test]
+    fn test_tone_reservation_blocks_listener_until_guard_is_dropped() {
+        let state = ProbeState::default();
+        let guard = state.reserve_tone().unwrap();
+        let result = state.start_listener(|_| -> Result<(), String> {
+            panic!("listener must not start while the test tone is reserved")
+        });
+        assert_eq!(
+            result.unwrap_err(),
+            "Wait for the test tone to finish before starting the listener."
+        );
+        assert!(state.reserve_tone().is_err());
+        drop(guard);
+        assert!(state.start_listener(|_| Ok(())).is_ok());
+    }
+
+    #[test]
+    fn listener_start_and_tone_reservation_are_serialized() {
+        use std::sync::{Arc, mpsc};
+        let state = Arc::new(ProbeState::default());
+        let worker_state = Arc::clone(&state);
+        let (started, started_rx) = mpsc::channel();
+        let (finish, finish_rx) = mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            worker_state
+                .start_listener(|lab| {
+                    started.send(()).unwrap();
+                    finish_rx.recv().unwrap();
+                    lab.simulate_running();
+                    Ok(())
+                })
+                .unwrap();
+        });
+        started_rx.recv().unwrap();
+        let tone_state = Arc::clone(&state);
+        let tone = std::thread::spawn(move || tone_state.reserve_tone().is_err());
+        finish.send(()).unwrap();
+        worker.join().unwrap();
+        assert!(tone.join().unwrap());
     }
 }
 
@@ -79,15 +120,43 @@ fn start_lab(
         ),
         None => None,
     };
-    state
-        .lab
-        .lock()
-        .map_err(|_| "Could not access listener state.")?
-        .start(
+    state.start_listener(|lab| {
+        lab.start(
             &host,
             output.as_ref().map(|id| id.as_str()),
             startup_buffer_ms,
         )
+    })
+}
+
+impl ProbeState {
+    fn start_listener<T>(
+        &self,
+        start: impl FnOnce(&mut lab::Lab) -> Result<T, String>,
+    ) -> Result<T, String> {
+        let mut lab = self
+            .lab
+            .lock()
+            .map_err(|_| "Could not access listener state.")?;
+        if self.playing.load(Ordering::Acquire) {
+            return Err("Wait for the test tone to finish before starting the listener.".into());
+        }
+        start(&mut lab)
+    }
+
+    fn reserve_tone(&self) -> Result<PlaybackGuard, &'static str> {
+        let mut lab = self
+            .lab
+            .lock()
+            .map_err(|_| "Could not access listener state.")?;
+        if lab.refresh().running {
+            return Err("Stop the listener before testing an output.");
+        }
+        self.playing
+            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .map_err(|_| "A test tone is already playing.")?;
+        Ok(PlaybackGuard(Arc::clone(&self.playing)))
+    }
 }
 
 #[tauri::command]
@@ -217,11 +286,7 @@ async fn play_test_tone(
                 .map_err(|_| "Could not select output.")?;
             snapshot.select(generation, index)?
         };
-        state
-            .playing
-            .compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
-            .map_err(|_| "A test tone is already playing.")?;
-        let guard = PlaybackGuard(Arc::clone(&state.playing));
+        let guard = state.reserve_tone()?;
         tauri::async_runtime::spawn_blocking(move || {
             let _guard = guard;
             play_tone(&id)

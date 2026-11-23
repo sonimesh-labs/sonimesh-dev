@@ -51,6 +51,11 @@ pub struct Lab {
 }
 
 impl Lab {
+    #[cfg(test)]
+    pub fn simulate_running(&mut self) {
+        self.snapshot.running = true;
+    }
+
     pub fn start(
         &mut self,
         host: &str,

@@ -20,6 +20,21 @@ function mountStoppedProbe() {
 }
 
 describe('desktop output probe', () => {
+  it('shows the host error if a listener starts before a test sound request', async () => {
+    const invoke = vi.fn((command: string) => {
+      if (command === 'probe_outputs') return Promise.resolve({ generation: 1, devices: [{ label: 'Speakers', sampleRateHz: 48000, channels: 2, isDefault: true }] })
+      if (command === 'play_test_tone') return Promise.reject('Stop the listener before testing an output.')
+      return Promise.resolve({ running: false, sessionActive: false, status: 'Stopped', invitation: null, metrics: null, volume: null, muted: null })
+    })
+    window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+    const wrapper = mountStoppedProbe()
+    await flushPromises()
+    await wrapper.get('[aria-label="Play test tone on Speakers"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toBe('Stop the listener before testing an output.')
+    wrapper.unmount()
+  })
+
   it('waits for a test sound to finish before starting the listener, including after a playback failure', async () => {
     let rejectTone!: (reason: string) => void
     const tone = new Promise((_resolve, reject) => { rejectTone = reject })
