@@ -172,7 +172,9 @@ class LabActivity : Activity() {
         })
         layout.addView(Button(this).apply {
             text = "Stop capture"
-            setOnClickListener { stopService(Intent(this@LabActivity, LabCaptureService::class.java)) }
+            setOnClickListener {
+                startService(Intent(this@LabActivity, LabCaptureService::class.java).setAction("stop"))
+            }
         })
         layout.addView(Button(this).apply {
             text = "Toggle test tone"

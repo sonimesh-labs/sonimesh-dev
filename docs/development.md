@@ -115,7 +115,10 @@ packets, padding a partial final PCM frame with silence, and then gives its
 bounded UDP queue a short time to drain before requesting stop. The waits and
 desktop tail drain are best effort, so
 network loss or slow shutdown can still truncate audio. The
-desktop defaults to a software PCM check. On Windows, add `--features playback`
+foreground service stays in a stopping state until this cleanup completes;
+repeated start requests during that interval are ignored. A stalled control
+reply can delay completion until the control command times out. The desktop
+defaults to a software PCM check. On Windows, add `--features playback`
 before `--` and pass `--play` after it to use the default output device; add
 `--select-output` to choose a device. `--require-tone` checks decoded audio,
 not whether it was audible. Output callback counts are not a listening test.

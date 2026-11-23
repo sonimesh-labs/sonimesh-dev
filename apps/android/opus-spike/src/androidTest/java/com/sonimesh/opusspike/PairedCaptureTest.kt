@@ -78,7 +78,9 @@ class PairedCaptureTest {
             } else {
                 SystemClock.sleep(3_000)
                 scenario.onActivity { activity ->
-                    find(activity.window.decorView) { it is Button && it.text.toString().equals("Stop capture", true) }.performClick()
+                    val stop = find(activity.window.decorView) { it is Button && it.text.toString().equals("Stop capture", true) }
+                    stop.performClick()
+                    stop.performClick()
                 }
             }
             var stopped = false
@@ -92,6 +94,11 @@ class PairedCaptureTest {
                 if (!stopped) SystemClock.sleep(100)
             }
             assertTrue("capture service did not stop", stopped)
+            if (!expectDisconnect) {
+                scenario.onActivity { activity ->
+                    assertTrue("capture did not publish completion", containsStatus(activity.window.decorView, "Status: Capture stopped."))
+                }
+            }
         }
     }
 

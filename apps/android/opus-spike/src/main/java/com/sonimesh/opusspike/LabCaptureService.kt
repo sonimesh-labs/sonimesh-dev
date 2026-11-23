@@ -43,16 +43,20 @@ class LabCaptureService : Service() {
     private var projection: MediaProjection? = null
     private val handler = Handler(Looper.getMainLooper())
     private var terminalStatus = false
+    private var started = false
+    private var workerStarted = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     @Suppress("DEPRECATION")
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == "stop") {
-            stopSelf()
+            if (started) requestStop() else stopSelf()
             return START_NOT_STICKY
         }
-        if (!running.compareAndSet(false, true)) return START_NOT_STICKY
+        if (started) return START_NOT_STICKY
+        started = true
+        running.set(true)
         LabStatus.publish("Connecting to the desktop listener…")
         var pendingInvitation: ByteArray? = null
         try {
@@ -82,6 +86,7 @@ class LabCaptureService : Service() {
                     intent.getStringExtra("pairedHost") ?: "127.0.0.1") else null
             val invitation = pendingInvitation
             Thread({ capture(current, udpMode, destination, invitation, usage) }, "audio-lab-capture").start()
+            workerStarted = true
             pendingInvitation = null
         } catch (error: Exception) {
             pendingInvitation?.fill(0)
@@ -310,8 +315,6 @@ class LabCaptureService : Service() {
                 Log.e("SoniMeshLab", "Desktop connection failed", error)
                 handler.post { finishWith("Desktop connection ended. Restart the listener to reconnect.") }
             }
-        } finally {
-            handler.post { stopSelf() }
         }
     }
 
@@ -344,7 +347,6 @@ class LabCaptureService : Service() {
             }
         } finally {
             sealer.clear()
-            handler.post { stopSelf() }
         }
     }
 
@@ -355,7 +357,6 @@ class LabCaptureService : Service() {
             if (running.get()) Log.e("SoniMeshLab", "Lab control connection ended", error)
         } finally {
             if (running.get()) handler.post { finishWith("Desktop connection ended. Restart the listener to reconnect.") }
-            handler.post { stopSelf() }
         }
     }
 
@@ -363,19 +364,25 @@ class LabCaptureService : Service() {
         if (!running.get() || terminalStatus) return
         terminalStatus = true
         LabStatus.publish(message)
-        stopSelf()
+        requestStop()
     }
 
-    override fun onDestroy() {
-        running.set(false)
+    private fun requestStop() {
+        if (!running.getAndSet(false)) return
+        if (!terminalStatus) LabStatus.publish("Stopping capture…")
         setupSocket.cancel()
-        if (!terminalStatus) LabStatus.publish("Capture stopped.")
         synchronized(socketLock) {
             try { socket?.close() } catch (_: java.io.IOException) { }
             socket = null
         }
         projection?.stop()
         projection = null
+        if (!workerStarted) stopSelf()
+    }
+
+    override fun onDestroy() {
+        requestStop()
+        if (!terminalStatus) LabStatus.publish("Capture stopped.")
         super.onDestroy()
     }
 }
