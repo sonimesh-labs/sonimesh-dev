@@ -9,6 +9,7 @@ const originalShare = navigator.share
 afterEach(() => {
   vi.useRealTimers()
   delete window.__TAURI__
+  localStorage.clear()
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: originalClipboard })
   Object.defineProperty(navigator, 'share', { configurable: true, value: originalShare })
 })
@@ -799,6 +800,44 @@ describe('desktop output probe', () => {
     await wrapper.get('button').trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('No output devices found.')
+    wrapper.unmount()
+  })
+
+  it('restores bounded lab settings and selected output from local storage', async () => {
+    localStorage.setItem('sonimesh.outputProbe.labSettings', JSON.stringify({
+      labHost: '192.168.1.7', androidHost: '192.168.1.22', labOutput: '1', startupBufferMs: 100, adaptive: true,
+    }))
+    const invoke = vi.fn().mockResolvedValueOnce({ generation: 3, devices: [
+      { label: 'Default', sampleRateHz: 48_000, channels: 2, isDefault: true },
+      { label: 'USB', sampleRateHz: 48_000, channels: 2, isDefault: false },
+    ], selectedIndex: 1 })
+    window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+    const wrapper = mountStoppedProbe()
+    await flushPromises()
+    expect((wrapper.get('#lab-host').element as HTMLInputElement).value).toBe('192.168.1.7')
+    expect((wrapper.get('#android-host').element as HTMLInputElement).value).toBe('192.168.1.22')
+    expect((wrapper.get('#lab-buffer').element as HTMLSelectElement).value).toBe('100')
+    expect((wrapper.get('#lab-playout').element as HTMLSelectElement).value).toBe('true')
+    expect((wrapper.get('#lab-output').element as HTMLSelectElement).value).toBe('1')
+    expect(invoke).toHaveBeenCalledWith('probe_outputs', { generation: 0, selectedIndex: 1 })
+    wrapper.unmount()
+  })
+
+  it('ignores malformed persisted lab settings and stores bounded edits', async () => {
+    localStorage.setItem('sonimesh.outputProbe.labSettings', '{"labHost":{},"labOutput":"999x","startupBufferMs":999,"adaptive":"yes"')
+    const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [] })
+    window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+    const wrapper = mountStoppedProbe()
+    await flushPromises()
+    expect((wrapper.get('#lab-host').element as HTMLInputElement).value).toBe('127.0.0.1')
+    expect((wrapper.get('#lab-buffer').element as HTMLSelectElement).value).toBe('60')
+    await wrapper.get('#lab-host').setValue('10.0.0.8')
+    await wrapper.get('#lab-buffer').setValue('20')
+    await wrapper.get('#lab-playout').setValue('true')
+    const stored = JSON.parse(localStorage.getItem('sonimesh.outputProbe.labSettings')!)
+    expect(stored.labHost).toBe('10.0.0.8')
+    expect(stored.startupBufferMs).toBe(20)
+    expect(stored.adaptive).toBe(true)
     wrapper.unmount()
   })
 

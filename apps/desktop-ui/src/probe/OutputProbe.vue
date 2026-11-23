@@ -85,6 +85,44 @@ function evidenceValue(value: unknown): string {
   return text.length <= 80 ? text : `${text.slice(0, 77)}...`
 }
 
+const LAB_SETTINGS_KEY = 'sonimesh.outputProbe.labSettings'
+const startupBufferChoices = [20, 40, 60, 80, 100, 120]
+
+interface StoredLabSettings {
+  labHost?: string
+  androidHost?: string
+  labOutput?: string
+  startupBufferMs?: number
+  adaptive?: boolean
+}
+
+function readLabSettings(): StoredLabSettings {
+  try {
+    const raw = localStorage.getItem(LAB_SETTINGS_KEY)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    return {
+      labHost: typeof parsed.labHost === 'string' && parsed.labHost.length <= 64 ? parsed.labHost : undefined,
+      androidHost: typeof parsed.androidHost === 'string' && parsed.androidHost.length <= 64 ? parsed.androidHost : undefined,
+      labOutput: parsed.labOutput === '' || (typeof parsed.labOutput === 'string' && /^\d+$/.test(parsed.labOutput)) ? parsed.labOutput as string : undefined,
+      startupBufferMs: typeof parsed.startupBufferMs === 'number' && startupBufferChoices.includes(parsed.startupBufferMs) ? parsed.startupBufferMs : undefined,
+      adaptive: typeof parsed.adaptive === 'boolean' ? parsed.adaptive : undefined,
+    }
+  } catch {
+    return {}
+  }
+}
+
+function writeLabSettings(settings: StoredLabSettings) {
+  try {
+    localStorage.setItem(LAB_SETTINGS_KEY, JSON.stringify(settings))
+  } catch {
+    // Browser storage is a convenience; the probe remains usable when unavailable.
+  }
+}
+
+const storedLabSettings = readLabSettings()
+
 const labEvidenceMessage = ref<string | null>(null)
 
 function labEvidenceText(): string | null {
@@ -146,14 +184,14 @@ async function shareLabEvidence() {
     labEvidenceMessage.value = 'Could not share session evidence. Select the visible metrics instead.'
   }
 }
-const labHost = ref('127.0.0.1')
-const androidHost = ref('')
+const labHost = ref(storedLabSettings.labHost ?? '127.0.0.1')
+const androidHost = ref(storedLabSettings.androidHost ?? '')
 const suggestedHost = ref<string | null>(null)
 const suggestError = ref<string | null>(null)
 const suggestBusy = ref(false)
-const labOutput = ref('')
-const startupBufferMs = ref(60)
-const adaptive = ref(false)
+const labOutput = ref(storedLabSettings.labOutput ?? '')
+const startupBufferMs = ref(storedLabSettings.startupBufferMs ?? 60)
+const adaptive = ref(storedLabSettings.adaptive ?? false)
 const labBusy = ref(true)
 let labKnown = false
 const restoredLab = ref(false)
@@ -167,6 +205,16 @@ let reconciling = false
 let controlRequest = 0
 let controlTimer: ReturnType<typeof setTimeout> | undefined
 let pendingControl: { volume: number | null; muted: boolean | null; sent: boolean } | null = null
+
+watch([labHost, androidHost, labOutput, startupBufferMs, adaptive], () => {
+  writeLabSettings({
+    labHost: labHost.value,
+    androidHost: androidHost.value,
+    labOutput: labOutput.value === 'unavailable' ? '' : labOutput.value,
+    startupBufferMs: startupBufferMs.value,
+    adaptive: adaptive.value,
+  })
+})
 
 function clearControl() {
   controlRequest++
@@ -401,7 +449,7 @@ onBeforeUnmount(() => { disposed = true; labRequest++; clearTimeout(timer); clea
       <p class="preview-note">The suggestion follows the current route to Android; it does not verify connectivity.</p>
       <label for="lab-buffer">Startup buffer</label>
       <select id="lab-buffer" v-model.number="startupBufferMs" :disabled="lab.running || labBusy">
-        <option v-for="value in [20, 40, 60, 80, 100, 120]" :key="value" :value="value">{{ value }} ms</option>
+        <option v-for="value in startupBufferChoices" :key="value" :value="value">{{ value }} ms</option>
       </select>
       <p class="preview-note">Initial playout wait; restart the listener to change it. This is not an end-to-end latency measurement.</p>
       <label for="lab-playout">Playout mode</label>
