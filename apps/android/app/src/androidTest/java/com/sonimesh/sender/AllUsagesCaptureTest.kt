@@ -134,26 +134,24 @@ class AllUsagesCaptureTest {
     private fun clickText(automation: android.app.UiAutomation, text: String, scroll: Boolean = false): Boolean {
         return waitUntil(8_000) {
             val root = automation.rootInActiveWindow ?: return@waitUntil false
-            val node = root.findText(text)
-            if (node != null) {
-                var current: AccessibilityNodeInfo? = node
-                while (current != null) {
-                    if (current.isClickable && current.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return@waitUntil true
-                    current = current.parent
-                }
-            }
+            if (root.clickMatchingText(text)) return@waitUntil true
             if (scroll) root.findScrollable()?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
             false
         }
     }
 
-    private fun AccessibilityNodeInfo.findText(text: String): AccessibilityNodeInfo? {
-        if (this.text?.toString() == text) return this
-        for (index in 0 until childCount) {
-            val found = getChild(index)?.findText(text)
-            if (found != null) return found
+    private fun AccessibilityNodeInfo.clickMatchingText(text: String): Boolean {
+        if (this.text?.toString() == text) {
+            var current: AccessibilityNodeInfo? = this
+            while (current != null) {
+                if (current.isClickable && current.isEnabled && current.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true
+                current = current.parent
+            }
         }
-        return null
+        for (index in 0 until childCount) {
+            if (getChild(index)?.clickMatchingText(text) == true) return true
+        }
+        return false
     }
 
     private fun AccessibilityNodeInfo.hasSelectedText(text: String): Boolean {
