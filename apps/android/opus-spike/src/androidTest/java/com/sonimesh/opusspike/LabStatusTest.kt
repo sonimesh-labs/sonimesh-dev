@@ -116,13 +116,14 @@ class LabStatusTest {
     fun longStatusMessagesAreBoundedForTheScreenAndEvidence() {
         ActivityScenario.launch(LabActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
-                LabStatus.publish("Status: ${"x".repeat(400)}")
+                LabStatus.publish("${"x".repeat(400)}")
                 val status = requireNotNull(findStatusText(activity.window.decorView))
-                assertTrue(status.text.length <= 256)
+                assertTrue(status.text.length <= 264)
                 assertTrue(status.text.endsWith("..."))
                 val evidence = LabStatus.copyableEvidence()
-                assertTrue(evidence.contains("Status: "))
-                assertTrue(evidence.length < 400)
+                val evidenceStatus = requireNotNull(evidence.lineSequence().firstOrNull { it.startsWith("Status: ") })
+                assertTrue(evidenceStatus.length <= 264)
+                assertTrue(evidenceStatus.endsWith("..."))
                 LabStatus.publish("Idle")
             }
         }
@@ -144,6 +145,7 @@ class LabStatusTest {
                     )
                     val text = requireNotNull(clip.getItemAt(0).coerceToText(activity)).toString()
                     assertTrue(text.contains("Session request: Game, 128 kbps target"))
+                    assertTrue(text.contains("Transport: ADB TCP"))
                     assertTrue(text.contains("Sender queue drops: 7"))
                     assertTrue(text.contains("Media packets sent: 12"))
                     assertTrue(text.contains("Encoded payload average: 73 kbps"))
@@ -152,6 +154,22 @@ class LabStatusTest {
                     LabStatus.publishSenderQueueDrops(null)
                     LabStatus.publishSentPackets(null)
                     LabStatus.publishEncoderRate(null)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun sessionTransportAppearsInTheScreenAndEvidence() {
+        ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                try {
+                    LabStatus.serviceStarted(LabCaptureUsage.Media, OpusBitrate.STANDARD, LabTransport.PairedUdp)
+                    assertTrue(hasStatus(activity.window.decorView, "Session request: Media, 96 kbps target\nTransport: paired UDP"))
+                    val evidence = LabStatus.copyableEvidence()
+                    assertTrue(evidence.contains("Transport: paired UDP"))
+                } finally {
+                    LabStatus.serviceFinished()
                 }
             }
         }
