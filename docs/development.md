@@ -80,7 +80,11 @@ adb shell am instrument -w -e pairingInvitationHex $invitationHex -e mediaHost 1
 The test synthesizes and encodes a tone; the desktop acknowledges start only
 after binding its UDP receiver with the pairing-derived root and acknowledges
 stop after retiring it. Successful runs report the decoded frame count and
-software PCM peak. On 2026-11-22, two API 37 x86_64 emulator runs decoded 100
+software PCM peak. On stop, the paired lab briefly polls for trailing UDP and
+plays out buffered frames before closing the receiver, with a fixed upper time
+limit. UDP does not identify the final packet, so this is best effort and does
+not guarantee that every frame or hardware output buffer has played. On
+2026-11-22, two API 37 x86_64 emulator runs decoded 100
 and 92 frames respectively, each with a peak of 0.250; the discrepancy has not
 been characterized. This is not playback-capture, physical WLAN, listening,
 latency, persistent trust, or production UI evidence. The interactive audio lab

@@ -22,8 +22,8 @@ use sonimesh_app::{
     UdpReceiverError, UdpReceiverPipeline, accept_pairing_stream, begin_from_rendered_payload,
 };
 use sonimesh_audio::{
-    DecodeStep, DecodeWorkerError, FrameDecoder, OpusFrameConfig, StreamDecodeWorker,
-    realtime_pcm_queue,
+    DecodeStep, DecodeWorkerError, FrameDecoder, OpusFrameConfig, RealtimePcmConsumer,
+    StreamDecodeWorker, realtime_pcm_queue,
 };
 use sonimesh_diagnostics::{StreamCounters, StreamMetricsSnapshot};
 use sonimesh_network::{
@@ -327,6 +327,8 @@ fn negotiate_hello(
 const SAMPLES: usize = 1_920;
 const PLAYOUT_PERIOD: Duration = Duration::from_millis(20);
 const STATUS_PERIOD: Duration = Duration::from_secs(5);
+const STOP_DRAIN_QUIET: Duration = Duration::from_millis(160);
+const STOP_DRAIN_LIMIT: Duration = Duration::from_millis(500);
 type Receiver = UdpReceiverPipeline<ObservedDecoder, 8, 1_148, SAMPLES>;
 
 fn status_if_due(
@@ -390,6 +392,55 @@ fn decode_playout(receiver: &mut Receiver) -> LabResult<Option<DecodeStep>> {
         }
         Err(error) => Err(error.into()),
     }
+}
+
+fn drain_stop_tail(
+    receiver: &mut Receiver,
+    metrics: &StreamCounters,
+    consumer: &mut Option<RealtimePcmConsumer<SAMPLES>>,
+    next_playout: Option<Instant>,
+    decoded: &mut u64,
+    peak: &mut f32,
+) -> LabResult<()> {
+    let start = Instant::now();
+    let deadline = start + STOP_DRAIN_LIMIT;
+    let mut last_activity = start;
+    let mut next = next_playout.unwrap_or(start);
+    loop {
+        let now = Instant::now();
+        if now >= deadline {
+            break;
+        }
+        for _ in 0..32 {
+            match poll_media(receiver)? {
+                Some(UdpPollOutcome::Empty) => break,
+                Some(UdpPollOutcome::Processed { .. }) => last_activity = Instant::now(),
+                None => {}
+            }
+        }
+        let now = Instant::now();
+        if now >= next && metrics.snapshot().jitter_frames > 0 {
+            if let Some(DecodeStep::Decoded { .. }) = decode_playout(receiver)? {
+                *decoded += 1;
+                last_activity = now;
+            }
+            if let Some(pcm) = consumer {
+                let mut samples = [0_f32; SAMPLES];
+                pcm.pop_into(&mut samples);
+                for sample in samples {
+                    *peak = peak.max(sample.abs());
+                }
+            }
+            next = next_playout_deadline(next, now);
+        }
+        if metrics.snapshot().jitter_frames == 0
+            && now.duration_since(last_activity) >= STOP_DRAIN_QUIET
+        {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    Ok(())
 }
 
 struct ObservedDecoder {
@@ -650,6 +701,16 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                         }
                     }
                     ControlStreamAction::Stop { token, identity } => {
+                        if let (Some(pipeline), Some(metrics)) = (&mut receiver, &counters) {
+                            drain_stop_tail(
+                                pipeline,
+                                metrics,
+                                &mut consumer,
+                                next_playout,
+                                &mut decoded,
+                                &mut peak,
+                            )?;
+                        }
                         let output_result = playback.stop();
                         drop(receiver.take());
                         drop(consumer.take());
@@ -790,6 +851,71 @@ mod tests {
         AudioOutput, OutputConfig, OutputDeviceId, OutputDeviceInfo, OutputError, OutputHealth,
         RenderSource, SampleFormat,
     };
+
+    #[test]
+    fn stop_drain_decodes_buffered_and_late_udp_frames() {
+        use sonimesh_protocol::{MediaKeyContext, MediaSealer};
+        use std::net::UdpSocket;
+
+        let secret = SessionSecret::new([7; 32]);
+        let context = MediaKeyContext::new(1, 1, 0, MediaDirection::AndroidToDesktop).unwrap();
+        let metrics = Arc::new(StreamCounters::default());
+        let (producer, consumer) = realtime_pcm_queue::<SAMPLES>(8).unwrap();
+        let worker = StreamDecodeWorker::new_for_opus(
+            ObservedDecoder {
+                decoder: lab_decoder::Decoder::new().unwrap(),
+                peak: Arc::new(AtomicU32::new(0)),
+            },
+            producer,
+            0,
+            OpusFrameConfig::new(48_000, 2, 20).unwrap(),
+        )
+        .unwrap();
+        let mut receiver = Receiver::bind_with_worker(
+            "127.0.0.1:0".parse().unwrap(),
+            &secret,
+            context,
+            worker,
+            Arc::clone(&metrics),
+        )
+        .unwrap();
+        let mut encoder =
+            opus::Encoder::new(48_000, opus::Channels::Stereo, opus::Application::Audio).unwrap();
+        let mut payload = [0_u8; 1_148];
+        let length = encoder
+            .encode_float(&[0.25; SAMPLES], &mut payload)
+            .unwrap();
+        let mut sealer = MediaSealer::new(&secret, context).unwrap();
+        let first = sealer.seal(0, 0, &payload[..length]).unwrap();
+        let second = sealer.seal(0, 960, &payload[..length]).unwrap();
+        let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let address = receiver.local_addr().unwrap();
+        sender.send_to(&first.datagram, address).unwrap();
+        assert!(matches!(
+            poll_media(&mut receiver).unwrap(),
+            Some(UdpPollOutcome::Processed { .. })
+        ));
+        let thread = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(40));
+            sender.send_to(&second.datagram, address).unwrap();
+        });
+        let mut decoded = 0;
+        let mut peak = 0.0;
+        drain_stop_tail(
+            &mut receiver,
+            &metrics,
+            &mut Some(consumer),
+            None,
+            &mut decoded,
+            &mut peak,
+        )
+        .unwrap();
+        thread.join().unwrap();
+        assert_eq!(metrics.snapshot().authenticated_packets, 2);
+        assert_eq!(metrics.snapshot().jitter_frames, 0);
+        assert_eq!(decoded, 2);
+        assert!(peak > 0.001);
+    }
 
     #[derive(Default)]
     struct FaultOutput {

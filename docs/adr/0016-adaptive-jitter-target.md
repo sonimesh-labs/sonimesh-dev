@@ -41,6 +41,12 @@ regressing clock suppresses decode until time catches up. Stopped, unmatched, or
 output-unavailable streams reset their cadence. This is software scheduling
 behavior, not a latency or physical playback measurement.
 
+The separate paired audio lab uses a bounded best-effort stop drain: it polls
+UDP for trailing packets, continues paced decode, and gives queued PCM time to
+reach the output before stopping. A quiet interval ends the drain, and an
+absolute deadline limits it even under continuous traffic. UDP has no end marker;
+neither the drain nor its acknowledgement proves that hardware played the tail.
+
 ## Decision
 
 Each stream owns a non-realtime `AdaptiveJitterTarget` controller in
