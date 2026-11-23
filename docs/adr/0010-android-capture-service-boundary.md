@@ -152,6 +152,10 @@ The lab reports no capturable audio after two seconds of completed silent
 capture frames and restores the capturing status when a non-silent read arrives.
 Partial reads count by frames rather than calls; this observation does not identify
 the source of silence or establish whether media reached the desktop.
+If non-blocking reads return no samples continuously for five seconds, the lab
+stops capture and asks the operator to restart. Positive reads reset that timer;
+silent PCM is still valid input and follows the separate no-audio indication.
+The timeout is a lab recovery policy, not a measured platform guarantee.
 During paired-lab setup, the service tracks the connecting socket through TLS,
 Hello, and StartStream. Stopping the service closes the setup socket to interrupt
 pending I/O; after StartStream succeeds, ownership moves to the capture worker,

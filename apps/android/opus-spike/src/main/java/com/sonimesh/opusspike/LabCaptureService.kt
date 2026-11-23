@@ -194,6 +194,7 @@ class LabCaptureService : Service() {
             val pcm = ShortArray(OpusEncoder.FRAME_SAMPLES)
             val signalMonitor = LabSignalMonitor()
             val encoderInputWait = EncoderInputWait()
+            val captureReadWait = CaptureReadWait()
             var filled = 0
             var frame = 0L
             var outputSequence = 0L
@@ -242,6 +243,7 @@ class LabCaptureService : Service() {
                 if (filled < pcm.size) {
                     val read = activeRecord.read(pcm, filled, pcm.size - filled, AudioRecord.READ_NON_BLOCKING)
                     check(read >= 0 && read <= pcm.size - filled && read % 2 == 0)
+                    captureReadWait.observe(read, SystemClock.elapsedRealtime())
                     if (read > 0) {
                         val transition = signalMonitor.observe(pcm, filled, read)
                         if (transition != null) handler.post {
@@ -276,6 +278,7 @@ class LabCaptureService : Service() {
             if (running.get()) {
                 Log.e("SoniMeshLab", "Capture or encoding failed", error)
                 val message = if (error is EncoderStalledException) "Audio encoder stopped responding. Restart capture and try again."
+                    else if (error is CaptureReadStalledException) "Audio capture stopped producing samples. Restart capture and try again."
                     else if (connected) "Capture or encoding failed. Check device support and try again."
                     else "Desktop connection failed. Check the listener and control address."
                 handler.post { finishWith(message) }
