@@ -87,8 +87,12 @@ async function copyPreviewDiagnostics() {
     downloadMessage.value = 'Clipboard access is unavailable in this preview.'
     return
   }
-  await navigator.clipboard.writeText(previewDiagnosticsBundle())
-  downloadMessage.value = 'Preview diagnostics copied.'
+  try {
+    await navigator.clipboard.writeText(previewDiagnosticsBundle())
+    downloadMessage.value = 'Preview diagnostics copied.'
+  } catch {
+    downloadMessage.value = 'Clipboard access was denied in this preview.'
+  }
 }
 </script>
 
