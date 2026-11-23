@@ -145,6 +145,15 @@ playing: stop and restart the tone to apply the applicable usage. On
 choices and confirmed the playing tone retains its usage across activity
 recreation; this checks audio attributes, not audible output. Android and the source application still
 control whether playback can be captured; the selector does not select apps.
+The paired-capture instrumentation method `tone_follows_active_capture_usage`
+also exercises a Media capture while the next selection changes to Game. It
+waits for silence, recreates the activity, restarts the tone, and checks that
+the capture detects signal again before testing the selection after stop.
+On 2026-11-23, this test passed on an API 37 x86_64 emulator using ADB-reversed
+control and emulator UDP; the software listener decoded 276 frames with a
+cumulative peak of 0.102. The signal transition is observed on Android; the
+listener's cumulative peak does not isolate the restarted tone. This does not
+establish physical WLAN, device playback, or audible output.
 An invitation pasted into the lab but not yet applied remains in the field if
 Android recreates the activity, so it can still be reviewed and applied.
 The lab also lets the operator request 64, 96 (default), or 128 kbps Opus for

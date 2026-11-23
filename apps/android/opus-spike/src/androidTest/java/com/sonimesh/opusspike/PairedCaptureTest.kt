@@ -5,6 +5,7 @@ import android.app.ActivityManager
 import android.app.NotificationManager
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.AudioAttributes
 import android.os.Bundle
 import android.os.PowerManager
 import android.os.SystemClock
@@ -81,6 +82,9 @@ class PairedCaptureTest {
     fun keeps_capturing_tone_after_activity_recreation() = runCapture(expectDisconnect = false, recreate = true)
 
     @Test
+    fun tone_follows_active_capture_usage() = runCapture(expectDisconnect = false, changeUsage = true)
+
+    @Test
     fun captures_again_after_stopping() {
         runCapture(expectDisconnect = false)
         runCapture(expectDisconnect = false)
@@ -95,7 +99,7 @@ class PairedCaptureTest {
     @Test
     fun returns_to_active_capture_from_notification() = runCapture(expectDisconnect = false, notificationReturn = true)
 
-    private fun runCapture(expectDisconnect: Boolean, screenOff: Boolean = false, notificationReturn: Boolean = false, startFromScan: Boolean = false, startFromPaste: Boolean = false, recreate: Boolean = false) {
+    private fun runCapture(expectDisconnect: Boolean, screenOff: Boolean = false, notificationReturn: Boolean = false, startFromScan: Boolean = false, startFromPaste: Boolean = false, recreate: Boolean = false, changeUsage: Boolean = false) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val args = InstrumentationRegistry.getArguments()
         assumeTrue(
@@ -128,6 +132,10 @@ class PairedCaptureTest {
                 args.getString("mediaHost")?.let { mediaHost ->
                     (find(root) { it is EditText && it.contentDescription == "Desktop IPv4 address for UDP" } as EditText)
                         .setText(mediaHost)
+                }
+                if (changeUsage) {
+                    (find(root) { it is Spinner && it.contentDescription == "Playback usage for capture" } as Spinner)
+                        .setSelection(1)
                 }
                 find(root) { it is Button && it.text.toString().equals("Start test tone", true) }.performClick()
                 if (startFromScan) {
@@ -202,7 +210,40 @@ class PairedCaptureTest {
                 }
                 assertTrue("desktop disconnect was not reported", disconnectStatus != null)
             } else {
-                if (recreate) {
+                if (changeUsage) {
+                    scenario.onActivity { activity ->
+                        val root = activity.window.decorView
+                        (find(root) { it is Spinner && it.contentDescription == "Playback usage for capture" } as Spinner)
+                            .setSelection(2)
+                        find(root) { it is Button && it.text.toString() == "Stop test tone" }.performClick()
+                    }
+                    var silent = false
+                    val silentDeadline = SystemClock.elapsedRealtime() + 10_000
+                    while (!silent && SystemClock.elapsedRealtime() < silentDeadline) {
+                        scenario.onActivity { activity ->
+                            silent = containsStatus(activity.window.decorView, "Status: No capturable audio detected")
+                        }
+                        if (!silent) SystemClock.sleep(100)
+                    }
+                    assertTrue("capture did not detect silence after stopping the tone", silent)
+                    scenario.recreate()
+                    scenario.onActivity { activity ->
+                        val root = activity.window.decorView
+                        assertEquals(2, (find(root) { it is Spinner && it.contentDescription == "Playback usage for capture" } as Spinner).selectedItemPosition)
+                        find(root) { it is Button && it.text.toString() == "Start test tone" }.performClick()
+                        assertEquals(AudioAttributes.USAGE_MEDIA, activity.testToneUsage())
+                    }
+                    var signal = false
+                    val signalDeadline = SystemClock.elapsedRealtime() + 10_000
+                    while (!signal && SystemClock.elapsedRealtime() < signalDeadline) {
+                        scenario.onActivity { activity ->
+                            signal = containsStatus(activity.window.decorView, "Status: Capturing audio")
+                        }
+                        if (!signal) SystemClock.sleep(100)
+                    }
+                    assertTrue("capture did not detect the restarted tone", signal)
+                    SystemClock.sleep(3_000)
+                } else if (recreate) {
                     SystemClock.sleep(3_000)
                     scenario.recreate()
                     SystemClock.sleep(3_000)
@@ -277,6 +318,22 @@ class PairedCaptureTest {
                 if (!stopped) SystemClock.sleep(100)
             }
             assertTrue("capture service did not stop", stopped)
+            if (changeUsage) {
+                var finished = false
+                val finishDeadline = SystemClock.elapsedRealtime() + 10_000
+                while (!finished && SystemClock.elapsedRealtime() < finishDeadline) {
+                    scenario.onActivity { finished = LabStatus.captureAdmission.canBegin() }
+                    if (!finished) SystemClock.sleep(100)
+                }
+                assertTrue("capture cleanup did not finish", finished)
+                scenario.onActivity { activity ->
+                    val root = activity.window.decorView
+                    find(root) { it is Button && it.text.toString() == "Stop test tone" }.performClick()
+                    find(root) { it is Button && it.text.toString() == "Start test tone" }.performClick()
+                    assertEquals(AudioAttributes.USAGE_GAME, activity.testToneUsage())
+                    find(root) { it is Button && it.text.toString() == "Stop test tone" }.performClick()
+                }
+            }
             scenario.onActivity { activity ->
                 val count = find(activity.window.decorView) {
                     it is TextView && it.text.toString().matches(Regex("Sender queue drops: [0-9]+"))
