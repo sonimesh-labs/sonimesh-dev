@@ -340,6 +340,10 @@ a final snapshot, it labels the retained values as the last update. A new client
 attempt clears the prior observations. When its view reloads, the probe checks
 for an existing listener and resumes its status updates. Settings shown in a
 restored view apply to the next start and may differ from the running listener.
+The probe stores the host fields, selected output index, startup buffer, and
+fixed/adaptive choice in browser storage so a page reload keeps the operator's
+last lab setup. Values are length- and enum-bounded; malformed storage is
+ignored, and no invitation or session secret is stored there.
 If the listener process exits unexpectedly, the probe also retains the last
 observations it had received; they can be incomplete. Starting a new listener or
 stopping it explicitly clears them.
