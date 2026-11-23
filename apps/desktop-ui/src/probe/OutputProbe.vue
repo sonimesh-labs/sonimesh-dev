@@ -27,7 +27,7 @@ interface LabMetrics {
   plc: string; decodeErrors: string; buffered: string; output: 'active' | 'recovering' | 'software-check' | 'stopped'
 }
 interface LabSnapshot { running: boolean; sessionActive: boolean; status: string; invitation: string | null; metrics: LabMetrics | null; volume: number | null; muted: boolean | null }
-const lab = ref<LabSnapshot>({ running: false, sessionActive: false, status: 'Stopped', invitation: null, metrics: null, volume: null, muted: null })
+const lab = ref<LabSnapshot>({ running: false, sessionActive: false, status: 'Checking listener…', invitation: null, metrics: null, volume: null, muted: null })
 const invitationQr = ref<string | null>(null)
 const invitationQrError = ref(false)
 watch(() => lab.value.invitation, async (invitation, _previous, onCleanup) => {
@@ -50,7 +50,9 @@ const suggestError = ref<string | null>(null)
 const suggestBusy = ref(false)
 const labOutput = ref('')
 const startupBufferMs = ref(60)
-const labBusy = ref(false)
+const labBusy = ref(true)
+let labKnown = false
+const restoredLab = ref(false)
 const labError = ref<string | null>(null)
 const controlError = ref<string | null>(null)
 const controlBusy = ref(false)
@@ -75,16 +77,26 @@ async function suggestHost() {
 async function pollLab() {
   const request = labRequest
   try {
-    if (!window.__TAURI__) return
+    if (!window.__TAURI__) throw new Error('Desktop probe unavailable')
     const snapshot = await window.__TAURI__.core.invoke<LabSnapshot>('lab_status')
     if (disposed || request !== labRequest) return
+    const wasRunning = lab.value.running
     lab.value = snapshot
     labError.value = null
+    if (!labKnown) {
+      labKnown = true
+      restoredLab.value = snapshot.running
+      labBusy.value = false
+      if (!snapshot.running) void refresh()
+    } else if (wasRunning && !snapshot.running) {
+      restoredLab.value = false
+      if (!loaded.value) void refresh()
+    }
     if (!disposed && lab.value.running) timer = setTimeout(pollLab, 1000)
   } catch {
     if (!disposed && request === labRequest) {
       labError.value = 'Could not check the listener. Retrying…'
-      if (lab.value.running) timer = setTimeout(pollLab, 1000)
+      if (!labKnown || lab.value.running) timer = setTimeout(pollLab, 1000)
     }
   }
 }
@@ -99,12 +111,14 @@ async function toggleLab() {
     lab.value = lab.value.running
       ? await window.__TAURI__.core.invoke<LabSnapshot>('stop_lab')
       : await window.__TAURI__.core.invoke<LabSnapshot>('start_lab', { host: labHost.value.trim(), generation: generation.value, index: labOutput.value === '' ? null : Number(labOutput.value), startupBufferMs: startupBufferMs.value })
+    restoredLab.value = false
     if (!disposed && lab.value.running) timer = setTimeout(pollLab, 1000)
   } catch (cause) {
     labError.value = typeof cause === 'string' ? cause : 'Could not change listener state.'
     if (cause === 'The listener is already running.') await pollLab()
   } finally {
     labBusy.value = false
+    if (!disposed && labKnown && !lab.value.running && !loaded.value) void refresh()
   }
 }
 
@@ -177,7 +191,7 @@ async function play(index: number) {
   }
 }
 
-onMounted(refresh)
+onMounted(pollLab)
 onBeforeUnmount(() => { disposed = true; labRequest++; clearTimeout(timer) })
 </script>
 
@@ -214,6 +228,7 @@ onBeforeUnmount(() => { disposed = true; labRequest++; clearTimeout(timer) })
       <p class="eyebrow">Controlled network experiment</p>
       <h2 id="lab-title">Paired audio lab</h2>
       <p class="preview-note">Uses a public test invitation. Use only on a controlled network; this is not product pairing.</p>
+      <p v-if="restoredLab" class="preview-note">Listener settings below apply to the next start; the running listener may use different settings.</p>
       <label for="lab-output">Playback output</label>
       <select id="lab-output" v-model="labOutput" :disabled="lab.running || labBusy || busy">
         <option value="">System default output</option>

@@ -149,7 +149,9 @@ for the session, and they do not prove audible output. On a normal stop, the
 listener emits a final snapshot after its tail drain. The desktop probe retains
 the most recent session's observations while waiting; if a session fails before
 a final snapshot, it labels the retained values as the last update. A new client
-attempt clears the prior observations.
+attempt clears the prior observations. When its view reloads, the probe checks
+for an existing listener and resumes its status updates. Settings shown in a
+restored view apply to the next start and may differ from the running listener.
 Add `--control` alongside `--play` to adjust playback from the listener console:
 enter `volume 0` through `volume 100`, `mute`, or `unmute`. These local settings
 survive output recovery and successive sessions while the listener is running.
