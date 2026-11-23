@@ -724,13 +724,16 @@ playback. Media arrival and output recovery transitions are emitted promptly;
 the cumulative counters retain their five-second cadence. The last observations remain while waiting and clear on the next
 client attempt.
 When metrics are available, **Copy session evidence** copies a bounded text
-summary of the displayed status and counters without including the invitation or
-audio data. If clipboard access is unavailable, the visible metrics remain
-available for manual selection.
+summary of the displayed status, counters, and the latest listener lifecycle
+events without including the invitation or audio data. Events are limited to the
+listener's latest 32 transitions and each copied event is shortened to keep the
+operator report compact. If clipboard access is unavailable, the visible metrics
+and events remain available for manual selection.
 **Share session evidence** sends the same bounded summary through the browser
 share API when the Tauri web view exposes it, and otherwise copies it to the
 clipboard. A cancelled share leaves the current notice unchanged; neither path
-includes the invitation or audio data.
+includes the invitation or audio data. When no lifecycle events have arrived,
+the evidence omits the empty event section.
 For adaptive playout the observations also show the current target and range,
 smoothed arrival jitter, gated ticks and forced playouts. These values describe
 the current stream epoch: a decoder or jitter reset clears their history, while
