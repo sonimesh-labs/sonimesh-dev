@@ -235,15 +235,32 @@ where
         initial_sequence: u32,
         adaptive: AdaptiveTargetConfig,
     ) -> Result<Self, UdpReceiverSetupError> {
-        let receiver = UdpMediaReceiver::bind(address).map_err(UdpReceiverSetupError::Socket)?;
-        let pipeline = ReceiverStreamPipeline::new_with_adaptive_target(
+        Self::bind_with_worker_and_adaptive_target(
+            address,
             secret,
             context,
-            decoder,
-            producer,
+            StreamDecodeWorker::new(decoder, producer, initial_sequence),
             counters,
-            initial_sequence,
             adaptive,
+        )
+    }
+
+    /// Binds an adaptive receiver around a codec-validated decode worker.
+    ///
+    /// # Errors
+    ///
+    /// Returns a socket, media opener, or adaptive controller setup error.
+    pub fn bind_with_worker_and_adaptive_target(
+        address: SocketAddr,
+        secret: &SessionSecret,
+        context: MediaKeyContext,
+        worker: StreamDecodeWorker<D, JITTER_CAPACITY, MAX_ENCODED_BYTES, PCM_SAMPLES_PER_BLOCK>,
+        counters: Arc<StreamCounters>,
+        adaptive: AdaptiveTargetConfig,
+    ) -> Result<Self, UdpReceiverSetupError> {
+        let receiver = UdpMediaReceiver::bind(address).map_err(UdpReceiverSetupError::Socket)?;
+        let pipeline = ReceiverStreamPipeline::with_worker_and_adaptive_target(
+            secret, context, worker, counters, adaptive,
         )
         .map_err(UdpReceiverSetupError::Adaptive)?;
         Ok(Self {

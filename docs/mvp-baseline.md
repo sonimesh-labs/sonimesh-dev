@@ -156,8 +156,11 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   retains that snapshot, or the last available update after failure, until the
   next client attempt. These observations do not establish audible playback.
   Its fixed startup wait is configurable from 20 to 120 ms for network experiments;
-  the desktop probe exposes this setting before listener startup. It does not
-  implement adaptive jitter control or measure end-to-end latency.
+  the desktop probe exposes this setting before listener startup. An opt-in
+  experimental Balanced adaptive target gates live playout with bounded waits;
+  those waits can produce silence and target reductions do not accelerate
+  playback. Fixed scheduling remains the default. Neither mode measures
+  end-to-end latency or establishes a quality improvement.
   During live playout the paired lab conceals short gaps even when no later
   packet is buffered, then resets an empty stream after three consecutive PLC
   frames to permit fresh audio after an extended interruption. A real UDP and

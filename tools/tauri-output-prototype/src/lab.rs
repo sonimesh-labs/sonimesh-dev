@@ -61,6 +61,7 @@ impl Lab {
         host: &str,
         output_id: Option<&str>,
         startup_buffer_ms: u16,
+        adaptive: bool,
     ) -> Result<LabSnapshot, String> {
         self.refresh();
         if self.child.is_some() {
@@ -92,6 +93,9 @@ impl Lab {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        if adaptive {
+            command.arg("--adaptive");
+        }
         if output_id.is_some() {
             command.arg("--output-id-framed");
         }
@@ -343,10 +347,10 @@ mod tests {
     fn rejects_invalid_host_before_launch() {
         let mut lab = Lab::default();
         for host in ["invalid", "0.0.0.0", "224.0.0.1", "255.255.255.255"] {
-            assert!(lab.start(host, None, 60).is_err());
+            assert!(lab.start(host, None, 60, false).is_err());
         }
         for value in [0, 19, 30, 121, 140] {
-            assert!(lab.start("127.0.0.1", None, value).is_err());
+            assert!(lab.start("127.0.0.1", None, value, false).is_err());
         }
         assert!(!lab.refresh().running);
         assert!(lab.control(Some(101), None).is_err());
@@ -437,7 +441,8 @@ mod tests {
         let output = sonimesh_platform::CpalOutput::new();
         let device = output.default_device_probe().unwrap().device.id;
         let mut lab = Lab::default();
-        lab.start("127.0.0.1", Some(device.as_str()), 40).unwrap();
+        lab.start("127.0.0.1", Some(device.as_str()), 40, false)
+            .unwrap();
         let deadline = Instant::now() + Duration::from_secs(10);
         let snapshot = loop {
             let snapshot = lab.refresh();
@@ -479,11 +484,11 @@ mod tests {
             );
             std::thread::sleep(Duration::from_millis(25));
         }
-        assert!(lab.start("127.0.0.1", None, 60).is_err());
+        assert!(lab.start("127.0.0.1", None, 60, false).is_err());
         assert!(!lab.stop().running);
         assert!(lab.child.is_none());
 
-        lab.start("127.0.0.1", Some("unavailable-output-id"), 60)
+        lab.start("127.0.0.1", Some("unavailable-output-id"), 60, false)
             .unwrap();
         let deadline = Instant::now() + Duration::from_secs(10);
         while lab.refresh().running && Instant::now() < deadline {

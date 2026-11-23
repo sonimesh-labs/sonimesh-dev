@@ -109,6 +109,7 @@ fn start_lab(
     generation: u32,
     index: Option<usize>,
     startup_buffer_ms: u16,
+    adaptive: bool,
 ) -> Result<lab::LabSnapshot, String> {
     let output = match index {
         Some(index) => Some(
@@ -125,6 +126,7 @@ fn start_lab(
             &host,
             output.as_ref().map(|id| id.as_str()),
             startup_buffer_ms,
+            adaptive,
         )
     })
 }

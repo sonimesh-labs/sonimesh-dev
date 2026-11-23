@@ -16,14 +16,15 @@ use std::time::{Duration, Instant};
 use rcgen::generate_simple_self_signed;
 use rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
 use sonimesh_app::{
-    ControlReply, ControlStreamAction, ControlStreamCoordinator, InvitationInputs,
-    MediaSessionAllocator, PairingId, PairingInvitationController, PairingListener,
-    PairingQrInvitation, PairingSource, ReceiverPipelineError, SessionState, UdpPollOutcome,
-    UdpReceiverError, UdpReceiverPipeline, accept_pairing_stream, begin_from_rendered_payload,
+    AdaptiveTargetConfig, ControlReply, ControlStreamAction, ControlStreamCoordinator,
+    InvitationInputs, MediaSessionAllocator, PairingId, PairingInvitationController,
+    PairingListener, PairingQrInvitation, PairingSource, ReceiverPipelineError, SessionState,
+    UdpPollOutcome, UdpReceiverError, UdpReceiverPipeline, accept_pairing_stream,
+    begin_from_rendered_payload,
 };
 use sonimesh_audio::{
-    DecodeStep, DecodeWorkerError, FrameDecoder, OpusFrameConfig, RealtimePcmConsumer,
-    StreamDecodeWorker, realtime_pcm_queue,
+    DecodeStep, DecodeWorkerError, FrameDecoder, JitterMode, OpusFrameConfig, RealtimePcmConsumer,
+    StreamDecodeWorker, TargetGatedPlayoutConfig, realtime_pcm_queue,
 };
 use sonimesh_diagnostics::{StreamCounters, StreamMetricsSnapshot};
 use sonimesh_network::{
@@ -180,6 +181,7 @@ struct Options {
     keep_listening: bool,
     control: bool,
     status: bool,
+    adaptive: bool,
     startup_buffer: Duration,
     bind: Ipv4Addr,
     host: Ipv4Addr,
@@ -196,6 +198,7 @@ impl Default for Options {
             keep_listening: false,
             control: false,
             status: false,
+            adaptive: false,
             startup_buffer: Duration::from_millis(60),
             bind: Ipv4Addr::LOCALHOST,
             host: Ipv4Addr::LOCALHOST,
@@ -220,6 +223,7 @@ impl Options {
                 "--keep-listening" if !result.keep_listening => result.keep_listening = true,
                 "--control" if !result.control => result.control = true,
                 "--status" if !result.status => result.status = true,
+                "--adaptive" if !result.adaptive => result.adaptive = true,
                 "--startup-buffer-ms" if !startup_buffer_set => {
                     let value = args
                         .next()
@@ -248,7 +252,7 @@ impl Options {
                 }
                 _ => {
                     return Err(
-                        "usage: paired-audio-lab [--require-tone] [--play [--select-output | --output-id-stdin | --output-id-framed] [--control]] [--status] [--startup-buffer-ms 20-120] [--keep-listening] [--bind IPv4 --host IPv4]"
+                        "usage: paired-audio-lab [--require-tone] [--play [--select-output | --output-id-stdin | --output-id-framed] [--control]] [--status] [--adaptive] [--startup-buffer-ms 20-120] [--keep-listening] [--bind IPv4 --host IPv4]"
                             .into(),
                     );
                 }
@@ -408,8 +412,11 @@ fn next_playout_deadline(deadline: Instant, now: Instant) -> Instant {
     }
 }
 
-fn decode_playout(receiver: &mut Receiver) -> LabResult<Option<DecodeStep>> {
-    match receiver.decode_next() {
+fn decode_playout(
+    receiver: &mut Receiver,
+    arrivals_pending: bool,
+) -> LabResult<Option<DecodeStep>> {
+    match receiver.decode_next_with_arrivals_pending(arrivals_pending) {
         Ok(step) => Ok(Some(step)),
         Err(DecodeWorkerError::Decoder(error))
             if error.code() == opus::ErrorCode::InvalidPacket =>
@@ -431,11 +438,12 @@ fn decode_live_playout(
         *consecutive_plc = 0;
         return Ok(None);
     }
-    let step = decode_playout(receiver)?;
+    let step = decode_playout(receiver, true)?;
     match step {
         Some(DecodeStep::Concealed { .. }) => {
             *consecutive_plc = consecutive_plc.saturating_add(1);
         }
+        Some(DecodeStep::NotReady) => {}
         _ => *consecutive_plc = 0,
     }
     Ok(step)
@@ -467,7 +475,7 @@ fn drain_stop_tail(
         }
         let now = Instant::now();
         if now >= next && metrics.snapshot().jitter_frames > 0 {
-            if let Some(DecodeStep::Decoded { .. }) = decode_playout(receiver)? {
+            if let Some(DecodeStep::Decoded { .. }) = decode_playout(receiver, false)? {
                 *decoded += 1;
                 last_activity = now;
             }
@@ -742,13 +750,34 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                                 0,
                                 OpusFrameConfig::new(48_000, 2, 20)?,
                             )?;
-                            let mut pipeline = Receiver::bind_with_worker(
-                                SocketAddrV4::new(options.bind, 39093).into(),
-                                grant.root(),
-                                grant.context(),
-                                worker,
-                                Arc::clone(&metrics),
-                            )?;
+                            let address = SocketAddrV4::new(options.bind, 39093).into();
+                            let mut pipeline = if options.adaptive {
+                                let mut pipeline = Receiver::bind_with_worker_and_adaptive_target(
+                                    address,
+                                    grant.root(),
+                                    grant.context(),
+                                    worker,
+                                    Arc::clone(&metrics),
+                                    AdaptiveTargetConfig::preset(
+                                        JitterMode::Balanced,
+                                        20,
+                                        8,
+                                        1_000_000_000,
+                                    ),
+                                )?;
+                                pipeline.enable_target_gated_playout(TargetGatedPlayoutConfig {
+                                    max_gate_ticks: 3,
+                                })?;
+                                pipeline
+                            } else {
+                                Receiver::bind_with_worker(
+                                    address,
+                                    grant.root(),
+                                    grant.context(),
+                                    worker,
+                                    Arc::clone(&metrics),
+                                )?
+                            };
                             playing = match playback.start(&mut pipeline) {
                                 Ok(playing) => playing,
                                 Err(error) => {
@@ -1310,7 +1339,7 @@ mod tests {
         while metrics.snapshot().authenticated_packets < 1 && Instant::now() < until {
             poll_media(&mut receiver).unwrap();
         }
-        assert!(decode_playout(&mut receiver).unwrap().is_none());
+        assert!(decode_playout(&mut receiver, false).unwrap().is_none());
         assert_eq!(metrics.snapshot().decode_errors, 1);
 
         let mut encoder =
@@ -1328,7 +1357,7 @@ mod tests {
             poll_media(&mut receiver).unwrap();
         }
         assert!(matches!(
-            decode_playout(&mut receiver).unwrap(),
+            decode_playout(&mut receiver, false).unwrap(),
             Some(DecodeStep::Decoded { sequence: 1, .. })
         ));
         let mut samples = [0.0; SAMPLES];
@@ -1434,6 +1463,93 @@ mod tests {
     }
 
     #[test]
+    fn adaptive_live_playout_bounds_waits_recovers_and_drains() {
+        use sonimesh_protocol::{MediaKeyContext, MediaSealer};
+        use std::net::UdpSocket;
+
+        let secret = SessionSecret::new([0x37; 32]);
+        let context = MediaKeyContext::new(8, 1, 0, MediaDirection::AndroidToDesktop).unwrap();
+        let metrics = Arc::new(StreamCounters::default());
+        let (producer, _consumer) = realtime_pcm_queue::<SAMPLES>(8).unwrap();
+        let worker = StreamDecodeWorker::new_for_opus(
+            ObservedDecoder {
+                decoder: lab_decoder::Decoder::new().unwrap(),
+                peak: Arc::new(AtomicU32::new(0)),
+            },
+            producer,
+            0,
+            OpusFrameConfig::new(48_000, 2, 20).unwrap(),
+        )
+        .unwrap();
+        let mut receiver = Receiver::bind_with_worker_and_adaptive_target(
+            "127.0.0.1:0".parse().unwrap(),
+            &secret,
+            context,
+            worker,
+            Arc::clone(&metrics),
+            AdaptiveTargetConfig::preset(JitterMode::Balanced, 20, 8, 1_000),
+        )
+        .unwrap();
+        receiver
+            .enable_target_gated_playout(TargetGatedPlayoutConfig { max_gate_ticks: 3 })
+            .unwrap();
+        let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let mut encoder =
+            opus::Encoder::new(48_000, opus::Channels::Stereo, opus::Application::Audio).unwrap();
+        let mut payload = [0_u8; 1_148];
+        let length = encoder
+            .encode_float(&[0.25; SAMPLES], &mut payload)
+            .unwrap();
+        let mut sealer = MediaSealer::new(&secret, context).unwrap();
+        let first = sealer.seal(0, 0, &payload[..length]).unwrap();
+        sender
+            .send_to(&first.datagram, receiver.local_addr().unwrap())
+            .unwrap();
+        poll_media(&mut receiver).unwrap();
+        let mut plc = 0;
+        for _ in 0..3 {
+            assert!(matches!(
+                decode_live_playout(&mut receiver, &metrics, &mut plc).unwrap(),
+                Some(DecodeStep::NotReady)
+            ));
+        }
+        assert!(matches!(
+            decode_live_playout(&mut receiver, &metrics, &mut plc).unwrap(),
+            Some(DecodeStep::Decoded { sequence: 0, .. })
+        ));
+        for sequence in 1..=3 {
+            for _ in 0..3 {
+                assert!(matches!(
+                    decode_live_playout(&mut receiver, &metrics, &mut plc).unwrap(),
+                    Some(DecodeStep::NotReady)
+                ));
+                assert_eq!(plc, sequence - 1);
+            }
+            assert!(
+                matches!(decode_live_playout(&mut receiver, &metrics, &mut plc).unwrap(), Some(DecodeStep::Concealed { sequence: actual, .. }) if actual == u32::from(sequence))
+            );
+        }
+        assert!(
+            decode_live_playout(&mut receiver, &metrics, &mut plc)
+                .unwrap()
+                .is_none()
+        );
+        let resumed = sealer.seal(0, 960, &payload[..length]).unwrap();
+        sender
+            .send_to(&resumed.datagram, receiver.local_addr().unwrap())
+            .unwrap();
+        poll_media(&mut receiver).unwrap();
+        assert!(matches!(
+            decode_live_playout(&mut receiver, &metrics, &mut plc).unwrap(),
+            Some(DecodeStep::NotReady)
+        ));
+        assert!(matches!(
+            decode_playout(&mut receiver, false).unwrap(),
+            Some(DecodeStep::Decoded { sequence: 1, .. })
+        ));
+    }
+
+    #[test]
     fn playout_deadline_does_not_accumulate_poll_delay() {
         let origin = Instant::now();
         let mut deadline = origin;
@@ -1467,6 +1583,7 @@ mod tests {
         let defaults = Options::parse(args(&[])).unwrap();
         assert!(!defaults.play && !defaults.require_tone);
         assert!(!defaults.status);
+        assert!(!defaults.adaptive);
         assert_eq!(defaults.startup_buffer, Duration::from_millis(60));
         for value in ["20", "40", "60", "80", "100", "120"] {
             let options = Options::parse(args(&["--startup-buffer-ms", value])).unwrap();
@@ -1490,6 +1607,8 @@ mod tests {
         );
         assert!(Options::parse(args(&["--status"])).unwrap().status);
         assert!(Options::parse(args(&["--status", "--status"])).is_err());
+        assert!(Options::parse(args(&["--adaptive"])).unwrap().adaptive);
+        assert!(Options::parse(args(&["--adaptive", "--adaptive"])).is_err());
         let playback =
             Options::parse(args(&["--require-tone", "--play", "--select-output"])).unwrap();
         assert!(playback.play && playback.require_tone && playback.select_output);

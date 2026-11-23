@@ -498,6 +498,15 @@ selected. Refreshing the device list resets the selection; an unavailable chosen
 device prevents the listener from starting. Set the startup buffer before
 starting the listener (20–120 ms in 20 ms steps, default 60 ms); it controls the
 initial playout wait, not adaptive jitter or measured end-to-end latency.
+The optional **Adaptive (experimental)** playout mode uses the Balanced target
+and a bounded gate after that initial wait. Gated ticks can produce silence and
+target decreases do not accelerate playback; compare it with the default fixed
+mode before drawing conclusions. Neither mode proves physical latency or audio
+quality.
+On 2026-11-23, an API 37 emulator paired with the software-only listener in
+adaptive mode and completed a short synthetic-tone capture: 151 packets and
+151 decoded frames, with no rejected packets or PLC frames. This checks the
+software path only; it does not establish WLAN or audible-playback behavior.
 Stopping the listener terminates the
 experiment immediately, including any active session; closing the probe also
 stops its child. During an active session the probe shows the listener's

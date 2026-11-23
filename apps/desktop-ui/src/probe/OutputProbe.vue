@@ -50,6 +50,7 @@ const suggestError = ref<string | null>(null)
 const suggestBusy = ref(false)
 const labOutput = ref('')
 const startupBufferMs = ref(60)
+const adaptive = ref(false)
 const labBusy = ref(true)
 let labKnown = false
 const restoredLab = ref(false)
@@ -110,7 +111,7 @@ async function toggleLab() {
   try {
     lab.value = lab.value.running
       ? await window.__TAURI__.core.invoke<LabSnapshot>('stop_lab')
-      : await window.__TAURI__.core.invoke<LabSnapshot>('start_lab', { host: labHost.value.trim(), generation: generation.value, index: labOutput.value === '' ? null : Number(labOutput.value), startupBufferMs: startupBufferMs.value })
+      : await window.__TAURI__.core.invoke<LabSnapshot>('start_lab', { host: labHost.value.trim(), generation: generation.value, index: labOutput.value === '' ? null : Number(labOutput.value), startupBufferMs: startupBufferMs.value, adaptive: adaptive.value })
     restoredLab.value = false
     if (!disposed && lab.value.running) timer = setTimeout(pollLab, 1000)
   } catch (cause) {
@@ -249,6 +250,12 @@ onBeforeUnmount(() => { disposed = true; labRequest++; clearTimeout(timer) })
         <option v-for="value in [20, 40, 60, 80, 100, 120]" :key="value" :value="value">{{ value }} ms</option>
       </select>
       <p class="preview-note">Initial playout wait; restart the listener to change it. This is not an end-to-end latency measurement.</p>
+      <label for="lab-playout">Playout mode</label>
+      <select id="lab-playout" v-model="adaptive" :disabled="lab.running || labBusy">
+        <option :value="false">Fixed</option>
+        <option :value="true">Adaptive (experimental)</option>
+      </select>
+      <p class="preview-note">Adaptive mode may pause audio while buffering; restart the listener to change modes.</p>
       <button type="button" class="preview-action" :disabled="labBusy || suggestBusy || (!lab.running && (playing !== null || busy))" @click="toggleLab">{{ lab.running ? 'Stop listener' : 'Start listener' }}</button>
       <p v-if="playing !== null" class="preview-note">Wait for the test sound to finish before starting the listener.</p>
       <p v-else-if="lab.running" class="preview-note">Stop the listener before testing an output.</p>

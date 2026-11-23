@@ -61,6 +61,15 @@ frames, it resets an empty stream on the next deadline and waits for a fresh
 packet; buffered later frames are still reached through PLC. This lab policy is
 not an adaptive jitter target or a measured quality guarantee.
 
+The paired audio lab may explicitly select an experimental Balanced adaptive
+target instead of its default fixed scheduling policy. It treats arrivals as
+pending while the stream is active and gates for at most three 20 ms ticks per
+decision. A gated tick produces no PCM and can therefore cause output silence;
+the scheduler does not accelerate playout when the target falls. After three
+consecutive PLC decisions and an empty buffer it still resets and waits for a
+fresh packet. Stop draining uses immediate decode rather than gating. This is
+an experiment, not evidence of improved quality or latency.
+
 The paired audio lab uses a bounded best-effort stop drain: it polls
 UDP for trailing packets, continues paced decode, and gives queued PCM time to
 reach the output before stopping. A quiet interval ends the drain, and an

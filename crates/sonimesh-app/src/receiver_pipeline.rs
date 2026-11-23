@@ -289,6 +289,28 @@ where
         initial_sequence: u32,
         adaptive: AdaptiveTargetConfig,
     ) -> Result<Self, AdaptiveTargetSetupError> {
+        Self::with_worker_and_adaptive_target(
+            secret,
+            context,
+            StreamDecodeWorker::new(decoder, producer, initial_sequence),
+            counters,
+            adaptive,
+        )
+    }
+
+    /// Creates an adaptive pipeline around a codec-validated decode worker.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AdaptiveTargetSetupError`] for invalid controller configuration
+    /// or an initial media opener failure.
+    pub fn with_worker_and_adaptive_target(
+        secret: &SessionSecret,
+        context: MediaKeyContext,
+        worker: StreamDecodeWorker<D, JITTER_CAPACITY, MAX_ENCODED_BYTES, PCM_SAMPLES_PER_BLOCK>,
+        counters: Arc<StreamCounters>,
+        adaptive: AdaptiveTargetConfig,
+    ) -> Result<Self, AdaptiveTargetSetupError> {
         let arrival = ArrivalJitter::new(OPUS_SAMPLE_RATE_HZ, adaptive.arrival_ticks_per_second)
             .map_err(AdaptiveTargetSetupError::Arrival)?;
         let target =
@@ -298,15 +320,8 @@ where
                 JitterTargetConfigError::TargetExceedsCapacity,
             ));
         }
-        let mut pipeline = Self::new(
-            secret,
-            context,
-            decoder,
-            producer,
-            counters,
-            initial_sequence,
-        )
-        .map_err(AdaptiveTargetSetupError::Ingress)?;
+        let mut pipeline = Self::with_worker(secret, context, worker, counters)
+            .map_err(AdaptiveTargetSetupError::Ingress)?;
         pipeline.adaptive_target = Some(AdaptiveTargetController {
             arrival,
             target,
