@@ -385,6 +385,10 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   an All supported session and observed that usage selected both during capture
   and after stop. This is UI and service lifecycle evidence, not physical-device
   compatibility evidence.
+  Consecutive zero-frame reads now end the capture with a retry message after
+  five seconds; successful reads, including silent frames, reset that timer.
+  Host tests cover the timer and clock regression. The timeout failure path has
+  not been injected into a real Android AudioRecord session.
 - a buildable Vue/Vite receiver-control preview with a single low-rate bridge
   boundary, session controls, output selection, per-stream volume and mute,
   pairing-invitation state, and diagnostics presentation for packet,

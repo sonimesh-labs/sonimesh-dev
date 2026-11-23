@@ -250,6 +250,7 @@ class CaptureService : Service() {
         val evidenceThrottle = CaptureEvidencePublishThrottle(
             CAPTURE_EVIDENCE_PUBLISH_INTERVAL_MS,
         )
+        val readProgress = CaptureReadProgress(CAPTURE_READ_TIMEOUT_MS)
 
         try {
             while (!teardownGate.isTeardownStarted()) {
@@ -293,6 +294,14 @@ class CaptureService : Service() {
                 }
                 val readCompletedAtMillis = SystemClock.elapsedRealtime()
                 if (read == 0) {
+                    if (readProgress.stalled(empty = true, nowMillis = readCompletedAtMillis)) {
+                        mainHandler.post {
+                            if (!teardownGate.isTeardownStarted()) {
+                                teardown(TerminalOutcome.Failed("Audio capture stopped producing samples. Start a new capture and try again."))
+                            }
+                        }
+                        return
+                    }
                     try {
                         Thread.sleep(CAPTURE_POLL_INTERVAL_MS)
                     } catch (error: InterruptedException) {
@@ -337,6 +346,7 @@ class CaptureService : Service() {
                     }
                     return
                 }
+                readProgress.stalled(empty = false, nowMillis = readCompletedAtMillis)
 
                 var silent = true
                 var index = 0
@@ -520,6 +530,7 @@ class CaptureService : Service() {
         private const val STOP_REQUEST_CODE = 1002
         private const val NO_SIGNAL_DURATION_MS = 2_000L
         private const val CAPTURE_POLL_INTERVAL_MS = 5L
+        private const val CAPTURE_READ_TIMEOUT_MS = 5_000L
         private const val CAPTURE_EVIDENCE_PUBLISH_INTERVAL_MS = 500L
         private const val REQUESTED_SAMPLE_RATE_HZ = 48_000
         private const val REQUESTED_CHANNELS = 2

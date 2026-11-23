@@ -7,6 +7,26 @@ import org.junit.Test
 
 class CaptureReadTest {
     @Test
+    fun empty_reads_time_out_but_any_completed_read_restarts_the_wait() {
+        val progress = CaptureReadProgress(5_000)
+        assertEquals(false, progress.stalled(true, 100))
+        assertEquals(false, progress.stalled(true, 5_099))
+        assertEquals(false, progress.stalled(false, 5_099))
+        assertEquals(false, progress.stalled(true, 5_100))
+        assertEquals(false, progress.stalled(true, 10_099))
+        assertEquals(true, progress.stalled(true, 10_100))
+    }
+
+    @Test
+    fun clock_regression_restarts_the_empty_read_wait() {
+        val progress = CaptureReadProgress(5_000)
+        assertEquals(false, progress.stalled(true, 1_000))
+        assertEquals(false, progress.stalled(true, 10))
+        assertEquals(false, progress.stalled(true, 5_009))
+        assertEquals(true, progress.stalled(true, 5_010))
+    }
+
+    @Test
     fun successful_read_does_not_increment_the_error_counter() {
         val evidence = CaptureEvidence()
 

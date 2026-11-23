@@ -50,6 +50,10 @@ been accepted. It owns:
   must not be used to infer why a source is silent or policy-limited;
 - bounded non-blocking capture reads so teardown never depends on an unbounded
   platform `READ_BLOCKING` wake-up;
+- if non-blocking reads produce no frames for five continuous seconds, stop the
+  session and offer a fresh start. Completed silent frames are still valid reads
+  and use the separate no-signal indication; a zero-length read is not counted
+  as an AudioRecord error;
 - the bounded encoder, packet-protection, socket, and reconnect workers;
 - the visible foreground notification and its explicit stop action;
 - service state publication to the activity through a bounded, low-rate state

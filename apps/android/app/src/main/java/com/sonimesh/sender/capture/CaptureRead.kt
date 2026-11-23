@@ -1,5 +1,28 @@
 package com.sonimesh.sender.capture
 
+/** Detects a capture source that repeatedly returns no frames. */
+internal class CaptureReadProgress(private val timeoutMillis: Long) {
+    private var emptySince: Long? = null
+
+    init {
+        require(timeoutMillis > 0)
+    }
+
+    fun stalled(empty: Boolean, nowMillis: Long): Boolean {
+        require(nowMillis >= 0)
+        if (!empty) {
+            emptySince = null
+            return false
+        }
+        val start = emptySince
+        if (start == null || nowMillis < start) {
+            emptySince = nowMillis
+            return false
+        }
+        return nowMillis - start >= timeoutMillis
+    }
+}
+
 /** Runs one AudioRecord read and records non-teardown exceptions as evidence. */
 internal inline fun readCaptureSamples(
     evidence: CaptureEvidence,
