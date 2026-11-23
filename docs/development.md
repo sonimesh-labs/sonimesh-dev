@@ -599,6 +599,11 @@ They do not change the system volume. The controls wait for the listener's
 reported value before accepting another adjustment. If confirmation does not
 arrive within five seconds, the probe allows a retry and reports that the result
 is unknown; the displayed value remains the last one received from the listener.
+On 2026-11-23 the Windows host's real-listener test selected its default output,
+started the playback-enabled child, recovered from a deliberately incomplete
+connection, observed the listener report volume 35 and muted, and stopped it.
+The test also checked rejection of an unavailable output identifier. This covers
+the host-to-child control path, not the window interaction or audible playback.
 The probe prevents its test tone and listener from playing at the same time,
 including across a page reload. Finish the test tone before starting the
 listener, and stop the listener before testing an output. This does not control
