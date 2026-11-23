@@ -6,6 +6,7 @@ internal data class LabSessionConfig(val usage: LabCaptureUsage, val bitrate: Op
 
 /** Process-local, main-thread status for the interactive lab. */
 internal object LabStatus {
+    private const val MAX_MESSAGE_CHARS = 256
     val captureAdmission = LabCaptureAdmission()
     var captureUsage: LabCaptureUsage? = null
         private set
@@ -51,8 +52,13 @@ internal object LabStatus {
     }
 
     fun publish(value: String) {
-        message = value
-        observers.toList().forEach { it(value) }
+        message = boundMessage(value)
+        observers.toList().forEach { it(message) }
+    }
+
+    private fun boundMessage(value: String): String {
+        if (value.length <= MAX_MESSAGE_CHARS) return value
+        return value.take(MAX_MESSAGE_CHARS - 3) + "..."
     }
 
     fun observeSenderQueueDrops(observer: (Long?) -> Unit) {
