@@ -154,7 +154,8 @@ class LabCaptureService : Service() {
                 var session = random.nextLong()
                 while (session == 0L) session = random.nextLong()
                 val identity = StreamIdentity(session, 1, 0)
-                val result = connection.startStream(StreamParameters(identity, 48_000, 2, 20))
+                val parameters = StreamParameters(identity, 48_000, 2, 20)
+                val result = startPairedWithRetry(running::get, Thread::sleep) { connection.startStream(parameters) }
                 check(result is StreamControlResult.Status && result.state == 2) { "desktop receiver not ready" }
                 pairedIdentity = identity
                 check(setupSocket.handoff()) { "capture stopped while starting stream" }

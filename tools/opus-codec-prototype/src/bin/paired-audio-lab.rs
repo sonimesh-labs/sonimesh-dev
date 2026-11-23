@@ -17,10 +17,10 @@ use rcgen::generate_simple_self_signed;
 use rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
 use sonimesh_app::{
     AdaptiveTargetConfig, ControlReply, ControlStreamAction, ControlStreamCoordinator,
-    InvitationInputs, MediaSessionAllocator, PairingId, PairingInvitationController,
-    PairingListener, PairingQrInvitation, PairingSource, ReceiverPipelineError, SessionState,
-    UdpPollOutcome, UdpReceiverError, UdpReceiverPipeline, accept_pairing_stream,
-    begin_from_rendered_payload,
+    InvitationInputs, MediaSessionAllocator, MediaStreamIdentity, PairingId,
+    PairingInvitationController, PairingListener, PairingQrInvitation, PairingSource,
+    ReceiverPipelineError, SessionState, UdpPollOutcome, UdpReceiverError, UdpReceiverPipeline,
+    accept_pairing_stream, begin_from_rendered_payload,
 };
 use sonimesh_audio::{
     DecodeStep, DecodeWorkerError, FrameDecoder, InsertOutcome, JitterMode, OpusFrameConfig,
@@ -357,6 +357,26 @@ const STOP_DRAIN_QUIET: Duration = Duration::from_millis(160);
 const STOP_DRAIN_LIMIT: Duration = Duration::from_millis(500);
 const MAX_CONSECUTIVE_PLC: u8 = 3;
 type Receiver = UdpReceiverPipeline<ObservedDecoder, 8, 1_148, SAMPLES>;
+type PreparedReceiver = (Receiver, RealtimePcmConsumer<SAMPLES>, Arc<StreamCounters>);
+
+fn start_prepared<T, E>(
+    pending: &mut Option<(MediaStreamIdentity, T)>,
+    identity: MediaStreamIdentity,
+    prepare: impl FnOnce() -> Result<T, E>,
+    start: impl FnOnce(&mut T) -> Result<bool, E>,
+) -> Result<Result<(T, bool), E>, E> {
+    let mut prepared = match pending.take() {
+        Some((previous, prepared)) if previous == identity => prepared,
+        _ => prepare()?,
+    };
+    match start(&mut prepared) {
+        Ok(playing) => Ok(Ok((prepared, playing))),
+        Err(error) => {
+            *pending = Some((identity, prepared));
+            Ok(Err(error))
+        }
+    }
+}
 
 #[derive(Default)]
 struct ScheduleObservations {
@@ -802,6 +822,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
 ) -> LabResult<()> {
     let mut allocator = MediaSessionAllocator::new(root);
     let mut receiver: Option<Receiver> = None;
+    let mut pending_receiver: Option<(MediaStreamIdentity, PreparedReceiver)> = None;
     let mut consumer = None;
     let mut counters = None;
     let mut next_playout = None;
@@ -846,53 +867,64 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                                 "lab requires one 48 kHz stereo 20 ms stream",
                             )?
                         } else {
-                            let grant = allocator.supply_for_authenticated_control_session(
-                                coordinator,
-                                control_token,
+                            let prepared = start_prepared(
+                                &mut pending_receiver,
                                 request.identity,
-                                MediaDirection::AndroidToDesktop,
-                            )?;
-                            let metrics = Arc::new(StreamCounters::default());
-                            let (producer, next_consumer) = realtime_pcm_queue::<SAMPLES>(8)?;
-                            let worker = StreamDecodeWorker::new_for_opus(
-                                ObservedDecoder {
-                                    decoder: lab_decoder::Decoder::new()?,
-                                    peak: Arc::clone(&decoded_peak),
+                                || {
+                                    let grant = allocator
+                                        .supply_for_authenticated_control_session(
+                                            coordinator,
+                                            control_token,
+                                            request.identity,
+                                            MediaDirection::AndroidToDesktop,
+                                        )?;
+                                    let metrics = Arc::new(StreamCounters::default());
+                                    let (producer, next_consumer) =
+                                        realtime_pcm_queue::<SAMPLES>(8)?;
+                                    let worker = StreamDecodeWorker::new_for_opus(
+                                        ObservedDecoder {
+                                            decoder: lab_decoder::Decoder::new()?,
+                                            peak: Arc::clone(&decoded_peak),
+                                        },
+                                        producer,
+                                        0,
+                                        OpusFrameConfig::new(48_000, 2, 20)?,
+                                    )?;
+                                    let address = SocketAddrV4::new(options.bind, 39093).into();
+                                    let pipeline = if options.adaptive {
+                                        let mut pipeline =
+                                            Receiver::bind_with_worker_and_adaptive_target(
+                                                address,
+                                                grant.root(),
+                                                grant.context(),
+                                                worker,
+                                                Arc::clone(&metrics),
+                                                AdaptiveTargetConfig::preset(
+                                                    JitterMode::Balanced,
+                                                    20,
+                                                    8,
+                                                    1_000_000_000,
+                                                ),
+                                            )?;
+                                        pipeline.enable_target_gated_playout(
+                                            TargetGatedPlayoutConfig { max_gate_ticks: 3 },
+                                        )?;
+                                        pipeline
+                                    } else {
+                                        Receiver::bind_with_worker(
+                                            address,
+                                            grant.root(),
+                                            grant.context(),
+                                            worker,
+                                            Arc::clone(&metrics),
+                                        )?
+                                    };
+                                    Ok((pipeline, next_consumer, metrics))
                                 },
-                                producer,
-                                0,
-                                OpusFrameConfig::new(48_000, 2, 20)?,
+                                |(pipeline, _, _)| playback.start(pipeline),
                             )?;
-                            let address = SocketAddrV4::new(options.bind, 39093).into();
-                            let mut pipeline = if options.adaptive {
-                                let mut pipeline = Receiver::bind_with_worker_and_adaptive_target(
-                                    address,
-                                    grant.root(),
-                                    grant.context(),
-                                    worker,
-                                    Arc::clone(&metrics),
-                                    AdaptiveTargetConfig::preset(
-                                        JitterMode::Balanced,
-                                        20,
-                                        8,
-                                        1_000_000_000,
-                                    ),
-                                )?;
-                                pipeline.enable_target_gated_playout(TargetGatedPlayoutConfig {
-                                    max_gate_ticks: 3,
-                                })?;
-                                pipeline
-                            } else {
-                                Receiver::bind_with_worker(
-                                    address,
-                                    grant.root(),
-                                    grant.context(),
-                                    worker,
-                                    Arc::clone(&metrics),
-                                )?
-                            };
-                            playing = match playback.start(&mut pipeline) {
-                                Ok(playing) => playing,
+                            let ((pipeline, next_consumer, metrics), started) = match prepared {
+                                Ok(result) => result,
                                 Err(error) => {
                                     eprintln!("output start failed: {error}");
                                     coordinator.abort_pending(token)?;
@@ -908,6 +940,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                                     continue;
                                 }
                             };
+                            playing = started;
                             receiver = Some(pipeline);
                             consumer = if playing { None } else { Some(next_consumer) };
                             counters = Some(metrics);
@@ -1207,6 +1240,105 @@ mod tests {
                 OutputHealth::Healthy
             }
         }
+    }
+
+    #[test]
+    fn initial_output_failure_reuses_prepared_receiver_on_retry() {
+        let identity = MediaStreamIdentity {
+            session_id: 1,
+            stream_id: 1,
+            key_epoch: 0,
+        };
+        let mut allocator = MediaSessionAllocator::new(SessionSecret::new([7; 32]));
+        let metrics = Arc::new(StreamCounters::default());
+        let factory = sonimesh_app::ReceiverPcmEndpointFactory::new(
+            8,
+            sonimesh_app::SourcePcmFormat::new(48_000, 2).unwrap(),
+            Arc::clone(&metrics),
+        );
+        let mut output = sonimesh_app::ReceiverOutputController::new(
+            FaultOutput {
+                reject_start: true,
+                ..FaultOutput::default()
+            },
+            factory,
+        );
+        let selection = sonimesh_app::OutputSelection {
+            device: None,
+            config: OutputConfig {
+                sample_rate_hz: 48_000,
+                channels: 2,
+                sample_format: SampleFormat::Float32,
+                requested_callback_frames: None,
+                maximum_callback_frames: 960,
+            },
+        };
+        let mut pending = None;
+        let first: LabResult<_> = start_prepared(
+            &mut pending,
+            identity,
+            || {
+                let grant = allocator.supply(identity, MediaDirection::AndroidToDesktop)?;
+                let (producer, consumer) = realtime_pcm_queue::<SAMPLES>(8)?;
+                let worker = StreamDecodeWorker::new_for_opus(
+                    ObservedDecoder {
+                        decoder: lab_decoder::Decoder::new()?,
+                        peak: Arc::new(AtomicU32::new(0)),
+                    },
+                    producer,
+                    0,
+                    OpusFrameConfig::new(48_000, 2, 20)?,
+                )?;
+                let receiver = Receiver::bind_with_worker(
+                    "127.0.0.1:0".parse()?,
+                    grant.root(),
+                    grant.context(),
+                    worker,
+                    Arc::clone(&metrics),
+                )?;
+                Ok((receiver, consumer))
+            },
+            |(receiver, _)| {
+                output.start(selection.clone(), receiver)?;
+                Ok(true)
+            },
+        );
+        assert!(first.unwrap().is_err());
+        let address = pending.as_ref().unwrap().1.0.local_addr().unwrap();
+        assert_eq!(allocator.issued_count(), 1);
+        output.output_mut().reject_start = false;
+        let second: LabResult<_> = start_prepared(
+            &mut pending,
+            identity,
+            || panic!("retry must retain the original receiver"),
+            |(receiver, _)| {
+                output.start(selection, receiver)?;
+                Ok(true)
+            },
+        );
+        let ((receiver, _), playing) = second.unwrap().unwrap();
+        assert!(playing);
+        assert_eq!(receiver.local_addr().unwrap(), address);
+        assert_eq!(allocator.issued_count(), 1);
+        assert_eq!(output.output().starts, 2);
+        assert!(pending.is_none());
+    }
+
+    #[test]
+    fn different_start_retires_failed_preparation() {
+        let first = MediaStreamIdentity {
+            session_id: 1,
+            stream_id: 1,
+            key_epoch: 0,
+        };
+        let second = MediaStreamIdentity {
+            session_id: 2,
+            ..first
+        };
+        let mut pending = Some((first, 10));
+        let result: Result<_, ()> = start_prepared(&mut pending, second, || Ok(20), |_| Ok(true));
+        assert_eq!(result, Ok(Ok((20, true))));
+        assert!(pending.is_none());
     }
 
     #[test]

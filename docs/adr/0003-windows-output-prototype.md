@@ -95,6 +95,11 @@ The UDP lab may retry the selected endpoint after a reported output fault while
 its media session remains connected. Recovery recreates the PCM endpoint outside
 the callback and preserves the local gain and mute settings. It does not follow a
 new default device or establish physical device-removal behavior.
+If the first output start fails, the paired lab retains the prepared receiver
+for the same stream instead of issuing its media identity again. The Android
+lab retries retryable start replies at most twice, 500 ms apart, while allowing
+capture cancellation. These are experimental control-plane timings, not an
+audio latency measurement or a product reconnection policy.
 
 ## Direct-WASAPI comparison boundary
 

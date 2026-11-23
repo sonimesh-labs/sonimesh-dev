@@ -137,6 +137,11 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   showing values confirmed by the listener without changing system volume.
   The UDP lab also retries its selected output after a reported runtime fault;
   simulated recovery is tested, while physical device-removal behavior remains open.
+  If initial output startup fails, it retains the prepared receiver for a retry
+  of the same stream on the control connection, without issuing its media
+  identity a second time. A different start retires the retained receiver.
+  The Android lab retries a retryable start rejection up to twice on the same
+  connection, with a cancellable 500 ms wait between attempts.
   The paired lab also resumes after an authenticated Opus packet rejected as
   invalid: it resets the stream's decode state and waits for fresh media, and
   reports the decode error count. Other decoder failures still end the session.
