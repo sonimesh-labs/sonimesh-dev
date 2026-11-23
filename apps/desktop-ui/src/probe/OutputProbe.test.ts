@@ -557,7 +557,7 @@ describe('desktop output probe', () => {
     }
     const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [] })
       .mockResolvedValueOnce({ running: true, status: 'Starting listener…', invitation: null })
-      .mockResolvedValueOnce({ running: true, sessionActive: true, status: 'Session active', invitation: 'secret-invitation', metrics })
+      .mockResolvedValueOnce({ running: true, sessionActive: true, status: 'Session active', invitation: 'secret-invitation', events: ['READY', 'RESULT receiver started', 'OUTPUT active'], metrics })
     window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
     const wrapper = mountStoppedProbe()
     await flushPromises()
@@ -571,6 +571,9 @@ describe('desktop output probe', () => {
     expect(copied).toContain('Output: active')
     expect(copied).toContain('Adaptive target: 3')
     expect(copied).toContain('Gated ticks: 9')
+    expect(copied).toContain('Recent listener events:')
+    expect(copied).toContain('- READY')
+    expect(copied).toContain('- RESULT receiver started')
     expect(copied).not.toContain('secret-invitation')
     expect(wrapper.text()).toContain('Session evidence copied.')
     wrapper.unmount()
@@ -582,7 +585,7 @@ describe('desktop output probe', () => {
     const metrics = { packets: '8', rejected: '1', decoded: '7', peak: '0.125', plc: '0', decodeErrors: '0', buffered: '2', output: 'active', media: 'receiving', adaptive: null }
     const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [] })
       .mockResolvedValueOnce({ running: true, status: 'Starting listener…', invitation: null })
-      .mockResolvedValueOnce({ running: true, sessionActive: true, status: 'Session active', invitation: 'secret-invitation', metrics })
+      .mockResolvedValueOnce({ running: true, sessionActive: true, status: 'Session active', invitation: 'secret-invitation', events: ['READY'], metrics })
     window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
     const wrapper = mountStoppedProbe()
     await flushPromises()
@@ -593,9 +596,47 @@ describe('desktop output probe', () => {
     await flushPromises()
     expect(share).toHaveBeenCalledWith(expect.objectContaining({ title: 'SoniMesh session evidence' }))
     expect(share.mock.calls[0][0].text).toContain('Accepted packets: 8')
+    expect(share.mock.calls[0][0].text).toContain('- READY')
     expect(share.mock.calls[0][0].text).not.toContain('secret-invitation')
     expect(wrapper.text()).toContain('Session evidence shared.')
     wrapper.unmount()
+  })
+
+  it('bounds listener events in copied evidence and omits the section when none exist', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    const longEvent = `RESULT ${'x'.repeat(120)}`
+    const metrics = { packets: '1', rejected: '0', decoded: '1', peak: '0.100', plc: '0', decodeErrors: '0', buffered: '0', output: 'active', media: 'receiving', adaptive: null }
+    const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [] })
+      .mockResolvedValueOnce({ running: true, status: 'Starting listener…', invitation: null })
+      .mockResolvedValueOnce({ running: true, sessionActive: true, status: 'Session active', invitation: null, events: [longEvent], metrics })
+    window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+    const wrapper = mountStoppedProbe()
+    await flushPromises()
+    vi.useFakeTimers()
+    await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
+    await vi.advanceTimersByTimeAsync(1000)
+    await wrapper.findAll('button').find(button => button.text() === 'Copy session evidence')!.trigger('click')
+    await flushPromises()
+    const copied = writeText.mock.calls[0][0] as string
+    expect(copied).toContain('Recent listener events:')
+    expect(copied).toContain(`- ${longEvent.slice(0, 77)}...`)
+    expect(copied).not.toContain(longEvent)
+    wrapper.unmount()
+
+    const noEventsInvoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [] })
+      .mockResolvedValueOnce({ running: true, status: 'Starting listener…', invitation: null })
+      .mockResolvedValueOnce({ running: true, sessionActive: true, status: 'Session active', invitation: null, metrics })
+    window.__TAURI__ = { core: { invoke: noEventsInvoke as DesktopBridgeInvoke } }
+    const noEventsWrapper = mountStoppedProbe()
+    await flushPromises()
+    vi.useFakeTimers()
+    await noEventsWrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
+    await vi.advanceTimersByTimeAsync(1000)
+    await noEventsWrapper.findAll('button').find(button => button.text() === 'Copy session evidence')!.trigger('click')
+    await flushPromises()
+    expect(writeText.mock.calls[1][0]).not.toContain('Recent listener events:')
+    noEventsWrapper.unmount()
   })
 
   it('falls back to copying session evidence when system sharing is unavailable', async () => {

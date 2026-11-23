@@ -167,6 +167,10 @@ function labEvidenceText(): string | null {
     lines.push(`Forced playouts: ${evidenceValue(metrics.adaptive.forced)}`)
     lines.push(`Stream resets: ${evidenceValue(metrics.adaptive.resets)}`)
   }
+  if (lab.value.events?.length) {
+    lines.push('Recent listener events:')
+    for (const event of lab.value.events) lines.push(`- ${evidenceValue(event)}`)
+  }
   return lines.join('\n')
 }
 
