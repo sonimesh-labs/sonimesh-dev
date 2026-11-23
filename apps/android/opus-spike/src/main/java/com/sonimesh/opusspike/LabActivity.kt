@@ -205,6 +205,10 @@ class LabActivity : Activity() {
             setText(savedInstanceState?.getString("pin") ?: "")
         }
         layout.addView(pin)
+        layout.addView(Button(this).apply {
+            text = "Paste desktop SPKI"
+            setOnClickListener { pasteDesktopSpki() }
+        })
         layout.addView(TextView(this).apply { text = "Paired control IPv4 (ADB reverse: 127.0.0.1)" })
         host = EditText(this).apply {
             hint = "Desktop control IPv4 address"
@@ -406,6 +410,26 @@ class LabActivity : Activity() {
                 invitation.setText(text)
                 LabStatus.publish("Invitation pasted. Apply it to continue.")
             }
+        }
+    }
+
+    private fun pasteDesktopSpki() {
+        val text = getSystemService(ClipboardManager::class.java).primaryClip
+            ?.takeIf { it.itemCount > 0 }
+            ?.getItemAt(0)
+            ?.coerceToText(this)
+            ?.toString()
+            ?.trim()
+        if (text.isNullOrEmpty()) {
+            LabStatus.publish("Copy the desktop SPKI_HEX first.")
+            return
+        }
+        try {
+            labInvitation(text).fill(0)
+            pin.setText(text)
+            LabStatus.publish("Desktop SPKI pasted. Enter the control address and start paired capture.")
+        } catch (_: IllegalArgumentException) {
+            LabStatus.publish("The copied desktop SPKI_HEX is invalid.")
         }
     }
 

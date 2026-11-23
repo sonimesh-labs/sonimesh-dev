@@ -659,6 +659,8 @@ For a pasted invitation, **Apply invitation and start paired capture** follows
 the same one-step flow: a non-loopback control address also becomes the UDP
 destination, while a loopback invitation retains the separate UDP address for
 ADB reverse. Invalid input or an already active capture does not start a session.
+The manual SPKI path also has **Paste desktop SPKI**, which validates the copied
+hex key before filling the pairing field.
 On 2026-11-23, an API 37 emulator test exercised the pasted-invitation flow;
 the local software listener verified pairing and decoded 151 frames without
 decode errors. This does not validate physical WLAN or audible playback.

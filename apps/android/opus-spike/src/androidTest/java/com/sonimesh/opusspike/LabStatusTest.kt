@@ -165,6 +165,21 @@ class LabStatusTest {
     }
 
     @Test
+    fun pasteDesktopSpkiFillsThePairingField() {
+        val spki = "ab".repeat(32)
+        ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                activity.getSystemService(ClipboardManager::class.java).setPrimaryClip(
+                    ClipData.newPlainText("spki", spki),
+                )
+                requireNotNull(findButton(activity.window.decorView, "Paste desktop SPKI")).performClick()
+                assertTrue(findTextField(activity.window.decorView, "Paired lab desktop SPKI")?.text?.toString() == spki)
+                assertTrue(hasStatus(activity.window.decorView, "Status: Desktop SPKI pasted."))
+            }
+        }
+    }
+
+    @Test
     fun failedServiceStartSurvivesActivityRecreation() {
         ActivityScenario.launch(LabActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
