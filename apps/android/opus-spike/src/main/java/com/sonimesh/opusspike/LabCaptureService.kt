@@ -48,6 +48,8 @@ class LabCaptureService : Service() {
     private val setupSocket = SetupSocket()
     private var projection: MediaProjection? = null
     private var wakeLock: PowerManager.WakeLock? = null
+    private var foregroundNotificationManager: NotificationManager? = null
+    private var foregroundNotificationBuilder: Notification.Builder? = null
     private val handler = Handler(Looper.getMainLooper())
     private var terminalStatus = false
     private var started = false
@@ -86,12 +88,16 @@ class LabCaptureService : Service() {
             val open = PendingIntent.getActivity(this, 0, Intent(this, LabActivity::class.java).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             }, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
-            startForeground(1, Notification.Builder(this, "lab")
+            val notification = Notification.Builder(this, "lab")
                 .setSmallIcon(android.R.drawable.ic_btn_speak_now)
                 .setContentTitle("SoniMesh audio lab capturing")
                 .setContentText("Transport: ${transport.label}")
+                .setSubText("Capture duration: —")
                 .setContentIntent(open)
-                .addAction(Notification.Action.Builder(null, "Stop", stop).build()).build())
+                .addAction(Notification.Action.Builder(null, "Stop", stop).build())
+            foregroundNotificationManager = manager
+            foregroundNotificationBuilder = notification
+            startForeground(1, notification.build())
             wakeLock = getSystemService(PowerManager::class.java)
                 .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SoniMesh:LabCapture").also { it.acquire() }
             val result = intent?.getParcelableExtra<Intent>("resultData") ?: error("missing consent")
@@ -232,6 +238,7 @@ class LabCaptureService : Service() {
             captureStartMillis = SystemClock.elapsedRealtime()
             lastDurationPublication = captureStartMillis
             handler.post { LabStatus.publishCaptureDuration(0) }
+            handler.post { updateForegroundDuration(0) }
             val activeRateMeter = EncoderRateMeter(captureStartMillis)
             rateMeter = activeRateMeter
             lastRatePublication = captureStartMillis
@@ -292,7 +299,10 @@ class LabCaptureService : Service() {
                 if (now - lastDurationPublication >= 1_000) {
                     lastDurationPublication = now
                     val duration = (now - captureStartMillis) / 1_000
-                    handler.post { LabStatus.publishCaptureDuration(duration) }
+                    handler.post {
+                        LabStatus.publishCaptureDuration(duration)
+                        updateForegroundDuration(duration)
+                    }
                 }
                 if (paired != null && SystemClock.elapsedRealtime() >= nextControlPoll) {
                     try {
@@ -376,7 +386,9 @@ class LabCaptureService : Service() {
                 handler.post {
                     LabStatus.publishSenderQueueDrops(count)
                     LabStatus.publishEncoderRate(rate)
-                    LabStatus.publishCaptureDuration((SystemClock.elapsedRealtime() - captureStartMillis) / 1_000)
+                    val duration = (SystemClock.elapsedRealtime() - captureStartMillis) / 1_000
+                    LabStatus.publishCaptureDuration(duration)
+                    updateForegroundDuration(duration)
                 }
             }
             codec?.close()
@@ -476,6 +488,13 @@ class LabCaptureService : Service() {
         requestStop()
     }
 
+    private fun updateForegroundDuration(seconds: Long) {
+        val builder = foregroundNotificationBuilder ?: return
+        val manager = foregroundNotificationManager ?: return
+        builder.setSubText("Capture duration: ${seconds.coerceAtLeast(0)}s")
+        manager.notify(1, builder.build())
+    }
+
     private fun requestStop() {
         if (!running.getAndSet(false)) return
         if (!terminalStatus) LabStatus.publish("Stopping capture…")
@@ -495,6 +514,8 @@ class LabCaptureService : Service() {
         } finally {
             wakeLock?.let { if (it.isHeld) it.release() }
             wakeLock = null
+            foregroundNotificationManager = null
+            foregroundNotificationBuilder = null
         }
         if (!terminalStatus) {
             LabStatus.publish(if (workerStarted && !workerFinished) "Stopping capture…" else "Capture stopped.")
