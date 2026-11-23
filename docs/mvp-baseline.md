@@ -93,8 +93,10 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   optional framed control channel, preserving channel ownership across ticks and
   retaining partial control frames and replies across nonblocking polls, and
   retiring the channel on closure or transport failure. Its UDP specialization also
-  provides one combined control/media tick with independent results, so a
-  control transport failure does not suppress media polling or decode;
+  provides one combined control/media tick and pumps decoded PCM into bounded
+  mixer queues. A real UDP loopback test observes non-silent output from that
+  composition, using a test decoder and output. Control, media and pump results
+  are independent; the caller still owns playout timing and packet polling;
   `mark_control_lost` centralizes the follow-up lifecycle transition and arms
   reconnect grace after a closed or failed control poll. `tick_at(now_ms)` then
   services grace and output-health observation in the same low-rate

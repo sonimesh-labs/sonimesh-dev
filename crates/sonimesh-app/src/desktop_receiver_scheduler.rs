@@ -77,6 +77,7 @@ impl std::error::Error for DesktopReceiverSchedulerReconnectError {
 pub struct DesktopReceiverSchedulerTick<DecoderError> {
     control: Result<Option<ControlSessionPoll>, ControlSessionError>,
     media: Result<UdpMediaTick, UdpReceiverError<DecoderError>>,
+    pump: Result<(), crate::MixerStreamSessionError>,
 }
 
 impl<DecoderError> DesktopReceiverSchedulerTick<DecoderError> {
@@ -92,7 +93,13 @@ impl<DecoderError> DesktopReceiverSchedulerTick<DecoderError> {
         &self.media
     }
 
-    /// Splits the tick into its independent control and media results.
+    /// Returns the independent decoded-PCM conversion result for this tick.
+    #[must_use = "inspect the mixer pump result"]
+    pub const fn pump(&self) -> &Result<(), crate::MixerStreamSessionError> {
+        &self.pump
+    }
+
+    /// Splits out control and media after inspecting the pump result.
     #[must_use = "handle both scheduler results"]
     pub fn into_parts(
         self,
@@ -109,6 +116,7 @@ impl<DecoderError> DesktopReceiverSchedulerTick<DecoderError> {
 pub struct DesktopReceiverSchedulerMaintenanceTick<DecoderError> {
     control: Result<Option<ControlSessionPoll>, ControlSessionError>,
     media: Result<UdpMediaTick, UdpReceiverError<DecoderError>>,
+    pump: Result<(), crate::MixerStreamSessionError>,
     reconnect: Result<ReconnectGraceObservation, DesktopControlOwnerError>,
     output: Result<Option<OutputHealth>, DesktopControlOwnerError>,
 }
@@ -124,6 +132,12 @@ impl<DecoderError> DesktopReceiverSchedulerMaintenanceTick<DecoderError> {
     #[must_use = "inspect the media result"]
     pub const fn media(&self) -> &Result<UdpMediaTick, UdpReceiverError<DecoderError>> {
         &self.media
+    }
+
+    /// Returns the independent decoded-PCM conversion result for this tick.
+    #[must_use = "inspect the mixer pump result"]
+    pub const fn pump(&self) -> &Result<(), crate::MixerStreamSessionError> {
+        &self.pump
     }
 
     /// Returns the reconnect-grace observation for this tick.
@@ -150,6 +164,7 @@ impl<DecoderError> DesktopReceiverSchedulerMaintenanceTick<DecoderError> {
             DesktopReceiverSchedulerTick {
                 control: self.control,
                 media: self.media,
+                pump: self.pump,
             },
             self.reconnect,
         )
@@ -395,12 +410,14 @@ mod tests {
 
     struct TestOutput {
         health: OutputHealth,
+        source: Option<Box<dyn RenderSource>>,
     }
 
     impl Default for TestOutput {
         fn default() -> Self {
             Self {
                 health: OutputHealth::Healthy,
+                source: None,
             }
         }
     }
@@ -414,8 +431,9 @@ mod tests {
             &mut self,
             _device: Option<&OutputDeviceId>,
             _config: OutputConfig,
-            _source: Box<dyn RenderSource>,
+            source: Box<dyn RenderSource>,
         ) -> Result<(), OutputError> {
+            self.source = Some(source);
             Ok(())
         }
 
@@ -754,6 +772,133 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)] // Exercises control, UDP, decode, and output together.
+    fn scheduler_drives_authenticated_udp_audio_to_the_output_source() {
+        use sonimesh_network::MediaSessionSender;
+
+        type Pipeline = crate::UdpReceiverPipeline<ByteDecoder, 8, 256, SOURCE_SAMPLES>;
+        let (producer, _) = realtime_pcm_queue::<SOURCE_SAMPLES>(8).unwrap();
+        let secret = SessionSecret::new([7; 32]);
+        let context = MediaKeyContext::new(7, 1, 0, MediaDirection::AndroidToDesktop).unwrap();
+        let counters = Arc::new(StreamCounters::default());
+        let pipeline = Pipeline::bind(
+            "127.0.0.1:0".parse().unwrap(),
+            &secret,
+            context,
+            ByteDecoder,
+            producer,
+            Arc::clone(&counters),
+            0,
+        )
+        .unwrap();
+        let address = pipeline.local_addr().unwrap();
+        let bridge = ControlToMixerBridge::new(
+            SessionState::READY,
+            &[Capability::FrameDuration10Ms],
+            TestOutput::default(),
+            OutputSelection {
+                device: None,
+                config: OutputConfig {
+                    sample_rate_hz: 48_000,
+                    channels: 2,
+                    sample_format: SampleFormat::Float32,
+                    requested_callback_frames: Some(480),
+                    maximum_callback_frames: 1_024,
+                },
+            },
+            8,
+            8,
+        )
+        .unwrap();
+        let owner = DesktopControlOwner::new(bridge).unwrap();
+        let mut scheduler =
+            DesktopReceiverScheduler::new(DesktopReceiverOwner::<
+                _,
+                _,
+                SLOTS,
+                OUTPUT_SAMPLES,
+                1,
+                SOURCE_SAMPLES,
+            >::new(owner, pipeline, Some(counters)));
+        let session = scheduler
+            .receiver_mut()
+            .owner_mut()
+            .install_authenticated_control_session()
+            .unwrap();
+        let hello = Envelope {
+            protocol_version: CONTROL_PROTOCOL_VERSION,
+            request_id: 1,
+            payload: Some(envelope::Payload::Hello(Hello {
+                supported_versions: vec![CONTROL_PROTOCOL_VERSION],
+                capabilities: vec![Capability::FrameDuration10Ms as i32],
+                display_name: "test sender".to_owned(),
+            })),
+        };
+        let start = Envelope {
+            protocol_version: CONTROL_PROTOCOL_VERSION,
+            request_id: 2,
+            payload: Some(envelope::Payload::StartStream(StartStream {
+                media_session_id: 7,
+                stream_id: 1,
+                sample_rate_hz: 48_000,
+                channels: 1,
+                frame_duration_ms: 10,
+                media_key_epoch: 0,
+            })),
+        };
+        let mut input = VecDeque::new();
+        input.extend(encode_control_frame(&hello).unwrap());
+        input.extend(encode_control_frame(&start).unwrap());
+        scheduler
+            .attach_control(
+                session,
+                PartialWriteIo {
+                    input,
+                    writes: 0,
+                    output: Vec::new(),
+                },
+            )
+            .unwrap();
+        for _ in 0..3 {
+            let tick = scheduler.tick();
+            assert!(tick.control().is_ok());
+            assert!(tick.media().is_ok());
+            assert!(tick.pump().is_ok());
+        }
+        let mut sender =
+            MediaSessionSender::bind("127.0.0.1:0".parse().unwrap(), &secret, context, address)
+                .unwrap();
+        sender.send_frame(0, 0, &[1]).unwrap();
+        let mut decoded = false;
+        for _ in 0..1_000 {
+            let tick = scheduler.tick();
+            assert!(tick.pump().is_ok());
+            if matches!(tick.media(), Ok(media) if matches!(media.poll(), crate::UdpPollOutcome::Processed { .. }))
+            {
+                assert!(
+                    matches!(tick.media(), Ok(media) if matches!(media.decode(), sonimesh_audio::DecodeStep::Decoded { .. }))
+                );
+                decoded = true;
+                break;
+            }
+            std::thread::yield_now();
+        }
+        assert!(decoded, "loopback packet was not decoded");
+        let output = scheduler
+            .receiver_mut()
+            .owner_mut()
+            .bridge_mut()
+            .mixer_mut()
+            .output_mut();
+        let mut samples = [0.0; OUTPUT_SAMPLES];
+        output.source.as_mut().unwrap().render(&mut samples);
+        assert!(
+            samples.iter().any(|sample| *sample > 0.1),
+            "decoded audio must reach the output"
+        );
+    }
+
+    #[test]
     #[allow(clippy::too_many_lines)]
     fn combined_tick_reports_control_and_media_results_together() {
         const JITTER_CAPACITY: usize = 8;
@@ -907,12 +1052,23 @@ where
 {
     /// Runs one control and UDP media scheduler tick outside the output callback.
     ///
-    /// Control and media results are independent; inspect both fields even when
-    /// one side reports an error.
+    /// Control, media and PCM conversion results are independent; inspect each
+    /// result even when another side reports an error. Each call makes one
+    /// decode/PLC decision; the caller must supply the stream's playout cadence.
     pub fn tick(&mut self) -> DesktopReceiverSchedulerTick<D::Error> {
         let control = self.poll_control_once();
         let media = self.receiver.tick_media();
-        DesktopReceiverSchedulerTick { control, media }
+        let pump = self
+            .receiver
+            .owner_mut()
+            .bridge_mut()
+            .mixer_mut()
+            .pump_available();
+        DesktopReceiverSchedulerTick {
+            control,
+            media,
+            pump,
+        }
     }
 
     /// Runs one control/media tick and observes reconnect grace and output health.
@@ -924,10 +1080,15 @@ where
     pub fn tick_at(&mut self, now_ms: u64) -> DesktopReceiverSchedulerMaintenanceTick<D::Error> {
         let reconnect = self.receiver.owner_mut().observe_reconnect_grace(now_ms);
         let output = self.receiver.owner_mut().monitor();
-        let DesktopReceiverSchedulerTick { control, media } = self.tick();
+        let DesktopReceiverSchedulerTick {
+            control,
+            media,
+            pump,
+        } = self.tick();
         DesktopReceiverSchedulerMaintenanceTick {
             control,
             media,
+            pump,
             reconnect,
             output,
         }

@@ -748,8 +748,12 @@ retains its framing buffers across polls, so fragmented incoming frames and
 partially written replies resume where the previous poll stopped. Explicitly
 detaching a channel discards any unfinished frame or reply.
 The UDP specialization also exposes `tick`, which runs one control poll and one
-media poll/decode together while returning their results independently, so a
-control transport failure does not suppress the media tick.
+media poll/decode together, then pumps decoded PCM into the mixer until each
+output queue is full or its source underflows. Inspect `pump()` alongside the
+independent control and media results; a control or UDP error does not suppress
+the pump. Each call performs a decode/PLC decision, so its caller must provide
+the appropriate playout cadence. This is not a clock-driven runtime or a burst
+drainer; callers needing faster packet polling must schedule that separately.
 When a control poll returns `Closed` or an unrecoverable transport error, the
 caller should invoke `mark_control_lost(now_ms, grace_duration_ms)` once. That
 retires pending control work, moves the lifecycle to `Reconnecting`, and arms

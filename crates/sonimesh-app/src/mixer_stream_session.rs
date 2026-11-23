@@ -306,6 +306,43 @@ where
         }
     }
 
+    /// Fills available mixer queue space from each admitted stream without blocking.
+    ///
+    /// Each stream performs at most one pump per queue slot and stops on source
+    /// underflow or a full output queue. Failures do not prevent other streams
+    /// from making progress.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first adapter failure after servicing the other streams.
+    pub fn pump_available(&mut self) -> Result<(), MixerStreamSessionError> {
+        let mut first_error = None;
+        for record in self.records.iter_mut().flatten() {
+            if record.membership_slot.is_none() {
+                continue;
+            }
+            for _ in 0..self.queue_capacity {
+                if record.pump.queued_output_blocks() >= self.queue_capacity {
+                    break;
+                }
+                match record.pump.pump() {
+                    Ok(PumpOutcome::Pushed { .. }) => {}
+                    Ok(PumpOutcome::Underflow) => break,
+                    Err(error) => {
+                        if first_error.is_none() {
+                            first_error = Some(error);
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        match first_error {
+            Some(error) => Err(MixerStreamSessionError::Adapter(error)),
+            None => Ok(()),
+        }
+    }
+
     /// Retires one stream's partial conversion state after a stream-local reset.
     ///
     /// # Errors
@@ -1062,6 +1099,46 @@ mod tests {
         session.pump_all().unwrap();
         assert_eq!(session.queued_source_blocks(identity(1)).unwrap(), 0);
         assert_eq!(session.queued_output_blocks(identity(1)).unwrap(), 1);
+    }
+
+    #[test]
+    fn pump_available_fills_without_overwriting_and_services_other_streams() {
+        let mut session = session(FakeOutput::default());
+        session.start_output(selection(None)).unwrap();
+        let mut first = FakePipeline::<SOURCE_SAMPLES>::default();
+        let mut second = FakePipeline::<SOURCE_SAMPLES>::default();
+        started(&mut session, identity(1), &mut first);
+        started(&mut session, identity(2), &mut second);
+        for _ in 0..4 {
+            assert_eq!(
+                first
+                    .producer
+                    .as_mut()
+                    .unwrap()
+                    .push(&[0.5; SOURCE_SAMPLES]),
+                RealtimePcmPushOutcome::Inserted
+            );
+        }
+        assert_eq!(
+            second
+                .producer
+                .as_mut()
+                .unwrap()
+                .push(&[0.25; SOURCE_SAMPLES]),
+            RealtimePcmPushOutcome::Inserted
+        );
+
+        session.pump_available().unwrap();
+        assert_eq!(session.queued_output_blocks(identity(1)).unwrap(), 8);
+        let remaining = session.queued_source_blocks(identity(1)).unwrap();
+        assert!(remaining > 0);
+        assert!(session.queued_output_blocks(identity(2)).unwrap() > 1);
+        session.pump_available().unwrap();
+        assert_eq!(session.queued_output_blocks(identity(1)).unwrap(), 8);
+        assert_eq!(
+            session.queued_source_blocks(identity(1)).unwrap(),
+            remaining
+        );
     }
 
     #[test]

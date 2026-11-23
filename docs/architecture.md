@@ -44,7 +44,10 @@ injected receiver pipeline and exposes an accept-and-execute boundary for the
 future shell. After output recreation it can also re-admit a persisted stream
 using its owned pipeline, before reporting that stream ready. Its UDP specialization also exposes low-rate poll/decode calls
 and the bound media endpoint; it still does not choose a decoder, socket, or
-output backend. A
+output backend. The receiver scheduler also pumps decoded PCM through the
+per-stream format adapters outside the output callback. Each tick stops pumping
+an adapter at underflow or when its bounded output queue is full, and reports
+conversion errors independently from control and UDP results. A
 `DesktopControlSession` can now attach a trusted post-pairing channel to that
 owner. It polls the existing bounded control framing, executes at most one
 envelope per tick, and sends correlated `StreamStatus` replies for start,
