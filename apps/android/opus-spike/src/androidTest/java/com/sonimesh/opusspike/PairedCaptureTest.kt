@@ -1,7 +1,9 @@
 package com.sonimesh.opusspike
 
+import android.app.Activity
 import android.app.ActivityManager
 import android.app.NotificationManager
+import android.content.Intent
 import android.os.Bundle
 import android.os.PowerManager
 import android.os.SystemClock
@@ -19,9 +21,20 @@ import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
 import org.junit.Test
 
+internal fun deliverScannerResult(activity: LabActivity, requestCode: Int, resultCode: Int, contents: String?) {
+    val callback = LabActivity::class.java.getDeclaredMethod(
+        "onActivityResult", Int::class.javaPrimitiveType, Int::class.javaPrimitiveType, Intent::class.java,
+    )
+    callback.isAccessible = true
+    callback.invoke(activity, requestCode, resultCode, Intent().putExtra("SCAN_RESULT", contents))
+}
+
 class PairedCaptureTest {
     @Test
     fun captures_tone_after_pairing_and_stops() = runCapture(expectDisconnect = false)
+
+    @Test
+    fun captures_after_scanned_invitation() = runCapture(expectDisconnect = false, startFromScan = true)
 
     @Test
     fun captures_again_after_stopping() {
@@ -38,7 +51,7 @@ class PairedCaptureTest {
     @Test
     fun returns_to_active_capture_from_notification() = runCapture(expectDisconnect = false, notificationReturn = true)
 
-    private fun runCapture(expectDisconnect: Boolean, screenOff: Boolean = false, notificationReturn: Boolean = false) {
+    private fun runCapture(expectDisconnect: Boolean, screenOff: Boolean = false, notificationReturn: Boolean = false, startFromScan: Boolean = false) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val args = InstrumentationRegistry.getArguments()
         assumeTrue(
@@ -46,6 +59,7 @@ class PairedCaptureTest {
             args.containsKey("pairingInvitationHex") || args.containsKey("pairingSpkiHex"),
         )
         val pin = args.getString("pairingSpkiHex")
+        if (startFromScan) assumeTrue("scan test requires pairingInvitationHex", args.containsKey("pairingInvitationHex"))
         ActivityScenario.launch(LabActivity::class.java).use { scenario ->
             args.getString("bitrateKbps")?.let { requested ->
                 val position = listOf("64", "96", "128").indexOf(requested)
@@ -70,19 +84,23 @@ class PairedCaptureTest {
                     (find(root) { it is EditText && it.contentDescription == "Desktop IPv4 address for UDP" } as EditText)
                         .setText(mediaHost)
                 }
-                args.getString("pairingInvitationHex")?.let { payload ->
-                    (find(root) { it is EditText && it.contentDescription == "Lab invitation payload" } as EditText)
-                        .setText(payload)
-                    find(root) { it is Button && it.text.toString().equals("Apply invitation payload", true) }.performClick()
-                } ?: run {
-                    (find(root) { it is EditText && it.contentDescription == "Paired lab desktop SPKI" } as EditText)
-                        .setText(requireNotNull(pin))
-                    args.getString("pairingHost")?.let { host ->
-                        (find(root) { it is EditText && it.contentDescription == "Paired control IPv4 address" } as EditText).setText(host)
-                    }
-                }
                 find(root) { it is Button && it.text.toString().equals("Toggle test tone", true) }.performClick()
-                find(root) { it is Button && it.text.toString().equals("Start paired UDP capture", true) }.performClick()
+                if (startFromScan) {
+                    deliverScannerResult(activity, 4, Activity.RESULT_OK, args.getString("pairingInvitationHex"))
+                } else {
+                    args.getString("pairingInvitationHex")?.let { payload ->
+                        (find(root) { it is EditText && it.contentDescription == "Lab invitation payload" } as EditText)
+                            .setText(payload)
+                        find(root) { it is Button && it.text.toString().equals("Apply invitation payload", true) }.performClick()
+                    } ?: run {
+                        (find(root) { it is EditText && it.contentDescription == "Paired lab desktop SPKI" } as EditText)
+                            .setText(requireNotNull(pin))
+                        args.getString("pairingHost")?.let { host ->
+                            (find(root) { it is EditText && it.contentDescription == "Paired control IPv4 address" } as EditText).setText(host)
+                        }
+                    }
+                    find(root) { it is Button && it.text.toString().equals("Start paired UDP capture", true) }.performClick()
+                }
             }
             val automation = instrumentation.uiAutomation
             assertTrue("screen-capture selector missing", clickNode(automation, "Share one app"))

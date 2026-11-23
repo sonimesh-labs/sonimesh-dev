@@ -1,5 +1,6 @@
 package com.sonimesh.opusspike
 
+import android.app.Activity
 import android.content.Intent
 import android.os.SystemClock
 import android.view.View
@@ -13,6 +14,21 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class LabStatusTest {
+    @Test
+    fun invalid_scan_does_not_start_capture() {
+        ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                deliverScannerResult(activity, 4, Activity.RESULT_CANCELED, "invalid")
+                assertTrue(LabStatus.captureAdmission.canBegin())
+                deliverScannerResult(activity, 4, Activity.RESULT_OK, "invalid")
+                assertTrue(hasStatus(activity.window.decorView, "Status: Paste a valid lab invitation payload."))
+                assertTrue(LabStatus.captureAdmission.canBegin())
+                deliverScannerResult(activity, 4, Activity.RESULT_OK, null)
+                assertTrue(hasStatus(activity.window.decorView, "Status: Scan a valid lab invitation"))
+                assertTrue(LabStatus.captureAdmission.canBegin())
+            }
+        }
+    }
     @Test
     fun senderQueueDropsSurviveActivityRecreation() {
         ActivityScenario.launch(LabActivity::class.java).use { scenario ->

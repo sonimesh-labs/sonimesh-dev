@@ -138,12 +138,11 @@ class LabActivity : Activity() {
         layout.addView(invitation)
         layout.addView(Button(this).apply {
             text = "Scan lab invitation"
-            setOnClickListener {
-                val options = ScanOptions().setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-                    .setPrompt("Scan the lab invitation on the desktop")
-                    .setBeepEnabled(false)
-                startActivityForResult(options.createScanIntent(this@LabActivity), 3)
-            }
+            setOnClickListener { scanInvitation(startAfterScan = false) }
+        })
+        layout.addView(Button(this).apply {
+            text = "Scan and start paired capture"
+            setOnClickListener { scanInvitation(startAfterScan = true) }
         })
         layout.addView(Button(this).apply {
             text = "Apply invitation payload"
@@ -308,7 +307,18 @@ class LabActivity : Activity() {
         Toast.makeText(this, "Capture is already starting, running, or stopping.", Toast.LENGTH_SHORT).show()
     }
 
-    private fun applyInvitation(useAddressForUdp: Boolean = false) {
+    private fun scanInvitation(startAfterScan: Boolean) {
+        if (startAfterScan && !LabStatus.captureAdmission.canBegin()) {
+            showCaptureBusy()
+            return
+        }
+        val options = ScanOptions().setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+            .setPrompt("Scan the lab invitation on the desktop")
+            .setBeepEnabled(false)
+        startActivityForResult(options.createScanIntent(this), if (startAfterScan) 4 else 3)
+    }
+
+    private fun applyInvitation(useAddressForUdp: Boolean = false): Boolean {
         var raw: ByteArray? = null
         var retained = false
         try {
@@ -342,15 +352,22 @@ class LabActivity : Activity() {
         } finally {
             if (!retained) raw?.fill(0)
         }
+        return retained
     }
 
-    internal fun applyScannedInvitation(contents: String?) {
+    internal fun applyScannedInvitation(contents: String?, startAfterScan: Boolean = false) {
         if (contents == null || contents.length > PairingQr.MAX_PAYLOAD_BYTES * 2) {
             LabStatus.publish("Scan a valid lab invitation, or paste its payload.")
             return
         }
         invitation.setText(contents)
-        applyInvitation(useAddressForUdp = true)
+        if (applyInvitation(useAddressForUdp = true) && startAfterScan) {
+            startCapture(true, paired = true)
+        }
+    }
+
+    private fun onScannerResult(resultCode: Int, contents: String?, startAfterScan: Boolean) {
+        if (resultCode == RESULT_OK) applyScannedInvitation(contents, startAfterScan)
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
@@ -375,8 +392,8 @@ class LabActivity : Activity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == 3) {
-            if (resultCode == RESULT_OK) applyScannedInvitation(data?.getStringExtra("SCAN_RESULT"))
+        if (requestCode == 3 || requestCode == 4) {
+            onScannerResult(resultCode, data?.getStringExtra("SCAN_RESULT"), startAfterScan = requestCode == 4)
             return
         }
         if (requestCode == 2) {
