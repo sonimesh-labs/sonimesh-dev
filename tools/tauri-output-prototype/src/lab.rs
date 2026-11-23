@@ -169,7 +169,6 @@ impl Lab {
                 Ok(Some(_)) => {
                     self.snapshot.running = false;
                     self.snapshot.invitation = None;
-                    self.snapshot.metrics = None;
                     self.snapshot.volume = None;
                     self.snapshot.muted = None;
                     self.snapshot.session_active = false;
@@ -457,6 +456,48 @@ mod tests {
         assert_eq!(snapshot.metrics, Some(metrics));
         assert!(parse_metrics(&status.replace("0.250", "NaN")).is_none());
         assert!(parse_metrics(&status.replace("recovering", "unknown")).is_none());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn unexpected_listener_exit_retains_last_observations_until_explicit_stop() {
+        let child = Command::new("cmd.exe")
+            .args(["/C", "exit", "1"])
+            .spawn()
+            .unwrap();
+        let (sender, events) = mpsc::sync_channel(4);
+        sender.try_send("RESULT receiver started".into()).unwrap();
+        sender.try_send("STATUS packets 120 rejected 3 decoded 115 peak 0.250 plc 2 decode_errors 1 buffered 4 output active".into()).unwrap();
+        let mut lab = Lab {
+            child: Some(child),
+            events: Some(events),
+            snapshot: LabSnapshot {
+                running: true,
+                invitation: Some("01ab".into()),
+                volume: Some(50),
+                muted: Some(false),
+                ..LabSnapshot::default()
+            },
+        };
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let snapshot = loop {
+            let snapshot = lab.refresh();
+            if !snapshot.running {
+                break snapshot;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "listener did not exit"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        assert_eq!(snapshot.metrics.unwrap().decoded, "115");
+        assert!(!snapshot.session_active);
+        assert!(snapshot.invitation.is_none());
+        assert!(snapshot.volume.is_none());
+        assert!(snapshot.muted.is_none());
+        assert!(snapshot.status.contains("Listener exited"));
+        assert!(lab.stop().metrics.is_none());
     }
 
     #[test]

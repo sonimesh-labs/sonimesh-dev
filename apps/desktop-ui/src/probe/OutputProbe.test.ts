@@ -165,6 +165,26 @@ describe('desktop output probe', () => {
     wrapper.unmount()
   })
 
+  it('keeps the last session observations visible after the listener exits', async () => {
+    vi.useFakeTimers()
+    const metrics = { packets: '120', rejected: '3', decoded: '115', peak: '0.250', plc: '2', decodeErrors: '1', buffered: '4', output: 'active', late: '0', resyncDropped: '0', playout: 'fixed', adaptive: null }
+    const invoke = vi.fn()
+      .mockResolvedValueOnce({ running: true, sessionActive: true, status: 'Session active', invitation: '01ab', metrics, volume: 50, muted: false })
+      .mockResolvedValueOnce({ running: false, sessionActive: false, status: 'Listener exited', invitation: null, metrics, volume: null, muted: null })
+      .mockResolvedValueOnce({ generation: 1, devices: [] })
+    window.__TAURI__ = { core: { invoke } }
+    const wrapper = mount(OutputProbe)
+    await flushPromises()
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(wrapper.text()).toContain('Listener exited')
+    expect(wrapper.text()).toContain('Last session observations')
+    expect(wrapper.text()).toContain('115')
+    expect(wrapper.text()).toContain('Last available update')
+    expect(wrapper.text()).toContain('Last reported: Active')
+    expect(wrapper.find('#lab-invitation').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('ignores an old status response after stopping a restored listener', async () => {
     vi.useFakeTimers()
     let resolvePoll!: (snapshot: unknown) => void

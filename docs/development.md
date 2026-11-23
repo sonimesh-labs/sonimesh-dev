@@ -248,6 +248,9 @@ a final snapshot, it labels the retained values as the last update. A new client
 attempt clears the prior observations. When its view reloads, the probe checks
 for an existing listener and resumes its status updates. Settings shown in a
 restored view apply to the next start and may differ from the running listener.
+If the listener process exits unexpectedly, the probe also retains the last
+observations it had received; they can be incomplete. Starting a new listener or
+stopping it explicitly clears them.
 If a start or stop request fails, the probe checks the listener's current state
 again; while that check is unavailable, it retries and keeps listener controls
 disabled until the state is known.
