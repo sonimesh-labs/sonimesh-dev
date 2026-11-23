@@ -16,12 +16,24 @@ struct ProbeState {
 fn start_lab(
     state: tauri::State<'_, ProbeState>,
     host: String,
+    generation: u32,
+    index: Option<usize>,
 ) -> Result<lab::LabSnapshot, String> {
+    let output = match index {
+        Some(index) => Some(
+            state
+                .snapshot
+                .lock()
+                .map_err(|_| "Could not select output.")?
+                .select(generation, index)?,
+        ),
+        None => None,
+    };
     state
         .lab
         .lock()
         .map_err(|_| "Could not access listener state.")?
-        .start(&host)
+        .start(&host, output.as_ref().map(|id| id.as_str()))
 }
 
 #[tauri::command]

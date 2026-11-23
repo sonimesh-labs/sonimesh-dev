@@ -396,7 +396,9 @@ listener in the window, copy the displayed invitation to the Android audio lab,
 and enter the UDP address separately on Android. The control address defaults to
 `127.0.0.1` for ADB reverse; for a controlled LAN use an address Android can
 reach. The listener binds TCP 47610 on all IPv4 interfaces and uses UDP 39093;
-it plays through the default Windows output. Stopping the listener terminates the
+it plays through the selected output, or the default output when no device is
+selected. Refreshing the device list resets the selection; an unavailable chosen
+device prevents the listener from starting. Stopping the listener terminates the
 experiment immediately, including any active session; closing the probe also
 stops its child. During an active session the probe shows the listener's
 initial and five-second cumulative packet and decode counters, decoded peak, buffered frames,

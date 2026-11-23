@@ -1,5 +1,5 @@
 use serde::Serialize;
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::Ipv4Addr;
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, SyncSender};
@@ -48,7 +48,7 @@ pub struct Lab {
 }
 
 impl Lab {
-    pub fn start(&mut self, host: &str) -> Result<LabSnapshot, String> {
+    pub fn start(&mut self, host: &str, output_id: Option<&str>) -> Result<LabSnapshot, String> {
         self.refresh();
         if self.child.is_some() {
             return Err("The listener is already running.".into());
@@ -70,9 +70,16 @@ impl Lab {
                 "--host",
                 &host.to_string(),
             ])
-            .stdin(Stdio::null())
+            .stdin(if output_id.is_some() {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        if output_id.is_some() {
+            command.arg("--output-id-stdin");
+        }
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
@@ -81,6 +88,18 @@ impl Lab {
         let mut child = command.spawn().map_err(
             |_| "Could not launch the lab listener. Build it with playback support first.",
         )?;
+        if let Some(id) = output_id {
+            let result = child
+                .stdin
+                .take()
+                .expect("piped stdin")
+                .write_all(id.as_bytes());
+            if result.is_err() {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("Could not send the output selection to the listener.".into());
+            }
+        }
         let (sender, events) = mpsc::sync_channel(128);
         read_output(child.stdout.take().expect("piped stdout"), sender.clone());
         read_output(child.stderr.take().expect("piped stderr"), sender);
@@ -109,7 +128,7 @@ impl Lab {
                     self.snapshot.invitation = None;
                     self.snapshot.metrics = None;
                     self.snapshot.session_active = false;
-                    self.snapshot.status = "Listener exited. Check the output device and whether port 47610 is in use.".into();
+                    self.snapshot.status = "Listener exited. Check the selected output device and whether port 47610 is in use.".into();
                     self.child = None;
                     self.events = None;
                 }
@@ -181,7 +200,7 @@ fn update_snapshot(snapshot: &mut LabSnapshot, line: &str) {
     } else if line == "RESULT pairing verified" {
         snapshot.status = "Paired; negotiating session".into();
     } else if line == "RESULT receiver started" {
-        snapshot.status = "Session active on the default output".into();
+        snapshot.status = "Session active".into();
         snapshot.metrics = None;
         snapshot.session_active = true;
     } else if snapshot.session_active
@@ -260,7 +279,7 @@ mod tests {
     fn rejects_invalid_host_before_launch() {
         let mut lab = Lab::default();
         for host in ["invalid", "0.0.0.0", "224.0.0.1", "255.255.255.255"] {
-            assert!(lab.start(host).is_err());
+            assert!(lab.start(host, None).is_err());
         }
         assert!(!lab.refresh().running);
     }
@@ -290,8 +309,10 @@ mod tests {
     #[ignore = "requires the playback lab binary, a Windows output and free lab ports"]
     fn real_listener_starts_and_stops() {
         use std::time::{Duration, Instant};
+        let output = sonimesh_platform::CpalOutput::new();
+        let device = output.default_device_probe().unwrap().device.id;
         let mut lab = Lab::default();
-        lab.start("127.0.0.1").unwrap();
+        lab.start("127.0.0.1", Some(device.as_str())).unwrap();
         let deadline = Instant::now() + Duration::from_secs(10);
         let snapshot = loop {
             let snapshot = lab.refresh();
@@ -305,8 +326,16 @@ mod tests {
             snapshot.invitation.is_some(),
             "listener did not publish an invitation"
         );
-        assert!(lab.start("127.0.0.1").is_err());
+        assert!(lab.start("127.0.0.1", None).is_err());
         assert!(!lab.stop().running);
         assert!(lab.child.is_none());
+
+        lab.start("127.0.0.1", Some("unavailable-output-id"))
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while lab.refresh().running && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        assert!(!lab.refresh().running, "unavailable device must fail");
     }
 }

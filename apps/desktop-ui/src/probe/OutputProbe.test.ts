@@ -5,6 +5,29 @@ import OutputProbe from './OutputProbe.vue'
 afterEach(() => { vi.useRealTimers(); delete window.__TAURI__ })
 
 describe('desktop output probe', () => {
+  it('uses the selected device snapshot for the listener and resets it on refresh', async () => {
+    const invoke = vi.fn().mockResolvedValueOnce({ generation: 4, devices: [
+      { label: 'Speakers', sampleRateHz: 48_000, channels: 2, isDefault: true },
+      { label: 'Headphones', sampleRateHz: 48_000, channels: 2, isDefault: false },
+    ] }).mockResolvedValueOnce({ running: true, status: 'Starting listener…', invitation: null, metrics: null })
+      .mockResolvedValueOnce({ running: false, status: 'Stopped', invitation: null, metrics: null })
+      .mockResolvedValueOnce({ generation: 5, devices: [] })
+    window.__TAURI__ = { core: { invoke } }
+    const wrapper = mount(OutputProbe)
+    await flushPromises()
+    await wrapper.get('#lab-output').setValue('1')
+    await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
+    await flushPromises()
+    expect(invoke).toHaveBeenCalledWith('start_lab', { host: '127.0.0.1', generation: 4, index: 1 })
+    expect(wrapper.get('#lab-output').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('button').attributes('disabled')).toBeDefined()
+    await wrapper.findAll('button').find(button => button.text() === 'Stop listener')!.trigger('click')
+    await flushPromises()
+    await wrapper.get('button').trigger('click')
+    await flushPromises()
+    expect((wrapper.get('#lab-output').element as HTMLSelectElement).value).toBe('')
+    wrapper.unmount()
+  })
   it('starts and stops the lab listener with the specified control address', async () => {
     const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [] })
       .mockResolvedValueOnce({ running: true, status: 'Starting listener…', invitation: null })
@@ -15,7 +38,7 @@ describe('desktop output probe', () => {
     await wrapper.get('#lab-host').setValue('10.0.2.2')
     await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
     await flushPromises()
-    expect(invoke).toHaveBeenCalledWith('start_lab', { host: '10.0.2.2' })
+    expect(invoke).toHaveBeenCalledWith('start_lab', { host: '10.0.2.2', generation: 1, index: null })
     expect(wrapper.text()).toContain('Starting listener')
     await wrapper.findAll('button').find(button => button.text() === 'Stop listener')!.trigger('click')
     await flushPromises()

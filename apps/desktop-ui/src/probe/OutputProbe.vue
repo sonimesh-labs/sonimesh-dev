@@ -28,6 +28,7 @@ interface LabMetrics {
 interface LabSnapshot { running: boolean; status: string; invitation: string | null; metrics: LabMetrics | null }
 const lab = ref<LabSnapshot>({ running: false, status: 'Stopped', invitation: null, metrics: null })
 const labHost = ref('127.0.0.1')
+const labOutput = ref('')
 const labBusy = ref(false)
 const labError = ref<string | null>(null)
 let timer: ReturnType<typeof setTimeout> | undefined
@@ -60,7 +61,7 @@ async function toggleLab() {
   try {
     lab.value = lab.value.running
       ? await window.__TAURI__.core.invoke<LabSnapshot>('stop_lab')
-      : await window.__TAURI__.core.invoke<LabSnapshot>('start_lab', { host: labHost.value.trim() })
+      : await window.__TAURI__.core.invoke<LabSnapshot>('start_lab', { host: labHost.value.trim(), generation: generation.value, index: labOutput.value === '' ? null : Number(labOutput.value) })
     if (!disposed && lab.value.running) timer = setTimeout(pollLab, 1000)
   } catch (cause) {
     labError.value = typeof cause === 'string' ? cause : 'Could not change listener state.'
@@ -81,8 +82,9 @@ const playbackErrors = new Set([
 ])
 
 async function refresh() {
-  if (busy.value) return
+  if (busy.value || lab.value.running || labBusy.value) return
   busy.value = true
+  labOutput.value = ''
   error.value = null
   message.value = null
   try {
@@ -132,7 +134,7 @@ onBeforeUnmount(() => { disposed = true; labRequest++; clearTimeout(timer) })
           <p class="preview-note">Inspect outputs and play a short test tone.</p>
         </div>
       </div>
-      <button type="button" class="preview-action" :disabled="busy || playing !== null" @click="refresh">
+      <button type="button" class="preview-action" :disabled="busy || playing !== null || lab.running || labBusy" @click="refresh">
         {{ busy ? 'Inspecting…' : 'Refresh devices' }}
       </button>
       <p v-if="error" class="command-error" role="alert">{{ error }}</p>
@@ -154,7 +156,12 @@ onBeforeUnmount(() => { disposed = true; labRequest++; clearTimeout(timer) })
     <section class="panel utility-panel" aria-labelledby="lab-title">
       <p class="eyebrow">Controlled network experiment</p>
       <h2 id="lab-title">Paired audio lab</h2>
-      <p class="preview-note">Uses the Windows default output and a public test invitation. Use only on a controlled network; this is not product pairing.</p>
+      <p class="preview-note">Uses a public test invitation. Use only on a controlled network; this is not product pairing.</p>
+      <label for="lab-output">Playback output</label>
+      <select id="lab-output" v-model="labOutput" :disabled="lab.running || labBusy || busy">
+        <option value="">System default output</option>
+        <option v-for="(device, index) in devices" :key="index" :value="String(index)" :disabled="device.sampleRateHz === null">{{ device.label }}{{ device.isDefault ? ' (default)' : '' }}</option>
+      </select>
       <label for="lab-host">Desktop address for Android control</label>
       <input id="lab-host" v-model="labHost" :disabled="lab.running || labBusy" autocomplete="off" />
       <p class="preview-note">For ADB reverse use 127.0.0.1 here; enter the UDP address separately in Android (typically 10.0.2.2 for an emulator).</p>
