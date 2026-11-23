@@ -2,6 +2,7 @@ use core::fmt;
 
 use sonimesh_audio::{FrameDecoder, RealtimePcmProducer};
 use sonimesh_platform::{AudioOutput, OutputError, OutputHealth};
+use sonimesh_protocol::MediaKeyContext;
 
 use crate::{
     GainControlHandle, OutputSelection, OutputSnapshot, OutputSnapshotSource,
@@ -13,6 +14,11 @@ use crate::{
 pub trait ReceiverPcmProducerInstaller<const PCM_SAMPLES_PER_BLOCK: usize> {
     /// Retires the previous output queue and installs the producer paired with a new source.
     fn replace_pcm_producer(&mut self, producer: RealtimePcmProducer<PCM_SAMPLES_PER_BLOCK>);
+
+    /// Returns the configured media context, when the adapter can report it.
+    fn media_context(&self) -> Option<MediaKeyContext> {
+        None
+    }
 }
 
 impl<
@@ -28,6 +34,10 @@ where
     fn replace_pcm_producer(&mut self, producer: RealtimePcmProducer<PCM_SAMPLES_PER_BLOCK>) {
         ReceiverStreamPipeline::replace_pcm_producer(self, producer);
     }
+
+    fn media_context(&self) -> Option<MediaKeyContext> {
+        Some(self.context())
+    }
 }
 
 impl<
@@ -42,6 +52,10 @@ where
 {
     fn replace_pcm_producer(&mut self, producer: RealtimePcmProducer<PCM_SAMPLES_PER_BLOCK>) {
         UdpReceiverPipeline::replace_pcm_producer(self, producer);
+    }
+
+    fn media_context(&self) -> Option<MediaKeyContext> {
+        Some(self.context())
     }
 }
 

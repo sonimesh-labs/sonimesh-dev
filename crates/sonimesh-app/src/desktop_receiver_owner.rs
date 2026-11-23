@@ -11,7 +11,7 @@ use std::sync::Arc;
 use sonimesh_audio::{DecodeStep, DecodeWorkerError, FrameDecoder};
 use sonimesh_diagnostics::StreamCounters;
 use sonimesh_platform::AudioOutput;
-use sonimesh_protocol::Envelope;
+use sonimesh_protocol::{Envelope, MediaDirection, envelope};
 
 use crate::{
     ControlSessionToken, ControlStreamAction, DesktopControlOwner, DesktopControlOwnerError,
@@ -134,6 +134,43 @@ where
         envelope: &Envelope,
     ) -> Result<ControlStreamAction, DesktopControlOwnerError> {
         let action = self.owner.accept_control(session, envelope)?;
+        let requested = match action {
+            ControlStreamAction::Start { token, request } => Some((Some(token), request.identity)),
+            ControlStreamAction::Rotate { token, next, .. } => Some((Some(token), next.identity)),
+            ControlStreamAction::Noop => match envelope.payload.as_ref() {
+                Some(envelope::Payload::StartStream(start)) => {
+                    u16::try_from(start.media_key_epoch).ok().map(|key_epoch| {
+                        (
+                            None,
+                            MediaStreamIdentity {
+                                session_id: start.media_session_id,
+                                stream_id: start.stream_id,
+                                key_epoch,
+                            },
+                        )
+                    })
+                }
+                _ => None,
+            },
+            _ => None,
+        };
+        if let (Some(context), Some((token, identity))) = (self.pipeline.media_context(), requested)
+        {
+            if identity
+                .media_key_context(MediaDirection::AndroidToDesktop)
+                .ok()
+                != Some(context)
+            {
+                if let Some(token) = token {
+                    let _ = self
+                        .owner
+                        .bridge_mut()
+                        .coordinator_mut()
+                        .abort_pending(token);
+                }
+                return Err(DesktopControlOwnerError::MediaContextMismatch);
+            }
+        }
         self.owner
             .execute_control_action(action, self.counters.clone(), &mut self.pipeline)?;
         Ok(action)

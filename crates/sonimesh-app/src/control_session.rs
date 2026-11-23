@@ -393,6 +393,12 @@ fn owner_error_reply(
     error: &DesktopControlOwnerError,
 ) -> Result<Envelope, ControlFrameError> {
     let envelope = match error {
+        DesktopControlOwnerError::MediaContextMismatch => ControlReply::error(
+            ErrorCode::RetryLater,
+            true,
+            "receiver media pipeline is not configured for the requested stream",
+        )?
+        .into_envelope(request_id)?,
         DesktopControlOwnerError::Mixer(ControlToMixerError::Control(control)) => {
             ControlReply::for_rejection(request_id, control)?
         }
@@ -459,11 +465,16 @@ mod tests {
     #[derive(Default)]
     struct TestPipeline {
         replacements: usize,
+        context: Option<sonimesh_protocol::MediaKeyContext>,
     }
 
     impl ReceiverPcmProducerInstaller<SOURCE_SAMPLES> for TestPipeline {
         fn replace_pcm_producer(&mut self, _producer: RealtimePcmProducer<SOURCE_SAMPLES>) {
             self.replacements += 1;
+        }
+
+        fn media_context(&self) -> Option<sonimesh_protocol::MediaKeyContext> {
+            self.context
         }
     }
 
@@ -593,8 +604,54 @@ mod tests {
         assert!(matches!(
             control.poll_once().unwrap(),
             ControlSessionPoll::Processed { replied: true, .. }
+                | ControlSessionPoll::Rejected { replied: true, .. }
         ));
         decode_control_frame(&control.into_inner().output).unwrap()
+    }
+
+    #[test]
+    fn mismatched_pipeline_replies_retryably_and_preserves_active_stream() {
+        use sonimesh_protocol::{MediaDirection, MediaKeyContext};
+
+        let mut receiver = receiver();
+        receiver.pipeline_mut().context =
+            Some(MediaKeyContext::new(7, 2, 0, MediaDirection::AndroidToDesktop).unwrap());
+        let session = receiver
+            .owner_mut()
+            .install_authenticated_control_session()
+            .unwrap();
+        receiver.accept_and_execute(session, &hello()).unwrap();
+        let reply = command_reply(&mut receiver, session, start());
+        assert_eq!(reply.request_id, 2);
+        assert!(
+            matches!(reply.payload, Some(envelope::Payload::Error(error)) if error.code == ErrorCode::RetryLater as i32 && error.retryable)
+        );
+        assert_eq!(receiver.pipeline_mut().replacements, 0);
+        assert!(!receiver.owner().bridge().coordinator().has_pending_change());
+
+        receiver.pipeline_mut().context =
+            Some(MediaKeyContext::new(7, 1, 0, MediaDirection::AndroidToDesktop).unwrap());
+        let reply = command_reply(&mut receiver, session, start());
+        assert!(
+            matches!(reply.payload, Some(envelope::Payload::StreamStatus(status)) if status.state == StreamState::Streaming as i32)
+        );
+        let mut rotate = start();
+        rotate.request_id = 3;
+        if let Some(envelope::Payload::StartStream(start)) = &mut rotate.payload {
+            start.media_key_epoch = 1;
+        }
+        let reply = command_reply(&mut receiver, session, rotate);
+        assert_eq!(reply.request_id, 3);
+        assert!(matches!(reply.payload, Some(envelope::Payload::Error(error)) if error.retryable));
+        assert!(!receiver.owner().bridge().coordinator().has_pending_change());
+        let reply = command_reply(&mut receiver, session, start());
+        assert!(
+            matches!(reply.payload, Some(envelope::Payload::StreamStatus(status)) if status.state == StreamState::Streaming as i32)
+        );
+        receiver.pipeline_mut().context =
+            Some(MediaKeyContext::new(7, 1, 0, MediaDirection::DesktopToAndroid).unwrap());
+        let reply = command_reply(&mut receiver, session, start());
+        assert!(matches!(reply.payload, Some(envelope::Payload::Error(error)) if error.retryable));
     }
 
     #[test]

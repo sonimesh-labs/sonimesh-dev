@@ -1194,17 +1194,21 @@ mod tests {
             start.stream_id = 2;
         }
         other_start.request_id = 4;
+        let rejected = scheduler
+            .receiver_mut()
+            .accept_and_execute(session, &other_start);
+        assert!(matches!(
+            rejected,
+            Err(crate::DesktopControlOwnerError::MediaContextMismatch)
+        ));
+        assert_eq!(
+            scheduler.tick_scheduled_at(1181).state,
+            super::ScheduledReceiverState::Idle
+        );
         scheduler
             .receiver_mut()
-            .accept_and_execute(session, &other_start)
+            .accept_and_execute(session, &start)
             .unwrap();
-        let mismatch = scheduler.tick_scheduled_at(1181);
-        assert_eq!(
-            mismatch.state,
-            super::ScheduledReceiverState::IdentityMismatch
-        );
-        assert_eq!(mismatch.packets.unwrap(), 0);
-        assert!(matches!(mismatch.playout, Ok(None)));
     }
 
     #[test]

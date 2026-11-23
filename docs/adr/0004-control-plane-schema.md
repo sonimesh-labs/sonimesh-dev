@@ -128,6 +128,14 @@ duplicate whose matching operation is still pending receives a retryable error
 instead of a premature success. An already-active start while output is
 unavailable also receives a retryable error until the stream can render again.
 
+The shell-neutral receiver owns a preconfigured media pipeline. When that
+pipeline exposes its media key context, start and rotation must match its
+session, stream, epoch and Android-to-desktop direction before admission or a
+streaming reply. A mismatch returns a correlated retryable error and cancels
+only the newly prepared operation; an existing stream remains admitted. This
+does not construct or rotate a pipeline, or verify its audio format. Adapters
+that do not expose a context remain responsible for ensuring the match.
+
 Version-one `StartStream` commands may establish multiple concurrently active
 media streams up to a fixed control-plane bound (`MAX_ACTIVE_STREAMS`), each
 distinguished by its own media-session and stream identity. The first admitted

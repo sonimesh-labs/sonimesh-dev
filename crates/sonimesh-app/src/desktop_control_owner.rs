@@ -26,6 +26,8 @@ use crate::{
 /// Failure returned by a low-rate desktop command owner.
 #[derive(Debug)]
 pub enum DesktopControlOwnerError {
+    /// The requested stream does not match the configured media pipeline.
+    MediaContextMismatch,
     /// Pairing lifecycle or snapshot clock failure.
     Pairing(PairingInvitationError),
     /// Diagnostic export serialization or retention failure.
@@ -88,6 +90,10 @@ impl DesktopControlView {
 impl core::fmt::Display for DesktopControlOwnerError {
     fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
+            Self::MediaContextMismatch => write!(
+                formatter,
+                "receiver media pipeline is not configured for the requested stream"
+            ),
             Self::Pairing(error) => write!(formatter, "desktop control pairing failure: {error}"),
             Self::Diagnostics(error) => {
                 write!(formatter, "desktop control diagnostics failure: {error}")
@@ -104,6 +110,7 @@ impl core::fmt::Display for DesktopControlOwnerError {
 impl std::error::Error for DesktopControlOwnerError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Self::MediaContextMismatch => None,
             Self::Pairing(error) => Some(error),
             Self::Diagnostics(error) => Some(error),
             Self::Mixer(error) => Some(error),
