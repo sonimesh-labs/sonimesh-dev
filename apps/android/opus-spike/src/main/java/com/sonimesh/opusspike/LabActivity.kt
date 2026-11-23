@@ -2,6 +2,8 @@ package com.sonimesh.opusspike
 
 import android.Manifest
 import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.AudioAttributes
@@ -104,6 +106,10 @@ class LabActivity : Activity() {
         layout.addView(encoderRate)
         sessionConfig = TextView(this)
         layout.addView(sessionConfig)
+        layout.addView(Button(this).apply {
+            text = "Copy lab evidence"
+            setOnClickListener { copyLabEvidence() }
+        })
         layout.addView(TextView(this).apply { text = "Playback usage for the next capture" })
         usage = Spinner(this).apply {
             contentDescription = "Playback usage for capture"
@@ -344,6 +350,13 @@ class LabActivity : Activity() {
 
     private fun showCaptureBusy() {
         Toast.makeText(this, "Capture is already starting, running, or stopping.", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun copyLabEvidence() {
+        getSystemService(ClipboardManager::class.java).setPrimaryClip(
+            ClipData.newPlainText("SoniMesh lab evidence", LabStatus.copyableEvidence()),
+        )
+        Toast.makeText(this, "Lab evidence copied.", Toast.LENGTH_SHORT).show()
     }
 
     private fun scanInvitation(startAfterScan: Boolean) {

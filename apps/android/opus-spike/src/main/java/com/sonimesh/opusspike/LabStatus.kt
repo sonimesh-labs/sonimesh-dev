@@ -96,4 +96,16 @@ internal object LabStatus {
         sentPackets = value
         sentPacketObservers.toList().forEach { it(value) }
     }
+
+    /** Returns a bounded operator summary without invitation or audio payloads. */
+    fun copyableEvidence(): String = buildString {
+        appendLine("SoniMesh paired audio lab")
+        appendLine("Status: $message")
+        sessionConfig?.let { config ->
+            appendLine("Session request: ${config.usage.label}, ${config.bitrate.bitsPerSecond / 1_000} kbps target")
+        }
+        appendLine("Sender queue drops: ${senderQueueDrops ?: "—"}")
+        appendLine("Media packets sent: ${sentPackets ?: "—"}")
+        appendLine("Encoded payload average: ${encoderRate?.let { "$it kbps" } ?: "—"}")
+    }.trimEnd()
 }

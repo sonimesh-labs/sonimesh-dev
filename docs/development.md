@@ -141,7 +141,10 @@ usage. A new test tone uses the current capture session's usage while the
 service is starting, running, or stopping; otherwise it uses the selector.
 **All** uses Media. Changing the selector does not change a tone already
 playing: stop and restart the tone to apply the applicable usage. On
-2026-11-23, an API 37 x86_64 emulator test checked all four
+the interactive lab screen, **Copy lab evidence** copies a bounded text summary
+of the current status, session request, sender queue drops, sent packet count,
+and encoded payload average. It excludes the invitation, SPKI, and audio data.
+On 2026-11-23, an API 37 x86_64 emulator test checked all four
 choices and confirmed the playing tone retains its usage across activity
 recreation; this checks audio attributes, not audible output. Android and the source application still
 control whether playback can be captured; the selector does not select apps.
@@ -484,8 +487,8 @@ Alternatively use `--check` without the playback feature to render into a
 software check. Open **SoniMesh audio lab**, select **Start ADB capture**, grant
 audio permission and fresh screen-capture consent, and play an eligible media
 source. **Start test tone** provides a local synthetic source; its button changes
-to **Stop test tone** while it plays. The tone stops if the lab activity is
-destroyed or recreated. **Stop capture**
+to **Stop test tone** while it plays. The tone continues across activity
+configuration recreation and is released when the activity finishes. **Stop capture**
 or the notification action ends the stream. Restart the desktop listener for
 each session. Remove the ADB mapping afterwards with `adb reverse --remove
 tcp:39091`. Select the device with `adb -s SERIAL` if several are connected.

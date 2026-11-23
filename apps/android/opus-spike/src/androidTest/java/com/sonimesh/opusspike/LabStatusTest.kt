@@ -1,6 +1,7 @@
 package com.sonimesh.opusspike
 
 import android.app.Activity
+import android.content.ClipboardManager
 import android.content.Intent
 import android.os.SystemClock
 import android.view.View
@@ -52,7 +53,9 @@ class LabStatusTest {
             }
             scenario.recreate()
             scenario.onActivity { activity ->
-                assertTrue(findButton(activity.window.decorView, "Start test tone") != null)
+                assertTrue(findButton(activity.window.decorView, "Stop test tone") != null)
+                assertTrue(activity.isTestTonePlaying())
+                findButton(activity.window.decorView, "Stop test tone")?.performClick()
             }
         }
     }
@@ -102,6 +105,35 @@ class LabStatusTest {
                 LabStatus.publishSentPackets(Long.MAX_VALUE)
                 assertTrue(hasStatus(activity.window.decorView, "Media packets sent: ${Long.MAX_VALUE}"))
                 LabStatus.publishSentPackets(null)
+            }
+        }
+    }
+
+    @Test
+    fun copyLabEvidenceIncludesBoundedStatusCounters() {
+        ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                try {
+                    LabStatus.serviceStarted(LabCaptureUsage.Game, OpusBitrate.fromBitsPerSecond(128_000))
+                    LabStatus.publishSenderQueueDrops(7)
+                    LabStatus.publishSentPackets(12)
+                    LabStatus.publishEncoderRate(73)
+                    requireNotNull(findButton(activity.window.decorView, "Copy lab evidence")).performClick()
+
+                    val clip = requireNotNull(
+                        activity.getSystemService(ClipboardManager::class.java).primaryClip,
+                    )
+                    val text = requireNotNull(clip.getItemAt(0).coerceToText(activity)).toString()
+                    assertTrue(text.contains("Session request: Game, 128 kbps target"))
+                    assertTrue(text.contains("Sender queue drops: 7"))
+                    assertTrue(text.contains("Media packets sent: 12"))
+                    assertTrue(text.contains("Encoded payload average: 73 kbps"))
+                } finally {
+                    LabStatus.serviceFinished()
+                    LabStatus.publishSenderQueueDrops(null)
+                    LabStatus.publishSentPackets(null)
+                    LabStatus.publishEncoderRate(null)
+                }
             }
         }
     }
