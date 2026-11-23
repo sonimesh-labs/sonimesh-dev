@@ -433,6 +433,14 @@ rejections, late packets, resynchronization drops, or decode errors, at a
 software peak of 0.095. This is emulator loopback evidence and does not qualify
 physical capture or audible output.
 
+On 2026-11-24, the `resumes_after_media_pause` instrumentation test completed
+against one continuously running listener after the listener moved its bounded
+receiver and retry state off the control thread stack. The API 37 emulator sent
+100 authenticated packets; the listener decoded 100, observed the intentional
+media interruption and resumption, and reported six PLC frames with zero
+rejections, late packets, or decode errors. This is a software/emulator loopback
+check and does not qualify physical-network or audible-playback behavior.
+
 This isolated test encodes a synthetic 48 kHz stereo tone with Android
 MediaCodec. It writes only synthetic audio to the spike application's external
 files directory; it does not use capture or networking. With a single selected
