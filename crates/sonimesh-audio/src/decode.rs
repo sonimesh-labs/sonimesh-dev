@@ -67,7 +67,7 @@ pub enum DecodeStep {
 pub enum DecodeWorkerError<DecoderError> {
     /// An authenticated payload exceeded inline jitter storage.
     Frame(FrameError),
-    /// The decoder reported no PCM or more samples than caller-owned storage holds.
+    /// The decoder reported an invalid length for the output block or Opus frame.
     InvalidOutputLength,
     /// The concrete decoder rejected an authenticated frame or PLC request.
     Decoder(DecoderError),
@@ -88,7 +88,7 @@ impl<DecoderError: fmt::Display> fmt::Display for DecodeWorkerError<DecoderError
         match self {
             Self::Frame(error) => write!(formatter, "encoded frame rejected: {error}"),
             Self::InvalidOutputLength => {
-                formatter.write_str("decoder reported PCM outside the bounded output block")
+                formatter.write_str("decoder reported an invalid PCM output length")
             }
             Self::Decoder(error) => write!(formatter, "stream decoder failed: {error}"),
         }
@@ -123,6 +123,7 @@ pub struct StreamDecodeWorker<
     jitter: JitterBuffer<JITTER_CAPACITY, MAX_ENCODED_BYTES>,
     producer: RealtimePcmProducer<PCM_SAMPLES_PER_BLOCK>,
     pcm: [f32; PCM_SAMPLES_PER_BLOCK],
+    opus_frame_samples: Option<usize>,
 }
 
 impl<
@@ -146,6 +147,7 @@ where
             jitter: JitterBuffer::with_start_sequence(sequence),
             producer,
             pcm: [0.0; PCM_SAMPLES_PER_BLOCK],
+            opus_frame_samples: None,
         }
     }
 
@@ -166,7 +168,9 @@ where
         frame: OpusFrameConfig,
     ) -> Result<Self, OpusFrameConfigError> {
         frame.validate_pcm_block_capacity(PCM_SAMPLES_PER_BLOCK)?;
-        Ok(Self::new(decoder, producer, sequence))
+        let mut worker = Self::new(decoder, producer, sequence);
+        worker.opus_frame_samples = Some(frame.interleaved_samples());
+        Ok(worker)
     }
 
     /// Admits a packet that has already passed network authentication and replay checks.
@@ -190,28 +194,34 @@ where
     ///
     /// # Errors
     ///
-    /// Returns a decoder error, or rejects a decoder that reports a length
-    /// beyond the compile-time PCM block capacity. No block is queued on error.
+    /// Returns a decoder error or rejects an invalid output length. An Opus
+    /// worker requires exactly one configured frame. No block is queued on error.
     pub fn decode_next(&mut self) -> Result<DecodeStep, DecodeWorkerError<D::Error>> {
         let playout = self.jitter.take_next();
+        let output_samples = self.opus_frame_samples.unwrap_or(PCM_SAMPLES_PER_BLOCK);
         let (sequence, concealed, samples) = match playout {
             PlayoutOutcome::NotReady => return Ok(DecodeStep::NotReady),
             PlayoutOutcome::Frame(frame) => (
                 frame.sequence,
                 false,
                 self.decoder
-                    .decode(frame.payload(), &mut self.pcm)
+                    .decode(frame.payload(), &mut self.pcm[..output_samples])
                     .map_err(DecodeWorkerError::Decoder)?,
             ),
             PlayoutOutcome::Missing { sequence } => (
                 sequence,
                 true,
                 self.decoder
-                    .decode_plc(&mut self.pcm)
+                    .decode_plc(&mut self.pcm[..output_samples])
                     .map_err(DecodeWorkerError::Decoder)?,
             ),
         };
-        if samples == 0 || samples > PCM_SAMPLES_PER_BLOCK {
+        if samples == 0
+            || samples > output_samples
+            || self
+                .opus_frame_samples
+                .is_some_and(|expected| samples != expected)
+        {
             self.pcm.fill(0.0);
             return Err(DecodeWorkerError::InvalidOutputLength);
         }

@@ -86,6 +86,10 @@ The codec-neutral `OpusFrameConfig` now validates the selected 48 kHz stereo
 10/20 ms shape and its 960/1,920 interleaved Float32 PCM requirement before a
 native binding is introduced. It may validate a larger reserved block for a
 shorter selected frame, but does not relax decoder output-length checks.
+An Opus-configured worker supplies exactly the selected frame's PCM span to
+both decode and PLC, even when its reserved block is larger. It rejects a
+different returned sample count instead of queuing audio with the wrong duration.
+The generic codec-neutral worker retains its variable-length behavior.
 The deterministic A-F simulator also constructs mock `StreamDecodeWorker`
 instances through `new_for_opus` for both fixed capacities. Those runs prove
 worker/PLC/queue control flow only; they are not a libopus, quality, power, or

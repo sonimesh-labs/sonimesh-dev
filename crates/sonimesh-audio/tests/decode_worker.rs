@@ -572,3 +572,77 @@ fn opus_constructor_rejects_insufficient_pcm_capacity_before_decode() {
         Err(OpusFrameConfigError::PcmBlockTooSmall)
     ));
 }
+
+struct FullBufferDecoder;
+
+impl FrameDecoder for FullBufferDecoder {
+    type Error = TestDecodeError;
+
+    fn decode(&mut self, _encoded: &[u8], output: &mut [f32]) -> Result<usize, Self::Error> {
+        output.fill(0.5);
+        Ok(output.len())
+    }
+
+    fn decode_plc(&mut self, output: &mut [f32]) -> Result<usize, Self::Error> {
+        output.fill(-0.5);
+        Ok(output.len())
+    }
+}
+
+#[test]
+fn opus_short_frame_uses_selected_length_for_decode_and_plc() {
+    let (producer, mut consumer) = realtime_pcm_queue::<1_920>(4).unwrap();
+    let frame = OpusFrameConfig::new(48_000, 2, 10).unwrap();
+    let mut worker =
+        StreamDecodeWorker::<_, 4, 8, 1_920>::new_for_opus(FullBufferDecoder, producer, 0, frame)
+            .unwrap();
+    worker.admit(0, 0, &[1]).unwrap();
+    worker.admit(2, 960, &[1]).unwrap();
+    assert!(matches!(
+        worker.decode_next(),
+        Ok(DecodeStep::Decoded { samples: 960, .. })
+    ));
+    assert!(matches!(
+        worker.decode_next(),
+        Ok(DecodeStep::Concealed { samples: 960, .. })
+    ));
+    let mut output = [0.0; 1_920];
+    assert!(matches!(
+        consumer.pop_into(&mut output),
+        RealtimePcmPopOutcome::Filled { samples: 960, .. }
+    ));
+    assert!(
+        output[..960]
+            .iter()
+            .all(|sample| (*sample - 0.5).abs() < f32::EPSILON)
+    );
+    assert!(matches!(
+        consumer.pop_into(&mut output),
+        RealtimePcmPopOutcome::Filled { samples: 960, .. }
+    ));
+    assert!(
+        output[..960]
+            .iter()
+            .all(|sample| (*sample + 0.5).abs() < f32::EPSILON)
+    );
+}
+
+#[test]
+fn opus_worker_rejects_short_decode_and_plc_output() {
+    let (producer, _consumer) = realtime_pcm_queue::<1_920>(4).unwrap();
+    let frame = OpusFrameConfig::new(48_000, 2, 10).unwrap();
+    let mut worker =
+        StreamDecodeWorker::<_, 4, 8, 1_920>::new_for_opus(TestDecoder, producer, 0, frame)
+            .unwrap();
+    worker.admit(0, 0, &[1]).unwrap();
+    worker.admit(2, 960, &[1]).unwrap();
+    assert_eq!(
+        worker.decode_next(),
+        Err(DecodeWorkerError::InvalidOutputLength)
+    );
+    assert_eq!(
+        worker.decode_next(),
+        Err(DecodeWorkerError::InvalidOutputLength)
+    );
+    assert_eq!(worker.queued_blocks(), 0);
+}

@@ -26,6 +26,41 @@ use sonimesh_protocol::{
 
 const SAMPLES: usize = 1_920;
 
+#[test]
+fn native_ten_ms_decode_and_plc_fit_a_larger_reserved_block() {
+    let mut encoder =
+        opus::Encoder::new(48_000, opus::Channels::Stereo, opus::Application::Audio).unwrap();
+    let mut packet = [0_u8; 1_148];
+    let length = encoder.encode_float(&[0.1; 960], &mut packet).unwrap();
+    let (producer, mut consumer) = realtime_pcm_queue::<SAMPLES>(4).unwrap();
+    let mut worker = StreamDecodeWorker::<_, 4, 1_148, SAMPLES>::new_for_opus(
+        lab_decoder::Decoder::new().unwrap(),
+        producer,
+        0,
+        OpusFrameConfig::new(48_000, 2, 10).unwrap(),
+    )
+    .unwrap();
+    worker.admit(0, 0, &packet[..length]).unwrap();
+    worker.admit(2, 960, &packet[..length]).unwrap();
+    assert!(matches!(
+        worker.decode_next(),
+        Ok(DecodeStep::Decoded { samples: 960, .. })
+    ));
+    assert!(matches!(
+        worker.decode_next(),
+        Ok(DecodeStep::Concealed { samples: 960, .. })
+    ));
+    let mut block = [0.0; SAMPLES];
+    assert!(matches!(
+        consumer.pop_into(&mut block),
+        sonimesh_audio::RealtimePcmPopOutcome::Filled { samples: 960, .. }
+    ));
+    assert!(matches!(
+        consumer.pop_into(&mut block),
+        sonimesh_audio::RealtimePcmPopOutcome::Filled { samples: 960, .. }
+    ));
+}
+
 #[derive(Default)]
 struct MemoryOutput {
     source: Option<Box<dyn RenderSource>>,
