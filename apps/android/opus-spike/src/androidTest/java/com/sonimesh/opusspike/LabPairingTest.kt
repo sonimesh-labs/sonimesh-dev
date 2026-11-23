@@ -1,16 +1,48 @@
 package com.sonimesh.opusspike
 
+import android.app.Activity
+import android.app.Instrumentation
+import android.content.Intent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
 import androidx.test.core.app.ActivityScenario
+import androidx.test.platform.app.InstrumentationRegistry
 import com.sonimesh.sender.protocol.PairingQr
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class LabPairingTest {
+    @Test
+    fun scan_button_launches_embedded_scanner_and_applies_its_result() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val result = Intent().putExtra("SCAN_RESULT", labHex(labInvitation("AB".repeat(32), "192.168.1.7")).uppercase())
+        val monitor = instrumentation.addMonitor(
+            "com.journeyapps.barcodescanner.CaptureActivity",
+            Instrumentation.ActivityResult(Activity.RESULT_OK, result),
+            true,
+        )
+        try {
+            ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    requireNotNull(findButton(activity.window.decorView, "Scan lab invitation")).performClick()
+                }
+                instrumentation.waitForIdleSync()
+                assertEquals(1, monitor.hits)
+                scenario.onActivity { activity ->
+                    val root = activity.window.decorView
+                    assertEquals("192.168.1.7", requireNotNull(findField(root, "Paired control IPv4 address")).text.toString())
+                    assertEquals("192.168.1.7", requireNotNull(findField(root, "Desktop IPv4 address for UDP")).text.toString())
+                    assertEquals("ab".repeat(32), requireNotNull(findField(root, "Paired lab desktop SPKI")).text.toString())
+                }
+            }
+        } finally {
+            instrumentation.removeMonitor(monitor)
+        }
+    }
+
     @Test
     fun accepts_hex_pin_and_rejects_invalid_input() {
         val invitation = PairingQr.decode(labInvitation(" ${"AB".repeat(32)} "))

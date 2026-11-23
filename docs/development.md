@@ -413,8 +413,8 @@ cargo build -p opus-codec-prototype --bin paired-audio-lab --features playback
 
 The probe expects `target/debug/paired-audio-lab.exe` in this checkout. Start the
 listener in the window and scan its lab invitation with the Android audio lab's
-**Scan lab invitation** button (requires an installed app that supports the
-ZXing scan intent). Alternatively, copy and paste the displayed payload. The
+**Scan lab invitation** button. The built-in scanner requests camera permission;
+copy and paste remains available if scanning cannot be used. The
 experimental QR contains the same hexadecimal test payload as the text field;
 it is not the production binary QR representation from ADR 0018. A scan from a
 non-loopback address also fills the UDP destination; a loopback invitation keeps

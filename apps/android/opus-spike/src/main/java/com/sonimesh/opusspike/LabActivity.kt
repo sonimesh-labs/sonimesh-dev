@@ -2,7 +2,6 @@ package com.sonimesh.opusspike
 
 import android.Manifest
 import android.app.Activity
-import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.AudioAttributes
@@ -20,6 +19,7 @@ import android.widget.ScrollView
 import android.widget.Spinner
 import android.widget.TextView
 import com.sonimesh.sender.protocol.PairingQr
+import com.journeyapps.barcodescanner.ScanOptions
 import kotlin.math.PI
 import kotlin.math.sin
 
@@ -109,13 +109,10 @@ class LabActivity : Activity() {
         layout.addView(Button(this).apply {
             text = "Scan lab invitation"
             setOnClickListener {
-                try {
-                    startActivityForResult(Intent("com.google.zxing.client.android.SCAN").apply {
-                        putExtra("SCAN_MODE", "QR_CODE_MODE")
-                    }, 3)
-                } catch (_: ActivityNotFoundException) {
-                    LabStatus.publish("No compatible scanner found. Paste the lab invitation instead.")
-                }
+                val options = ScanOptions().setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+                    .setPrompt("Scan the lab invitation on the desktop")
+                    .setBeepEnabled(false)
+                startActivityForResult(options.createScanIntent(this@LabActivity), 3)
             }
         })
         layout.addView(Button(this).apply {
