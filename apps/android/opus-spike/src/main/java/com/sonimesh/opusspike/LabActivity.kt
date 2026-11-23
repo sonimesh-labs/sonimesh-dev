@@ -65,7 +65,7 @@ class LabActivity : Activity() {
     }
     private val sessionObserver: (LabSessionConfig?) -> Unit = { config ->
         sessionConfig.text = if (config == null) "Session request: —" else
-            "Session request: ${config.usage.label}, ${config.bitrate.bitsPerSecond / 1_000} kbps target"
+            "Session request: ${config.usage.label}, ${config.bitrate.bitsPerSecond / 1_000} kbps target\nTransport: ${config.transport.label}"
     }
     private val labPreferences by lazy { getPreferences(MODE_PRIVATE) }
 

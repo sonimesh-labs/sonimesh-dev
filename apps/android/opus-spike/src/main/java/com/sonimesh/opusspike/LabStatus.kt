@@ -2,7 +2,17 @@ package com.sonimesh.opusspike
 
 import com.sonimesh.sender.encoder.OpusBitrate
 
-internal data class LabSessionConfig(val usage: LabCaptureUsage, val bitrate: OpusBitrate)
+internal enum class LabTransport(val label: String) {
+    Adb("ADB TCP"),
+    Udp("UDP"),
+    PairedUdp("paired UDP"),
+}
+
+internal data class LabSessionConfig(
+    val usage: LabCaptureUsage,
+    val bitrate: OpusBitrate,
+    val transport: LabTransport,
+)
 
 /** Process-local, main-thread status for the interactive lab. */
 internal object LabStatus {
@@ -21,10 +31,10 @@ internal object LabStatus {
     private var sessionConfig: LabSessionConfig? = null
     private val sessionObservers = mutableSetOf<(LabSessionConfig?) -> Unit>()
 
-    fun serviceStarted(usage: LabCaptureUsage, bitrate: OpusBitrate) {
+    fun serviceStarted(usage: LabCaptureUsage, bitrate: OpusBitrate, transport: LabTransport = LabTransport.Adb) {
         captureUsage = usage
         captureAdmission.serviceStarted()
-        sessionConfig = LabSessionConfig(usage, bitrate)
+        sessionConfig = LabSessionConfig(usage, bitrate, transport)
         sessionObservers.toList().forEach { it(sessionConfig) }
     }
 
@@ -109,6 +119,7 @@ internal object LabStatus {
         appendLine("Status: $message")
         sessionConfig?.let { config ->
             appendLine("Session request: ${config.usage.label}, ${config.bitrate.bitsPerSecond / 1_000} kbps target")
+            appendLine("Transport: ${config.transport.label}")
         }
         appendLine("Sender queue drops: ${senderQueueDrops ?: "—"}")
         appendLine("Media packets sent: ${sentPackets ?: "—"}")
