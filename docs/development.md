@@ -366,6 +366,10 @@ If the Android lab reports that the desktop connection ended, check that the
 listener is waiting and start capture again with fresh screen-capture consent.
 The continuously running listener does not need to be restarted for a new
 session; a listener that has exited must be started again.
+Every listener status line is flushed as it is emitted, including `READY`,
+`MEDIA`, `OUTPUT`, and periodic `STATUS` lines. A wrapper process can therefore
+consume the listener's stdout as a live event stream instead of waiting for the
+session to finish.
 
 On 2026-11-22, a malformed TLS handshake was followed by two successful API 37
 emulator sessions against one continuously running Windows listener using CPAL.
