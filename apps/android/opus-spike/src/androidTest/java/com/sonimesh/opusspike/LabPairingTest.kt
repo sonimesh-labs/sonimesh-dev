@@ -84,6 +84,30 @@ class LabPairingTest {
     }
 
     @Test
+    fun unapplied_invitation_survives_recreation_and_can_be_applied() {
+        val payload = labHex(labInvitation("AB".repeat(32), "192.168.1.7"))
+        ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                requireNotNull(findField(activity.window.decorView, "Lab invitation payload")).setText(payload)
+            }
+            scenario.recreate()
+            scenario.onActivity { activity ->
+                val root = activity.window.decorView
+                val invitation = requireNotNull(findField(root, "Lab invitation payload"))
+                assertEquals(payload, invitation.text.toString())
+                requireNotNull(findButton(root, "Apply invitation payload")).performClick()
+                assertEquals("192.168.1.7", requireNotNull(findField(root, "Paired control IPv4 address")).text.toString())
+                assertEquals("ab".repeat(32), requireNotNull(findField(root, "Paired lab desktop SPKI")).text.toString())
+                assertEquals("", invitation.text.toString())
+            }
+            scenario.recreate()
+            scenario.onActivity { activity ->
+                assertEquals("", requireNotNull(findField(activity.window.decorView, "Lab invitation payload")).text.toString())
+            }
+        }
+    }
+
+    @Test
     fun invitation_can_fill_udp_address_without_replacing_it_with_loopback() {
         ActivityScenario.launch(LabActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->

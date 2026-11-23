@@ -112,6 +112,8 @@ The lab's capture usage selector applies to the next capture session: **All**
 includes media, game and unknown usage, while the other choices select one
 usage. The test tone uses media usage. Android and the source application still
 control whether playback can be captured; the selector does not select apps.
+An invitation pasted into the lab but not yet applied remains in the field if
+Android recreates the activity, so it can still be reviewed and applied.
 The lab also lets the operator request 64, 96 (default), or 128 kbps Opus for
 the next capture. This is a MediaCodec target, not a measured or guaranteed
 bitrate; changing the selector does not reconfigure an active capture.

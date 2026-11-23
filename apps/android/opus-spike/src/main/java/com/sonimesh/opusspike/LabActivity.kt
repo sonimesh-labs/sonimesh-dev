@@ -135,6 +135,7 @@ class LabActivity : Activity() {
             hint = "Paste INVITATION_HEX"
             contentDescription = "Lab invitation payload"
             setSingleLine(true)
+            setText(savedInstanceState?.getString("invitation") ?: "")
         }
         layout.addView(invitation)
         layout.addView(Button(this).apply {
@@ -244,6 +245,7 @@ class LabActivity : Activity() {
         outState.putString("importedPin", importedPin)
         outState.putString("importedHost", importedHost)
         outState.putString("address", address.text.toString())
+        outState.putString("invitation", invitation.text.toString())
         outState.putString("pin", pin.text.toString())
         outState.putString("host", host.text.toString())
         super.onSaveInstanceState(outState)
