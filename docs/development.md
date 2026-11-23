@@ -103,6 +103,11 @@ The lab's capture usage selector applies to the next capture session: **All**
 includes media, game and unknown usage, while the other choices select one
 usage. The test tone uses media usage. Android and the source application still
 control whether playback can be captured; the selector does not select apps.
+When the encoder temporarily cannot accept a complete capture frame, the lab
+retains it and continues polling output. It pauses briefly if neither side can
+progress; after two seconds without accepting that frame, it stops the session
+and asks the user to retry. Capture continuity during codec stalls is not
+guaranteed because the platform capture buffer can overflow.
 **Stop capture** requests the desktop to stop the stream. This mode uses the
 same fixed public lab invitation and ADB-reversed control connection. The
 Android sender first gives its encoder a bounded opportunity to flush pending
