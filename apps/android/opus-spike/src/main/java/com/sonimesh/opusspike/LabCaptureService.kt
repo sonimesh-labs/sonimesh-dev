@@ -155,8 +155,12 @@ class LabCaptureService : Service() {
                 while (session == 0L) session = random.nextLong()
                 val identity = StreamIdentity(session, 1, 0)
                 val parameters = StreamParameters(identity, 48_000, 2, 20)
-                val result = startPairedWithRetry(running::get, Thread::sleep) { connection.startStream(parameters) }
-                check(result is StreamControlResult.Status && result.state == 2) { "desktop receiver not ready" }
+                val result = startPairedWithRetry(running::get, Thread::sleep, onRetry = {
+                    handler.post {
+                        if (running.get() && !terminalStatus) LabStatus.publish("Desktop receiver is not ready. Retrying…")
+                    }
+                }) { connection.startStream(parameters) }
+                requirePairedStart(result)
                 pairedIdentity = identity
                 check(setupSocket.handoff()) { "capture stopped while starting stream" }
                 check(running.get()) { "capture stopped while starting stream" }
@@ -313,9 +317,12 @@ class LabCaptureService : Service() {
                 Log.e("SoniMeshLab", "Capture or encoding failed", error)
                 val message = if (error is EncoderStalledException) "Audio encoder stopped responding. Restart capture and try again."
                     else if (error is CaptureReadStalledException) "Audio capture stopped producing samples. Restart capture and try again."
+                    else if (error is PairedStartRejectedException && error.retryable) "Desktop receiver is not ready. Check its output device and try again."
+                    else if (error is PairedStartRejectedException) "Desktop rejected the audio stream. Check the listener settings and try again."
+                    else if (error is PairedStartStatusException) "Desktop did not start the audio stream. Check the listener and try again."
                     else if (connected) "Capture or encoding failed. Check device support and try again."
                     else "Desktop connection failed. Check the listener and control address."
-                handler.post { finishWith(message) }
+                handler.post { if (running.get() && !terminalStatus) finishWith(message) }
             }
         } finally {
             try { record?.stop() } catch (_: IllegalStateException) { }

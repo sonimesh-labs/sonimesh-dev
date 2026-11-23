@@ -13,12 +13,29 @@ class PairedStartTest {
     @Test fun retriesAndThenReturnsSuccess() {
         var calls = 0
         var waited = 0L
-        val result = startPairedWithRetry({ true }, { waited += it }) {
+        var notices = 0
+        val result = startPairedWithRetry({ true }, { waited += it }, { notices++ }) {
             if (++calls == 2) success else retryable
         }
         assertEquals(success, result)
         assertEquals(2, calls)
         assertEquals(500L, waited)
+        assertEquals(1, notices)
+    }
+
+    @Test fun startRejectionsRetainRetryabilityWithoutDisplayingRemoteDetail() {
+        requirePairedStart(success)
+        val temporary = assertThrows(PairedStartRejectedException::class.java) {
+            requirePairedStart(retryable)
+        }
+        assertEquals(true, temporary.retryable)
+        val permanent = assertThrows(PairedStartRejectedException::class.java) {
+            requirePairedStart(StreamControlResult.Rejected(1, false, "untrusted detail"))
+        }
+        assertEquals(false, permanent.retryable)
+        assertThrows(PairedStartStatusException::class.java) {
+            requirePairedStart(StreamControlResult.Status(StreamIdentity(1, 1, 0), 4, ""))
+        }
     }
 
     @Test fun limitsRetriesAndDoesNotRetryPermanentRejection() {

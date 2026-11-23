@@ -142,6 +142,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   identity a second time. A different start retires the retained receiver.
   The Android lab retries a retryable start rejection up to twice on the same
   connection, with a cancellable 500 ms wait between attempts.
+  It reports the retry and distinguishes a desktop start rejection from a
+  connection failure; the reported reason does not assume why the desktop is
+  unready.
   The paired lab also resumes after an authenticated Opus packet rejected as
   invalid: it resets the stream's decode state and waits for fresh media, and
   reports the decode error count. Other decoder failures still end the session.
