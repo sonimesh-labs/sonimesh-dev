@@ -153,7 +153,10 @@ interfaces. This is not evidence of physical WLAN interoperability.
 Add `--keep-listening` to accept successive sessions without restarting the
 desktop listener or changing its displayed pin. It handles one client at a time;
 each connection uses a fresh pairing exchange and media session. An unsuccessful
-session returns to listening. Stop the listener with Ctrl+C. To exercise two
+session returns to listening. The desktop probe clears the previous session's
+observations and keeps a completion or failure notice while waiting for the next
+client. This notice does not identify the cause of a failure. Stop the listener
+with Ctrl+C. To exercise two
 successive synthetic sessions, run the instrumentation method
 `PairedAudioInteropTest#pairs_twice_with_continuous_listener` with the listener
 in this mode and the same `pairingSpkiHex` and optional `pairingHost` arguments.

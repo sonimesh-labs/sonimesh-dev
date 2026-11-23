@@ -91,7 +91,10 @@ fn run() -> LabResult<()> {
         }
         match result {
             Ok(()) => println!("RESULT session complete"),
-            Err(error) => eprintln!("Session ended: {error}"),
+            Err(error) => {
+                println!("RESULT session failed");
+                eprintln!("Session ended: {error}");
+            }
         }
     }
 }

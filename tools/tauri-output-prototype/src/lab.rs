@@ -239,7 +239,12 @@ fn update_snapshot(snapshot: &mut LabSnapshot, line: &str) {
             snapshot.invitation = Some(invitation.to_owned());
         }
     } else if line == "READY" {
-        snapshot.status = "Waiting for Android".into();
+        if !matches!(
+            snapshot.status.as_str(),
+            "Session ended; waiting for Android" | "Session failed; waiting for Android"
+        ) {
+            snapshot.status = "Waiting for Android".into();
+        }
         snapshot.metrics = None;
         snapshot.session_active = false;
     } else if line == "RESULT pairing verified" {
@@ -252,8 +257,14 @@ fn update_snapshot(snapshot: &mut LabSnapshot, line: &str) {
         && let Some(metrics) = parse_metrics(line)
     {
         snapshot.metrics = Some(metrics);
-    } else if line.starts_with("Session ended:") && !snapshot.session_active {
+    } else if line == "RESULT session complete" {
         snapshot.status = "Session ended; waiting for Android".into();
+        snapshot.metrics = None;
+        snapshot.session_active = false;
+    } else if line == "RESULT session failed" {
+        snapshot.status = "Session failed; waiting for Android".into();
+        snapshot.metrics = None;
+        snapshot.session_active = false;
     }
 }
 
@@ -358,6 +369,37 @@ mod tests {
     }
 
     #[test]
+    fn session_results_clear_observations_and_remain_visible_until_next_pairing() {
+        let status = "STATUS packets 120 rejected 3 decoded 115 peak 0.250 plc 2 decode_errors 1 buffered 4 output active";
+        for (result, expected) in [
+            (
+                "RESULT session failed",
+                "Session failed; waiting for Android",
+            ),
+            (
+                "RESULT session complete",
+                "Session ended; waiting for Android",
+            ),
+        ] {
+            let mut snapshot = LabSnapshot::default();
+            update_snapshot(&mut snapshot, "RESULT receiver started");
+            update_snapshot(&mut snapshot, status);
+            assert!(snapshot.metrics.is_some());
+            update_snapshot(&mut snapshot, result);
+            assert!(!snapshot.session_active);
+            assert!(snapshot.metrics.is_none());
+            update_snapshot(&mut snapshot, "READY");
+            assert_eq!(snapshot.status, expected);
+            update_snapshot(&mut snapshot, "RESULT pairing verified");
+            update_snapshot(&mut snapshot, "Session ended: delayed stderr");
+            assert_eq!(snapshot.status, "Paired; negotiating session");
+            update_snapshot(&mut snapshot, "RESULT receiver started");
+            update_snapshot(&mut snapshot, status);
+            assert!(snapshot.metrics.is_some());
+        }
+    }
+
+    #[test]
     #[ignore = "requires the playback lab binary, a Windows output and free lab ports"]
     fn real_listener_starts_and_stops() {
         use std::time::{Duration, Instant};
@@ -378,6 +420,20 @@ mod tests {
             snapshot.invitation.is_some(),
             "listener did not publish an invitation"
         );
+        drop(std::net::TcpStream::connect("127.0.0.1:47610").unwrap());
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let state = lab.refresh();
+            if state.status == "Session failed; waiting for Android" {
+                break;
+            }
+            assert!(
+                state.running && Instant::now() < deadline,
+                "{}",
+                state.status
+            );
+            std::thread::sleep(Duration::from_millis(25));
+        }
         lab.control(Some(35), None).unwrap();
         lab.control(None, Some(true)).unwrap();
         let deadline = Instant::now() + Duration::from_secs(5);
