@@ -31,6 +31,10 @@ On 2026-11-23, an API 37 x86_64 emulator capture was stopped after 27.7 seconds;
 the screen retained the observed 48 kHz stereo format, buffer sizes, and final
 frame counters. This silent emulator run checks the display and lifecycle path,
 not physical-device capture or audio playback.
+While a capture is active, the foreground notification also shows elapsed
+capture duration in its subtext and updates from the same bounded evidence
+clock. This keeps the run's liveness visible when the activity is off-screen;
+the notification still exposes only control text and no audio data.
 
 Before starting, the capture-only screen lets the operator choose **Media**,
 **Game**, **Other**, or **All supported** (the three groups together).
