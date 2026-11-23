@@ -558,6 +558,13 @@ requests the usual recording permission and screen-capture consent. A cancelled
 scan or invalid invitation does not start capture. **Scan lab invitation**
 continues to apply the invitation without starting, so the operator can review
 or edit the addresses first.
+For a pasted invitation, **Apply invitation and start paired capture** follows
+the same one-step flow: a non-loopback control address also becomes the UDP
+destination, while a loopback invitation retains the separate UDP address for
+ADB reverse. Invalid input or an already active capture does not start a session.
+On 2026-11-23, an API 37 emulator test exercised the pasted-invitation flow;
+the local software listener verified pairing and decoded 151 frames without
+decode errors. This does not validate physical WLAN or audible playback.
 On 2026-11-23, an API 37 emulator test injected a valid scanner result and
 completed consent, pairing, capture, and stop; the software listener decoded
 154 frames. A separate test rejected invalid scan contents before capture.

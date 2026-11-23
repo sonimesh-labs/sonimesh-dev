@@ -12,6 +12,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import com.sonimesh.sender.protocol.PairingQr
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LabPairingTest {
@@ -103,6 +104,20 @@ class LabPairingTest {
             scenario.recreate()
             scenario.onActivity { activity ->
                 assertEquals("", requireNotNull(findField(activity.window.decorView, "Lab invitation payload")).text.toString())
+            }
+        }
+    }
+
+    @Test
+    fun invalid_pasted_invitation_does_not_start_capture() {
+        ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                val root = activity.window.decorView
+                val invitation = requireNotNull(findField(root, "Lab invitation payload"))
+                invitation.setText("invalid")
+                requireNotNull(findButton(root, "Apply invitation and start paired capture")).performClick()
+                assertEquals("invalid", invitation.text.toString())
+                assertTrue(LabStatus.captureAdmission.canBegin())
             }
         }
     }

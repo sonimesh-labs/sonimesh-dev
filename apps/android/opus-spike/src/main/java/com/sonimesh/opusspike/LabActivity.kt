@@ -155,6 +155,16 @@ class LabActivity : Activity() {
             setOnClickListener { applyInvitation(useAddressForUdp = true) }
         })
         layout.addView(Button(this).apply {
+            text = "Apply invitation and start paired capture"
+            setOnClickListener {
+                if (!LabStatus.captureAdmission.canBegin()) {
+                    showCaptureBusy()
+                } else if (applyInvitation(useAddressForUdp = true)) {
+                    startCapture(true, paired = true)
+                }
+            }
+        })
+        layout.addView(Button(this).apply {
             text = "Start UDP capture"
             setOnClickListener { startCapture(true) }
         })

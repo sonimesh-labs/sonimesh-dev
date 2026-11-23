@@ -75,6 +75,9 @@ class PairedCaptureTest {
     fun captures_after_scanned_invitation() = runCapture(expectDisconnect = false, startFromScan = true)
 
     @Test
+    fun captures_after_pasted_invitation() = runCapture(expectDisconnect = false, startFromPaste = true)
+
+    @Test
     fun captures_again_after_stopping() {
         runCapture(expectDisconnect = false)
         runCapture(expectDisconnect = false)
@@ -89,7 +92,7 @@ class PairedCaptureTest {
     @Test
     fun returns_to_active_capture_from_notification() = runCapture(expectDisconnect = false, notificationReturn = true)
 
-    private fun runCapture(expectDisconnect: Boolean, screenOff: Boolean = false, notificationReturn: Boolean = false, startFromScan: Boolean = false) {
+    private fun runCapture(expectDisconnect: Boolean, screenOff: Boolean = false, notificationReturn: Boolean = false, startFromScan: Boolean = false, startFromPaste: Boolean = false) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val args = InstrumentationRegistry.getArguments()
         assumeTrue(
@@ -98,6 +101,7 @@ class PairedCaptureTest {
         )
         val pin = args.getString("pairingSpkiHex")
         if (startFromScan) assumeTrue("scan test requires pairingInvitationHex", args.containsKey("pairingInvitationHex"))
+        if (startFromPaste) assumeTrue("paste test requires pairingInvitationHex", args.containsKey("pairingInvitationHex"))
         ActivityScenario.launch(LabActivity::class.java).use { scenario ->
             args.getString("bitrateKbps")?.let { requested ->
                 val position = listOf("64", "96", "128").indexOf(requested)
@@ -125,6 +129,10 @@ class PairedCaptureTest {
                 find(root) { it is Button && it.text.toString().equals("Start test tone", true) }.performClick()
                 if (startFromScan) {
                     deliverScannerResult(activity, 4, Activity.RESULT_OK, args.getString("pairingInvitationHex"))
+                } else if (startFromPaste) {
+                    (find(root) { it is EditText && it.contentDescription == "Lab invitation payload" } as EditText)
+                        .setText(requireNotNull(args.getString("pairingInvitationHex")))
+                    find(root) { it is Button && it.text.toString() == "Apply invitation and start paired capture" }.performClick()
                 } else {
                     args.getString("pairingInvitationHex")?.let { payload ->
                         (find(root) { it is EditText && it.contentDescription == "Lab invitation payload" } as EditText)
@@ -167,6 +175,13 @@ class PairedCaptureTest {
                     "duplicate capture request replaced the active capture status",
                     containsStatus(activity.window.decorView, "Status: Capturing audio"),
                 )
+                if (startFromPaste) {
+                    val invitation = find(activity.window.decorView) { it is EditText && it.contentDescription == "Lab invitation payload" } as EditText
+                    invitation.setText("draft")
+                    find(activity.window.decorView) { it is Button && it.text.toString() == "Apply invitation and start paired capture" }.performClick()
+                    assertEquals("draft", invitation.text.toString())
+                    assertTrue(containsStatus(activity.window.decorView, "Status: Capturing audio"))
+                }
             }
             var disconnectStatus: String? = null
             if (expectDisconnect) {
