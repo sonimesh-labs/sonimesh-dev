@@ -28,6 +28,10 @@ interface LabMetrics {
 interface LabSnapshot { running: boolean; status: string; invitation: string | null; metrics: LabMetrics | null; volume: number | null; muted: boolean | null }
 const lab = ref<LabSnapshot>({ running: false, status: 'Stopped', invitation: null, metrics: null, volume: null, muted: null })
 const labHost = ref('127.0.0.1')
+const androidHost = ref('')
+const suggestedHost = ref<string | null>(null)
+const suggestError = ref<string | null>(null)
+const suggestBusy = ref(false)
 const labOutput = ref('')
 const startupBufferMs = ref(60)
 const labBusy = ref(false)
@@ -37,6 +41,20 @@ const controlBusy = ref(false)
 let timer: ReturnType<typeof setTimeout> | undefined
 let disposed = false
 let labRequest = 0
+
+async function suggestHost() {
+  if (!window.__TAURI__ || suggestBusy.value) return
+  suggestBusy.value = true
+  suggestedHost.value = null
+  suggestError.value = null
+  try {
+    suggestedHost.value = await window.__TAURI__.core.invoke<string>('suggest_lab_host', { androidHost: androidHost.value.trim() })
+  } catch (cause) {
+    suggestError.value = typeof cause === 'string' ? cause : 'Could not suggest a desktop address.'
+  } finally {
+    suggestBusy.value = false
+  }
+}
 
 async function pollLab() {
   const request = labRequest
@@ -188,12 +206,18 @@ onBeforeUnmount(() => { disposed = true; labRequest++; clearTimeout(timer) })
       <label for="lab-host">Desktop address for Android control</label>
       <input id="lab-host" v-model="labHost" :disabled="lab.running || labBusy" autocomplete="off" />
       <p class="preview-note">For ADB reverse use 127.0.0.1 here; enter the UDP address separately in Android (typically 10.0.2.2 for an emulator).</p>
+      <label for="android-host">Android device IPv4 (optional)</label>
+      <input id="android-host" v-model="androidHost" :disabled="lab.running || labBusy || suggestBusy" autocomplete="off" @input="suggestedHost = null; suggestError = null" />
+      <button type="button" class="preview-action" :disabled="lab.running || labBusy || suggestBusy" @click="suggestHost">{{ suggestBusy ? 'Checking route…' : 'Suggest desktop address' }}</button>
+      <p v-if="suggestError" class="command-error" role="alert">{{ suggestError }}</p>
+      <p v-if="suggestedHost" role="status">Suggested desktop address: {{ suggestedHost }} <button type="button" class="preview-action" :disabled="lab.running || labBusy" @click="labHost = suggestedHost">Use address</button></p>
+      <p class="preview-note">The suggestion follows the current route to Android; it does not verify connectivity.</p>
       <label for="lab-buffer">Startup buffer</label>
       <select id="lab-buffer" v-model.number="startupBufferMs" :disabled="lab.running || labBusy">
         <option v-for="value in [20, 40, 60, 80, 100, 120]" :key="value" :value="value">{{ value }} ms</option>
       </select>
       <p class="preview-note">Initial playout wait; restart the listener to change it. This is not an end-to-end latency measurement.</p>
-      <button type="button" class="preview-action" :disabled="labBusy" @click="toggleLab">{{ lab.running ? 'Stop listener' : 'Start listener' }}</button>
+      <button type="button" class="preview-action" :disabled="labBusy || suggestBusy" @click="toggleLab">{{ lab.running ? 'Stop listener' : 'Start listener' }}</button>
       <p role="status">{{ lab.status }}</p>
       <p v-if="labError" class="command-error" role="alert">{{ labError }}</p>
       <div v-if="lab.running && lab.volume != null && lab.muted != null">

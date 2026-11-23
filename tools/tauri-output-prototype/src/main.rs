@@ -13,6 +13,55 @@ struct ProbeState {
 }
 
 #[tauri::command]
+fn suggest_lab_host(android_host: &str) -> Result<String, &'static str> {
+    use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
+
+    let target: Ipv4Addr = android_host
+        .parse()
+        .map_err(|_| "Enter the Android device's IPv4 address.")?;
+    if target.is_unspecified()
+        || target.is_multicast()
+        || target.is_broadcast()
+        || target.is_loopback()
+    {
+        return Err("Enter a non-loopback unicast Android IPv4 address.");
+    }
+    let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0))
+        .map_err(|_| "Could not inspect the network route.")?;
+    socket
+        .connect(SocketAddrV4::new(target, 39093))
+        .map_err(|_| "No network route to that address. Enter the desktop address manually.")?;
+    match socket.local_addr() {
+        Ok(std::net::SocketAddr::V4(local))
+            if !local.ip().is_unspecified() && !local.ip().is_loopback() =>
+        {
+            Ok(local.ip().to_string())
+        }
+        _ => Err("Could not determine a desktop IPv4 address. Enter it manually."),
+    }
+}
+
+#[cfg(test)]
+mod route_tests {
+    use super::suggest_lab_host;
+
+    #[test]
+    fn rejects_addresses_that_cannot_identify_an_android_peer() {
+        for address in [
+            "",
+            "invalid",
+            "0.0.0.0",
+            "127.0.0.1",
+            "224.0.0.1",
+            "255.255.255.255",
+            "::1",
+        ] {
+            assert!(suggest_lab_host(address).is_err(), "{address}");
+        }
+    }
+}
+
+#[tauri::command]
 fn start_lab(
     state: tauri::State<'_, ProbeState>,
     host: String,
@@ -393,6 +442,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             probe_outputs,
             play_test_tone,
+            suggest_lab_host,
             start_lab,
             lab_status,
             stop_lab,

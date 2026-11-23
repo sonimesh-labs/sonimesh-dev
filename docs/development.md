@@ -132,6 +132,12 @@ their separate ADB bootstrap. Remove the reverse mapping when no longer needed.
 
 For a manually addressed controlled network, run the desktop listener with
 `--bind <desktop-local-IPv4> --host <desktop-reachable-IPv4>` after `--`.
+In the desktop output probe, entering the Android device's IPv4 address and
+choosing **Suggest desktop address** asks the operating system which local
+address it would route to that device. Review the suggestion before starting;
+VPNs, routing changes, firewalls, or client isolation can still prevent access.
+The suggestion does not send a packet or verify connectivity. Manual entry and
+the separate ADB reverse configuration remain available.
 The bind address applies to TCP port 47610 and UDP port 39093; the host is the
 exact address placed in the pairing invitation. Enter that same host in the
 Android **Paired control IPv4** field, and the reachable desktop IPv4 in the

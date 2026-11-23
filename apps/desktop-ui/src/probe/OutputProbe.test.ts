@@ -5,6 +5,37 @@ import OutputProbe from './OutputProbe.vue'
 afterEach(() => { vi.useRealTimers(); delete window.__TAURI__ })
 
 describe('desktop output probe', () => {
+  it('suggests a route address only when requested and applies it explicitly', async () => {
+    const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [] })
+      .mockResolvedValueOnce('192.168.1.10')
+      .mockResolvedValueOnce({ running: true, status: 'Starting', invitation: null })
+    window.__TAURI__ = { core: { invoke } }
+    const wrapper = mount(OutputProbe)
+    await flushPromises()
+    await wrapper.get('#android-host').setValue(' 192.168.1.20 ')
+    await wrapper.findAll('button').find(button => button.text() === 'Suggest desktop address')!.trigger('click')
+    await flushPromises()
+    expect(invoke).toHaveBeenCalledWith('suggest_lab_host', { androidHost: '192.168.1.20' })
+    expect((wrapper.get('#lab-host').element as HTMLInputElement).value).toBe('127.0.0.1')
+    await wrapper.findAll('button').find(button => button.text() === 'Use address')!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
+    expect(invoke).toHaveBeenCalledWith('start_lab', { host: '192.168.1.10', generation: 1, index: null, startupBufferMs: 60 })
+    wrapper.unmount()
+  })
+
+  it('shows route errors and preserves the manually entered address', async () => {
+    const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [] })
+      .mockRejectedValueOnce('No network route to that address. Enter the desktop address manually.')
+    window.__TAURI__ = { core: { invoke } }
+    const wrapper = mount(OutputProbe)
+    await flushPromises()
+    await wrapper.get('#lab-host').setValue('10.0.2.2')
+    await wrapper.findAll('button').find(button => button.text() === 'Suggest desktop address')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('No network route')
+    expect((wrapper.get('#lab-host').element as HTMLInputElement).value).toBe('10.0.2.2')
+    wrapper.unmount()
+  })
   it('sends audio controls and displays the listener-confirmed values', async () => {
     const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [] })
       .mockResolvedValueOnce({ running: true, status: 'Waiting', invitation: null, metrics: null, volume: 100, muted: false })
