@@ -170,6 +170,8 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   seconds. State changes are reported promptly while the other metrics retain
   their five-second cadence. This observation does not
   identify the cause of an interruption or establish that audio was decoded.
+  Output recovery transitions are also emitted promptly for the desktop probe;
+  the cumulative status line remains the compatibility fallback.
   Its fixed startup wait is configurable from 20 to 120 ms for network experiments;
   the desktop probe exposes this setting before listener startup. An opt-in
   experimental Balanced adaptive target gates live playout with bounded waits;

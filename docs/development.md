@@ -670,7 +670,8 @@ experiment immediately, including any active session; closing the probe also
 stops its child. During an active session the probe shows the listener's
 initial and five-second cumulative packet and decode counters, decoded peak, buffered frames,
 and output recovery state. These are software observations, not proof of audible
-playback. The last observations remain while waiting and clear on the next
+playback. Media arrival and output recovery transitions are emitted promptly;
+the cumulative counters retain their five-second cadence. The last observations remain while waiting and clear on the next
 client attempt.
 For adaptive playout the observations also show the current target and range,
 smoothed arrival jitter, gated ticks and forced playouts. These values describe

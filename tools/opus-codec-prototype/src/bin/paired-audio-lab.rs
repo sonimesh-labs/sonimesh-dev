@@ -551,6 +551,16 @@ fn format_status(
     status
 }
 
+fn output_state(playing: bool, retry_at: Option<Instant>) -> &'static str {
+    if retry_at.is_some() {
+        "recovering"
+    } else if playing {
+        "active"
+    } else {
+        "software-check"
+    }
+}
+
 fn poll_media(receiver: &mut Receiver) -> LabResult<Option<UdpPollOutcome>> {
     match receiver.poll() {
         Ok(outcome) => Ok(Some(outcome)),
@@ -880,6 +890,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
     let mut consecutive_plc = 0;
     let mut next_status = None;
     let mut retry_at = None;
+    let mut last_output_state = None;
     let mut decoded = 0_u64;
     let mut peak = 0_f32;
     let mut schedule = ScheduleObservations::default();
@@ -1005,6 +1016,8 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                                 }
                             };
                             playing = started;
+                            retry_at = None;
+                            last_output_state = None;
                             receiver = Some(pipeline);
                             consumer = if playing { None } else { Some(next_consumer) };
                             counters = Some(metrics);
@@ -1032,6 +1045,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                             )?;
                         }
                         let output_result = playback.stop();
+                        retry_at = None;
                         drop(receiver.take());
                         drop(consumer.take());
                         if playing {
@@ -1111,6 +1125,11 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                 next_playout = None;
                 consecutive_plc = 0;
             }
+            let current_output_state = output_state(playing, retry_at);
+            if last_output_state != Some(current_output_state) {
+                println!("OUTPUT {current_output_state}");
+                last_output_state = Some(current_output_state);
+            }
             if draining_stale {
                 draining_stale = !drain_stale_media(pipeline)?;
             } else {
@@ -1157,13 +1176,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                 next_playout = Some(next_playout_deadline(due, now));
             }
             if next_status.is_some_and(|due| now >= due) {
-                let output = if retry_at.is_some() {
-                    "recovering"
-                } else if playing {
-                    "active"
-                } else {
-                    "software-check"
-                };
+                let output = output_state(playing, retry_at);
                 let decoded_peak = f32::from_bits(decoded_peak.load(Ordering::Relaxed));
                 if let Some(status) = status_if_due(
                     &mut next_status,
@@ -2269,6 +2282,13 @@ mod tests {
             activity.changed(now + Duration::from_secs(23)),
             Some("receiving")
         );
+    }
+
+    #[test]
+    fn output_state_prioritizes_recovery_over_playback_mode() {
+        assert_eq!(output_state(true, None), "active");
+        assert_eq!(output_state(false, None), "software-check");
+        assert_eq!(output_state(true, Some(Instant::now())), "recovering");
     }
 
     #[test]

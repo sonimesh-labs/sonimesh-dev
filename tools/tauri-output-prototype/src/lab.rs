@@ -286,6 +286,12 @@ fn update_snapshot(snapshot: &mut LabSnapshot, line: &str) {
     {
         metrics.media = Some(state.into());
     } else if snapshot.session_active
+        && let Some(state @ ("active" | "recovering" | "software-check")) =
+            line.strip_prefix("OUTPUT ")
+        && let Some(metrics) = &mut snapshot.metrics
+    {
+        metrics.output = state.into();
+    } else if snapshot.session_active
         && let Some(mut metrics) = parse_metrics(line)
     {
         metrics.media = snapshot
@@ -554,6 +560,24 @@ mod tests {
         );
         update_snapshot(&mut snapshot, "RESULT client connected");
         assert!(snapshot.metrics.is_none());
+    }
+
+    #[test]
+    fn output_observation_updates_promptly_without_accepting_invalid_states() {
+        let mut snapshot = LabSnapshot::default();
+        let status = "STATUS packets 1 rejected 0 decoded 1 peak 0.100 plc 0 decode_errors 0 buffered 0 output active playout fixed";
+        update_snapshot(&mut snapshot, "RESULT receiver started");
+        update_snapshot(&mut snapshot, status);
+        for state in ["recovering", "active", "software-check"] {
+            update_snapshot(&mut snapshot, &format!("OUTPUT {state}"));
+            assert_eq!(snapshot.metrics.as_ref().unwrap().output, state);
+        }
+        let before = snapshot.metrics.clone();
+        update_snapshot(&mut snapshot, "OUTPUT failed");
+        assert_eq!(snapshot.metrics, before);
+        update_snapshot(&mut snapshot, "RESULT session complete");
+        update_snapshot(&mut snapshot, "OUTPUT recovering");
+        assert_eq!(snapshot.metrics.as_ref().unwrap().output, "software-check");
     }
 
     #[test]
