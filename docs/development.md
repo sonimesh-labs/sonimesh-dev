@@ -725,10 +725,10 @@ the cumulative counters retain their five-second cadence. The last observations 
 client attempt.
 When metrics are available, **Copy session evidence** copies a bounded text
 summary of the displayed status, counters, and the latest listener lifecycle
-events without including the invitation or audio data. Events are limited to the
-listener's latest 32 transitions and each copied event is shortened to keep the
-operator report compact. If clipboard access is unavailable, the visible metrics
-and events remain available for manual selection.
+events without including the invitation or audio data. The listener retains the
+latest 32 transitions and bounds each stored event; copied events are shortened
+again to keep the operator report compact. If clipboard access is unavailable,
+the visible metrics and events remain available for manual selection.
 If a listener ends before producing metrics, the same action remains available
 when lifecycle events exist and copies status plus those events so an early
 startup or session failure can still be attached to a local report.
