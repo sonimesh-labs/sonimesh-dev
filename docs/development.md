@@ -204,6 +204,14 @@ On a normal stop, `RESULT schedule` reports the number of live playout
 decisions, decisions at least one frame late, and the maximum lateness in
 microseconds. These measure the lab loop against its own deadlines, exclude
 the stop drain, and do not measure packet arrival time or physical playback.
+On normal stop, `RESULT resync` reports up to the first eight live jitter-buffer
+resynchronizations: the number of buffered frames discarded, the interval since
+the preceding receive-loop iteration, and the age and lateness of the most recent
+playout decision when available. A total event count indicates omitted events.
+These observations are captured in memory and printed after the stop drain; they
+exclude resynchronizations during that drain. Loop intervals are not packet
+arrival times, and a nearby delay does not establish why a resynchronization
+occurred.
 In one 2026-11-23 API 37 emulator software session, the notification-return
 capture test completed with 193 live decisions, one at least 20 ms late, and
 26,122 microseconds maximum lateness; the listener decoded 177 frames and

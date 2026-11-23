@@ -23,8 +23,8 @@ use sonimesh_app::{
     begin_from_rendered_payload,
 };
 use sonimesh_audio::{
-    DecodeStep, DecodeWorkerError, FrameDecoder, JitterMode, OpusFrameConfig, RealtimePcmConsumer,
-    StreamDecodeWorker, TargetGatedPlayoutConfig, realtime_pcm_queue,
+    DecodeStep, DecodeWorkerError, FrameDecoder, InsertOutcome, JitterMode, OpusFrameConfig,
+    RealtimePcmConsumer, StreamDecodeWorker, TargetGatedPlayoutConfig, realtime_pcm_queue,
 };
 use sonimesh_diagnostics::{StreamCounters, StreamMetricsSnapshot};
 use sonimesh_network::{
@@ -374,6 +374,54 @@ impl ScheduleObservations {
         }
         let micros = u64::try_from(lateness.as_micros()).unwrap_or(u64::MAX);
         self.max_lateness_us = self.max_lateness_us.max(micros);
+    }
+}
+
+#[derive(Clone, Copy)]
+struct ResyncObservation {
+    dropped: usize,
+    loop_gap: Option<Duration>,
+    previous_decision: Option<(Duration, Duration)>,
+}
+
+#[derive(Default)]
+struct ResyncObservations {
+    total: u64,
+    first: [Option<ResyncObservation>; 8],
+}
+
+impl ResyncObservations {
+    fn record(&mut self, observation: ResyncObservation) {
+        if let Some(slot) = usize::try_from(self.total)
+            .ok()
+            .and_then(|index| self.first.get_mut(index))
+        {
+            *slot = Some(observation);
+        }
+        self.total = self.total.saturating_add(1);
+    }
+
+    fn print(&self) {
+        println!("RESULT resync events {}", self.total);
+        for (index, event) in self.first.iter().flatten().enumerate() {
+            let loop_gap = event
+                .loop_gap
+                .map_or_else(|| "none".to_owned(), |gap| gap.as_micros().to_string());
+            let (age, lateness) = event.previous_decision.map_or_else(
+                || ("none".to_owned(), "none".to_owned()),
+                |(age, lateness)| {
+                    (
+                        age.as_micros().to_string(),
+                        lateness.as_micros().to_string(),
+                    )
+                },
+            );
+            println!(
+                "RESULT resync event {} dropped {} loop_gap_us {loop_gap} decision_age_us {age} decision_lateness_us {lateness}",
+                index + 1,
+                event.dropped,
+            );
+        }
     }
 }
 
@@ -746,6 +794,9 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
     let mut decoded = 0_u64;
     let mut peak = 0_f32;
     let mut schedule = ScheduleObservations::default();
+    let mut resyncs = ResyncObservations::default();
+    let mut previous_loop = None;
+    let mut previous_decision: Option<(Instant, Duration)> = None;
     let mut playing = false;
     let decoded_peak = Arc::new(AtomicU32::new(0));
     let deadline = Instant::now() + Duration::from_secs(40);
@@ -914,6 +965,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                             "RESULT schedule decisions {} frame_late {} max_lateness_us {}",
                             schedule.decisions, schedule.frame_late, schedule.max_lateness_us
                         );
+                        resyncs.print();
                         if decoded == 0 || peak < 0.001 {
                             if options.require_tone {
                                 return Err("no non-silent audio decoded".into());
@@ -936,6 +988,9 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
             UntrustedControlPoll::Empty => {}
         }
         if let (Some(pipeline), Some(metrics)) = (&mut receiver, &counters) {
+            let loop_start = Instant::now();
+            let loop_gap = previous_loop.map(|previous| loop_start.duration_since(previous));
+            previous_loop = Some(loop_start);
             if playback.monitor(pipeline, &mut retry_at) {
                 next_playout = None;
                 consecutive_plc = 0;
@@ -944,7 +999,17 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                 match poll_media(pipeline)? {
                     None => continue,
                     Some(UdpPollOutcome::Empty) => break,
-                    Some(UdpPollOutcome::Processed { .. }) => {
+                    Some(UdpPollOutcome::Processed { admission, .. }) => {
+                        if let InsertOutcome::Resynchronized { dropped_frames } = admission {
+                            let observed_at = Instant::now();
+                            resyncs.record(ResyncObservation {
+                                dropped: dropped_frames,
+                                loop_gap,
+                                previous_decision: previous_decision.map(|(when, lateness)| {
+                                    (observed_at.duration_since(when), lateness)
+                                }),
+                            });
+                        }
                         if next_playout.is_none() && retry_at.is_none() {
                             next_playout = Some(Instant::now() + options.startup_buffer);
                         }
@@ -954,6 +1019,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
             let now = Instant::now();
             if let Some(due) = next_playout.filter(|due| now >= *due) {
                 schedule.observe(due, now);
+                previous_decision = Some((now, now.duration_since(due)));
                 match decode_live_playout(pipeline, metrics, &mut consecutive_plc)? {
                     Some(DecodeStep::Decoded { .. }) => decoded += 1,
                     Some(_) => {}
@@ -1619,6 +1685,30 @@ mod tests {
         assert_eq!(observations.decisions, 3);
         assert_eq!(observations.frame_late, 2);
         assert_eq!(observations.max_lateness_us, 41_500);
+    }
+
+    #[test]
+    fn resync_observations_retain_first_events_and_count_the_rest() {
+        let mut observations = ResyncObservations::default();
+        for dropped in 0..12 {
+            observations.record(ResyncObservation {
+                dropped,
+                loop_gap: Some(Duration::from_millis(dropped as u64)),
+                previous_decision: (dropped != 0)
+                    .then_some((Duration::from_millis(5), Duration::from_millis(2))),
+            });
+        }
+        assert_eq!(observations.total, 12);
+        let first = observations.first[0].unwrap();
+        assert_eq!(first.dropped, 0);
+        assert_eq!(first.previous_decision, None);
+        let last = observations.first[7].unwrap();
+        assert_eq!(last.dropped, 7);
+        assert_eq!(last.loop_gap, Some(Duration::from_millis(7)));
+        assert_eq!(
+            last.previous_decision,
+            Some((Duration::from_millis(5), Duration::from_millis(2)))
+        );
     }
 
     #[test]
