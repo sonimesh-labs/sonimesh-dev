@@ -434,8 +434,10 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   It can also start and stop the separately built paired-audio lab process and
   display its public test invitation, session status, and periodic packet,
   decode, and output-recovery observations. That process can use a selected output;
-  the probe does not own a product receiver session or change the system default
-  output. The observations are not evidence of audible playback or latency.
+  the probe also retains a bounded ordered history of listener lifecycle events
+  for session diagnosis. The probe does not own a product receiver session or
+  change the system default output. The observations are not evidence of audible
+  playback or latency.
 - a dependency-free `tools/latency-measurement` crate that generates a
   deterministic MLS reference WAVE (PCM 16/24/32 or IEEE float 32/64), reads
   and reports the declared properties of WAVE recordings (PCM 16/24/32, IEEE
