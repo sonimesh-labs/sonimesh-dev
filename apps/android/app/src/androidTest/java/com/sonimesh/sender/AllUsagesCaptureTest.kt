@@ -1,5 +1,7 @@
 package com.sonimesh.sender
 
+import android.app.Notification
+import android.app.NotificationManager
 import android.content.Intent
 import android.media.AudioAttributes
 import android.media.AudioFormat
@@ -33,6 +35,13 @@ class AllUsagesCaptureTest {
                 assertTrue("capture did not start", waitUntil(10_000) {
                     CaptureStateStore.state.value.evidence.captureSource == CaptureSource.AllSupported
                 })
+                val notification = instrumentation.targetContext.getSystemService(NotificationManager::class.java)
+                    .activeNotifications.firstOrNull { it.id == 1001 }?.notification
+                assertTrue("capture notification missing", notification != null)
+                assertTrue(
+                    "capture notification did not expose duration",
+                    notification?.extras?.getString(Notification.EXTRA_SUB_TEXT)?.startsWith("Capture duration: ") == true,
+                )
             }
             ActivityScenario.launch(MainActivity::class.java).use {
                 val selected = waitUntil(8_000) {
