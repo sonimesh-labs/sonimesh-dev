@@ -187,6 +187,9 @@ On 2026-11-23 an API 37 x86_64 emulator run verified that the count is visible
 during paired capture and remains visible after stop; the software listener
 decoded 151 frames with a 0.094 peak. A separate recreation test restored a
 synthetic count. Neither run injected sender-queue congestion.
+**Media packets sent** counts packets successfully written to the selected TCP
+or UDP sender. Compare it with sender queue drops when diagnosing the lab; it
+does not prove network delivery or desktop receipt and is retained after stop.
 The lab foreground service holds a partial CPU wake lock until the service is
 destroyed so it can be evaluated with the screen off. Physical-device screen-off
 continuity and power consumption remain unmeasured.

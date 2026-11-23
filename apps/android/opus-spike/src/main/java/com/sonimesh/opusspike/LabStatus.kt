@@ -15,6 +15,8 @@ internal object LabStatus {
     private val dropObservers = mutableSetOf<(Long?) -> Unit>()
     private var encoderRate: Long? = null
     private val rateObservers = mutableSetOf<(Long?) -> Unit>()
+    private var sentPackets: Long? = null
+    private val sentPacketObservers = mutableSetOf<(Long?) -> Unit>()
     private var sessionConfig: LabSessionConfig? = null
     private val sessionObservers = mutableSetOf<(LabSessionConfig?) -> Unit>()
 
@@ -79,5 +81,19 @@ internal object LabStatus {
     fun publishEncoderRate(value: Long?) {
         encoderRate = value
         rateObservers.toList().forEach { it(value) }
+    }
+
+    fun observeSentPackets(observer: (Long?) -> Unit) {
+        sentPacketObservers.add(observer)
+        observer(sentPackets)
+    }
+
+    fun removeSentPackets(observer: (Long?) -> Unit) {
+        sentPacketObservers.remove(observer)
+    }
+
+    fun publishSentPackets(value: Long?) {
+        sentPackets = value
+        sentPacketObservers.toList().forEach { it(value) }
     }
 }

@@ -36,6 +36,7 @@ import java.security.SecureRandom
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 class LabCaptureService : Service() {
     private val running = AtomicBoolean(false)
@@ -67,6 +68,7 @@ class LabCaptureService : Service() {
         LabStatus.serviceStarted(usage, bitrate)
         running.set(true)
         LabStatus.publishSenderQueueDrops(null)
+        LabStatus.publishSentPackets(null)
         LabStatus.publishEncoderRate(null)
         LabStatus.publish("Connecting to the desktop listener…")
         var pendingInvitation: ByteArray? = null
@@ -136,6 +138,16 @@ class LabCaptureService : Service() {
         var captureStarted = false
         var rateMeter: EncoderRateMeter? = null
         var lastRatePublication = 0L
+        val sentPackets = AtomicLong(0)
+        val lastSentPublication = AtomicLong(0)
+        val packetSent: () -> Unit = {
+            val count = sentPackets.incrementAndGet()
+            val now = SystemClock.elapsedRealtime()
+            val previous = lastSentPublication.get()
+            if (now - previous >= 1_000 && lastSentPublication.compareAndSet(previous, now)) {
+                handler.post { LabStatus.publishSentPackets(count) }
+            }
+        }
         try {
             val packets = ArrayBlockingQueue<EncodedPacket>(8)
             if (invitation != null) {
@@ -165,7 +177,7 @@ class LabCaptureService : Service() {
                 check(setupSocket.handoff()) { "capture stopped while starting stream" }
                 check(running.get()) { "capture stopped while starting stream" }
                 val sealer = LabMediaSealer(connection.mediaRoot, session, 1, 0)
-                pairedSender = Thread({ sendDatagrams(sealer, packets, requireNotNull(destination), pairedProducerFinished) }, "audio-lab-sender")
+                pairedSender = Thread({ sendDatagrams(sealer, packets, requireNotNull(destination), pairedProducerFinished, packetSent) }, "audio-lab-sender")
                     .also { it.start() }
             } else {
                 val connection = Socket()
@@ -187,9 +199,9 @@ class LabCaptureService : Service() {
                     }
                     connection.soTimeout = 0
                     Thread({ watchControl(connection) }, "audio-lab-control").start()
-                    Thread({ sendDatagrams(sealer, packets, requireNotNull(destination)) }, "audio-lab-sender").start()
+                    Thread({ sendDatagrams(sealer, packets, requireNotNull(destination), onSent = packetSent) }, "audio-lab-sender").start()
                 } else {
-                    Thread({ writePackets(connection, packets) }, "audio-lab-sender").start()
+                    Thread({ writePackets(connection, packets, packetSent) }, "audio-lab-sender").start()
                 }
             }
             connected = true
@@ -215,6 +227,7 @@ class LabCaptureService : Service() {
             handler.post {
                 if (running.get() && !terminalStatus) {
                     LabStatus.publishSenderQueueDrops(0)
+                    LabStatus.publishSentPackets(0)
                     LabStatus.publish("Capturing audio and sending to desktop.")
                 }
             }
@@ -353,6 +366,7 @@ class LabCaptureService : Service() {
                     paired.close()
                 }
             }
+            handler.post { LabStatus.publishSentPackets(sentPackets.get()) }
             handler.post {
                 workerFinished = true
                 captureStopWarning(terminalStatus, stopResult)?.let {
@@ -369,13 +383,14 @@ class LabCaptureService : Service() {
 
     private data class EncodedPacket(val sequence: Long, val bytes: ByteArray)
 
-    private fun writePackets(connection: Socket, packets: ArrayBlockingQueue<EncodedPacket>) {
+    private fun writePackets(connection: Socket, packets: ArrayBlockingQueue<EncodedPacket>, onSent: () -> Unit) {
         try {
             val output = DataOutputStream(connection.getOutputStream())
             while (running.get()) {
                 val packet = packets.poll(100, TimeUnit.MILLISECONDS) ?: continue
                 output.writeInt(packet.bytes.size)
                 output.write(packet.bytes)
+                onSent()
             }
         } catch (error: Exception) {
             if (running.get()) {
@@ -390,6 +405,7 @@ class LabCaptureService : Service() {
         packets: ArrayBlockingQueue<EncodedPacket>,
         destination: java.net.Inet4Address,
         producerFinished: AtomicBoolean? = null,
+        onSent: () -> Unit = {},
     ) {
         try {
             DatagramSocket().use { udp ->
@@ -397,6 +413,7 @@ class LabCaptureService : Service() {
                 val send = { packet: EncodedPacket ->
                     val datagram = sealer.seal(packet.sequence, packet.sequence * 960, 0, packet.bytes)
                     udp.send(DatagramPacket(datagram, datagram.size))
+                    onSent()
                 }
                 if (producerFinished != null) {
                     sendUntilProducerFinished(packets, producerFinished, send)

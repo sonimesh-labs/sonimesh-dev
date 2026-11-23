@@ -165,6 +165,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   On normal stop it also reports a final post-drain snapshot; the desktop probe
   retains that snapshot, or the last available update after failure, until the
   next client attempt. These observations do not establish audible playback.
+  The Android lab also reports media packets successfully written to its TCP or
+  UDP sender, separately from local sender-queue drops; this does not measure
+  network delivery or desktop receipt and resets for the next capture.
   The probe also reports whether the listener is waiting for its first accepted
   packet, has received one recently, or has seen no new accepted packet for two
   seconds. State changes are reported promptly while the other metrics retain

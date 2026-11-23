@@ -45,6 +45,7 @@ class LabActivity : Activity() {
     private lateinit var host: EditText
     private lateinit var status: TextView
     private lateinit var senderQueueDrops: TextView
+    private lateinit var sentPackets: TextView
     private lateinit var encoderRate: TextView
     private lateinit var sessionConfig: TextView
     private lateinit var usage: Spinner
@@ -55,6 +56,9 @@ class LabActivity : Activity() {
     }
     private val rateObserver: (Long?) -> Unit = { rate ->
         encoderRate.text = if (rate == null) "Encoded payload average: —" else "Encoded payload average: $rate kbps"
+    }
+    private val sentPacketsObserver: (Long?) -> Unit = { count ->
+        sentPackets.text = if (count == null) "Media packets sent: —" else "Media packets sent: $count"
     }
     private val sessionObserver: (LabSessionConfig?) -> Unit = { config ->
         sessionConfig.text = if (config == null) "Session request: —" else
@@ -94,6 +98,8 @@ class LabActivity : Activity() {
         layout.addView(status)
         senderQueueDrops = TextView(this)
         layout.addView(senderQueueDrops)
+        sentPackets = TextView(this)
+        layout.addView(sentPackets)
         encoderRate = TextView(this)
         layout.addView(encoderRate)
         sessionConfig = TextView(this)
@@ -242,6 +248,7 @@ class LabActivity : Activity() {
         super.onStart()
         LabStatus.observe(statusObserver)
         LabStatus.observeSenderQueueDrops(dropsObserver)
+        LabStatus.observeSentPackets(sentPacketsObserver)
         LabStatus.observeEncoderRate(rateObserver)
         LabStatus.observeSessionConfig(sessionObserver)
     }
@@ -249,6 +256,7 @@ class LabActivity : Activity() {
     override fun onStop() {
         LabStatus.remove(statusObserver)
         LabStatus.removeSenderQueueDrops(dropsObserver)
+        LabStatus.removeSentPackets(sentPacketsObserver)
         LabStatus.removeEncoderRate(rateObserver)
         LabStatus.removeSessionConfig(sessionObserver)
         super.onStop()
