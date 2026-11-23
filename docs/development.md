@@ -729,6 +729,9 @@ events without including the invitation or audio data. Events are limited to the
 listener's latest 32 transitions and each copied event is shortened to keep the
 operator report compact. If clipboard access is unavailable, the visible metrics
 and events remain available for manual selection.
+If a listener ends before producing metrics, the same action remains available
+when lifecycle events exist and copies status plus those events so an early
+startup or session failure can still be attached to a local report.
 **Share session evidence** sends the same bounded summary through the browser
 share API when the Tauri web view exposes it, and otherwise copies it to the
 clipboard. A cancelled share leaves the current notice unchanged; neither path
