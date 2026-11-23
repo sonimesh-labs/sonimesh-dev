@@ -27,6 +27,8 @@ pub struct LabMetrics {
     decode_errors: String,
     buffered: String,
     output: String,
+    late: Option<String>,
+    resync_dropped: Option<String>,
     playout: Option<String>,
     adaptive: Option<AdaptiveMetrics>,
 }
@@ -329,6 +331,14 @@ fn parse_metrics(line: &str) -> Option<LabMetrics> {
     {
         return None;
     }
+    let (late, resync_dropped, rest) = match rest {
+        ["late", late, "resync_dropped", dropped, rest @ ..] => {
+            late.parse::<u64>().ok()?;
+            dropped.parse::<u64>().ok()?;
+            (Some((*late).into()), Some((*dropped).into()), rest)
+        }
+        _ => (None, None, rest),
+    };
     let (playout, adaptive) = match rest {
         [] => (None, None),
         ["playout", "fixed"] => (Some("fixed".into()), None),
@@ -388,6 +398,8 @@ fn parse_metrics(line: &str) -> Option<LabMetrics> {
         decode_errors: (*decode_errors).into(),
         buffered: (*buffered).into(),
         output: (*output).into(),
+        late,
+        resync_dropped,
         playout,
         adaptive,
     })
@@ -445,6 +457,24 @@ mod tests {
         assert_eq!(snapshot.metrics, Some(metrics));
         assert!(parse_metrics(&status.replace("0.250", "NaN")).is_none());
         assert!(parse_metrics(&status.replace("recovering", "unknown")).is_none());
+    }
+
+    #[test]
+    fn parses_optional_late_and_resync_counts_without_losing_large_integers() {
+        let prefix = "STATUS packets 120 rejected 3 decoded 115 peak 0.250 plc 2 decode_errors 1 buffered 4 output active";
+        let old = parse_metrics(&format!("{prefix} playout fixed")).unwrap();
+        assert_eq!((old.late, old.resync_dropped), (None, None));
+        let extended = format!("{prefix} late 9007199254740993 resync_dropped 7 playout fixed");
+        let parsed = parse_metrics(&extended).unwrap();
+        assert_eq!(parsed.late.as_deref(), Some("9007199254740993"));
+        assert_eq!(parsed.resync_dropped.as_deref(), Some("7"));
+        assert_eq!(parsed.playout.as_deref(), Some("fixed"));
+        assert!(
+            parse_metrics(&extended.replace("resync_dropped 7", "resync_dropped invalid"))
+                .is_none()
+        );
+        assert!(parse_metrics(&format!("{prefix} late 1 playout fixed")).is_none());
+        assert!(parse_metrics(&format!("{prefix} late 2 resync_dropped 3 playout adaptive target 3 min 2 max 4 jitter_ms 17 gated 7 forced 2 resets 1")).is_some());
     }
 
     #[test]

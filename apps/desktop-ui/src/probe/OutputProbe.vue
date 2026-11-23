@@ -25,6 +25,7 @@ const message = ref<string | null>(null)
 interface LabMetrics {
   packets: string; rejected: string; decoded: string; peak: string
   plc: string; decodeErrors: string; buffered: string; output: 'active' | 'recovering' | 'software-check' | 'stopped'
+  late: string | null; resyncDropped: string | null
   playout: 'fixed' | 'adaptive' | null
   adaptive: { target: number; min: number; max: number; jitterMs: number; gated: string; forced: string; resets: string } | null
 }
@@ -275,6 +276,8 @@ onBeforeUnmount(() => { disposed = true; labRequest++; clearTimeout(timer) })
         <dl class="lab-metrics">
           <div><dt>Accepted packets</dt><dd>{{ lab.metrics.packets }}</dd></div>
           <div><dt>Packets rejected</dt><dd>{{ lab.metrics.rejected }}</dd></div>
+          <div v-if="lab.metrics.late != null"><dt>Late packets</dt><dd>{{ lab.metrics.late }}</dd></div>
+          <div v-if="lab.metrics.resyncDropped != null"><dt>Frames dropped on resync</dt><dd>{{ lab.metrics.resyncDropped }}</dd></div>
           <div><dt>Decoded frames</dt><dd>{{ lab.metrics.decoded }}</dd></div>
           <div><dt>Decoded peak</dt><dd>{{ lab.metrics.peak }}</dd></div>
           <div><dt>Concealed frames</dt><dd>{{ lab.metrics.plc }}</dd></div>
@@ -291,6 +294,7 @@ onBeforeUnmount(() => { disposed = true; labRequest++; clearTimeout(timer) })
           <div><dt>Output</dt><dd>{{ !lab.sessionActive && lab.metrics.output !== 'stopped' ? 'Last reported: ' : '' }}{{ lab.metrics.output === 'recovering' ? 'Recovering' : lab.metrics.output === 'active' ? 'Active' : lab.metrics.output === 'stopped' ? 'Stopped' : 'Software check' }}</dd></div>
         </dl>
         <p class="preview-note">{{ lab.sessionActive ? 'Updated at session start and every five seconds.' : lab.metrics.output === 'stopped' ? 'Final update after the stop drain.' : 'Last available update; the session may have ended before its final report.' }} Packet and decode counts and peak are cumulative; they do not confirm audible playback.</p>
+        <p v-if="lab.metrics.late != null" class="preview-note">Late packets missed their playout deadline; resync drops are buffered frames discarded when the jitter buffer resynchronizes.</p>
         <p v-if="lab.metrics.adaptive" class="preview-note">Adaptive target, jitter, gated ticks and forced playouts reset with the stream epoch; stream resets count the session's resets.</p>
       </section>
       <template v-if="lab.invitation">

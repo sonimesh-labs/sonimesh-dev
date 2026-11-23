@@ -382,12 +382,14 @@ fn format_status(
     adaptive: bool,
 ) -> String {
     let mut status = format!(
-        "STATUS packets {} rejected {} decoded {decoded} peak {peak:.3} plc {} decode_errors {} buffered {} output {output}",
+        "STATUS packets {} rejected {} decoded {decoded} peak {peak:.3} plc {} decode_errors {} buffered {} output {output} late {} resync_dropped {}",
         metrics.authenticated_packets,
         metrics.rejected_packets,
         metrics.plc_frames,
         metrics.decode_errors,
         metrics.jitter_frames,
+        metrics.late_packets,
+        metrics.jitter_resync_dropped_frames,
     );
     if adaptive {
         write!(
@@ -1703,6 +1705,8 @@ mod tests {
         let metrics = StreamMetricsSnapshot {
             authenticated_packets: 120,
             rejected_packets: 3,
+            late_packets: 9,
+            jitter_resync_dropped_frames: 6,
             plc_frames: 2,
             decode_errors: 1,
             jitter_frames: 4,
@@ -1720,7 +1724,7 @@ mod tests {
         assert_eq!(
             status_if_due(&mut next, late, metrics, 115, 0.25, "recovering", true).as_deref(),
             Some(
-                "STATUS packets 120 rejected 3 decoded 115 peak 0.250 plc 2 decode_errors 1 buffered 4 output recovering playout adaptive target 3 min 2 max 4 jitter_ms 17 gated 7 forced 2 resets 1"
+                "STATUS packets 120 rejected 3 decoded 115 peak 0.250 plc 2 decode_errors 1 buffered 4 output recovering late 9 resync_dropped 6 playout adaptive target 3 min 2 max 4 jitter_ms 17 gated 7 forced 2 resets 1"
             )
         );
         assert!(status_if_due(&mut next, late, metrics, 115, 0.25, "recovering", true).is_none());
@@ -1736,7 +1740,7 @@ mod tests {
             )
             .as_deref(),
             Some(
-                "STATUS packets 0 rejected 0 decoded 0 peak 0.000 plc 0 decode_errors 0 buffered 0 output software-check playout fixed"
+                "STATUS packets 0 rejected 0 decoded 0 peak 0.000 plc 0 decode_errors 0 buffered 0 output software-check late 0 resync_dropped 0 playout fixed"
             )
         );
         assert!(status_if_due(&mut None, late, metrics, 0, 0.0, "active", false).is_none());

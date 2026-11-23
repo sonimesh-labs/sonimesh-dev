@@ -320,8 +320,8 @@ describe('desktop output probe', () => {
   })
 
   it('shows live and final session observations, then clears them on the next client', async () => {
-    const metrics = { packets: '120', rejected: '3', decoded: '115', peak: '0.250', plc: '2', decodeErrors: '1', buffered: '4', output: 'recovering' }
-    const finalMetrics = { ...metrics, decoded: '120', output: 'stopped' }
+    const metrics = { packets: '120', rejected: '3', decoded: '115', peak: '0.250', plc: '2', decodeErrors: '1', buffered: '4', output: 'recovering', late: '9007199254740993', resyncDropped: '4' }
+    const finalMetrics = { ...metrics, decoded: '120', output: 'stopped', late: '9007199254740994', resyncDropped: '5' }
     const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [] })
       .mockResolvedValueOnce({ running: true, status: 'Starting listener…', invitation: null, metrics: null })
       .mockResolvedValueOnce({ running: true, sessionActive: true, status: 'Session active', invitation: '01ab', metrics })
@@ -334,12 +334,16 @@ describe('desktop output probe', () => {
     await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
     await vi.advanceTimersByTimeAsync(1000)
     expect(wrapper.get('.lab-metrics').text()).toContain('Accepted packets120')
+    expect(wrapper.get('.lab-metrics').text()).toContain('Late packets9007199254740993')
+    expect(wrapper.get('.lab-metrics').text()).toContain('Frames dropped on resync4')
     expect(wrapper.get('.lab-metrics').text()).toContain('Decoded peak0.250')
     expect(wrapper.get('.lab-metrics').text()).toContain('OutputRecovering')
     await vi.advanceTimersByTimeAsync(1000)
     expect(wrapper.text()).toContain('Last session observations')
     expect(wrapper.text()).toContain('Final update after the stop drain')
     expect(wrapper.get('.lab-metrics').text()).toContain('Decoded frames120')
+    expect(wrapper.get('.lab-metrics').text()).toContain('Late packets9007199254740994')
+    expect(wrapper.get('.lab-metrics').text()).toContain('Frames dropped on resync5')
     expect(wrapper.get('.lab-metrics').text()).toContain('OutputStopped')
     await vi.advanceTimersByTimeAsync(1000)
     expect(wrapper.find('.lab-metrics').exists()).toBe(false)
@@ -363,6 +367,8 @@ describe('desktop output probe', () => {
     await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
     await vi.advanceTimersByTimeAsync(1000)
     expect(wrapper.get('.lab-metrics').text()).toContain('Playout modeAdaptive (experimental)')
+    expect(wrapper.get('.lab-metrics').text()).not.toContain('Late packets')
+    expect(wrapper.get('.lab-metrics').text()).not.toContain('Frames dropped on resync')
     expect(wrapper.get('.lab-metrics').text()).toContain('Adaptive target3 frames (2–4)')
     expect(wrapper.get('.lab-metrics').text()).toContain('Gated ticks9007199254740993')
     expect(wrapper.text()).toContain('reset with the stream epoch')

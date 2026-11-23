@@ -201,8 +201,14 @@ Add `--status` to print packet counts, decode counts and peak, jitter occupancy,
 and output recovery state at session start and every five seconds afterward. This can help
 distinguish missing media from decoded silence; counts and peak are cumulative
 for the session, and they do not prove audible output. On a normal stop, the
-listener emits a final snapshot after its tail drain. The desktop probe retains
-the most recent session's observations while waiting; if a session fails before
+listener emits a final snapshot after its tail drain. The desktop probe shows
+late-packet and jitter-resynchronization dropped-frame counts alongside the other
+observations; these identify different causes of missing frames, not the cause
+of network delay. An older listener omits these values and the probe hides them.
+On 2026-11-23, an API 37 emulator and software listener reported 7 late packets
+and 24 resynchronization drops in both the final status and result; 174 frames
+were decoded. This does not characterize physical WLAN or audible playback.
+The probe retains the most recent session's observations while waiting; if a session fails before
 a final snapshot, it labels the retained values as the last update. A new client
 attempt clears the prior observations. When its view reloads, the probe checks
 for an existing listener and resumes its status updates. Settings shown in a
