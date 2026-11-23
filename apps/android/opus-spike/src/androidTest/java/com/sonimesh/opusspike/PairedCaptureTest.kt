@@ -274,6 +274,7 @@ class PairedCaptureTest {
                     val notification = instrumentation.targetContext.getSystemService(NotificationManager::class.java)
                         .activeNotifications.firstOrNull { it.id == 1 }?.notification
                     assertEquals("Transport: paired UDP", notification?.extras?.getString(Notification.EXTRA_TEXT))
+                    assertEquals("Capture duration: —", notification?.extras?.getString(Notification.EXTRA_SUB_TEXT))
                     requireNotNull(notification?.contentIntent) { "capture notification has no open action" }.send()
                     val returnDeadline = SystemClock.elapsedRealtime() + 10_000
                     var returned = false
