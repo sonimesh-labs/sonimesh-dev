@@ -58,6 +58,7 @@ class LabActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        tone = lastNonConfigurationInstance as? AudioTrack
         udpMode = savedInstanceState?.getBoolean("udpMode") ?: false
         pairedMode = savedInstanceState?.getBoolean("pairedMode") ?: false
         pendingAddress = savedInstanceState?.getString("pendingAddress") ?: DEFAULT_LAB_ADDRESS
@@ -218,7 +219,7 @@ class LabActivity : Activity() {
             }
         })
         layout.addView(Button(this).apply {
-            text = "Start test tone"
+            text = if (tone == null) "Start test tone" else "Stop test tone"
             setOnClickListener {
                 toggleTone()
                 text = if (tone == null) "Start test tone" else "Stop test tone"
@@ -480,10 +481,14 @@ class LabActivity : Activity() {
         tone = track
     }
 
+    override fun onRetainNonConfigurationInstance(): Any? = tone
+
+    internal fun isTestTonePlaying(): Boolean = tone?.playState == AudioTrack.PLAYSTATE_PLAYING
+
     override fun onDestroy() {
         importedInvitation?.fill(0)
         importedInvitation = null
-        tone?.let { it.stop(); it.release() }
+        if (!isChangingConfigurations) tone?.let { it.stop(); it.release() }
         tone = null
         super.onDestroy()
     }

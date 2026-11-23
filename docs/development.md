@@ -573,6 +573,10 @@ On 2026-11-23, an API 37 emulator test injected a valid scanner result and
 completed consent, pairing, capture, and stop; the software listener decoded
 154 frames. A separate test rejected invalid scan contents before capture.
 These checks did not exercise camera-based QR recognition or physical WLAN.
+The lab's optional test tone continues across activity configuration recreation;
+the button still stops it, and finishing the activity releases it. An API 37
+emulator test on 2026-11-23 checked the AudioTrack play state and stop control
+across recreation; it did not check audible output or physical-device behavior.
 The control address defaults to `127.0.0.1` for ADB reverse; for a controlled LAN use an address Android can
 reach. The listener binds TCP 47610 on all IPv4 interfaces and uses UDP 39093;
 it plays through the selected output, or the default output when no device is

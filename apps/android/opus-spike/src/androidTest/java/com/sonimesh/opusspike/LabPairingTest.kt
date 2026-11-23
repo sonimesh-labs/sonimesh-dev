@@ -11,11 +11,29 @@ import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
 import com.sonimesh.sender.protocol.PairingQr
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LabPairingTest {
+    @Test
+    fun test_tone_continues_across_activity_recreation_and_can_be_stopped() {
+        ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                requireNotNull(findButton(activity.window.decorView, "Start test tone")).performClick()
+                assertTrue(activity.isTestTonePlaying())
+            }
+            scenario.recreate()
+            scenario.onActivity { activity ->
+                assertTrue(activity.isTestTonePlaying())
+                requireNotNull(findButton(activity.window.decorView, "Stop test tone")).performClick()
+                assertFalse(activity.isTestTonePlaying())
+                requireNotNull(findButton(activity.window.decorView, "Start test tone"))
+            }
+        }
+    }
+
     @Test
     fun scan_button_launches_embedded_scanner_and_applies_its_result() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()

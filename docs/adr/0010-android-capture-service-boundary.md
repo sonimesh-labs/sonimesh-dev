@@ -143,6 +143,9 @@ behavior remain unverified.
 The lab activity presents the service's current connection and capture state,
 including a terminal reason on connection failure or projection revocation;
 this process-local status is not a production diagnostics interface.
+Its optional locally generated test tone stays active across activity configuration
+recreation and is released when the activity finishes. It is not a service-owned
+audio source and does not survive process death.
 The lab foreground notification opens the activity when selected, allowing the
 operator to return to the existing capture and its status without starting a new
 projection session. Its stop action remains available independently.
