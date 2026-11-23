@@ -15,8 +15,8 @@ use sonimesh_protocol::Envelope;
 
 use crate::{
     ControlSessionToken, ControlStreamAction, DesktopControlOwner, DesktopControlOwnerError,
-    ReceiverPcmProducerInstaller, ReceiverPipelineError, UdpPollOutcome, UdpReceiverError,
-    UdpReceiverPipeline,
+    MediaStreamIdentity, ReceiverPcmProducerInstaller, ReceiverPipelineError, StartedMixerStream,
+    UdpPollOutcome, UdpReceiverError, UdpReceiverPipeline,
 };
 
 /// Result of one UDP media scheduler tick.
@@ -102,6 +102,20 @@ where
     /// Mutably borrows the injected media pipeline for packet polling and decode.
     pub fn pipeline_mut(&mut self) -> &mut P {
         &mut self.pipeline
+    }
+
+    /// Re-admits a persisted stream to a recreated output using this receiver's pipeline.
+    ///
+    /// The caller must select the identity corresponding to this owned pipeline.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when output is unavailable or the stream cannot be re-admitted.
+    pub fn recover_stream(
+        &mut self,
+        identity: MediaStreamIdentity,
+    ) -> Result<StartedMixerStream, DesktopControlOwnerError> {
+        self.owner.recover_stream(identity, &mut self.pipeline)
     }
 
     /// Accepts one authenticated control envelope and executes its lifecycle action.

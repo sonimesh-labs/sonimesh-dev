@@ -122,6 +122,11 @@ validated payload match pending or completed work. Reusing a media identity with
 different sample rate, channel count, or frame duration is rejected rather than
 reported as a successful no-op. A start command also cannot alias an in-flight
 stop merely because both name the same media identity.
+The desktop transport replies to a completed duplicate start or stop with a
+correlated stream status, so a sender retry does not wait indefinitely. A
+duplicate whose matching operation is still pending receives a retryable error
+instead of a premature success. An already-active start while output is
+unavailable also receives a retryable error until the stream can render again.
 
 Version-one `StartStream` commands may establish multiple concurrently active
 media streams up to a fixed control-plane bound (`MAX_ACTIVE_STREAMS`), each

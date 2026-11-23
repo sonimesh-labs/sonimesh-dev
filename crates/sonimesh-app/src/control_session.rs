@@ -11,12 +11,15 @@ use sonimesh_network::{
     PinnedServerChannel, UntrustedControlError, UntrustedControlPoll, UntrustedControlStream,
     UntrustedControlWrite,
 };
-use sonimesh_protocol::{ControlFrameError, Envelope, ErrorCode, Hello, StreamState, envelope};
+use sonimesh_protocol::{
+    CONTROL_PROTOCOL_VERSION, ControlFrameError, Envelope, ErrorCode, Hello, StreamState,
+    StreamStatus, envelope,
+};
 
 use crate::{
     ControlReply, ControlSessionToken, ControlStreamAction, ControlToMixerError,
-    DesktopControlOwnerError, DesktopReceiverOwner, ReceiverPcmProducerInstaller,
-    TrustedControlChannel,
+    DesktopControlOwnerError, DesktopReceiverOwner, MediaStreamIdentity,
+    ReceiverPcmProducerInstaller, TrustedControlChannel,
 };
 use sonimesh_platform::AudioOutput;
 
@@ -209,8 +212,8 @@ where
 
     /// Polls and processes at most one control envelope.
     ///
-    /// Hello and lifecycle replies are correlated with the request ID. No-op
-    /// and ignored envelopes do not produce a reply.
+    /// Hello and lifecycle replies, including duplicate commands, are
+    /// correlated with the request ID. Incoming replies are ignored.
     ///
     /// # Errors
     ///
@@ -252,9 +255,34 @@ where
         let request_id = envelope.request_id;
         match self.receiver.accept_and_execute(self.session, envelope) {
             Ok(action) => {
-                let Some(reply) =
-                    reply_for_action(action, request_id).map_err(ControlSessionError::Reply)?
-                else {
+                let reply = if matches!(action, ControlStreamAction::Noop) {
+                    let bridge = self.receiver.owner().bridge();
+                    let stream_ready = match envelope.payload.as_ref() {
+                        Some(envelope::Payload::StartStream(start)) => {
+                            u16::try_from(start.media_key_epoch)
+                                .ok()
+                                .is_some_and(|key_epoch| {
+                                    bridge.state().phase() == crate::SessionPhase::Streaming
+                                        && bridge.mixer().removal_requires_membership_command(
+                                            MediaStreamIdentity {
+                                                session_id: start.media_session_id,
+                                                stream_id: start.stream_id,
+                                                key_epoch,
+                                            },
+                                        )
+                                })
+                        }
+                        _ => false,
+                    };
+                    reply_for_noop(
+                        envelope,
+                        bridge.coordinator().has_pending_change(),
+                        stream_ready,
+                    )
+                } else {
+                    reply_for_action(action, request_id)
+                };
+                let Some(reply) = reply.map_err(ControlSessionError::Reply)? else {
                     return Ok(ControlSessionPoll::Processed {
                         replied: false,
                         write: None,
@@ -283,6 +311,43 @@ where
             }
         }
     }
+}
+
+fn reply_for_noop(
+    request: &Envelope,
+    pending: bool,
+    stream_ready: bool,
+) -> Result<Option<Envelope>, ControlFrameError> {
+    let (session_id, stream_id, state, detail) = match request.payload.as_ref() {
+        Some(envelope::Payload::StartStream(start)) if !pending && stream_ready => (
+            start.media_session_id,
+            start.stream_id,
+            StreamState::Streaming,
+            "stream already started",
+        ),
+        Some(envelope::Payload::StopStream(stop)) if !pending => (
+            stop.media_session_id,
+            stop.stream_id,
+            StreamState::Stopped,
+            "stream already stopped",
+        ),
+        Some(envelope::Payload::StartStream(_) | envelope::Payload::StopStream(_)) => {
+            return ControlReply::error(ErrorCode::RetryLater, true, "stream operation not ready")?
+                .into_envelope(request.request_id)
+                .map(Some);
+        }
+        _ => return Ok(None),
+    };
+    Ok(Some(Envelope {
+        protocol_version: CONTROL_PROTOCOL_VERSION,
+        request_id: request.request_id,
+        payload: Some(envelope::Payload::StreamStatus(StreamStatus {
+            media_session_id: session_id,
+            stream_id,
+            state: state as i32,
+            detail: detail.to_owned(),
+        })),
+    }))
 }
 
 fn reply_for_action(
@@ -352,14 +417,14 @@ mod tests {
         RenderSource, SampleFormat,
     };
     use sonimesh_protocol::{
-        CONTROL_PROTOCOL_VERSION, Capability, ControlError, Envelope, Hello, StartStream,
-        StreamState, decode_control_frame, encode_control_frame, envelope,
+        CONTROL_PROTOCOL_VERSION, Capability, ControlError, Envelope, ErrorCode, Hello,
+        StartStream, StopStream, StreamState, decode_control_frame, encode_control_frame, envelope,
     };
 
     use super::{ControlSessionPoll, DesktopControlSession};
     use crate::{
-        ControlToMixerBridge, DesktopControlOwner, DesktopReceiverOwner, OutputSelection,
-        ReceiverPcmProducerInstaller, SessionState,
+        ControlSessionToken, ControlToMixerBridge, DesktopControlOwner, DesktopReceiverOwner,
+        OutputSelection, ReceiverPcmProducerInstaller, SessionEvent, SessionState,
     };
     use sonimesh_network::UntrustedControlWrite;
 
@@ -497,6 +562,145 @@ mod tests {
                 media_key_epoch: 0,
             })),
         }
+    }
+
+    fn stop(request_id: u64) -> Envelope {
+        Envelope {
+            protocol_version: CONTROL_PROTOCOL_VERSION,
+            request_id,
+            payload: Some(envelope::Payload::StopStream(StopStream {
+                media_session_id: 7,
+                stream_id: 1,
+                media_key_epoch: 0,
+            })),
+        }
+    }
+
+    fn command_reply(
+        receiver: &mut DesktopReceiverOwner<
+            TestOutput,
+            TestPipeline,
+            SLOTS,
+            OUTPUT_SAMPLES,
+            1,
+            SOURCE_SAMPLES,
+        >,
+        session: ControlSessionToken,
+        request: Envelope,
+    ) -> Envelope {
+        let mut control =
+            DesktopControlSession::new(receiver, session, MemoryIo::from_frames(&[request]));
+        assert!(matches!(
+            control.poll_once().unwrap(),
+            ControlSessionPoll::Processed { replied: true, .. }
+        ));
+        decode_control_frame(&control.into_inner().output).unwrap()
+    }
+
+    #[test]
+    fn duplicate_start_and_stop_receive_correlated_status_without_repeating_work() {
+        let mut receiver = receiver();
+        let session = receiver
+            .owner_mut()
+            .install_authenticated_control_session()
+            .unwrap();
+        receiver.accept_and_execute(session, &hello()).unwrap();
+        receiver.accept_and_execute(session, &start()).unwrap();
+
+        let mut duplicate = start();
+        duplicate.request_id = 20;
+        let reply = command_reply(&mut receiver, session, duplicate);
+        assert_eq!(reply.request_id, 20);
+        assert!(
+            matches!(reply.payload, Some(envelope::Payload::StreamStatus(status))
+            if status.media_session_id == 7 && status.stream_id == 1
+                && status.state == StreamState::Streaming as i32)
+        );
+        assert_eq!(receiver.pipeline_mut().replacements, 1);
+
+        let first_stop = command_reply(&mut receiver, session, stop(21));
+        let second_stop = command_reply(&mut receiver, session, stop(22));
+        for (reply, request_id) in [(first_stop, 21), (second_stop, 22)] {
+            assert_eq!(reply.request_id, request_id);
+            assert!(
+                matches!(reply.payload, Some(envelope::Payload::StreamStatus(status))
+                if status.media_session_id == 7 && status.stream_id == 1
+                    && status.state == StreamState::Stopped as i32)
+            );
+        }
+        assert_eq!(receiver.pipeline_mut().replacements, 1);
+    }
+
+    #[test]
+    fn pending_duplicate_and_unavailable_output_return_retryable_errors() {
+        let mut receiver = receiver();
+        let session = receiver
+            .owner_mut()
+            .install_authenticated_control_session()
+            .unwrap();
+        receiver.accept_and_execute(session, &hello()).unwrap();
+        let action = receiver
+            .owner_mut()
+            .accept_control(session, &start())
+            .unwrap();
+        let reply = command_reply(&mut receiver, session, start());
+        assert_eq!(reply.request_id, 2);
+        assert!(
+            matches!(reply.payload, Some(envelope::Payload::Error(error))
+            if error.code == ErrorCode::RetryLater as i32 && error.retryable)
+        );
+        let crate::ControlStreamAction::Start { token, .. } = action else {
+            panic!("expected pending start");
+        };
+        receiver
+            .owner_mut()
+            .bridge_mut()
+            .coordinator_mut()
+            .abort_pending(token)
+            .unwrap();
+        receiver.accept_and_execute(session, &start()).unwrap();
+        let action = receiver
+            .owner_mut()
+            .accept_control(session, &stop(30))
+            .unwrap();
+        let reply = command_reply(&mut receiver, session, stop(31));
+        assert_eq!(reply.request_id, 31);
+        assert!(
+            matches!(reply.payload, Some(envelope::Payload::Error(error))
+            if error.code == ErrorCode::RetryLater as i32 && error.retryable)
+        );
+        let crate::ControlStreamAction::Stop { token, .. } = action else {
+            panic!("expected pending stop");
+        };
+        receiver
+            .owner_mut()
+            .bridge_mut()
+            .coordinator_mut()
+            .abort_pending(token)
+            .unwrap();
+        receiver
+            .owner_mut()
+            .acknowledge_platform_event(SessionEvent::OutputLost)
+            .unwrap();
+        let reply = command_reply(&mut receiver, session, start());
+        assert!(
+            matches!(reply.payload, Some(envelope::Payload::Error(error))
+            if error.code == ErrorCode::RetryLater as i32 && error.retryable)
+        );
+        let identities = receiver.owner_mut().recover_output().unwrap();
+        assert_eq!(identities.len(), 1);
+        let reply = command_reply(&mut receiver, session, start());
+        assert!(
+            matches!(reply.payload, Some(envelope::Payload::Error(error))
+            if error.code == ErrorCode::RetryLater as i32 && error.retryable)
+        );
+        receiver.recover_stream(identities[0]).unwrap();
+        assert_eq!(receiver.pipeline_mut().replacements, 2);
+        let reply = command_reply(&mut receiver, session, start());
+        assert!(
+            matches!(reply.payload, Some(envelope::Payload::StreamStatus(status))
+            if status.state == StreamState::Streaming as i32)
+        );
     }
 
     #[test]

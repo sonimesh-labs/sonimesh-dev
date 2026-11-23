@@ -440,6 +440,10 @@ impl ControlStreamCoordinator {
         self.control_session == Some(session)
     }
 
+    pub(crate) const fn has_pending_change(&self) -> bool {
+        self.pending.is_some()
+    }
+
     /// Validates and prepares an action from an authenticated control envelope.
     ///
     /// # Errors

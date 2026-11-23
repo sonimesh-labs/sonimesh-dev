@@ -41,7 +41,8 @@ coordinator's negotiated/start/rotate/stop actions through one token-checked
 completion path, while receiver pipelines remain injected by the application
 composition layer. `DesktopReceiverOwner` now composes that owner with one
 injected receiver pipeline and exposes an accept-and-execute boundary for the
-future shell. Its UDP specialization also exposes low-rate poll/decode calls
+future shell. After output recreation it can also re-admit a persisted stream
+using its owned pipeline, before reporting that stream ready. Its UDP specialization also exposes low-rate poll/decode calls
 and the bound media endpoint; it still does not choose a decoder, socket, or
 output backend. A
 `DesktopControlSession` can now attach a trusted post-pairing channel to that
@@ -49,8 +50,10 @@ owner. It polls the existing bounded control framing, executes at most one
 envelope per tick, and sends correlated `StreamStatus` replies for start,
 rotation, and stop actions. Owner rejections become correlated `ControlError`
 replies and do not retire the authenticated transport. A successful Hello gets a
-correlated Hello response containing the negotiated version and capabilities;
-no-op and ignored envelopes remain reply-less. The adapter exposes explicit flush/closed states and
+correlated Hello response containing the negotiated version and capabilities.
+Completed duplicate start/stop commands receive correlated status replies;
+pending duplicates receive a retryable error. Received status/error envelopes are
+ignored. The adapter exposes explicit flush/closed states and
 does not enter the realtime output callback. A
 future Tauri shell can delegate to this owner without moving UI code into the
 realtime path. The projection excludes pairing IDs,

@@ -732,7 +732,11 @@ installed owner session token, call `poll_once` from the control loop, and call
 `flush` when a nonblocking write reports `Pending`. It executes one bounded
 envelope per tick, returns a correlated Hello with the selected version and
 common capabilities, returns lifecycle statuses for start/rotate/stop, and returns a
-correlated wire error for an owner rejection. It is still a composition
+correlated wire error for an owner rejection. Completed duplicate start/stop
+requests receive status replies; pending duplicates and starts with unavailable
+or not-yet-readmitted output receive retryable errors. After recreating output,
+`DesktopReceiverOwner::recover_stream` reconnects a persisted stream to its
+owned pipeline. It is still a composition
 boundary, not a live Tauri shell or a proof of Windows audio output.
 `DesktopReceiverScheduler` now owns that receiver owner plus an optional control
 channel, automatically retires a closed/error channel, and exposes the UDP
