@@ -390,12 +390,17 @@ private fun CaptureActionCard(
                     else -> "Starting asks for permission and a fresh projection consent before capture begins."
                 },
             )
-            CaptureSourceSelector(
-                enabled = !active && !starting,
-                selectedSource = selectedSource,
-                onSourceSelected = onSourceSelected,
-            )
             if (active) {
+                OutlinedButton(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 50.dp),
+                    onClick = onStop,
+                    shape = TileShape,
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                ) {
+                    Text("Stop capture", fontWeight = FontWeight.SemiBold)
+                }
                 Text(
                     text = stringResource(R.string.capture_test_tone_hint),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -408,17 +413,17 @@ private fun CaptureActionCard(
                 ) {
                     Text(stringResource(if (testTonePlaying) R.string.capture_test_tone_stop else R.string.capture_test_tone_start))
                 }
-                OutlinedButton(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 50.dp),
-                    onClick = onStop,
-                    shape = TileShape,
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
-                ) {
-                    Text("Stop capture", fontWeight = FontWeight.SemiBold)
-                }
+                CaptureSourceSelector(
+                    enabled = false,
+                    selectedSource = selectedSource,
+                    onSourceSelected = onSourceSelected,
+                )
             } else {
+                CaptureSourceSelector(
+                    enabled = !starting,
+                    selectedSource = selectedSource,
+                    onSourceSelected = onSourceSelected,
+                )
                 Button(
                     modifier = Modifier
                         .fillMaxWidth()
