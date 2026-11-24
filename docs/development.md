@@ -104,6 +104,12 @@ source-app compatibility claim. CI builds the test APK but does not run it.
 On 2026-11-24, the same emulator test also checked that the capture notification
 changes between no capturable audio and observed signal for each usage. The
 notification reports a signal observation, not the cause of silence.
+On 2026-11-25, the API 37 x86_64 emulator also passed
+`notification_stop_action_ends_capture_from_background`: after moving the
+activity to the Home screen, the foreground notification's Stop action ended the
+capture and removed the notification. This verifies the emulator service and
+notification lifecycle only; it is not evidence for physical-device background
+execution or vendor power-management behavior.
 
 ### Android Opus interoperability lab
 

@@ -440,7 +440,8 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   host tests cover its calculation and reset; API 37 x86_64 emulator
   instrumentation now confirms a nonzero peak during built-in tone capture and
   passes tone stop/restart/activity recreation, active-session activity
-  reopen/source retention, and the supported-usage capture flow. Earlier
+  reopen/source retention, the supported-usage capture flow, and stopping the
+  background capture from its notification action. Earlier
   failures coincided with a System UI not-responding dialog and cleared after the
   emulator settled. This is emulator evidence, not physical-device or
   audible-output evidence. The capture status card now displays the normalized

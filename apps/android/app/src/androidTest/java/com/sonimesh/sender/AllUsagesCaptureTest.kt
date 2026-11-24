@@ -145,6 +145,50 @@ class AllUsagesCaptureTest {
     }
 
     @Test
+    fun notification_stop_action_ends_capture_from_background() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val automation = instrumentation.uiAutomation
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use {
+                assertTrue("start button missing: $lastScreenSnapshot", clickText(automation, "Start capture", scroll = true))
+                assertTrue("projection chooser missing", clickText(automation, "Share one app"))
+                assertTrue("entire screen option missing", clickText(automation, "Share entire screen"))
+                assertTrue("projection confirmation missing", clickText(automation, "Share screen"))
+                assertTrue("capture did not start", waitUntil(10_000) {
+                    CaptureStateStore.state.value.status.isActive()
+                })
+                val notificationManager = instrumentation.targetContext
+                    .getSystemService(NotificationManager::class.java)
+                val stopAction = notificationManager.activeNotifications
+                    .firstOrNull { it.id == 1001 }
+                    ?.notification
+                    ?.actions
+                    ?.singleOrNull()
+                assertTrue("notification stop action missing", stopAction?.actionIntent != null)
+
+                automation.executeShellCommand("input keyevent KEYCODE_HOME").close()
+                assertTrue("home screen did not appear", waitUntil(8_000) {
+                    val name = automation.rootInActiveWindow?.packageName?.toString()
+                    name != null && name != instrumentation.targetContext.packageName
+                })
+                stopAction?.actionIntent?.send()
+                assertTrue("notification action did not stop capture", waitUntil(8_000) {
+                    CaptureStateStore.state.value.status is CaptureStatus.Stopped
+                })
+                assertTrue("stopped capture notification remained visible", waitUntil(5_000) {
+                    notificationManager.activeNotifications.none { it.id == 1001 }
+                })
+            }
+        } finally {
+            instrumentation.targetContext.startService(
+                Intent(instrumentation.targetContext, CaptureService::class.java)
+                    .setAction(CaptureService.ACTION_STOP),
+            )
+            waitUntil(5_000) { CaptureStateStore.state.value.status is CaptureStatus.Stopped }
+        }
+    }
+
+    @Test
     fun captures_each_supported_usage_in_one_session() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val automation = instrumentation.uiAutomation
