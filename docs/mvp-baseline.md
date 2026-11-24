@@ -441,7 +441,10 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   instrumentation now confirms a nonzero peak during built-in tone capture and
   passes tone stop/restart/activity recreation, active-session activity
   reopen/source retention, the supported-usage capture flow, and stopping the
-  background capture from its notification action. Earlier
+  background capture from its notification action. On the API 37 AVD with a
+  swipe keyguard enabled, an instrumentation test also confirms capture and the
+  foreground notification remain active while the display is off, then permits
+  a normal stop after wake. Earlier
   failures coincided with a System UI not-responding dialog and cleared after the
   emulator settled. This is emulator evidence, not physical-device or
   audible-output evidence. The capture status card now displays the normalized

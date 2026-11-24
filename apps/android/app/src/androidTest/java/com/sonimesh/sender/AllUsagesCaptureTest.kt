@@ -1,5 +1,6 @@
 package com.sonimesh.sender
 
+import android.app.KeyguardManager
 import android.app.Notification
 import android.app.NotificationManager
 import android.content.Intent
@@ -189,6 +190,57 @@ class AllUsagesCaptureTest {
     }
 
     @Test
+    fun capture_remains_active_while_screen_is_off() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val automation = instrumentation.uiAutomation
+        val context = instrumentation.targetContext
+        val keyguardManager = context.getSystemService(KeyguardManager::class.java)
+        val powerManager = context.getSystemService(android.os.PowerManager::class.java)
+        val notificationManager = context.getSystemService(NotificationManager::class.java)
+        try {
+            automation.executeShellCommand("input keyevent KEYCODE_WAKEUP").close()
+            automation.executeShellCommand("wm dismiss-keyguard").close()
+            ActivityScenario.launch(MainActivity::class.java).use {
+                assertTrue("start button missing: $lastScreenSnapshot", clickText(automation, "Start capture", scroll = true))
+                assertTrue("projection chooser missing", clickText(automation, "Share one app"))
+                assertTrue("entire screen option missing", clickText(automation, "Share entire screen"))
+                assertTrue("projection confirmation missing", clickText(automation, "Share screen"))
+                assertTrue("capture did not start", waitUntil(10_000) {
+                    CaptureStateStore.state.value.status.isActive()
+                })
+
+                automation.executeShellCommand("input keyevent KEYCODE_POWER").close()
+                assertTrue("screen did not enter keyguard", waitUntil(8_000) {
+                    !powerManager.isInteractive && keyguardManager.isKeyguardLocked
+                })
+                SystemClock.sleep(2_000)
+                assertTrue("capture stopped while the screen was off", CaptureStateStore.state.value.status.isActive())
+                assertTrue(
+                    "foreground notification disappeared while the screen was off",
+                    notificationManager.activeNotifications.any { it.id == 1001 },
+                )
+
+                automation.executeShellCommand("input keyevent KEYCODE_POWER").close()
+                assertTrue("screen did not wake", waitUntil(8_000) { powerManager.isInteractive })
+                automation.executeShellCommand("wm dismiss-keyguard").close()
+                assertTrue("capture did not survive wake", CaptureStateStore.state.value.status.isActive())
+                assertTrue(
+                    "stop button missing after wake: $lastScreenSnapshot",
+                    clickText(automation, "Stop capture", scroll = true),
+                )
+                assertTrue("capture did not stop after wake", waitUntil(8_000) {
+                    CaptureStateStore.state.value.status is CaptureStatus.Stopped
+                })
+            }
+        } finally {
+            context.startService(
+                Intent(context, CaptureService::class.java).setAction(CaptureService.ACTION_STOP),
+            )
+            waitUntil(5_000) { CaptureStateStore.state.value.status is CaptureStatus.Stopped }
+        }
+    }
+
+    @Test
     fun captures_each_supported_usage_in_one_session() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val automation = instrumentation.uiAutomation
@@ -302,7 +354,11 @@ class AllUsagesCaptureTest {
     }
 
     private fun clickText(automation: android.app.UiAutomation, text: String, scroll: Boolean = false): Boolean =
-        findOnScreen(automation, scroll, initialScrollForward = !text.startsWith("Stop ")) {
+        findOnScreen(
+            automation,
+            scroll,
+            initialScrollForward = !text.startsWith("Stop ") && !text.startsWith("Cancel "),
+        ) {
             it.clickMatchingText(text)
         }
 

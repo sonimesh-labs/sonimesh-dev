@@ -110,6 +110,28 @@ activity to the Home screen, the foreground notification's Stop action ended the
 capture and removed the notification. This verifies the emulator service and
 notification lifecycle only; it is not evidence for physical-device background
 execution or vendor power-management behavior.
+The same API 37 AVD passed `capture_remains_active_while_screen_is_off` with a
+swipe keyguard enabled: `KeyguardManager.isKeyguardLocked` and
+`PowerManager.isInteractive == false` were both observed while capture and its
+foreground notification remained active; after wake and keyguard dismissal, the
+activity still stopped capture normally. The stock AVD had its lock screen
+disabled, so the test setup used `adb shell locksettings set-disabled false`.
+Record the original value from `adb shell locksettings get-disabled` and restore
+it after the run; the default AVD value was restored with
+`adb shell locksettings set-disabled true`. This emulator run does not establish
+physical-device lock-screen behavior or battery impact.
+To repeat the lock-screen row, select the API 37 AVD and record its current
+lock-screen setting. If `adb shell locksettings get-disabled` prints `true`,
+enable the swipe keyguard for the test:
+
+~~~powershell
+adb shell locksettings set-disabled false
+adb shell am instrument -r -w -e class com.sonimesh.sender.AllUsagesCaptureTest#capture_remains_active_while_screen_is_off com.sonimesh.sender.test/androidx.test.runner.AndroidJUnitRunner
+adb shell locksettings set-disabled true
+~~~
+
+Restore the recorded setting rather than blindly applying the last command when
+the AVD was already configured with a keyguard.
 
 ### Android Opus interoperability lab
 
