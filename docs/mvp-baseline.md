@@ -450,7 +450,7 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   audible-output evidence. The capture status card now displays the normalized
   maximum-to-date sample peak; it is not an instantaneous meter or a loudness
   measurement.
-- a buildable Vue/Vite receiver-control preview with a single low-rate bridge
+- a buildable Vue/Vite receiver-control UI with a single low-rate bridge
   boundary, session controls, output selection, per-stream volume and mute,
   pairing-invitation state, and diagnostics presentation for packet,
   PCM-queue/refill, and resampling state; it uses in-memory preview data by
@@ -464,9 +464,14 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   persist an export through the existing bounded `ExportStore`. A generic
   `DesktopReceiverOwner` now keeps this control owner beside one injected receiver
   pipeline and executes authenticated stream actions through the same completion
-  path. There
-  is still no live Tauri shell, receiver-owner construction, audio, key, or
-  realtime integration in the desktop UI process.
+  path. A standalone Tauri shell now exposes the real Windows CPAL output
+  inventory and app-session output selection; selection is not persisted and
+  does not start playback or change the system default. Refreshing after the
+  selected endpoint disappears falls back to the current default or first
+  available endpoint. The shell explicitly
+  disables pairing, receiver, stream controls, and live diagnostics because it
+  does not yet construct the receiver owner. No live receiver, audio, key, or
+  realtime integration is connected to the desktop UI process.
 - an isolated Tauri output-probe prototype that lists Windows CPAL devices and
   their default formats and can play a short test tone on a selected endpoint.
   It can also start and stop the separately built paired-audio lab process and

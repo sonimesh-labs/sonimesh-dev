@@ -4,7 +4,7 @@ import { Activity, Check, CircleAlert, Headphones, Volume2, VolumeX } from '@luc
 
 import type { OutputDevice, OutputHealth, OutputSnapshot } from '../types'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   devices: OutputDevice[]
   selectedId: string | null
   output: OutputSnapshot
@@ -12,7 +12,13 @@ const props = defineProps<{
   muted: boolean
   busy: boolean
   preview?: boolean
-}>()
+  receiverAvailable?: boolean
+  streamControlsAvailable?: boolean
+}>(), {
+  preview: false,
+  receiverAvailable: true,
+  streamControlsAvailable: true,
+})
 
 const emit = defineEmits<{
   select: [id: string]
@@ -70,9 +76,10 @@ const displayStatus = computed<DisplayStatus>(() => {
     <div class="panel-heading">
       <div class="panel-icon"><Headphones :size="19" aria-hidden="true" /></div>
       <div>
-        <p class="eyebrow">{{ preview ? 'Output preview' : 'Listening output' }}</p>
-        <h2 id="output-heading">{{ preview ? 'Simulated output' : 'Where sound lands' }}</h2>
+        <p class="eyebrow">{{ preview ? 'Output preview' : receiverAvailable ? 'Listening output' : 'Windows output' }}</p>
+        <h2 id="output-heading">{{ preview ? 'Simulated output' : receiverAvailable ? 'Where sound lands' : 'Preferred output' }}</h2>
         <p v-if="preview" class="preview-note">No hardware is inspected or changed.</p>
+        <p v-else-if="!receiverAvailable" class="preview-note">Selected for this app session.</p>
       </div>
     </div>
 
@@ -123,7 +130,7 @@ const displayStatus = computed<DisplayStatus>(() => {
         max="1"
         step="0.01"
         :value="gain"
-        :disabled="busy"
+        :disabled="busy || !streamControlsAvailable"
         aria-label="Volume level"
         @input="emit('gain', Number(($event.target as HTMLInputElement).value))"
       />
@@ -131,7 +138,7 @@ const displayStatus = computed<DisplayStatus>(() => {
         class="mute-toggle"
         :class="{ muted }"
         type="button"
-        :disabled="busy"
+        :disabled="busy || !streamControlsAvailable"
         :aria-pressed="muted"
         @click="emit('mute', !muted)"
       >

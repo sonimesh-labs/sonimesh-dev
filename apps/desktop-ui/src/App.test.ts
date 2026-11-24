@@ -168,6 +168,35 @@ describe('App', () => {
     expect(wrapper.text()).toContain('Preview observability')
     expect(wrapper.text()).not.toContain('Route your phone audio')
   })
+
+  it('exposes real output selection while disabling receiver actions until services are connected', async () => {
+    const shellSnapshot = {
+      ...previewSnapshot(),
+      session: 'idle' as const,
+      outputDevices: [
+        { id: 'wasapi:headphones', label: 'Headphones', sampleRateHz: 48_000, channels: 2, isDefault: true },
+      ],
+      selectedOutputId: 'wasapi:headphones',
+      previewAdapter: false,
+      capabilities: {
+        receiver: false,
+        pairing: false,
+        streamControls: false,
+        diagnostics: false,
+      },
+    }
+    desktopBridgeMock.snapshot.mockResolvedValueOnce(shellSnapshot)
+    const wrapper = mount(App)
+    await flushPromises()
+
+    expect(wrapper.get('h1').text()).toContain('Choose an output')
+    expect(wrapper.get('.session-copy p').text()).toContain('not connected yet')
+    expect((wrapper.get('#output-device').element as HTMLSelectElement).disabled).toBe(false)
+    expect(wrapper.get('#output-device option').text()).toContain('Headphones')
+    expect((wrapper.get('#output-volume').element as HTMLInputElement).disabled).toBe(true)
+    expect((wrapper.get('button.secondary-action').element as HTMLButtonElement).disabled).toBe(true)
+    expect(wrapper.find('#diagnostics').exists()).toBe(false)
+  })
   it('simulates the sender consuming the preview invitation from the pairing panel', async () => {
     desktopBridgeMock.snapshot.mockResolvedValueOnce({
       ...previewSnapshot(),

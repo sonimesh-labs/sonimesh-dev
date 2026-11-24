@@ -8,6 +8,9 @@
 - Java 21 and an Android SDK when phase 0A starts;
 - Node.js 22.22.2 when the desktop control UI starts;
 - Windows 11 and documented audio hardware for output validation.
+- Rust 1.88 for the standalone Tauri desktop shell under
+  `apps/desktop-ui/src-tauri`; the main Rust workspace remains compatible with
+  Rust 1.85.
 - CMake and a C toolchain for the native libopus build compiled by the
   `opus-codec-prototype` workspace member; a Visual Studio install works, and
   newer CMake releases need `CMAKE_POLICY_VERSION_MINIMUM=3.5` because the

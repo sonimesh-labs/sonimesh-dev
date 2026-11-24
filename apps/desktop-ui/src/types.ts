@@ -119,5 +119,11 @@ export interface DesktopSnapshot {
   replies: ControlReply[]
   /** Bounded, most-recent-first issued diagnostic-export receipts (preview-owned). */
   diagnosticExports: DiagnosticExportReceipt[]
+  capabilities?: {
+    receiver: boolean
+    pairing: boolean
+    streamControls: boolean
+    diagnostics: boolean
+  }
   previewAdapter: boolean
 }

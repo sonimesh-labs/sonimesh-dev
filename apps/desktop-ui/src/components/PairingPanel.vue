@@ -4,11 +4,15 @@ import { Clock3, QrCode, ShieldX, X } from '@lucide/vue'
 
 import type { PairingStatus } from '../types'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   pairing: PairingStatus
   busy: boolean
+  available?: boolean
   preview?: boolean
-}>()
+}>(), {
+  available: true,
+  preview: false,
+})
 
 const emit = defineEmits<{
   create: []
@@ -114,6 +118,7 @@ const pairingMessage = computed(() => {
 })
 
 const pairingHint = computed(() => {
+  if (!props.available) return 'Pairing service is not connected yet.'
   if (props.preview) {
     return 'The preview adapter changes local UI state only and verifies no real invitation; the buttons simulate each sender step.'
   }
@@ -132,8 +137,8 @@ const pairingHint = computed(() => {
   }
 })
 
-const pairingEyebrow = computed(() => (props.preview ? 'Pairing preview' : 'Private pairing'))
-const pairingHeading = computed(() => (props.preview ? 'Simulate sender trust' : 'Trust a sender'))
+const pairingEyebrow = computed(() => !props.available ? 'Pairing unavailable' : props.preview ? 'Pairing preview' : 'Private pairing')
+const pairingHeading = computed(() => !props.available ? 'Trust a sender' : props.preview ? 'Simulate sender trust' : 'Trust a sender')
 const createButtonLabel = computed(() => (props.preview ? 'Create preview invitation' : 'Create invitation'))
 
 watch(() => props.pairing, beginCountdown, { immediate: true })
@@ -160,16 +165,16 @@ onUnmounted(clearCountdown)
     </div>
 
     <div class="inline-actions">
-      <button class="secondary-action" :disabled="busy || pairing.state === 'active' || pairing.state === 'consumed'" @click="emit('create')">
+      <button class="secondary-action" :disabled="!available || busy || pairing.state === 'active' || pairing.state === 'consumed'" @click="emit('create')">
         {{ createButtonLabel }}
       </button>
-      <button v-if="pairing.state === 'active'" class="icon-action subtle" :title="preview ? 'Expire preview invitation' : 'Expire invitation'" :aria-label="preview ? 'Expire preview invitation' : 'Expire invitation'" :disabled="busy" @click="emit('expire')">
+      <button v-if="available && pairing.state === 'active'" class="icon-action subtle" :title="preview ? 'Expire preview invitation' : 'Expire invitation'" :aria-label="preview ? 'Expire preview invitation' : 'Expire invitation'" :disabled="busy" @click="emit('expire')">
         <X :size="18" aria-hidden="true" />
       </button>
       <button v-if="preview && pairing.state === 'active'" class="preview-action" :disabled="busy" @click="emit('simulatePairingConsumed')">
         Simulate sender verification
       </button>
-      <button v-if="pairing.state === 'consumed'" class="icon-action subtle" :title="preview ? 'Revoke preview trust' : 'Revoke trust'" :aria-label="preview ? 'Revoke preview trust' : 'Revoke trust'" :disabled="busy" @click="emit('revoke')">
+      <button v-if="available && pairing.state === 'consumed'" class="icon-action subtle" :title="preview ? 'Revoke preview trust' : 'Revoke trust'" :aria-label="preview ? 'Revoke preview trust' : 'Revoke trust'" :disabled="busy" @click="emit('revoke')">
         <ShieldX :size="18" aria-hidden="true" />
       </button>
     </div>

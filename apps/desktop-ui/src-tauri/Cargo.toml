@@ -1,0 +1,18 @@
+[package]
+name = "sonimesh-desktop-shell"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[build-dependencies]
+tauri-build = "=2.6.3"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+sonimesh-platform = { path = "../../../crates/sonimesh-platform", features = ["cpal-output"] }
+tauri = "=2.11.6"
+
+[dev-dependencies]
+serde_json = "1"

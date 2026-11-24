@@ -7,11 +7,13 @@ import type { PairingState, SessionState } from '../types'
 const props = withDefaults(defineProps<{
   state: SessionState
   pairingState: PairingState
+  available?: boolean
   preview?: boolean
   busy: boolean
   reconnectRemainingMs?: number | null
 }>(), {
   preview: false,
+  available: true,
   reconnectRemainingMs: null,
 })
 
@@ -70,8 +72,8 @@ const previewSummaries: Record<SessionState, string> = {
   outputUnavailable: 'The preview adapter is showing an unavailable-output state; it does not inspect hardware.',
 }
 
-const displayLabel = computed(() => (props.preview ? previewLabels[props.state] : labels[props.state]))
-const displaySummary = computed(() => (props.preview ? previewSummaries[props.state] : summaries[props.state]))
+const displayLabel = computed(() => props.available ? (props.preview ? previewLabels[props.state] : labels[props.state]) : 'Receiver not connected')
+const displaySummary = computed(() => props.available ? (props.preview ? previewSummaries[props.state] : summaries[props.state]) : 'Output setup is available; network receiving is not connected yet.')
 const displayControl = computed(() => (props.preview ? 'Preview state' : controlLabels[props.pairingState]))
 const displayState = computed(() => (props.preview ? `Preview ${props.state}` : props.state))
 const reconnectSeconds = computed(() =>
@@ -82,7 +84,7 @@ const reconnectSeconds = computed(() =>
 <template>
   <section class="session-panel" :class="`session-${state}`" aria-labelledby="session-heading">
     <div class="session-topline">
-      <span class="session-kicker">{{ preview ? 'Preview receiver' : 'Live receiver' }}</span>
+      <span class="session-kicker">{{ !available ? 'Output setup' : preview ? 'Preview receiver' : 'Live receiver' }}</span>
       <span class="state-badge" :class="`state-${state}`">
         <span class="state-dot" aria-hidden="true"></span>
         {{ displayState }}
@@ -107,12 +109,12 @@ const reconnectSeconds = computed(() =>
       <div>
         <Radio :size="17" aria-hidden="true" />
         <dt>Input</dt>
-        <dd>Single stream</dd>
+        <dd>{{ available ? 'Single stream' : 'Waiting for receiver' }}</dd>
       </div>
       <div>
         <ArrowUpRight :size="17" aria-hidden="true" />
         <dt>Mode</dt>
-        <dd>{{ preview ? 'Preview adapter' : 'Receiver' }}</dd>
+        <dd>{{ !available ? 'Not connected' : preview ? 'Preview adapter' : 'Receiver' }}</dd>
       </div>
       <div v-if="state === 'reconnecting' && reconnectRemainingMs !== null">
         <RefreshCw :size="17" aria-hidden="true" />
@@ -122,12 +124,12 @@ const reconnectSeconds = computed(() =>
     </dl>
 
     <div class="session-actions">
-      <button v-if="state !== 'streaming'" class="primary-action" :disabled="busy || state !== 'ready' || pairingState !== 'consumed'" @click="emit('start')">
+      <button v-if="state !== 'streaming'" class="primary-action" :disabled="!available || busy || state !== 'ready' || pairingState !== 'consumed'" @click="emit('start')">
         <Radio :size="17" aria-hidden="true" />
         <span>{{ preview ? 'Start listening preview' : 'Start listening' }}</span>
         <ArrowUpRight :size="17" aria-hidden="true" />
       </button>
-      <button v-else class="danger-action" :disabled="busy" @click="emit('stop')">
+      <button v-else class="danger-action" :disabled="!available || busy" @click="emit('stop')">
         <Square :size="16" aria-hidden="true" />
         <span>{{ preview ? 'Stop listening preview' : 'Stop listening' }}</span>
       </button>
