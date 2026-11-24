@@ -15,6 +15,9 @@ results as physical WLAN, audible quality, or end-to-end latency evidence.
 The relay also exposes the model's packet-counted loss bursts to exercise
 playout interruption and recovery; host socket loss can change which packets
 are counted by the model.
+The live relay can also limit modeled UDP payload bytes per second and the number
+of scheduled copies. Its counters distinguish queue-capacity drops from configured
+loss; these model limits do not reproduce all physical link or socket behavior.
 Optional periodic cumulative relay reports provide progress during a live run.
 They count only packets observed by the relay, not network delivery or playback.
 Writing reports can itself perturb live relay scheduling, so record when they are

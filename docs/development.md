@@ -154,8 +154,8 @@ to UDP port 39093; the relay forwards to the listener on 39094. Defaults bind
 only to loopback. For a physical sender, use the listener's existing `--bind`
 and `--host` options and bind the relay to the intended interface with
 `--listen IPv4:39093`. The relay accepts at most 1,200 bytes per datagram, queues
-at most 256 copies, and reports its profile, drops, forwarded copies, and copies
-still queued when its configured duration ends. Queued copies are discarded at
+at most 256 copies by default, and reports its profile, drops, forwarded copies,
+and copies still queued when its configured duration ends. Queued copies are discarded at
 exit; choose a duration that covers setup, capture, and drain. Its seed fixes
 model decisions for the received packet sequence, but actual arrival and delivery
 timing depend on the host and OS. The control channel is not impaired.
@@ -168,6 +168,15 @@ For repeated short outages, add `--burst-interval 50 --burst-length 4` to
 drop four consecutive submitted packets after the first 50 and again every 50
 submissions thereafter. The interval counts packets received by the relay, not
 time; the length must not exceed the interval. Both default to zero (no burst).
+For a constrained-link experiment, add `--bandwidth-bytes-per-second 12000`
+and `--queue-packets 32`. The bandwidth counts UDP payload bytes, including the
+protected media header and authentication tag, but excludes UDP, IP, and link-layer
+headers. Zero bandwidth (the default) disables shaping; the supported range is
+0 to 1,000,000,000 bytes per second. The queue limit counts scheduled copies,
+including duplicates, and ranges from 1 to 4096 (default 256). Once full, the
+relay drops additional copies and reports them in `capacity_dropped_copies`.
+The model rounds each serialized copy up to whole milliseconds; the live host's
+scheduling and socket buffers also affect the observed result.
 The desktop output probe can instead start the playback-enabled listener: set
 its **Receiver UDP port** to 39094 and run the relay separately. Restore the
 default port 39093 for a direct connection. Android's **Desktop UDP port** is

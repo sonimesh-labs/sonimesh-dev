@@ -47,6 +47,10 @@ impl Options {
                 "--delay-ms" => result.profile.base_delay_ms = value.parse()?,
                 "--jitter-ms" => result.profile.jitter_ms = value.parse()?,
                 "--reorder-delay-ms" => result.profile.reorder_delay_ms = value.parse()?,
+                "--bandwidth-bytes-per-second" => {
+                    result.profile.bandwidth_bytes_per_second = value.parse()?;
+                }
+                "--queue-packets" => result.profile.max_in_flight_packets = value.parse()?,
                 _ => return Err("unknown option".into()),
             }
         }
@@ -139,7 +143,7 @@ fn relay(
 
 fn main() -> Result<(), Box<dyn Error>> {
     let options = Options::parse(std::env::args().skip(1)).map_err(|error| {
-        format!("{error}; usage: udp-impairment-relay [--listen IPv4:PORT] [--forward IPv4:PORT] [--seconds 1-86400] [--report-seconds 1-3600] [--seed N] [--loss 0-100] [--duplicate 0-100] [--reorder 0-100] [--burst-interval N] [--burst-length N] [--delay-ms N] [--jitter-ms N] [--reorder-delay-ms N]")
+        format!("{error}; usage: udp-impairment-relay [--listen IPv4:PORT] [--forward IPv4:PORT] [--seconds 1-86400] [--report-seconds 1-3600] [--seed N] [--loss 0-100] [--duplicate 0-100] [--reorder 0-100] [--burst-interval N] [--burst-length N] [--delay-ms N] [--jitter-ms N] [--reorder-delay-ms N] [--bandwidth-bytes-per-second 0-1000000000] [--queue-packets 1-4096]")
     })?;
     let input = UdpSocket::bind(options.listen)?;
     let output = UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0))?;
@@ -178,6 +182,18 @@ mod tests {
     #[test]
     fn validates_ports_profiles_and_duration() {
         assert!(Options::parse(args(&[])).is_ok());
+        let defaults = Options::parse(args(&[])).unwrap();
+        assert_eq!(defaults.profile.bandwidth_bytes_per_second, 0);
+        assert_eq!(defaults.profile.max_in_flight_packets, 256);
+        let shaped = Options::parse(args(&[
+            "--bandwidth-bytes-per-second",
+            "1000000000",
+            "--queue-packets",
+            "4096",
+        ]))
+        .unwrap();
+        assert_eq!(shaped.profile.bandwidth_bytes_per_second, 1_000_000_000);
+        assert_eq!(shaped.profile.max_in_flight_packets, 4096);
         for seconds in ["1", "28800", "86400"] {
             assert_eq!(
                 Options::parse(args(&["--seconds", seconds]))
@@ -203,9 +219,64 @@ mod tests {
             vec!["--delay-ms", "60001"],
             vec!["--burst-length", "1"],
             vec!["--burst-interval", "2", "--burst-length", "3"],
+            vec!["--bandwidth-bytes-per-second", "1000000001"],
+            vec!["--queue-packets", "0"],
+            vec!["--queue-packets", "4097"],
             vec!["--seed"],
         ] {
             assert!(Options::parse(args(&values)).is_err());
+        }
+    }
+
+    #[test]
+    fn shapes_live_datagrams_and_drops_when_the_queue_fills() {
+        let input = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let sink = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let output = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let mut options = Options::parse(args(&[
+            "--bandwidth-bytes-per-second",
+            "100",
+            "--queue-packets",
+            "2",
+            "--delay-ms",
+            "0",
+            "--jitter-ms",
+            "0",
+        ]))
+        .unwrap();
+        options.forward = match sink.local_addr().unwrap() {
+            std::net::SocketAddr::V4(address) => address,
+            std::net::SocketAddr::V6(_) => unreachable!(),
+        };
+        options.duration = Duration::from_millis(2_300);
+        options.report_interval = Some(Duration::from_millis(50));
+        for _ in 0..3 {
+            sender
+                .send_to(&[1_u8; 100], input.local_addr().unwrap())
+                .unwrap();
+        }
+        let report = relay(&options, &input, &output, |elapsed, report| {
+            if elapsed < Duration::from_secs(1) {
+                assert_eq!(report.forwarded, 0);
+            } else if elapsed < Duration::from_secs(2) {
+                assert!(report.forwarded <= 1);
+            }
+        })
+        .unwrap();
+        assert_eq!(report.network.submitted_packets, 3);
+        assert_eq!(report.network.bandwidth_shaped_copies, 2);
+        assert_eq!(report.network.bandwidth_serialized_bytes, 200);
+        assert_eq!(report.network.capacity_dropped_copies, 1);
+        assert_eq!(report.forwarded, 2);
+        assert_eq!(report.queued, 0);
+        sink.set_read_timeout(Some(Duration::from_millis(100)))
+            .unwrap();
+        let mut received = [0_u8; 100];
+        for _ in 0..2 {
+            let (length, _) = sink.recv_from(&mut received).unwrap();
+            assert_eq!(length, 100);
+            assert_eq!(received, [1; 100]);
         }
     }
 
