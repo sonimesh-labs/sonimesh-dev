@@ -1,5 +1,6 @@
 [package]
 name = "sonimesh-network-simulator"
+default-run = "sonimesh-network-simulator"
 description = "Deterministic network impairment runner for SoniMesh"
 version.workspace = true
 edition.workspace = true

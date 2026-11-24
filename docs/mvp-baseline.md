@@ -185,6 +185,11 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   those waits can produce silence and target reductions do not accelerate
   playback. Fixed scheduling remains the default. Neither mode measures
   end-to-end latency or establishes a quality improvement.
+  A bounded UDP relay can apply seeded loss, delay, jitter, duplication and
+  reorder delay to live protected lab media sent to an alternate listener port.
+  An API 37 emulator-to-Windows software run exercised loss and reorder delay;
+  live OS scheduling and physical WLAN behavior remain separate from the
+  deterministic virtual-network tests.
   During live playout the paired lab conceals short gaps even when no later
   packet is buffered, then resets an empty stream after three consecutive PLC
   frames to permit fresh audio after an extended interruption. A real UDP and

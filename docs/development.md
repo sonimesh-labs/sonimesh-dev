@@ -136,6 +136,31 @@ control, and emulator UDP decoded 154 frames in each session with nonzero PCM
 peaks; this is software evidence, not a physical WLAN, audible playback, or
 latency measurement.
 
+To test the paired media path with controlled UDP impairments on the desktop,
+start the listener and relay in separate terminals from the repository root:
+
+~~~powershell
+cargo run -p opus-codec-prototype --bin paired-audio-lab -- --media-port 39094 --status --require-tone
+cargo run -p sonimesh-network-simulator --bin udp-impairment-relay -- --seconds 120 --seed 17 --loss 10 --delay-ms 20 --jitter-ms 5 --reorder 10 --reorder-delay-ms 30
+~~~
+
+Run the instrumentation command above while both are running. The sender still
+uses UDP port 39093; the relay forwards to the listener on 39094. Defaults bind
+only to loopback. For a physical sender, use the listener's existing `--bind`
+and `--host` options and bind the relay to the intended interface with
+`--listen IPv4:39093`. The relay accepts at most 1,200 bytes per datagram, queues
+at most 256 copies, and reports its profile, drops, forwarded copies, and copies
+still queued when its configured duration ends. Queued copies are discarded at
+exit; choose a duration that covers setup, capture, and drain. Its seed fixes
+model decisions for the received packet sequence, but actual arrival and delivery
+timing depend on the host and OS. The control channel is not impaired.
+
+On 2026-11-24, one API 37 x86_64 emulator run sent 100 encoded packets through
+the example profile. The relay reported 14 random losses and 12 packets given
+extra reorder delay; the listener authenticated 86 packets, decoded 75 frames,
+and reported a 0.249 software PCM peak. This validates the software lab path,
+not physical WLAN, playback quality, or acoustic latency.
+
 The test synthesizes and encodes a tone; the desktop acknowledges start only
 after binding its UDP receiver with the pairing-derived root and acknowledges
 stop after retiring it. Successful runs report the decoded frame count and

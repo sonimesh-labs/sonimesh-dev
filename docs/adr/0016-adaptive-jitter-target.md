@@ -23,6 +23,12 @@ No hardware jitter evidence is selected by this record. The bounded
 single-stream default path remains unchanged until a production scheduler
 chooses and supplies the in-flight-arrival signal.
 
+Controlled lab tests may place a bounded UDP impairment relay between the
+Android sender and an alternate listener media port. It forwards protected
+datagrams without changing the control protocol. Its seeded impairment model
+does not make live socket arrival or operating-system scheduling deterministic;
+it supplements rather than replaces virtual-clock tests and physical evidence.
+
 The desktop combined UDP tick cannot infer that signal from a successful socket
 poll: a received packet says nothing about future arrivals. It therefore uses
 the immediate-drain path even when target gating is enabled. An explicit caller

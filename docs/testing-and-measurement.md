@@ -4,6 +4,15 @@ SoniMesh should promote a platform capability only after a repeatable test
 produces evidence. This document separates deterministic tests from hardware-in-
 the-loop validation.
 
+For controlled paired-lab experiments, a local UDP impairment relay may forward
+protected media through the bounded virtual-network model. The listener can bind
+its media socket on an alternate port while the Android sender continues using
+its fixed lab port. The relay does not touch the control connection or decrypt
+media. Its seeded decisions depend on the packets actually received and their
+arrival times; host scheduling and socket loss make a live run non-deterministic.
+Record the relay profile and counters with each experiment, and do not treat its
+results as physical WLAN, audible quality, or end-to-end latency evidence.
+
 ## Latency measurement
 
 ### Software timing

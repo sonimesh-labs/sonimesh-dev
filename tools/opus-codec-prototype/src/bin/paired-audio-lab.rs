@@ -195,6 +195,7 @@ struct Options {
     startup_buffer: Duration,
     bind: Ipv4Addr,
     host: Ipv4Addr,
+    media_port: u16,
 }
 
 impl Default for Options {
@@ -213,6 +214,7 @@ impl Default for Options {
             startup_buffer: Duration::from_millis(60),
             bind: Ipv4Addr::LOCALHOST,
             host: Ipv4Addr::LOCALHOST,
+            media_port: 39093,
         }
     }
 }
@@ -224,6 +226,7 @@ impl Options {
         let mut bind_set = false;
         let mut host_set = false;
         let mut startup_buffer_set = false;
+        let mut media_port_set = false;
         while let Some(arg) = args.next() {
             match arg.as_str() {
                 "--require-tone" if !result.require_tone => result.require_tone = true,
@@ -236,6 +239,14 @@ impl Options {
                 "--status" if !result.status => result.status = true,
                 "--signal-status" if !result.signal_status => result.signal_status = true,
                 "--adaptive" if !result.adaptive => result.adaptive = true,
+                "--media-port" if !media_port_set => {
+                    result.media_port =
+                        args.next().ok_or("--media-port requires a port")?.parse()?;
+                    if result.media_port == 0 {
+                        return Err("media port must be nonzero".into());
+                    }
+                    media_port_set = true;
+                }
                 "--startup-buffer-ms" if !startup_buffer_set => {
                     let value = args
                         .next()
@@ -264,7 +275,7 @@ impl Options {
                 }
                 _ => {
                     return Err(
-                        "usage: paired-audio-lab [--require-tone] [--play [--select-output | --output-id-stdin | --output-id-framed] [--control]] [--status] [--signal-status] [--adaptive] [--startup-buffer-ms 20-120] [--keep-listening] [--bind IPv4 --host IPv4]"
+                        "usage: paired-audio-lab [--require-tone] [--play [--select-output | --output-id-stdin | --output-id-framed] [--control]] [--status] [--signal-status] [--adaptive] [--startup-buffer-ms 20-120] [--keep-listening] [--media-port PORT] [--bind IPv4 --host IPv4]"
                             .into(),
                     );
                 }
@@ -990,7 +1001,8 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                                         0,
                                         OpusFrameConfig::new(48_000, 2, 20)?,
                                     )?;
-                                    let address = SocketAddrV4::new(options.bind, 39093).into();
+                                    let address =
+                                        SocketAddrV4::new(options.bind, options.media_port).into();
                                     let pipeline = if options.adaptive {
                                         let mut pipeline =
                                             Receiver::bind_with_worker_and_adaptive_target(
@@ -2213,6 +2225,18 @@ mod tests {
         assert!(Options::parse(args(&["--signal-status", "--signal-status"])).is_err());
         assert!(Options::parse(args(&["--adaptive"])).unwrap().adaptive);
         assert!(Options::parse(args(&["--adaptive", "--adaptive"])).is_err());
+        assert_eq!(Options::parse(args(&[])).unwrap().media_port, 39093);
+        assert_eq!(
+            Options::parse(args(&["--media-port", "39094"]))
+                .unwrap()
+                .media_port,
+            39094
+        );
+        for value in ["0", "65536", "invalid"] {
+            assert!(Options::parse(args(&["--media-port", value])).is_err());
+        }
+        assert!(Options::parse(args(&["--media-port"])).is_err());
+        assert!(Options::parse(args(&["--media-port", "1", "--media-port", "2"])).is_err());
         let playback =
             Options::parse(args(&["--require-tone", "--play", "--select-output"])).unwrap();
         assert!(playback.play && playback.require_tone && playback.select_output);
