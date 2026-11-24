@@ -1,16 +1,45 @@
 package com.sonimesh.opusspike
 
 import android.media.AudioAttributes
+import android.graphics.Rect
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.Spinner
+import android.widget.Switch
 import androidx.test.core.app.ActivityScenario
 import com.sonimesh.sender.encoder.OpusBitrate
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LabCaptureUsageUiTest {
+    @Test
+    fun sessionControlsAreVisibleWithoutScrolling() {
+        try {
+            ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+                scenario.onActivity { LabStatus.serviceStarted(LabCaptureUsage.All, OpusBitrate.STANDARD) }
+                androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+                scenario.onActivity { activity ->
+                    val root = activity.window.decorView
+                    val stop = findButton(root, "Stop capture")
+                    val mute = findMuteSwitch(root)
+                    for (control in listOf(stop, mute)) {
+                        val visible = Rect()
+                        assertTrue("${control.text} is not visible", control.getGlobalVisibleRect(visible))
+                        assertEquals("${control.text} is clipped", control.height, visible.height())
+                        assertEquals("${control.text} is clipped horizontally", control.width, visible.width())
+                    }
+                    assertTrue("mute should be available during capture", mute.isEnabled)
+                }
+            }
+        } finally {
+            androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().runOnMainSync {
+                LabStatus.serviceFinished()
+            }
+        }
+    }
+
     @Test
     fun bitrateChoiceDefaultsTo96AndSurvivesActivityRecreation() {
         ActivityScenario.launch(LabActivity::class.java).use { scenario ->
@@ -111,6 +140,17 @@ class LabCaptureUsageUiTest {
             }
         }
         error("button not found: $text")
+    }
+
+    private fun findMuteSwitch(view: View): Switch {
+        if (view is Switch && view.text.toString() == "Mute sending") return view
+        if (view is ViewGroup) {
+            for (index in 0 until view.childCount) {
+                val found = runCatching { findMuteSwitch(view.getChildAt(index)) }.getOrNull()
+                if (found != null) return found
+            }
+        }
+        error("mute switch not found")
     }
 
     private fun findSpinner(view: View, description: String): Spinner {

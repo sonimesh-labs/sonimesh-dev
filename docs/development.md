@@ -238,6 +238,8 @@ destroyed so it can be evaluated with the screen off. Physical-device screen-off
 continuity and power consumption remain unmeasured.
 During an active lab capture, **Mute sending** replaces subsequent encoder input
 with silence while capture, the connection, and capture-signal observation continue.
+The activity places **Stop capture** and **Mute sending** near the session status,
+ahead of the connection setup fields, for use during an active session.
 Unmute resumes captured audio without a new consent session. Audio already encoded,
 in transit, or buffered at the receiver can still play briefly after muting; this
 control is not an immediate stop. It resets when the session ends.

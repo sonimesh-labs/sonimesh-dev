@@ -124,6 +124,28 @@ class LabActivity : Activity() {
         })
         status = TextView(this).apply { accessibilityLiveRegion = android.view.View.ACCESSIBILITY_LIVE_REGION_POLITE }
         layout.addView(status)
+        layout.addView(Button(this).apply {
+            text = "Stop capture"
+            setOnClickListener {
+                startService(Intent(this@LabActivity, LabCaptureService::class.java).setAction("stop"))
+            }
+        })
+        muteSwitch = Switch(this).apply {
+            text = "Mute sending"
+            isEnabled = false
+            isSaveEnabled = false
+            setOnCheckedChangeListener { _, checked ->
+                if (!updatingMute) {
+                    startService(Intent(this@LabActivity, LabCaptureService::class.java)
+                        .setAction(LabCaptureService.ACTION_SET_MUTED)
+                        .putExtra(LabCaptureService.EXTRA_MUTED, checked))
+                }
+            }
+        }
+        layout.addView(muteSwitch)
+        layout.addView(TextView(this).apply {
+            text = "Already buffered audio may continue briefly after muting."
+        })
         signal = TextView(this)
         layout.addView(signal)
         duration = TextView(this)
@@ -295,28 +317,6 @@ class LabActivity : Activity() {
         layout.addView(Button(this).apply {
             text = "Start paired UDP capture"
             setOnClickListener { startCapture(true, paired = true) }
-        })
-        layout.addView(Button(this).apply {
-            text = "Stop capture"
-            setOnClickListener {
-                startService(Intent(this@LabActivity, LabCaptureService::class.java).setAction("stop"))
-            }
-        })
-        muteSwitch = Switch(this).apply {
-            text = "Mute sending"
-            isEnabled = false
-            isSaveEnabled = false
-            setOnCheckedChangeListener { _, checked ->
-                if (!updatingMute) {
-                    startService(Intent(this@LabActivity, LabCaptureService::class.java)
-                        .setAction(LabCaptureService.ACTION_SET_MUTED)
-                        .putExtra(LabCaptureService.EXTRA_MUTED, checked))
-                }
-            }
-        }
-        layout.addView(muteSwitch)
-        layout.addView(TextView(this).apply {
-            text = "Already buffered audio may continue briefly after muting."
         })
         layout.addView(TextView(this).apply {
             text = "New test tones use the current capture usage, or the selection when capture is stopped. Restart a playing tone to apply changes."
