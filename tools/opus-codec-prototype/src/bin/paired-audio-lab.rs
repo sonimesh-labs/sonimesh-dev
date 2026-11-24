@@ -901,6 +901,14 @@ fn maintain_output<O: sonimesh_platform::AudioOutput>(
     retry_at.is_some()
 }
 
+fn stop_output(retry_at: Option<Instant>, stop: impl FnOnce() -> LabResult<()>) -> LabResult<()> {
+    let result = stop();
+    if retry_at.is_some() {
+        return Err("output device did not recover before the session ended".into());
+    }
+    result
+}
+
 #[allow(clippy::too_many_lines)] // This one-shot lab owns the control and media lifetimes together.
 fn receive_audio<S: std::io::Read + std::io::Write>(
     framed: &mut UntrustedControlStream<S>,
@@ -1085,8 +1093,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                                 &mut peak,
                             )?;
                         }
-                        let output_result = playback.stop();
-                        retry_at = None;
+                        let output_result = stop_output(retry_at, || playback.stop());
                         drop(receiver.take());
                         drop(consumer.take());
                         if playing {
@@ -1128,11 +1135,6 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                         )?
                         .into_envelope(frame.request_id)?;
                         send_reply(framed, &reply)?;
-                        if retry_at.is_some() {
-                            return Err(
-                                "output device did not recover before the session ended".into()
-                            );
-                        }
                         output_result?;
                         lab_println!("RESULT decoded {decoded} peak {peak:.3}");
                         lab_println!(
@@ -1622,6 +1624,18 @@ mod tests {
         ));
         assert_eq!(output.output().starts, 2);
 
+        let mut stopped = false;
+        let error = stop_output(retry, || {
+            stopped = true;
+            Ok(())
+        })
+        .unwrap_err();
+        assert!(stopped);
+        assert_eq!(
+            error.to_string(),
+            "output device did not recover before the session ended"
+        );
+
         let mut encoder =
             opus::Encoder::new(48_000, opus::Channels::Stereo, opus::Application::Audio).unwrap();
         let mut payload = [0_u8; 1_148];
@@ -1646,6 +1660,7 @@ mod tests {
             now + Duration::from_secs(2)
         ));
         assert!(retry.is_none());
+        assert!(stop_output(retry, || Ok(())).is_ok());
         assert_eq!(output.gain_handle().snapshot(), controls.snapshot());
         assert_eq!(metrics.snapshot().jitter_frames, 0);
         assert!(matches!(
