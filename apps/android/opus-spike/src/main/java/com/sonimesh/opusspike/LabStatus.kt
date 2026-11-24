@@ -35,6 +35,8 @@ internal object LabStatus {
     val captureAdmission = LabCaptureAdmission()
     var captureUsage: LabCaptureUsage? = null
         private set
+    var retryAvailable = false
+        private set
     private var message = "Idle"
     private val observers = mutableSetOf<(String) -> Unit>()
     private var senderQueueDrops: Long? = null
@@ -55,6 +57,8 @@ internal object LabStatus {
     fun serviceStarted(usage: LabCaptureUsage, bitrate: OpusBitrate, transport: LabTransport = LabTransport.Adb) {
         captureUsage = usage
         captureAdmission.serviceStarted()
+        retryAvailable = false
+        observers.toList().forEach { it(message) }
         sessionConfig = LabSessionConfig(usage, bitrate, transport)
         signalState = null
         captureDurationSeconds = null
@@ -65,9 +69,14 @@ internal object LabStatus {
     }
 
     fun serviceFinished() {
+        val hadCapture = captureUsage != null
         captureUsage = null
         captureAdmission.serviceFinished()
         publishSenderMuted(null)
+        if (hadCapture) {
+            retryAvailable = true
+            observers.toList().forEach { it(message) }
+        }
     }
 
     fun observeSenderMuted(observer: (Boolean?) -> Unit) {

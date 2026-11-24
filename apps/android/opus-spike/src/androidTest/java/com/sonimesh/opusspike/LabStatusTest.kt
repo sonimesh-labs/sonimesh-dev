@@ -349,9 +349,18 @@ class LabStatusTest {
                 if (!found) SystemClock.sleep(50)
             }
             assertTrue("service failure should be visible", found)
+            var retryVisible = false
+            while (!retryVisible && SystemClock.elapsedRealtime() < deadline) {
+                scenario.onActivity { activity ->
+                    retryVisible = findButton(activity.window.decorView, "Retry last capture")?.visibility == View.VISIBLE
+                }
+                if (!retryVisible) SystemClock.sleep(50)
+            }
+            assertTrue("retry should appear after failed service cleanup", retryVisible)
             scenario.recreate()
             scenario.onActivity { activity ->
                 assertTrue(hasStatus(activity.window.decorView, "Status: Unable to start capture."))
+                assertEquals(View.VISIBLE, findButton(activity.window.decorView, "Retry last capture")?.visibility)
             }
         }
     }

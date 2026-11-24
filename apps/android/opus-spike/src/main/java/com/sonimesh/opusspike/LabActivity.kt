@@ -77,7 +77,7 @@ class LabActivity : Activity() {
     }
     private val statusObserver: (String) -> Unit = {
         status.text = "Status: $it"
-        updateRetryButton(it)
+        updateRetryButton()
     }
     private val signalObserver: (LabSignalState?) -> Unit = { state ->
         signal.text = "Capture signal: ${state?.label ?: "—"}"
@@ -473,12 +473,9 @@ class LabActivity : Activity() {
         Toast.makeText(this, "Capture is already starting, running, or stopping.", Toast.LENGTH_SHORT).show()
     }
 
-    private fun updateRetryButton(message: String) {
+    private fun updateRetryButton() {
         if (!::retryButton.isInitialized) return
-        val retryable = LabStatus.captureAdmission.canBegin() &&
-            (message.contains("try again", ignoreCase = true) ||
-                message.contains("connection ended", ignoreCase = true) ||
-                message == "Capture stopped.")
+        val retryable = LabStatus.captureAdmission.canBegin() && LabStatus.retryAvailable
         retryButton.visibility = if (retryable) View.VISIBLE else View.GONE
     }
 
