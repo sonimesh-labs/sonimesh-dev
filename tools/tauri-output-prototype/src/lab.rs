@@ -109,6 +109,11 @@ impl Lab {
     }
 
     #[cfg(test)]
+    pub fn test_take_stdin(&mut self) -> std::process::ChildStdin {
+        self.child.as_mut().unwrap().stdin.take().unwrap()
+    }
+
+    #[cfg(test)]
     pub fn simulate_running(&mut self) {
         self.snapshot.running = true;
     }

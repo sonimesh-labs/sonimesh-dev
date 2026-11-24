@@ -872,6 +872,17 @@ remain while waiting and after stopping the listener, and clear on the next
 listener start or client attempt. Stopping the listener terminates an active
 session immediately, so its retained counters are only the last available update,
 not a final post-drain report.
+On 2026-11-24, the Windows probe's ignored real-listener test sent 513 volume
+commands without UI status polling and observed the last acknowledgement through
+the background drain. Reproduce it after building the playback-enabled listener,
+with TCP 47610 and UDP 39094 free:
+
+```powershell
+cargo +1.98.1 test --manifest-path tools/tauri-output-prototype/Cargo.toml real_listener_output_is_drained_without_ui_polling --locked --offline -- --ignored
+```
+
+This exercises the child process and control-output pipe without an active audio
+session; it is not evidence of playback or sustained-load audio continuity.
 During an active session, the probe also shows the last reported one-second
 decoded-frame count and peak before output gain, excluding concealment. A zero
 frame count means no frames were decoded in that interval, not decoded silence.

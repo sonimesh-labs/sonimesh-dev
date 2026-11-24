@@ -79,6 +79,38 @@ mod route_tests {
     }
 
     #[test]
+    #[ignore = "requires the playback lab binary and free lab ports"]
+    fn real_listener_output_is_drained_without_ui_polling() {
+        use std::io::Write;
+        use std::time::{Duration, Instant};
+
+        let state = ProbeState::default();
+        state
+            .start_listener(|lab| lab.start("127.0.0.1", None, 60, false, 39094))
+            .unwrap();
+        let monitor = spawn_lab_monitor(&state.lab);
+        let mut stdin = state.lab.lock().unwrap().test_take_stdin();
+        let writer = std::thread::spawn(move || {
+            stdin
+                .write_all("volume 1\n".repeat(512).as_bytes())
+                .unwrap();
+            stdin.write_all(b"volume 42\n").unwrap();
+        });
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            if state.lab.lock().unwrap().test_volume() == Some(42) {
+                break;
+            }
+            assert!(Instant::now() < deadline, "listener output drain timed out");
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        writer.join().unwrap();
+        state.lab.lock().unwrap().stop();
+        drop(state);
+        monitor.join().unwrap();
+    }
+
+    #[test]
     fn rejects_addresses_that_cannot_identify_an_android_peer() {
         for address in [
             "",
