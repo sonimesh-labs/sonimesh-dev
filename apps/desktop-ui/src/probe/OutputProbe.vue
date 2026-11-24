@@ -483,7 +483,7 @@ onBeforeUnmount(() => { disposed = true; labRequest++; clearTimeout(timer); clea
       <p class="preview-note">The suggestion follows the current route to Android; it does not verify connectivity.</p>
       <label for="lab-media-port">Receiver UDP port</label>
       <input id="lab-media-port" v-model="mediaPort" inputmode="numeric" maxlength="5" :disabled="lab.running || labBusy" :aria-invalid="!mediaPortValid" aria-describedby="lab-media-port-help" />
-      <p id="lab-media-port-help" class="preview-note">Use 39093 for direct capture, or the relay's forwarding port for an impairment experiment. Android still sends to 39093.</p>
+      <p id="lab-media-port-help" class="preview-note">For direct capture, set Android's Desktop UDP port to this value. With a relay, use its forwarding port here and its listen port on Android.</p>
       <p v-if="!mediaPortValid" class="command-error" role="alert">Enter a receiver UDP port from 1 to 65535.</p>
       <label for="lab-buffer">Startup buffer</label>
       <select id="lab-buffer" v-model.number="startupBufferMs" :disabled="lab.running || labBusy">

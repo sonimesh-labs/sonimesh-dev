@@ -39,6 +39,8 @@ describe('desktop output probe', () => {
     const wrapper = mountStoppedProbe()
     await flushPromises()
     const port = wrapper.get('#lab-media-port')
+    expect(port.attributes('aria-describedby')).toBe('lab-media-port-help')
+    expect(wrapper.get('#lab-media-port-help').text()).toContain("set Android's Desktop UDP port to this value")
     const start = wrapper.findAll('button').find(button => button.text() === 'Start listener')!
     for (const invalid of ['', '0', '65536', '12x']) {
       await port.setValue(invalid)
