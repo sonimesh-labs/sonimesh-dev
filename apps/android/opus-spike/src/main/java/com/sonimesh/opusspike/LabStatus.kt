@@ -49,6 +49,8 @@ internal object LabStatus {
     private val signalObservers = mutableSetOf<(LabSignalState?) -> Unit>()
     private var captureDurationSeconds: Long? = null
     private val durationObservers = mutableSetOf<(Long?) -> Unit>()
+    private var senderMuted: Boolean? = null
+    private val muteObservers = mutableSetOf<(Boolean?) -> Unit>()
 
     fun serviceStarted(usage: LabCaptureUsage, bitrate: OpusBitrate, transport: LabTransport = LabTransport.Adb) {
         captureUsage = usage
@@ -56,6 +58,7 @@ internal object LabStatus {
         sessionConfig = LabSessionConfig(usage, bitrate, transport)
         signalState = null
         captureDurationSeconds = null
+        publishSenderMuted(false)
         sessionObservers.toList().forEach { it(sessionConfig) }
         signalObservers.toList().forEach { it(null) }
         durationObservers.toList().forEach { it(null) }
@@ -64,6 +67,21 @@ internal object LabStatus {
     fun serviceFinished() {
         captureUsage = null
         captureAdmission.serviceFinished()
+        publishSenderMuted(null)
+    }
+
+    fun observeSenderMuted(observer: (Boolean?) -> Unit) {
+        muteObservers.add(observer)
+        observer(senderMuted)
+    }
+
+    fun removeSenderMuted(observer: (Boolean?) -> Unit) {
+        muteObservers.remove(observer)
+    }
+
+    fun publishSenderMuted(value: Boolean?) {
+        senderMuted = value
+        muteObservers.toList().forEach { it(value) }
     }
 
     fun observeSessionConfig(observer: (LabSessionConfig?) -> Unit) {

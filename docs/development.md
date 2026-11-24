@@ -236,6 +236,16 @@ does not prove network delivery or desktop receipt and is retained after stop.
 The lab foreground service holds a partial CPU wake lock until the service is
 destroyed so it can be evaluated with the screen off. Physical-device screen-off
 continuity and power consumption remain unmeasured.
+During an active lab capture, **Mute sending** replaces subsequent encoder input
+with silence while capture, the connection, and capture-signal observation continue.
+Unmute resumes captured audio without a new consent session. Audio already encoded,
+in transit, or buffered at the receiver can still play briefly after muting; this
+control is not an immediate stop. It resets when the session ends.
+On 2026-11-24, an API 37 emulator paired with the software listener, continued
+sending packets while muted, retained the switch state after activity recreation,
+and unmuted and stopped. A host test checks selection of the silent encoder
+input. The listener's cumulative peak does not isolate the muted interval, so
+this run does not measure muted output or audible behavior.
 On Android 13 and newer the lab requests notification permission before screen
 capture consent, so the capture notification and its stop action can appear in
 the notification drawer. If permission is denied, enable it in app settings

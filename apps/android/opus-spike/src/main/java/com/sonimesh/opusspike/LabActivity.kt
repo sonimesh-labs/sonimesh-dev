@@ -22,6 +22,7 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Spinner
+import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import com.sonimesh.sender.encoder.OpusBitrate
@@ -56,6 +57,14 @@ class LabActivity : Activity() {
     private lateinit var sessionConfig: TextView
     private lateinit var usage: Spinner
     private lateinit var bitrate: Spinner
+    private lateinit var muteSwitch: Switch
+    private var updatingMute = false
+    private val muteObserver: (Boolean?) -> Unit = { muted ->
+        updatingMute = true
+        muteSwitch.isEnabled = muted != null
+        muteSwitch.isChecked = muted == true
+        updatingMute = false
+    }
     private val statusObserver: (String) -> Unit = { status.text = "Status: $it" }
     private val signalObserver: (LabSignalState?) -> Unit = { state ->
         signal.text = "Capture signal: ${state?.label ?: "—"}"
@@ -293,6 +302,22 @@ class LabActivity : Activity() {
                 startService(Intent(this@LabActivity, LabCaptureService::class.java).setAction("stop"))
             }
         })
+        muteSwitch = Switch(this).apply {
+            text = "Mute sending"
+            isEnabled = false
+            isSaveEnabled = false
+            setOnCheckedChangeListener { _, checked ->
+                if (!updatingMute) {
+                    startService(Intent(this@LabActivity, LabCaptureService::class.java)
+                        .setAction(LabCaptureService.ACTION_SET_MUTED)
+                        .putExtra(LabCaptureService.EXTRA_MUTED, checked))
+                }
+            }
+        }
+        layout.addView(muteSwitch)
+        layout.addView(TextView(this).apply {
+            text = "Already buffered audio may continue briefly after muting."
+        })
         layout.addView(TextView(this).apply {
             text = "New test tones use the current capture usage, or the selection when capture is stopped. Restart a playing tone to apply changes."
         })
@@ -325,6 +350,7 @@ class LabActivity : Activity() {
         LabStatus.observeSentPackets(sentPacketsObserver)
         LabStatus.observeEncoderRate(rateObserver)
         LabStatus.observeSessionConfig(sessionObserver)
+        LabStatus.observeSenderMuted(muteObserver)
     }
 
     override fun onStop() {
@@ -335,6 +361,7 @@ class LabActivity : Activity() {
         LabStatus.removeSentPackets(sentPacketsObserver)
         LabStatus.removeEncoderRate(rateObserver)
         LabStatus.removeSessionConfig(sessionObserver)
+        LabStatus.removeSenderMuted(muteObserver)
         super.onStop()
     }
 

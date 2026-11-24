@@ -41,8 +41,12 @@ import java.util.concurrent.atomic.AtomicLong
 internal fun incrementSaturated(value: Long): Long =
     if (value == Long.MAX_VALUE) value else value + 1
 
+internal fun encoderInput(pcm: ShortArray, silence: ShortArray, muted: Boolean): ShortArray =
+    if (muted) silence else pcm
+
 class LabCaptureService : Service() {
     private val running = AtomicBoolean(false)
+    private val senderMuted = AtomicBoolean(false)
     private val socketLock = Any()
     private var socket: Socket? = null
     private val setupSocket = SetupSocket()
@@ -62,6 +66,16 @@ class LabCaptureService : Service() {
     @Suppress("DEPRECATION")
     @SuppressLint("WakelockTimeout") // Released when this foreground service is destroyed.
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_SET_MUTED) {
+            if (started && running.get()) {
+                val muted = intent.getBooleanExtra(EXTRA_MUTED, false)
+                senderMuted.set(muted)
+                LabStatus.publishSenderMuted(muted)
+            } else if (!started) {
+                stopSelf()
+            }
+            return START_NOT_STICKY
+        }
         if (intent?.action == "stop") {
             if (started) requestStop() else stopSelf()
             return START_NOT_STICKY
@@ -250,6 +264,7 @@ class LabCaptureService : Service() {
                 }
             }
             val pcm = ShortArray(OpusEncoder.FRAME_SAMPLES)
+            val silence = ShortArray(OpusEncoder.FRAME_SAMPLES)
             val signalMonitor = LabSignalMonitor()
             val encoderInputWait = EncoderInputWait()
             val captureReadWait = CaptureReadWait()
@@ -286,7 +301,7 @@ class LabCaptureService : Service() {
                     nowMillis = SystemClock::elapsedRealtime,
                     submitEnd = {
                         if (filled > 0) pcm.fill(0, filled, pcm.size)
-                        activeCodec.tryQueue(if (filled > 0) pcm else null, frame * 20_000, end = true)
+                        activeCodec.tryQueue(if (filled > 0) encoderInput(pcm, silence, senderMuted.get()) else null, frame * 20_000, end = true)
                     },
                     pollOutput = ::pollEncodedOutput,
                     idle = { Thread.sleep(2) },
@@ -344,7 +359,7 @@ class LabCaptureService : Service() {
                 }
                 var waitingForInput = false
                 if (filled == pcm.size) {
-                    if (activeCodec.tryQueue(pcm, frame * 20_000)) {
+                    if (activeCodec.tryQueue(encoderInput(pcm, silence, senderMuted.get()), frame * 20_000)) {
                         frame++
                         filled = 0
                         encoderInputWait.reset()
@@ -497,6 +512,7 @@ class LabCaptureService : Service() {
 
     private fun requestStop() {
         if (!running.getAndSet(false)) return
+        LabStatus.publishSenderMuted(null)
         if (!terminalStatus) LabStatus.publish("Stopping capture…")
         setupSocket.cancel()
         synchronized(socketLock) {
@@ -523,5 +539,10 @@ class LabCaptureService : Service() {
         destroyed = true
         if (started && (!workerStarted || workerFinished)) LabStatus.serviceFinished()
         super.onDestroy()
+    }
+
+    companion object {
+        const val ACTION_SET_MUTED = "com.sonimesh.opusspike.SET_MUTED"
+        const val EXTRA_MUTED = "muted"
     }
 }

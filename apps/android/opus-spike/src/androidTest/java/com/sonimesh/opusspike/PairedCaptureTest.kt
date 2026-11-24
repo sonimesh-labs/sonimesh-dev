@@ -16,6 +16,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.Button
 import android.widget.EditText
 import android.widget.Spinner
+import android.widget.Switch
 import android.widget.TextView
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
@@ -100,7 +101,10 @@ class PairedCaptureTest {
     @Test
     fun returns_to_active_capture_from_notification() = runCapture(expectDisconnect = false, notificationReturn = true)
 
-    private fun runCapture(expectDisconnect: Boolean, screenOff: Boolean = false, notificationReturn: Boolean = false, startFromScan: Boolean = false, startFromPaste: Boolean = false, recreate: Boolean = false, changeUsage: Boolean = false) {
+    @Test
+    fun mutes_and_resumes_sending_during_capture() = runCapture(expectDisconnect = false, testMute = true)
+
+    private fun runCapture(expectDisconnect: Boolean, screenOff: Boolean = false, notificationReturn: Boolean = false, startFromScan: Boolean = false, startFromPaste: Boolean = false, recreate: Boolean = false, changeUsage: Boolean = false, testMute: Boolean = false) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val args = InstrumentationRegistry.getArguments()
         assumeTrue(
@@ -217,7 +221,42 @@ class PairedCaptureTest {
                 }
                 assertTrue("desktop disconnect was not reported", disconnectStatus != null)
             } else {
-                if (changeUsage) {
+                if (testMute) {
+                    var packetsBeforeMute = 0L
+                    scenario.onActivity { activity ->
+                        val count = find(activity.window.decorView) {
+                            it is TextView && it.text.toString().matches(Regex("Media packets sent: [0-9]+"))
+                        } as TextView
+                        packetsBeforeMute = count.text.toString().substringAfter(": ").toLong()
+                        val control = find(activity.window.decorView) { it is Switch && it.text.toString() == "Mute sending" } as Switch
+                        assertTrue("mute control is unavailable", control.isEnabled && !control.isChecked)
+                        control.performClick()
+                    }
+                    var sentWhileMuted = false
+                    val muteDeadline = SystemClock.elapsedRealtime() + 5_000
+                    while (!sentWhileMuted && SystemClock.elapsedRealtime() < muteDeadline) {
+                        scenario.onActivity { activity ->
+                            val count = find(activity.window.decorView) {
+                                it is TextView && it.text.toString().matches(Regex("Media packets sent: [0-9]+"))
+                            } as TextView
+                            sentWhileMuted = count.text.toString().substringAfter(": ").toLong() > packetsBeforeMute
+                        }
+                        if (!sentWhileMuted) SystemClock.sleep(100)
+                    }
+                    assertTrue("media packets did not continue while muted", sentWhileMuted)
+                    scenario.recreate()
+                    scenario.onActivity { activity ->
+                        val control = find(activity.window.decorView) { it is Switch && it.text.toString() == "Mute sending" } as Switch
+                        assertTrue("mute state did not survive recreation", control.isEnabled && control.isChecked)
+                        assertTrue("capture stopped when muted", containsStatus(activity.window.decorView, "Status: Capturing audio"))
+                        control.performClick()
+                    }
+                    SystemClock.sleep(1_000)
+                    scenario.onActivity { activity ->
+                        val control = find(activity.window.decorView) { it is Switch && it.text.toString() == "Mute sending" } as Switch
+                        assertTrue("unmute did not update control", control.isEnabled && !control.isChecked)
+                    }
+                } else if (changeUsage) {
                     scenario.onActivity { activity ->
                         val root = activity.window.decorView
                         (find(root) { it is Spinner && it.contentDescription == "Playback usage for capture" } as Spinner)
@@ -348,6 +387,10 @@ class PairedCaptureTest {
                 if (!stopped) SystemClock.sleep(100)
             }
             assertTrue("capture service did not stop", stopped)
+            if (testMute) scenario.onActivity { activity ->
+                val control = find(activity.window.decorView) { it is Switch && it.text.toString() == "Mute sending" } as Switch
+                assertTrue("mute control remained active after stop", !control.isEnabled && !control.isChecked)
+            }
             if (changeUsage) {
                 var finished = false
                 val finishDeadline = SystemClock.elapsedRealtime() + 10_000
