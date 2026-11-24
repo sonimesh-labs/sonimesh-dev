@@ -243,9 +243,11 @@ in transit, or buffered at the receiver can still play briefly after muting; thi
 control is not an immediate stop. It resets when the session ends.
 On 2026-11-24, an API 37 emulator paired with the software listener, continued
 sending packets while muted, retained the switch state after activity recreation,
-and unmuted and stopped. A host test checks selection of the silent encoder
-input. The listener's cumulative peak does not isolate the muted interval, so
-this run does not measure muted output or audible behavior.
+and unmuted and stopped. With `--signal-status`, the listener reported decoded
+peaks of 0.094–0.102 before mute, `0.000000` across five one-second windows of
+50 decoded frames while muted, and about 0.094 after unmute. A host test also
+checks selection of the silent encoder input. These observations do not establish
+physical-device behavior or audible output.
 On Android 13 and newer the lab requests notification permission before screen
 capture consent, so the capture notification and its stop action can appear in
 the notification drawer. If permission is denied, enable it in app settings
@@ -354,6 +356,10 @@ schedule: fixed mode decoded 199 frames with 8 resynchronization drops;
 adaptive mode decoded 160 frames with 16 drops. Both reported zero late packets.
 These short, uncontrolled software runs do not establish a before/after
 improvement or identify the causes of the remaining drops.
+Add `--signal-status` for one-second decoded-frame counts and peak amplitude
+for each interval; an interval without decoded frames reports `peak none`.
+This signal observation is before output gain and excludes packet-loss concealment;
+it does not establish audible playback. The existing cumulative status is unchanged.
 Add `--status` to print packet counts, decode counts and peak, jitter occupancy,
 and output recovery state at session start and every five seconds afterward. This can help
 distinguish missing media from decoded silence; counts and peak are cumulative

@@ -222,6 +222,8 @@ class PairedCaptureTest {
                 assertTrue("desktop disconnect was not reported", disconnectStatus != null)
             } else {
                 if (testMute) {
+                    // Leave complete receiver observation windows on each side of the switch.
+                    SystemClock.sleep(3_000)
                     var packetsBeforeMute = 0L
                     scenario.onActivity { activity ->
                         val count = find(activity.window.decorView) {
@@ -244,6 +246,7 @@ class PairedCaptureTest {
                         if (!sentWhileMuted) SystemClock.sleep(100)
                     }
                     assertTrue("media packets did not continue while muted", sentWhileMuted)
+                    SystemClock.sleep(4_000)
                     scenario.recreate()
                     scenario.onActivity { activity ->
                         val control = find(activity.window.decorView) { it is Switch && it.text.toString() == "Mute sending" } as Switch
@@ -251,7 +254,7 @@ class PairedCaptureTest {
                         assertTrue("capture stopped when muted", containsStatus(activity.window.decorView, "Status: Capturing audio"))
                         control.performClick()
                     }
-                    SystemClock.sleep(1_000)
+                    SystemClock.sleep(3_000)
                     scenario.onActivity { activity ->
                         val control = find(activity.window.decorView) { it is Switch && it.text.toString() == "Mute sending" } as Switch
                         assertTrue("unmute did not update control", control.isEnabled && !control.isChecked)

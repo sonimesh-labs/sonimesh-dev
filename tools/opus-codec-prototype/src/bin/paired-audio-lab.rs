@@ -190,6 +190,7 @@ struct Options {
     keep_listening: bool,
     control: bool,
     status: bool,
+    signal_status: bool,
     adaptive: bool,
     startup_buffer: Duration,
     bind: Ipv4Addr,
@@ -207,6 +208,7 @@ impl Default for Options {
             keep_listening: false,
             control: false,
             status: false,
+            signal_status: false,
             adaptive: false,
             startup_buffer: Duration::from_millis(60),
             bind: Ipv4Addr::LOCALHOST,
@@ -232,6 +234,7 @@ impl Options {
                 "--keep-listening" if !result.keep_listening => result.keep_listening = true,
                 "--control" if !result.control => result.control = true,
                 "--status" if !result.status => result.status = true,
+                "--signal-status" if !result.signal_status => result.signal_status = true,
                 "--adaptive" if !result.adaptive => result.adaptive = true,
                 "--startup-buffer-ms" if !startup_buffer_set => {
                     let value = args
@@ -261,7 +264,7 @@ impl Options {
                 }
                 _ => {
                     return Err(
-                        "usage: paired-audio-lab [--require-tone] [--play [--select-output | --output-id-stdin | --output-id-framed] [--control]] [--status] [--adaptive] [--startup-buffer-ms 20-120] [--keep-listening] [--bind IPv4 --host IPv4]"
+                        "usage: paired-audio-lab [--require-tone] [--play [--select-output | --output-id-stdin | --output-id-framed] [--control]] [--status] [--signal-status] [--adaptive] [--startup-buffer-ms 20-120] [--keep-listening] [--bind IPv4 --host IPv4]"
                             .into(),
                     );
                 }
@@ -701,6 +704,7 @@ fn drain_stop_tail(
 struct ObservedDecoder {
     decoder: lab_decoder::Decoder,
     peak: Arc<AtomicU32>,
+    interval_peak: Arc<AtomicU32>,
 }
 
 impl FrameDecoder for ObservedDecoder {
@@ -713,6 +717,8 @@ impl FrameDecoder for ObservedDecoder {
             .filter(|sample| sample.is_finite())
             .fold(0_f32, |peak, sample| peak.max(sample.abs()));
         self.peak.fetch_max(peak.to_bits(), Ordering::Relaxed);
+        self.interval_peak
+            .fetch_max(peak.to_bits(), Ordering::Relaxed);
         Ok(count)
     }
 
@@ -916,6 +922,9 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
     let mut previous_decision: Option<(Instant, Duration)> = None;
     let mut playing = false;
     let decoded_peak = Arc::new(AtomicU32::new(0));
+    let interval_peak = Arc::new(AtomicU32::new(0));
+    let mut next_signal = None;
+    let mut previous_signal_decoded = 0_u64;
     let deadline = Instant::now() + Duration::from_secs(40);
     while receiver.is_some() || Instant::now() < deadline {
         let loop_start = Instant::now();
@@ -975,6 +984,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                                         ObservedDecoder {
                                             decoder: lab_decoder::Decoder::new()?,
                                             peak: Arc::clone(&decoded_peak),
+                                            interval_peak: Arc::clone(&interval_peak),
                                         },
                                         producer,
                                         0,
@@ -1039,6 +1049,9 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                             counters = Some(metrics);
                             coordinator.complete_start(token, request)?;
                             next_status = options.status.then(Instant::now);
+                            next_signal = options
+                                .signal_status
+                                .then(|| Instant::now() + Duration::from_secs(1));
                             lab_println!("RESULT receiver started");
                             ControlReply::stream_status(
                                 request.identity,
@@ -1208,6 +1221,17 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                     lab_println!("{status}");
                 }
             }
+            if next_signal.is_some_and(|due| now >= due) {
+                let interval_count = decoded.saturating_sub(previous_signal_decoded);
+                previous_signal_decoded = decoded;
+                let peak = f32::from_bits(interval_peak.swap(0, Ordering::Relaxed));
+                if interval_count == 0 {
+                    lab_println!("SIGNAL decoded 0 peak none");
+                } else {
+                    lab_println!("SIGNAL decoded {interval_count} peak {peak:.6}");
+                }
+                next_signal = Some(now + Duration::from_secs(1));
+            }
             if let Some(state) = activity.changed(now) {
                 lab_println!("MEDIA {state}");
             }
@@ -1257,6 +1281,7 @@ mod tests {
             ObservedDecoder {
                 decoder: lab_decoder::Decoder::new().unwrap(),
                 peak: Arc::new(AtomicU32::new(0)),
+                interval_peak: Arc::new(AtomicU32::new(0)),
             },
             producer,
             0,
@@ -1317,6 +1342,7 @@ mod tests {
             ObservedDecoder {
                 decoder: lab_decoder::Decoder::new().unwrap(),
                 peak: Arc::new(AtomicU32::new(0)),
+                interval_peak: Arc::new(AtomicU32::new(0)),
             },
             producer,
             0,
@@ -1452,6 +1478,7 @@ mod tests {
                     ObservedDecoder {
                         decoder: lab_decoder::Decoder::new()?,
                         peak: Arc::new(AtomicU32::new(0)),
+                        interval_peak: Arc::new(AtomicU32::new(0)),
                     },
                     producer,
                     0,
@@ -1523,6 +1550,7 @@ mod tests {
             ObservedDecoder {
                 decoder: lab_decoder::Decoder::new().unwrap(),
                 peak: Arc::new(AtomicU32::new(0)),
+                interval_peak: Arc::new(AtomicU32::new(0)),
             },
             producer,
             0,
@@ -1698,6 +1726,7 @@ mod tests {
             ObservedDecoder {
                 decoder: lab_decoder::Decoder::new().unwrap(),
                 peak: Arc::new(AtomicU32::new(0)),
+                interval_peak: Arc::new(AtomicU32::new(0)),
             },
             producer,
             0,
@@ -1756,6 +1785,7 @@ mod tests {
             ObservedDecoder {
                 decoder: lab_decoder::Decoder::new().unwrap(),
                 peak: Arc::new(AtomicU32::new(0)),
+                interval_peak: Arc::new(AtomicU32::new(0)),
             },
             producer,
             0,
@@ -1819,6 +1849,7 @@ mod tests {
             ObservedDecoder {
                 decoder: lab_decoder::Decoder::new().unwrap(),
                 peak: Arc::new(AtomicU32::new(0)),
+                interval_peak: Arc::new(AtomicU32::new(0)),
             },
             producer,
             0,
@@ -1916,6 +1947,7 @@ mod tests {
             ObservedDecoder {
                 decoder: lab_decoder::Decoder::new().unwrap(),
                 peak: Arc::new(AtomicU32::new(0)),
+                interval_peak: Arc::new(AtomicU32::new(0)),
             },
             producer,
             0,
@@ -2039,6 +2071,7 @@ mod tests {
             ObservedDecoder {
                 decoder: lab_decoder::Decoder::new().unwrap(),
                 peak: Arc::new(AtomicU32::new(0)),
+                interval_peak: Arc::new(AtomicU32::new(0)),
             },
             producer,
             0,
@@ -2172,6 +2205,12 @@ mod tests {
         );
         assert!(Options::parse(args(&["--status"])).unwrap().status);
         assert!(Options::parse(args(&["--status", "--status"])).is_err());
+        assert!(
+            Options::parse(args(&["--signal-status"]))
+                .unwrap()
+                .signal_status
+        );
+        assert!(Options::parse(args(&["--signal-status", "--signal-status"])).is_err());
         assert!(Options::parse(args(&["--adaptive"])).unwrap().adaptive);
         assert!(Options::parse(args(&["--adaptive", "--adaptive"])).is_err());
         let playback =
@@ -2319,15 +2358,21 @@ mod tests {
         let mut packet = [0_u8; 1_148];
         let length = encoder.encode_float(&samples, &mut packet).unwrap();
         let peak = Arc::new(AtomicU32::new(0));
+        let interval_peak = Arc::new(AtomicU32::new(0));
         let mut decoder = ObservedDecoder {
             decoder: lab_decoder::Decoder::new().unwrap(),
             peak: Arc::clone(&peak),
+            interval_peak: Arc::clone(&interval_peak),
         };
         let mut pcm = [0.0; SAMPLES];
         assert_eq!(
             decoder.decode(&packet[..length], &mut pcm).unwrap(),
             SAMPLES
         );
+        assert!(f32::from_bits(peak.load(Ordering::Relaxed)) > 0.001);
+        assert!(f32::from_bits(interval_peak.swap(0, Ordering::Relaxed)) > 0.001);
+        decoder.decode_plc(&mut pcm).unwrap();
+        assert_eq!(interval_peak.load(Ordering::Relaxed), 0);
         assert!(f32::from_bits(peak.load(Ordering::Relaxed)) > 0.001);
     }
 }
