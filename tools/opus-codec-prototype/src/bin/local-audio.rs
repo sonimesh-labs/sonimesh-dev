@@ -23,6 +23,8 @@ use sonimesh_protocol::{MediaDirection, MediaKeyContext, SessionSecret};
 
 const SAMPLES: usize = 1_920;
 const FRAMES: u32 = 100;
+const PACED_FRAMES_PER_SECOND: u32 = 50;
+const MAX_PACED_SECONDS: u32 = 3_600;
 const FRAME_INTERVAL: Duration = Duration::from_millis(20);
 const STARTUP_BUFFER: Duration = Duration::from_millis(60);
 type LabResult<T> = Result<T, Box<dyn Error>>;
@@ -208,7 +210,7 @@ fn send_paced_frame(
     Ok(())
 }
 
-fn stream_via_relay(relay: (u16, u16)) -> LabResult<()> {
+fn stream_via_relay(relay: (u16, u16), frames: u32) -> LabResult<()> {
     let frame = OpusFrameConfig::new(48_000, 2, 20)?;
     let secret = SessionSecret::new([0x42; 32]);
     let context = MediaKeyContext::new(1, 1, 0, MediaDirection::AndroidToDesktop)?;
@@ -255,9 +257,9 @@ fn stream_via_relay(relay: (u16, u16)) -> LabResult<()> {
     let mut concealed = 0_u64;
     let mut empty_ticks = 0_u64;
 
-    while sent < FRAMES || playout_ticks < FRAMES {
+    while sent < frames || playout_ticks < frames {
         let now = Instant::now();
-        if sent < FRAMES && now >= next_send {
+        if sent < frames && now >= next_send {
             send_paced_frame(&mut sender, &mut encoder, &mut pcm, &mut packet, sent)?;
             sent += 1;
             next_send += FRAME_INTERVAL;
@@ -274,7 +276,7 @@ fn stream_via_relay(relay: (u16, u16)) -> LabResult<()> {
         }
 
         let now = Instant::now();
-        if now >= next_playout && playout_ticks < FRAMES {
+        if now >= next_playout && playout_ticks < frames {
             match receiver.decode_next()? {
                 DecodeStep::Decoded {
                     samples: SAMPLES, ..
@@ -296,14 +298,15 @@ fn stream_via_relay(relay: (u16, u16)) -> LabResult<()> {
             }
         }
 
-        if sent < FRAMES && next_send < next_playout {
+        if sent < frames && next_send < next_playout {
             std::thread::sleep(next_send.saturating_duration_since(Instant::now()));
-        } else if playout_ticks < FRAMES {
+        } else if playout_ticks < frames {
             std::thread::sleep(next_playout.saturating_duration_since(Instant::now()));
         }
     }
 
     let peak = output.output_mut().peak;
+    output.output_mut().finish()?;
     output.stop();
     println!(
         "paced relay run complete: sent={sent} admitted={admitted} decoded={decoded_frames} concealed={concealed} empty_ticks={empty_ticks} playout_ticks={playout_ticks} rendered_peak={peak:.4} elapsed_ms={}",
@@ -330,11 +333,11 @@ fn play() -> LabResult<()> {
 fn main() -> LabResult<()> {
     match parse_args(std::env::args().skip(1))? {
         Mode::Check(relay) => check(relay),
-        Mode::StreamViaRelay(relay) => stream_via_relay(relay),
+        Mode::StreamViaRelay(relay, frames) => stream_via_relay(relay, frames),
         Mode::Play => play(),
         Mode::Usage => {
             println!(
-                "Usage: local-audio --check | --play | --check-via-relay RELAY_PORT RECEIVER_PORT | --stream-via-relay RELAY_PORT RECEIVER_PORT"
+                "Usage: local-audio --check | --play | --check-via-relay RELAY_PORT RECEIVER_PORT | --stream-via-relay RELAY_PORT RECEIVER_PORT [--seconds SECONDS]"
             );
             Ok(())
         }
@@ -343,7 +346,7 @@ fn main() -> LabResult<()> {
 
 enum Mode {
     Check(Option<(u16, u16)>),
-    StreamViaRelay((u16, u16)),
+    StreamViaRelay((u16, u16), u32),
     Play,
     Usage,
 }
@@ -368,10 +371,30 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> LabResult<Mode> {
             if listen == 0 || receive == 0 || listen == receive {
                 return Err("relay and receiver ports must be distinct and nonzero".into());
             }
-            Ok(Mode::StreamViaRelay((listen, receive)))
+            Ok(Mode::StreamViaRelay(
+                (listen, receive),
+                FRAMES,
+            ))
+        }
+        [flag, listen, receive, seconds_flag, seconds]
+            if flag == "--stream-via-relay" && seconds_flag == "--seconds" =>
+        {
+            let listen: u16 = listen.parse()?;
+            let receive: u16 = receive.parse()?;
+            if listen == 0 || receive == 0 || listen == receive {
+                return Err("relay and receiver ports must be distinct and nonzero".into());
+            }
+            let seconds: u32 = seconds.parse()?;
+            if !(1..=MAX_PACED_SECONDS).contains(&seconds) {
+                return Err("stream duration must be between 1 and 3600 seconds".into());
+            }
+            Ok(Mode::StreamViaRelay(
+                (listen, receive),
+                seconds * PACED_FRAMES_PER_SECOND,
+            ))
         }
         _ => Err(
-            "usage: local-audio --check | --play | --check-via-relay RELAY_PORT RECEIVER_PORT | --stream-via-relay RELAY_PORT RECEIVER_PORT"
+            "usage: local-audio --check | --play | --check-via-relay RELAY_PORT RECEIVER_PORT | --stream-via-relay RELAY_PORT RECEIVER_PORT [--seconds SECONDS]"
                 .into(),
         ),
     }
@@ -395,7 +418,27 @@ mod tests {
         ));
         assert!(matches!(
             super::parse_args(args(&["--stream-via-relay", "39093", "39094"])),
-            Ok(super::Mode::StreamViaRelay((39093, 39094)))
+            Ok(super::Mode::StreamViaRelay((39093, 39094), 100))
+        ));
+        assert!(matches!(
+            super::parse_args(args(&[
+                "--stream-via-relay",
+                "39093",
+                "39094",
+                "--seconds",
+                "60"
+            ])),
+            Ok(super::Mode::StreamViaRelay((39093, 39094), 3_000))
+        ));
+        assert!(matches!(
+            super::parse_args(args(&[
+                "--stream-via-relay",
+                "39093",
+                "39094",
+                "--seconds",
+                "3600"
+            ])),
+            Ok(super::Mode::StreamViaRelay((39093, 39094), 180_000))
         ));
         for values in [
             vec!["--check-via-relay", "0", "39094"],
@@ -406,6 +449,10 @@ mod tests {
             vec!["--stream-via-relay", "39093", "0"],
             vec!["--stream-via-relay", "39093", "39093"],
             vec!["--stream-via-relay", "39093"],
+            vec!["--stream-via-relay", "39093", "39094", "--seconds", "0"],
+            vec!["--stream-via-relay", "39093", "39094", "--seconds", "3601"],
+            vec!["--stream-via-relay", "39093", "39094", "--seconds", "abc"],
+            vec!["--stream-via-relay", "39093", "39094", "--minutes", "1"],
             vec!["--check", "extra"],
         ] {
             assert!(super::parse_args(args(&values)).is_err());

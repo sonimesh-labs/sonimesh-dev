@@ -1,7 +1,7 @@
 # MVP implementation baseline
 
 > Status: foundation implemented; platform feasibility remains open
-> Updated: 2026-11-24
+> Updated: 2026-11-25
 
 This baseline turns the architecture documents into a buildable core without
 claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
@@ -117,7 +117,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   The separate `opus-codec-prototype` now also has a local-audio lab command
   that runs a generated tone through native Opus, encrypted UDP loopback, the
   receiver pipeline, and its render source. An explicit Windows playback mode
-  opens the default CPAL output; it is not Android capture or WLAN evidence.
+  opens the default CPAL output. Its paced relay exercise supports a configurable
+  one-second to one-hour software run and fails if the render is silent; it is not
+  Android capture or WLAN evidence.
   A separate Android MediaCodec spike generated 100 synthetic 20 ms Opus
   packets on an API 37 x86_64 emulator and desktop libopus decoded them to
   non-silent PCM. This is codec interoperability evidence, not capture, network,

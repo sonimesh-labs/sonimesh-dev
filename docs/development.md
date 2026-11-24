@@ -220,16 +220,19 @@ no queue-capacity drops. This is not Android or physical WLAN evidence.
 
 To exercise a paced software stream, start these commands in separate terminals
 from the repository root. The relay runs long enough to cover the sender's
-two-second stream and its final playout ticks:
+stream and its final playout ticks. The sender defaults to two seconds; pass
+`--seconds N` to choose a run from one second to one hour. Set the relay duration
+longer than the sender run so the final frames can drain:
 
 ~~~powershell
-cargo run -p sonimesh-network-simulator --bin udp-impairment-relay -- --listen 127.0.0.1:39093 --forward 127.0.0.1:39094 --seconds 5 --loss 5 --delay-ms 20 --jitter-ms 5 --queue-packets 32
-cargo run -p opus-codec-prototype --bin local-audio -- --stream-via-relay 39093 39094
+cargo run -p sonimesh-network-simulator --bin udp-impairment-relay -- --listen 127.0.0.1:39093 --forward 127.0.0.1:39094 --seconds 15 --loss 5 --delay-ms 20 --jitter-ms 5 --queue-packets 32
+cargo run -p opus-codec-prototype --bin local-audio -- --stream-via-relay 39093 39094 --seconds 10
 ~~~
 
 The paced sender emits one 20 ms frame at a time. Its receiver reports admitted,
-decoded, concealed, and empty playout ticks. Relay and receiver summaries describe
-the software path only; live host scheduling is not deterministic timing evidence.
+decoded, concealed, and empty playout ticks, and the command fails if the software
+render is silent. Relay and receiver summaries describe the software path only;
+live host scheduling is not deterministic timing evidence.
 On 2026-11-24, a Windows loopback run with 5% configured loss, 20 ms base delay,
 and 5 ms jitter decoded 94 frames and concealed 6, matching the relay's 94
 forwarded copies. With the same profile plus a 12,000-byte/second limit and a
