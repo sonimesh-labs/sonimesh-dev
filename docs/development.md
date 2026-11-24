@@ -159,6 +159,9 @@ still queued when its configured duration ends. Queued copies are discarded at
 exit; choose a duration that covers setup, capture, and drain. Its seed fixes
 model decisions for the received packet sequence, but actual arrival and delivery
 timing depend on the host and OS. The control channel is not impaired.
+Add `--report-seconds 5` to print cumulative relay counters every five seconds
+while it runs. Periodic reports are disabled by default; output can affect live
+scheduling, and counters do not establish desktop receipt or playback.
 For repeated short outages, add `--burst-interval 50 --burst-length 4` to
 drop four consecutive submitted packets after the first 50 and again every 50
 submissions thereafter. The interval counts packets received by the relay, not

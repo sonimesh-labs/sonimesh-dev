@@ -15,6 +15,10 @@ results as physical WLAN, audible quality, or end-to-end latency evidence.
 The relay also exposes the model's packet-counted loss bursts to exercise
 playout interruption and recovery; host socket loss can change which packets
 are counted by the model.
+Optional periodic cumulative relay reports provide progress during a live run.
+They count only packets observed by the relay, not network delivery or playback.
+Writing reports can itself perturb live relay scheduling, so record when they are
+enabled and do not treat their timing as a network measurement.
 
 ## Latency measurement
 

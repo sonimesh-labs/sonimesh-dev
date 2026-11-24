@@ -15,6 +15,7 @@ struct Options {
     listen: SocketAddrV4,
     forward: SocketAddrV4,
     duration: Duration,
+    report_interval: Option<Duration>,
     profile: NetworkProfile,
 }
 
@@ -24,6 +25,7 @@ impl Options {
             listen: SocketAddrV4::new(Ipv4Addr::LOCALHOST, 39093),
             forward: SocketAddrV4::new(Ipv4Addr::LOCALHOST, 39094),
             duration: Duration::from_secs(60),
+            report_interval: None,
             profile: NetworkProfile::stable(1),
         };
         let mut args = args.into_iter();
@@ -33,6 +35,9 @@ impl Options {
                 "--listen" => result.listen = value.parse()?,
                 "--forward" => result.forward = value.parse()?,
                 "--seconds" => result.duration = Duration::from_secs(value.parse()?),
+                "--report-seconds" => {
+                    result.report_interval = Some(Duration::from_secs(value.parse()?));
+                }
                 "--seed" => result.profile.seed = value.parse()?,
                 "--loss" => result.profile.loss_percent = value.parse()?,
                 "--duplicate" => result.profile.duplicate_percent = value.parse()?,
@@ -58,6 +63,12 @@ impl Options {
         if !(1..=3_600).contains(&result.duration.as_secs()) {
             return Err("seconds must be between 1 and 3600".into());
         }
+        if result
+            .report_interval
+            .is_some_and(|interval| !(1..=3_600).contains(&interval.as_secs()))
+        {
+            return Err("report-seconds must be between 1 and 3600".into());
+        }
         result.profile.validate()?;
         Ok(result)
     }
@@ -75,6 +86,7 @@ fn relay(
     options: &Options,
     input: &UdpSocket,
     output: &UdpSocket,
+    mut on_report: impl FnMut(Duration, &RelayReport),
 ) -> Result<RelayReport, Box<dyn Error>> {
     input.set_nonblocking(true)?;
     let mut network = VirtualNetwork::new(options.profile)?;
@@ -82,6 +94,7 @@ fn relay(
     let start = Instant::now();
     let mut oversized = 0_u64;
     let mut forwarded = 0_u64;
+    let mut next_report = options.report_interval;
     while start.elapsed() < options.duration {
         for _ in 0..RECEIVE_BATCH {
             match input.recv_from(&mut buffer) {
@@ -99,6 +112,21 @@ fn relay(
             output.send_to(&delivery.payload, options.forward)?;
             forwarded = forwarded.saturating_add(1);
         }
+        let elapsed = start.elapsed();
+        if next_report.is_some_and(|due| elapsed >= due) {
+            on_report(
+                elapsed,
+                &RelayReport {
+                    network: network.stats(),
+                    oversized,
+                    forwarded,
+                    queued: network.queued_copies(),
+                },
+            );
+            next_report = options
+                .report_interval
+                .map(|interval| start.elapsed() + interval);
+        }
         thread::sleep(Duration::from_millis(1));
     }
     Ok(RelayReport {
@@ -111,7 +139,7 @@ fn relay(
 
 fn main() -> Result<(), Box<dyn Error>> {
     let options = Options::parse(std::env::args().skip(1)).map_err(|error| {
-        format!("{error}; usage: udp-impairment-relay [--listen IPv4:PORT] [--forward IPv4:PORT] [--seconds 1-3600] [--seed N] [--loss 0-100] [--duplicate 0-100] [--reorder 0-100] [--burst-interval N] [--burst-length N] [--delay-ms N] [--jitter-ms N] [--reorder-delay-ms N]")
+        format!("{error}; usage: udp-impairment-relay [--listen IPv4:PORT] [--forward IPv4:PORT] [--seconds 1-3600] [--report-seconds 1-3600] [--seed N] [--loss 0-100] [--duplicate 0-100] [--reorder 0-100] [--burst-interval N] [--burst-length N] [--delay-ms N] [--jitter-ms N] [--reorder-delay-ms N]")
     })?;
     let input = UdpSocket::bind(options.listen)?;
     let output = UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0))?;
@@ -122,7 +150,16 @@ fn main() -> Result<(), Box<dyn Error>> {
         options.duration.as_secs(),
         options.profile
     );
-    let report = relay(&options, &input, &output)?;
+    let report = relay(&options, &input, &output, |elapsed, report| {
+        println!(
+            "relay elapsed_ms={} forwarded={} oversized={} queued={} stats={:?}",
+            elapsed.as_millis(),
+            report.forwarded,
+            report.oversized,
+            report.queued,
+            report.network
+        );
+    })?;
     println!(
         "relay forwarded={} oversized={} queued_at_stop={} stats={:?}",
         report.forwarded, report.oversized, report.queued, report.network
@@ -141,10 +178,18 @@ mod tests {
     #[test]
     fn validates_ports_profiles_and_duration() {
         assert!(Options::parse(args(&[])).is_ok());
+        assert_eq!(
+            Options::parse(args(&["--report-seconds", "5"]))
+                .unwrap()
+                .report_interval,
+            Some(Duration::from_secs(5))
+        );
         for values in [
             vec!["--listen", "127.0.0.1:39094"],
             vec!["--forward", "0.0.0.0:1"],
             vec!["--seconds", "0"],
+            vec!["--report-seconds", "0"],
+            vec!["--report-seconds", "3601"],
             vec!["--loss", "101"],
             vec!["--delay-ms", "60001"],
             vec!["--burst-length", "1"],
@@ -153,6 +198,60 @@ mod tests {
         ] {
             assert!(Options::parse(args(&values)).is_err());
         }
+    }
+
+    #[test]
+    fn reports_cumulative_progress_from_live_udp() {
+        let input = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let sink = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let output = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let mut options = Options::parse(args(&[])).unwrap();
+        options.forward = match sink.local_addr().unwrap() {
+            std::net::SocketAddr::V4(address) => address,
+            std::net::SocketAddr::V6(_) => unreachable!(),
+        };
+        options.duration = Duration::from_millis(250);
+        options.report_interval = Some(Duration::from_millis(50));
+        options.profile.base_delay_ms = 0;
+        options.profile.jitter_ms = 0;
+        sender
+            .send_to(b"media", input.local_addr().unwrap())
+            .unwrap();
+        sender
+            .send_to(
+                &vec![0; MAX_MEDIA_DATAGRAM_LEN + 1],
+                input.local_addr().unwrap(),
+            )
+            .unwrap();
+        let mut reports = Vec::new();
+        let final_report = relay(&options, &input, &output, |elapsed, report| {
+            reports.push((
+                elapsed,
+                report.network.submitted_packets,
+                report.forwarded,
+                report.oversized,
+                report.queued,
+            ));
+        })
+        .unwrap();
+        assert!(!reports.is_empty());
+        assert!(reports.windows(2).all(|pair| pair[0].0 < pair[1].0));
+        assert!(
+            reports
+                .iter()
+                .all(|&(_, submitted, forwarded, oversized, queued)| (
+                    submitted, forwarded, oversized, queued
+                ) == (1, 1, 1, 0))
+        );
+        assert_eq!(final_report.network.submitted_packets, 1);
+        assert_eq!(final_report.forwarded, 1);
+        assert_eq!(final_report.oversized, 1);
+        sink.set_read_timeout(Some(Duration::from_millis(100)))
+            .unwrap();
+        let mut bytes = [0; 16];
+        let (size, _) = sink.recv_from(&mut bytes).unwrap();
+        assert_eq!(&bytes[..size], b"media");
     }
 
     #[test]
@@ -184,7 +283,7 @@ mod tests {
                 .send_to(&[sequence], input.local_addr().unwrap())
                 .unwrap();
         }
-        let report = relay(&options, &input, &output).unwrap();
+        let report = relay(&options, &input, &output, |_, _| {}).unwrap();
         let mut received = Vec::new();
         let mut bytes = [0_u8; 1];
         while sink.recv_from(&mut bytes).is_ok() {
@@ -217,7 +316,8 @@ mod tests {
             options.profile.base_delay_ms = 10;
             options.profile.jitter_ms = 0;
             sender.send_to(b"media", input_address).unwrap();
-            let handle = thread::spawn(move || relay(&options, &input, &output).unwrap());
+            let handle =
+                thread::spawn(move || relay(&options, &input, &output, |_, _| {}).unwrap());
             let mut bytes = [0; 16];
             let read_result = receiver.recv_from(&mut bytes);
             let report = handle.join().unwrap();
@@ -255,7 +355,7 @@ mod tests {
         sender
             .send_to(&vec![0; MAX_MEDIA_DATAGRAM_LEN + 1], input_address)
             .unwrap();
-        let handle = thread::spawn(move || relay(&options, &input, &output).unwrap());
+        let handle = thread::spawn(move || relay(&options, &input, &output, |_, _| {}).unwrap());
         let mut bytes = [0; 16];
         for _ in 0..2 {
             let (size, _) = sink.recv_from(&mut bytes).unwrap();
