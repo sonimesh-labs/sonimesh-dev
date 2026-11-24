@@ -53,6 +53,12 @@ class MainActivity : ComponentActivity() {
         pendingCaptureSource = CaptureSource.fromWireValue(
             savedInstanceState?.getString(STATE_PENDING_CAPTURE_SOURCE),
         )
+        usageCheckEvidenceSummary = savedInstanceState
+            ?.getString(STATE_USAGE_CHECK_EVIDENCE_SUMMARY)
+            .orEmpty()
+        usageCheckSummary = savedInstanceState
+            ?.getString(STATE_USAGE_CHECK_SUMMARY)
+            .orEmpty()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
@@ -92,6 +98,12 @@ class MainActivity : ComponentActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString(STATE_PENDING_CAPTURE_SOURCE, pendingCaptureSource.wireValue)
+        outState.putString(STATE_USAGE_CHECK_EVIDENCE_SUMMARY, usageCheckEvidenceSummary)
+        outState.putString(
+            STATE_USAGE_CHECK_SUMMARY,
+            if (usageCheckRunning) getString(R.string.capture_usage_check_stopped)
+            else usageCheckSummary,
+        )
         super.onSaveInstanceState(outState)
     }
 
@@ -271,6 +283,7 @@ class MainActivity : ComponentActivity() {
         }
 
         usageCheckEvidenceSummary = ""
+        usageCheckSummary = ""
         pendingCaptureSource = source
         CaptureStateStore.publishAwaitingPermission()
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
@@ -341,6 +354,8 @@ class MainActivity : ComponentActivity() {
 
     private companion object {
         const val STATE_PENDING_CAPTURE_SOURCE = "pending_capture_source"
+        const val STATE_USAGE_CHECK_EVIDENCE_SUMMARY = "usage_check_evidence_summary"
+        const val STATE_USAGE_CHECK_SUMMARY = "usage_check_summary"
         const val USAGE_CHECK_TONE_DURATION_MILLIS = 750L
         const val USAGE_CHECK_POLL_MILLIS = 100L
         const val USAGE_CHECK_GAP_MILLIS = 250L

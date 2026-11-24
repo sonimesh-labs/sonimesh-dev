@@ -148,7 +148,7 @@ class AllUsagesCaptureTest {
     fun captures_each_supported_usage_in_one_session() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val automation = instrumentation.uiAutomation
-        ActivityScenario.launch(MainActivity::class.java).use {
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             try {
                 assertTrue("usage selector missing: $lastScreenSnapshot", clickText(automation, "All supported", scroll = true))
                 // Start immediately, before waiting for the selection to redraw.
@@ -188,6 +188,12 @@ class AllUsagesCaptureTest {
                     clickText(automation, "Check supported usages", scroll = true),
                 )
                 assertTrue("usage check did not report each captured test tone", waitUntil(15_000) {
+                    automation.rootInActiveWindow?.containsText(
+                        "Usage check: Media: detected; Game: detected; Other: detected",
+                    ) == true
+                })
+                scenario.recreate()
+                assertTrue("completed usage check was not restored", waitUntil(8_000) {
                     automation.rootInActiveWindow?.containsText(
                         "Usage check: Media: detected; Game: detected; Other: detected",
                     ) == true

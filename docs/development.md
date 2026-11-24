@@ -61,7 +61,8 @@ test tone control also cancels the sequence and starts or stops the manual tone.
 This checks only SoniMesh's own playback under those usage tags; it does not
 predict another app's capture behavior. Copying or sharing capture evidence
 includes the most recently completed usage check result from that capture
-session.
+session. The completed result is retained through activity recreation; an
+in-progress sequence is canceled when the activity leaves the foreground.
 The local observations also show the highest PCM sample magnitude seen during
 the current run as a percentage of full scale. It helps distinguish a very weak
 signal from silence, but is not an audible loudness or quality measurement. The
