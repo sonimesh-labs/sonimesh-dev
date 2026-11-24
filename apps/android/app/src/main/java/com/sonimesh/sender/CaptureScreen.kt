@@ -69,6 +69,8 @@ internal fun CaptureScreen(
     onStop: () -> Unit,
     onCopyEvidence: () -> Unit,
     onShareEvidence: () -> Unit,
+    testTonePlaying: Boolean,
+    onToggleTestTone: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -97,6 +99,8 @@ internal fun CaptureScreen(
             onSourceSelected = onSourceSelected,
             onStart = onStart,
             onStop = onStop,
+            testTonePlaying = testTonePlaying,
+            onToggleTestTone = onToggleTestTone,
         )
         CaptureBoundaryCard()
     }
@@ -356,6 +360,8 @@ private fun CaptureActionCard(
     onSourceSelected: (CaptureSource) -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit,
+    testTonePlaying: Boolean,
+    onToggleTestTone: () -> Unit,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -385,6 +391,18 @@ private fun CaptureActionCard(
                 onSourceSelected = onSourceSelected,
             )
             if (active) {
+                Text(
+                    text = stringResource(R.string.capture_test_tone_hint),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                OutlinedButton(
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp),
+                    onClick = onToggleTestTone,
+                    shape = TileShape,
+                ) {
+                    Text(stringResource(if (testTonePlaying) R.string.capture_test_tone_stop else R.string.capture_test_tone_start))
+                }
                 OutlinedButton(
                     modifier = Modifier
                         .fillMaxWidth()

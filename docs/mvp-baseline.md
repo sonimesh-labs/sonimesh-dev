@@ -424,6 +424,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   five seconds; successful reads, including silent frames, reset that timer.
   Host tests cover the timer and clock regression. The timeout failure path has
   not been injected into a real Android AudioRecord session.
+  An activity-owned test tone can exercise the current session's selected usage;
+  it stops when the activity leaves the foreground or capture ends. This only
+  exercises the app's own playback and does not establish other apps' policies.
 - a buildable Vue/Vite receiver-control preview with a single low-rate bridge
   boundary, session controls, output selection, per-stream volume and mute,
   pairing-invitation state, and diagnostics presentation for packet,

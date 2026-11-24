@@ -20,4 +20,8 @@
     <string name="capture_source_game">Game</string>
     <string name="capture_source_unknown">Other</string>
     <string name="capture_source_all_supported">All supported</string>
+    <string name="capture_test_tone_start">Start test tone</string>
+    <string name="capture_test_tone_stop">Stop test tone</string>
+    <string name="capture_test_tone_hint">Play a tone to check capture of this app’s audio.</string>
+    <string name="capture_test_tone_failed">Unable to play the test tone on this device</string>
 </resources>

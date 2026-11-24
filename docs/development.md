@@ -44,6 +44,12 @@ Media remains the default. The choice is passed to the
 foreground service for that capture session only; it does not identify the
 source application, override Android capture policy, or change the observed
 format reported by the service.
+While capture is active, **Start test tone** plays a low-amplitude local tone using the
+current session's selected usage; **All supported** uses Media. Stop it with the
+same control. The tone also stops when capture ends or the activity leaves the
+foreground. Use the signal and evidence counters to check this app's own audio;
+success does not mean another application permits playback capture. Device and
+system audio policy still apply.
 On 2026-11-23, an API 37 x86_64 emulator accepted **All supported** and began
 capturing after fresh consent; the screen showed the selected usage, increasing
 silent-frame counts, and zero read errors. No playback source was exercised in

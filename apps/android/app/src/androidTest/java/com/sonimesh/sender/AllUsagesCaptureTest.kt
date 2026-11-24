@@ -23,6 +23,46 @@ import kotlin.math.sin
 
 class AllUsagesCaptureTest {
     @Test
+    fun built_in_tone_is_captured_and_stops_with_activity() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val automation = instrumentation.uiAutomation
+        try {
+            ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+                assertTrue("start button missing", clickText(automation, "Start capture", scroll = true))
+                assertTrue("projection chooser missing", clickText(automation, "Share one app"))
+                assertTrue("entire screen option missing", clickText(automation, "Share entire screen"))
+                assertTrue("projection confirmation missing", clickText(automation, "Share screen"))
+                assertTrue("capture did not become silent", waitUntil(10_000) {
+                    CaptureStateStore.state.value.status is CaptureStatus.NoCapturableAudio
+                })
+                val before = nonSilentFrames()
+                assertTrue("test tone control missing", clickText(automation, "Start test tone", scroll = true))
+                assertTrue("built-in tone was not captured", waitUntil(8_000) {
+                    nonSilentFrames() - before >= 2_000
+                })
+                assertTrue("tone stop control missing", clickText(automation, "Stop test tone", scroll = true))
+                assertTrue("capture did not return to silence", waitUntil(8_000) {
+                    CaptureStateStore.state.value.status is CaptureStatus.NoCapturableAudio
+                })
+                val beforeRestart = nonSilentFrames()
+                assertTrue("test tone could not restart", clickText(automation, "Start test tone", scroll = true))
+                assertTrue("restarted tone was not captured", waitUntil(8_000) {
+                    nonSilentFrames() - beforeRestart >= 2_000
+                })
+                scenario.recreate()
+                assertTrue("activity recreation did not stop the tone", waitUntil(8_000) {
+                    CaptureStateStore.state.value.status is CaptureStatus.NoCapturableAudio
+                })
+            }
+        } finally {
+            instrumentation.targetContext.startService(
+                Intent(instrumentation.targetContext, CaptureService::class.java).setAction(CaptureService.ACTION_STOP),
+            )
+            waitUntil(5_000) { CaptureStateStore.state.value.status is CaptureStatus.Stopped }
+        }
+    }
+
+    @Test
     fun reopening_activity_shows_active_capture_usage() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val automation = instrumentation.uiAutomation

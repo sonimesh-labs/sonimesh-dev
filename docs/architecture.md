@@ -104,6 +104,12 @@ ADB-reversed connection for its temporary session secret. This is a development
 path rather than discovery, pairing, or the production control plane.
 The Android lab can select media, game, unknown, or all three playback usages
 for a capture session; platform and source capture policies still apply.
+The capture-only Android app can play an explicitly requested local test tone
+while capture is active. The activity owns and stops this short-loop playback;
+the capture service remains the owner of projection and audio capture. The tone
+uses the current session's capture usage, or media for an all-usage session, and
+is released when the activity leaves the foreground or capture ends. This checks
+only the app's own capturable playback and does not establish another app's policy.
 The desktop UDP lab can accept optional console gain and mute commands and
 publish them to its existing per-stream output control. These controls are
 local to the lab and do not implement the desktop UI bridge.

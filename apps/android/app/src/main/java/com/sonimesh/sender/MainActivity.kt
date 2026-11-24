@@ -17,6 +17,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.Surface
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -34,6 +35,8 @@ import com.sonimesh.sender.capture.isAwaitingAuthorization
 
 class MainActivity : ComponentActivity() {
     private var pendingCaptureSource = CaptureSource.Media
+    private val testTone = CaptureTestTone()
+    private var testTonePlaying by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         pendingCaptureSource = CaptureSource.fromWireValue(
@@ -43,6 +46,9 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             val state by CaptureStateStore.state.collectAsState()
+            LaunchedEffect(state.status.isActive()) {
+                if (!state.status.isActive()) stopTestTone()
+            }
             var selectedSourceWire by rememberSaveable {
                 mutableStateOf(
                     (state.evidence.captureSource.takeIf { state.status.isActive() } ?: CaptureSource.Media).wireValue,
@@ -59,6 +65,8 @@ class MainActivity : ComponentActivity() {
                         onStop = { sendStopCommand() },
                         onCopyEvidence = ::copyCaptureEvidence,
                         onShareEvidence = ::shareCaptureEvidence,
+                        testTonePlaying = testTonePlaying,
+                        onToggleTestTone = ::toggleTestTone,
                     )
                 }
             }
@@ -68,6 +76,27 @@ class MainActivity : ComponentActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString(STATE_PENDING_CAPTURE_SOURCE, pendingCaptureSource.wireValue)
         super.onSaveInstanceState(outState)
+    }
+
+    override fun onStop() {
+        stopTestTone()
+        super.onStop()
+    }
+
+    private fun stopTestTone() {
+        testTone.close()
+        testTonePlaying = false
+    }
+
+    private fun toggleTestTone() {
+        if (testTonePlaying) {
+            stopTestTone()
+            return
+        }
+        val state = CaptureStateStore.state.value
+        if (!state.status.isActive()) return
+        testTonePlaying = testTone.start(state.evidence.captureSource ?: CaptureSource.Media)
+        if (!testTonePlaying) Toast.makeText(this, R.string.capture_test_tone_failed, Toast.LENGTH_SHORT).show()
     }
 
     private val audioPermissionLauncher =
@@ -158,6 +187,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun sendStopCommand() {
+        stopTestTone()
         startService(Intent(this, CaptureService::class.java).setAction(CaptureService.ACTION_STOP))
     }
 
