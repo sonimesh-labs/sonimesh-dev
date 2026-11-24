@@ -169,6 +169,13 @@ extra reorder delay; the listener authenticated 86 packets, decoded 75 frames,
 and reported a 0.249 software PCM peak. This validates the software lab path,
 not physical WLAN, playback quality, or acoustic latency.
 
+Another API 37 x86_64 emulator run on 2026-11-24 used `--burst-interval 20
+--burst-length 4 --delay-ms 0 --jitter-ms 0` with the same capture test. The
+relay received 156 packets and dropped 28 in bursts; the listener authenticated
+and decoded 128 packets, reported 31 PLC decisions and a 0.098 software PCM
+peak. This exercises repeated interruption on the software lab path, not
+physical WLAN, audible quality, or acoustic latency.
+
 The test synthesizes and encodes a tone; the desktop acknowledges start only
 after binding its UDP receiver with the pairing-derived root and acknowledges
 stop after retiring it. Successful runs report the decoded frame count and
