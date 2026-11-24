@@ -96,7 +96,8 @@ class LabActivity : Activity() {
     }
     private val sessionObserver: (LabSessionConfig?) -> Unit = { config ->
         sessionConfig.text = if (config == null) "Session request: —" else
-            "Session request: ${config.usage.label}, ${config.bitrate.bitsPerSecond / 1_000} kbps target\nTransport: ${config.transport.label}"
+            "Session request: ${config.usage.label}, ${config.bitrate.bitsPerSecond / 1_000} kbps target\nTransport: ${config.transport.label}" +
+                (config.udpPort?.let { "\nRequested UDP port: $it" } ?: "")
     }
     private val labPreferences by lazy { getPreferences(MODE_PRIVATE) }
 

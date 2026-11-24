@@ -224,7 +224,13 @@ stopping; otherwise it uses the selector.
 playing: stop and restart the tone to apply the applicable usage. On
 the interactive lab screen, **Copy lab evidence** copies a bounded text summary
 of the current status, session request, sender queue drops, sent packet count,
-encoded payload average, and the latest capture signal state. The signal state
+encoded payload average, and the latest capture signal state. For UDP sessions,
+the screen and evidence also show the requested destination port from the
+current or most recent session, independently of the next-session field. This
+does not confirm desktop receipt. On 2026-11-24 an API 37 x86_64 emulator
+displayed port 39094 during paired capture; the listener authenticated and
+decoded 174 packets with a software PCM peak of 0.093. This is software-lab
+evidence, not physical WLAN or audible playback. The signal state
 is **no capturable audio** after a bounded silent interval, **signal detected**
 after non-zero PCM arrives, or unknown before the capture has produced enough
 samples. The same evidence includes elapsed capture duration in seconds for the

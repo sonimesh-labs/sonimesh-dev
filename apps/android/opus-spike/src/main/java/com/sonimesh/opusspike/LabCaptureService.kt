@@ -93,7 +93,8 @@ class LabCaptureService : Service() {
         val pairedMode = intent?.getBooleanExtra("pairedMode", false) ?: false
         val transport = LabTransport.fromFlags(udpMode, pairedMode)
             foregroundTransportLabel = transport.label
-        LabStatus.serviceStarted(usage, bitrate, transport)
+        val destinationPort = intent?.getIntExtra("udpPort", DEFAULT_LAB_MEDIA_PORT) ?: DEFAULT_LAB_MEDIA_PORT
+        LabStatus.serviceStarted(usage, bitrate, transport, destinationPort.takeIf { udpMode && it in 1..65535 })
         running.set(true)
         LabStatus.publishSenderQueueDrops(null)
         LabStatus.publishSentPackets(null)
@@ -140,7 +141,6 @@ class LabCaptureService : Service() {
             val pairedMode = intent.getBooleanExtra("pairedMode", false)
             val destination = if (udpMode) parseLabAddress(intent.getStringExtra("udpAddress") ?: "")
                 ?: error("invalid desktop address") else null
-            val destinationPort = intent.getIntExtra("udpPort", DEFAULT_LAB_MEDIA_PORT)
             require(!udpMode || destinationPort in 1..65535) { "invalid desktop UDP port" }
             pendingInvitation = if (pairedMode) intent.getByteArrayExtra("pairedInvitation")
                 ?: labInvitation(intent.getStringExtra("pairedPin") ?: "",

@@ -213,6 +213,30 @@ class LabStatusTest {
     }
 
     @Test
+    fun udpSessionPortRemainsVisibleWhenNextSettingChangesAndAfterRecreation() {
+        ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+            try {
+                scenario.onActivity { activity ->
+                    LabStatus.serviceStarted(LabCaptureUsage.Media, OpusBitrate.STANDARD, LabTransport.PairedUdp, 39094)
+                    requireNotNull(findTextField(activity.window.decorView, "Desktop UDP port")).setText("39095")
+                    assertTrue(hasStatus(activity.window.decorView, "Session request: Media, 96 kbps target\nTransport: paired UDP\nRequested UDP port: 39094"))
+                    assertTrue(LabStatus.copyableEvidence().contains("Requested UDP port: 39094"))
+                }
+                scenario.recreate()
+                scenario.onActivity { activity ->
+                    assertTrue(hasStatus(activity.window.decorView, "Session request: Media, 96 kbps target\nTransport: paired UDP\nRequested UDP port: 39094"))
+                    LabStatus.serviceFinished()
+                    LabStatus.serviceStarted(LabCaptureUsage.Media, OpusBitrate.STANDARD)
+                    assertTrue(hasStatus(activity.window.decorView, "Session request: Media, 96 kbps target\nTransport: ADB TCP"))
+                    assertTrue(!LabStatus.copyableEvidence().contains("Requested UDP port:"))
+                }
+            } finally {
+                scenario.onActivity { LabStatus.serviceFinished() }
+            }
+        }
+    }
+
+    @Test
     fun transportFlagsPreferPairedUdpAndDistinguishTheThreeCapturePaths() {
         assertEquals(LabTransport.Adb, LabTransport.fromFlags(udpMode = false, pairedMode = false))
         assertEquals(LabTransport.Udp, LabTransport.fromFlags(udpMode = true, pairedMode = false))

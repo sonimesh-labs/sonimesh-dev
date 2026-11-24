@@ -22,6 +22,7 @@ internal data class LabSessionConfig(
     val usage: LabCaptureUsage,
     val bitrate: OpusBitrate,
     val transport: LabTransport,
+    val udpPort: Int? = null,
 )
 
 internal enum class LabSignalState(val label: String) {
@@ -56,12 +57,12 @@ internal object LabStatus {
     private var senderMuted: Boolean? = null
     private val muteObservers = mutableSetOf<(Boolean?) -> Unit>()
 
-    fun serviceStarted(usage: LabCaptureUsage, bitrate: OpusBitrate, transport: LabTransport = LabTransport.Adb) {
+    fun serviceStarted(usage: LabCaptureUsage, bitrate: OpusBitrate, transport: LabTransport = LabTransport.Adb, udpPort: Int? = null) {
         captureUsage = usage
         captureAdmission.serviceStarted()
         retryAvailable = false
         observers.toList().forEach { it(message) }
-        sessionConfig = LabSessionConfig(usage, bitrate, transport)
+        sessionConfig = LabSessionConfig(usage, bitrate, transport, udpPort)
         signalState = null
         captureDurationSeconds = null
         publishSenderMuted(false)
@@ -204,6 +205,7 @@ internal object LabStatus {
         sessionConfig?.let { config ->
             appendLine("Session request: ${config.usage.label}, ${config.bitrate.bitsPerSecond / 1_000} kbps target")
             appendLine("Transport: ${config.transport.label}")
+            config.udpPort?.let { appendLine("Requested UDP port: $it") }
         }
         appendLine("Capture signal: ${signalState?.label ?: "—"}")
         appendLine("Capture duration: ${captureDurationSeconds?.let { "${it}s" } ?: "—"}")
