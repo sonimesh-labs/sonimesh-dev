@@ -50,6 +50,10 @@ same control. The tone also stops when capture ends or the activity leaves the
 foreground. Use the signal and evidence counters to check this app's own audio;
 success does not mean another application permits playback capture. Device and
 system audio policy still apply.
+On 2026-11-24, an API 37 x86_64 emulator captured the built-in Media tone,
+returned to silence after stopping it, captured it again after restarting, and
+returned to silence after activity recreation. This does not establish audible
+output or physical-device behavior.
 On 2026-11-23, an API 37 x86_64 emulator accepted **All supported** and began
 capturing after fresh consent; the screen showed the selected usage, increasing
 silent-frame counts, and zero read errors. No playback source was exercised in

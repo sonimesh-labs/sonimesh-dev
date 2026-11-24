@@ -37,9 +37,10 @@ class AllUsagesCaptureTest {
                 })
                 val before = nonSilentFrames()
                 assertTrue("test tone control missing", clickText(automation, "Start test tone", scroll = true))
-                assertTrue("built-in tone was not captured", waitUntil(8_000) {
+                val detected = waitUntil(8_000) {
                     nonSilentFrames() - before >= 2_000
-                })
+                }
+                assertTrue("built-in tone was not captured: ${CaptureStateStore.state.value}", detected)
                 assertTrue("tone stop control missing", clickText(automation, "Stop test tone", scroll = true))
                 assertTrue("capture did not return to silence", waitUntil(8_000) {
                     CaptureStateStore.state.value.status is CaptureStatus.NoCapturableAudio
@@ -204,10 +205,14 @@ class AllUsagesCaptureTest {
     }
 
     private fun clickText(automation: android.app.UiAutomation, text: String, scroll: Boolean = false): Boolean {
+        var scrollForward = true
         return waitUntil(8_000) {
             val root = automation.rootInActiveWindow ?: return@waitUntil false
             if (root.clickMatchingText(text)) return@waitUntil true
-            if (scroll) root.findScrollable()?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+            if (scroll) {
+                val action = if (scrollForward) AccessibilityNodeInfo.ACTION_SCROLL_FORWARD else AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
+                if (root.findScrollable()?.performAction(action) == false) scrollForward = !scrollForward
+            }
             false
         }
     }
