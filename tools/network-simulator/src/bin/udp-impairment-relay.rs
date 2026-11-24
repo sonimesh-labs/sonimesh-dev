@@ -60,8 +60,8 @@ impl Options {
                     .into(),
             );
         }
-        if !(1..=3_600).contains(&result.duration.as_secs()) {
-            return Err("seconds must be between 1 and 3600".into());
+        if !(1..=86_400).contains(&result.duration.as_secs()) {
+            return Err("seconds must be between 1 and 86400".into());
         }
         if result
             .report_interval
@@ -139,7 +139,7 @@ fn relay(
 
 fn main() -> Result<(), Box<dyn Error>> {
     let options = Options::parse(std::env::args().skip(1)).map_err(|error| {
-        format!("{error}; usage: udp-impairment-relay [--listen IPv4:PORT] [--forward IPv4:PORT] [--seconds 1-3600] [--report-seconds 1-3600] [--seed N] [--loss 0-100] [--duplicate 0-100] [--reorder 0-100] [--burst-interval N] [--burst-length N] [--delay-ms N] [--jitter-ms N] [--reorder-delay-ms N]")
+        format!("{error}; usage: udp-impairment-relay [--listen IPv4:PORT] [--forward IPv4:PORT] [--seconds 1-86400] [--report-seconds 1-3600] [--seed N] [--loss 0-100] [--duplicate 0-100] [--reorder 0-100] [--burst-interval N] [--burst-length N] [--delay-ms N] [--jitter-ms N] [--reorder-delay-ms N]")
     })?;
     let input = UdpSocket::bind(options.listen)?;
     let output = UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0))?;
@@ -178,6 +178,14 @@ mod tests {
     #[test]
     fn validates_ports_profiles_and_duration() {
         assert!(Options::parse(args(&[])).is_ok());
+        for seconds in ["1", "28800", "86400"] {
+            assert_eq!(
+                Options::parse(args(&["--seconds", seconds]))
+                    .unwrap()
+                    .duration,
+                Duration::from_secs(seconds.parse().unwrap())
+            );
+        }
         assert_eq!(
             Options::parse(args(&["--report-seconds", "5"]))
                 .unwrap()
@@ -188,6 +196,7 @@ mod tests {
             vec!["--listen", "127.0.0.1:39094"],
             vec!["--forward", "0.0.0.0:1"],
             vec!["--seconds", "0"],
+            vec!["--seconds", "86401"],
             vec!["--report-seconds", "0"],
             vec!["--report-seconds", "3601"],
             vec!["--loss", "101"],

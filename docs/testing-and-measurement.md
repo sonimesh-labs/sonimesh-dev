@@ -19,6 +19,9 @@ Optional periodic cumulative relay reports provide progress during a live run.
 They count only packets observed by the relay, not network delivery or playback.
 Writing reports can itself perturb live relay scheduling, so record when they are
 enabled and do not treat their timing as a network measurement.
+The relay accepts a fixed run duration of up to 24 hours, sufficient to support
+the planned eight-hour software soak. This capability is not a completed soak
+result; queued packets are discarded when the run ends.
 
 ## Latency measurement
 

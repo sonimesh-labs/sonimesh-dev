@@ -159,6 +159,8 @@ still queued when its configured duration ends. Queued copies are discarded at
 exit; choose a duration that covers setup, capture, and drain. Its seed fixes
 model decisions for the received packet sequence, but actual arrival and delivery
 timing depend on the host and OS. The control channel is not impaired.
+Use `--seconds 28800` for an eight-hour run; the duration may be set from one
+second to 24 hours. This option alone does not establish a completed soak.
 Add `--report-seconds 5` to print cumulative relay counters every five seconds
 while it runs. Periodic reports are disabled by default; output can affect live
 scheduling, and counters do not establish desktop receipt or playback.
