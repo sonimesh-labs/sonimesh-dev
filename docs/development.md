@@ -55,7 +55,9 @@ success does not mean another application permits playback capture. Device and
 system audio policy still apply.
 The local observations also show the highest PCM sample magnitude seen during
 the current run as a percentage of full scale. It helps distinguish a very weak
-signal from silence, but is not an audible loudness or quality measurement.
+signal from silence, but is not an audible loudness or quality measurement. The
+status card displays that run peak as a normalized bar and percentage; it is a
+maximum-to-date reading, not an instantaneous level meter.
 On 2026-11-25, API 37 x86_64 emulator instrumentation passed the built-in tone
 capture/stop/restart/activity-recreation flow, the active-session activity-
 reopen/source-retention flow, and capture of each supported usage in one
@@ -64,7 +66,9 @@ locating lower source controls, and includes the visible text snapshot when it
 cannot find a control. Earlier attempts hit an Android System UI
 not-responding dialog; dismissing it and allowing the emulator to settle cleared
 that transient failure. These results do not establish audible output or
-physical-device behavior.
+physical-device behavior. A follow-up instrumentation run also found the
+state-card peak label and matching nonzero percentage while the tone was
+captured.
 On 2026-11-23, an API 37 x86_64 emulator accepted **All supported** and began
 capturing after fresh consent; the screen showed the selected usage, increasing
 silent-frame counts, and zero read errors. No playback source was exercised in

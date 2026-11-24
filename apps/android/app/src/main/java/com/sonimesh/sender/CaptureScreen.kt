@@ -27,6 +27,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -83,7 +84,7 @@ internal fun CaptureScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         CaptureHeader()
-        CaptureStatusCard(status = state.status)
+        CaptureStatusCard(status = state.status, evidence = state.evidence)
         CaptureActionCard(
             active = state.status.isActive(),
             starting = state.status.isAwaitingAuthorization(),
@@ -162,7 +163,7 @@ private fun BrandMark() {
 }
 
 @Composable
-private fun CaptureStatusCard(status: CaptureStatus) {
+private fun CaptureStatusCard(status: CaptureStatus, evidence: CaptureEvidenceSnapshot) {
     val palette = status.palette()
     Card(
         modifier = Modifier
@@ -198,43 +199,41 @@ private fun CaptureStatusCard(status: CaptureStatus) {
                 color = StatusMutedText,
                 style = MaterialTheme.typography.bodyMedium,
             )
-            SignalRail(active = status is CaptureStatus.Capturing, color = palette.indicator)
+            SessionPeakLevel(evidence = evidence)
         }
     }
 }
 
 @Composable
-private fun SignalRail(active: Boolean, color: Color) {
-    val transition = rememberInfiniteTransition(label = "signal-rail")
-    val pulse = transition.animateFloat(
-        initialValue = 0.45f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 900),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "rail-pulse",
-    ).value
-    val barHeights = listOf(8, 18, 12, 26, 14, 30, 16, 22, 10, 26, 14, 20, 8, 18, 12, 24)
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(34.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        barHeights.forEachIndexed { index, height ->
-            val emphasized = index % 5 == 2
-            val barColor = if (emphasized) color else color.copy(alpha = 0.35f)
-            val alpha = if (active) 0.55f + 0.45f * pulse else 0.55f
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .height(height.dp)
-                    .clip(RoundedCornerShape(3.dp))
-                    .background(barColor.copy(alpha = barColor.alpha * alpha)),
+private fun SessionPeakLevel(evidence: CaptureEvidenceSnapshot) {
+    val magnitude = evidence.peakSampleMagnitude?.coerceIn(0, 32_768)
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = stringResource(R.string.capture_signal_peak),
+                color = StatusMutedText,
+                style = MaterialTheme.typography.labelMedium,
+            )
+            Text(
+                text = magnitude?.let(::formatCapturePeak)
+                    ?: stringResource(R.string.capture_evidence_unavailable),
+                color = StatusText,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.SemiBold,
             )
         }
+        LinearProgressIndicator(
+            progress = (magnitude ?: 0) / 32_768f,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(6.dp),
+            color = MaterialTheme.colorScheme.primary,
+            trackColor = StatusText.copy(alpha = 0.16f),
+        )
     }
 }
 

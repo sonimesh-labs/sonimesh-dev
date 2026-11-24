@@ -47,7 +47,20 @@ class AllUsagesCaptureTest {
                     nonSilentFrames() - before >= 2_000
                 }
                 assertTrue("built-in tone was not captured: ${CaptureStateStore.state.value}", detected)
-                assertTrue("captured tone peak missing", (CaptureStateStore.state.value.evidence.peakSampleMagnitude ?: 0) > 0)
+                val peakMagnitude = CaptureStateStore.state.value.evidence.peakSampleMagnitude ?: 0
+                assertTrue("captured tone peak missing", peakMagnitude > 0)
+                assertTrue(
+                    "session peak label missing: $lastScreenSnapshot",
+                    findOnScreen(automation, scroll = true, initialScrollForward = false) {
+                        it.containsText("Run peak level")
+                    },
+                )
+                assertTrue(
+                    "session peak value missing: $lastScreenSnapshot",
+                    findOnScreen(automation, scroll = true, initialScrollForward = false) {
+                        it.containsText(formatCapturePeak(peakMagnitude))
+                    },
+                )
                 assertTrue(
                     "tone stop control missing: $lastScreenSnapshot",
                     clickText(automation, "Stop test tone", scroll = true),
@@ -285,6 +298,14 @@ class AllUsagesCaptureTest {
         }
         for (index in 0 until childCount) {
             if (getChild(index)?.hasSelectedText(text) == true) return true
+        }
+        return false
+    }
+
+    private fun AccessibilityNodeInfo.containsText(text: String): Boolean {
+        if (this.text?.toString() == text) return true
+        for (index in 0 until childCount) {
+            if (getChild(index)?.containsText(text) == true) return true
         }
         return false
     }
