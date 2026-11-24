@@ -429,7 +429,11 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   exercises the app's own playback and does not establish other apps' policies.
   The capture-only evidence also includes the run's maximum PCM16 sample level;
   host tests cover its calculation and reset, while device evidence for the new
-  readout remains open. It is not a loudness measurement.
+  readout remains open. An API 37 x86_64 emulator run observed a nonzero peak
+  from the built-in tone, but the full instrumentation flow later failed to find
+  the stop-tone control. A separate activity-reopen test failed while locating
+  the stop control or checking the retained source; those UI observations need
+  further investigation. The peak is not a loudness measurement.
 - a buildable Vue/Vite receiver-control preview with a single low-rate bridge
   boundary, session controls, output selection, per-stream volume and mute,
   pairing-invitation state, and diagnostics presentation for packet,
