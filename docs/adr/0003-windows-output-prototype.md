@@ -78,8 +78,10 @@ paired audio lab as a child process, display its public lab invitation and
 low-rate status, and stop it when requested or when the probe exits. The child
 owns pairing, UDP, decoding, and selected-device playback; the UI carries no
 audio. During an active session the probe displays the child's periodic packet,
-decode, jitter-buffer, and output-recovery observations; these are cleared when
-the listener returns to waiting. They do not establish audibility or latency.
+decode, jitter-buffer, and output-recovery observations; the last available
+metrics remain until the next client attempt. On listener exit, the probe waits up to 200 ms
+for reader output and collects at most 2,048 lines before retaining the last
+available observations. They do not establish audibility or latency.
 The probe resolves a selection from its device snapshot and passes the opaque
 endpoint ID to the child through its standard input; the child probes that exact
 endpoint before listening. Refreshing the list invalidates a pending selection.

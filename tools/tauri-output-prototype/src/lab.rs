@@ -8,6 +8,8 @@ use std::time::{Duration, Instant};
 const MAX_LAB_EVENTS: usize = 32;
 const MAX_LAB_EVENT_CHARS: usize = 256;
 const SIGNAL_STALE_AFTER: Duration = Duration::from_secs(3);
+const OUTPUT_DRAIN_TIMEOUT: Duration = Duration::from_millis(200);
+const OUTPUT_DRAIN_LIMIT: usize = 2048;
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -199,22 +201,11 @@ impl Lab {
     }
 
     fn refresh_at(&mut self, now: Instant) -> LabSnapshot {
-        if let Some(events) = &self.events {
-            for line in events.try_iter().take(128) {
-                record_event(&mut self.snapshot, &line.text);
-                let valid_signal =
-                    self.snapshot.session_active && parse_signal(&line.text).is_some();
-                update_snapshot(&mut self.snapshot, &line.text);
-                if valid_signal {
-                    self.signal_received_at = Some(line.received_at);
-                } else if self.snapshot.signal.is_none() {
-                    self.signal_received_at = None;
-                }
-            }
-        }
+        self.drain_events(false);
         if let Some(child) = &mut self.child {
             match child.try_wait() {
                 Ok(Some(_)) => {
+                    self.drain_events(true);
                     self.snapshot.running = false;
                     self.snapshot.invitation = None;
                     self.snapshot.volume = None;
@@ -243,7 +234,7 @@ impl Lab {
             let _ = child.kill();
             let _ = child.wait();
         }
-        self.refresh();
+        self.drain_events(true);
         self.events = None;
         self.signal_received_at = None;
         self.snapshot.running = false;
@@ -255,6 +246,34 @@ impl Lab {
         self.snapshot.signal = None;
         self.snapshot.signal_stale = false;
         self.snapshot.clone()
+    }
+
+    fn drain_events(&mut self, wait_for_readers: bool) {
+        let Some(events) = &self.events else { return };
+        let deadline = Instant::now() + OUTPUT_DRAIN_TIMEOUT;
+        let limit = if wait_for_readers {
+            OUTPUT_DRAIN_LIMIT
+        } else {
+            128
+        };
+        for _ in 0..limit {
+            let line = if wait_for_readers {
+                events
+                    .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                    .ok()
+            } else {
+                events.try_recv().ok()
+            };
+            let Some(line) = line else { break };
+            record_event(&mut self.snapshot, &line.text);
+            let valid_signal = self.snapshot.session_active && parse_signal(&line.text).is_some();
+            update_snapshot(&mut self.snapshot, &line.text);
+            if valid_signal {
+                self.signal_received_at = Some(line.received_at);
+            } else if self.snapshot.signal.is_none() {
+                self.signal_received_at = None;
+            }
+        }
     }
 
     pub fn control(&mut self, volume: Option<u8>, muted: Option<bool>) -> Result<(), &'static str> {
@@ -696,6 +715,52 @@ mod tests {
         assert_eq!(snapshot.metrics, Some(metrics));
         assert!(parse_metrics(&status.replace("0.250", "NaN")).is_none());
         assert!(parse_metrics(&status.replace("recovering", "unknown")).is_none());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn exited_listener_collects_output_delivered_after_process_exit() {
+        let mut child = Command::new("cmd.exe")
+            .args(["/C", "exit", "1"])
+            .spawn()
+            .unwrap();
+        child.wait().unwrap();
+        let (sender, events) = mpsc::sync_channel(4);
+        let reader = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(40));
+            for text in [
+                "RESULT receiver started",
+                "STATUS packets 9 rejected 0 decoded 8 peak 0.100 plc 1 decode_errors 0 buffered 0 output active",
+                "RESULT session complete",
+            ] {
+                sender
+                    .send(ObservedLine {
+                        text: text.into(),
+                        received_at: Instant::now(),
+                    })
+                    .unwrap();
+            }
+        });
+        let mut lab = Lab {
+            child: Some(child),
+            events: Some(events),
+            snapshot: LabSnapshot {
+                running: true,
+                ..LabSnapshot::default()
+            },
+            signal_received_at: None,
+        };
+        let snapshot = lab.refresh();
+        reader.join().unwrap();
+        assert!(!snapshot.running && !snapshot.session_active);
+        assert_eq!(snapshot.metrics.unwrap().decoded, "8");
+        assert!(
+            snapshot
+                .events
+                .iter()
+                .any(|event| event == "RESULT session complete")
+        );
+        assert!(snapshot.status.contains("Listener exited"));
     }
 
     #[cfg(windows)]
