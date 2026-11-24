@@ -224,6 +224,18 @@ class PairedCaptureTest {
                 if (testMute) {
                     // Leave complete receiver observation windows on each side of the switch.
                     SystemClock.sleep(3_000)
+                    val manager = instrumentation.targetContext.getSystemService(NotificationManager::class.java)
+                    fun notificationAction(title: String): Notification.Action? =
+                        manager.activeNotifications.firstOrNull { it.id == 1 }?.notification?.actions
+                            ?.firstOrNull { it.title.toString() == title }
+                    fun awaitAction(title: String): Notification.Action {
+                        val deadline = SystemClock.elapsedRealtime() + 5_000
+                        while (SystemClock.elapsedRealtime() < deadline) {
+                            notificationAction(title)?.let { return it }
+                            SystemClock.sleep(50)
+                        }
+                        error("notification action missing: $title")
+                    }
                     var packetsBeforeMute = 0L
                     scenario.onActivity { activity ->
                         val count = find(activity.window.decorView) {
@@ -232,7 +244,22 @@ class PairedCaptureTest {
                         packetsBeforeMute = count.text.toString().substringAfter(": ").toLong()
                         val control = find(activity.window.decorView) { it is Switch && it.text.toString() == "Mute sending" } as Switch
                         assertTrue("mute control is unavailable", control.isEnabled && !control.isChecked)
-                        control.performClick()
+                    }
+                    automation.executeShellCommand("input keyevent KEYCODE_HOME").close()
+                    awaitAction("Mute sending").actionIntent.send()
+                    awaitAction("Unmute sending")
+                    SystemClock.sleep(2_000)
+                    requireNotNull(manager.activeNotifications.firstOrNull { it.id == 1 }?.notification?.contentIntent).send()
+                    val returnDeadline = SystemClock.elapsedRealtime() + 10_000
+                    while (automation.rootInActiveWindow?.packageName?.toString() != instrumentation.targetContext.packageName &&
+                        SystemClock.elapsedRealtime() < returnDeadline) {
+                        SystemClock.sleep(50)
+                    }
+                    assertEquals("capture activity did not return", instrumentation.targetContext.packageName,
+                        automation.rootInActiveWindow?.packageName?.toString())
+                    scenario.onActivity { activity ->
+                        val control = find(activity.window.decorView) { it is Switch && it.text.toString() == "Mute sending" } as Switch
+                        assertTrue("notification mute did not update activity", control.isChecked)
                     }
                     var sentWhileMuted = false
                     val muteDeadline = SystemClock.elapsedRealtime() + 5_000
@@ -254,10 +281,18 @@ class PairedCaptureTest {
                         assertTrue("capture stopped when muted", containsStatus(activity.window.decorView, "Status: Capturing audio"))
                         control.performClick()
                     }
+                    awaitAction("Mute sending")
                     SystemClock.sleep(3_000)
                     scenario.onActivity { activity ->
                         val control = find(activity.window.decorView) { it is Switch && it.text.toString() == "Mute sending" } as Switch
                         assertTrue("unmute did not update control", control.isEnabled && !control.isChecked)
+                        control.performClick()
+                    }
+                    awaitAction("Unmute sending").actionIntent.send()
+                    awaitAction("Mute sending")
+                    scenario.onActivity { activity ->
+                        val control = find(activity.window.decorView) { it is Switch && it.text.toString() == "Mute sending" } as Switch
+                        assertTrue("notification unmute did not update activity", !control.isChecked)
                     }
                 } else if (changeUsage) {
                     scenario.onActivity { activity ->

@@ -241,6 +241,16 @@ with silence while capture, the connection, and capture-signal observation conti
 Unmute resumes captured audio without a new consent session. Audio already encoded,
 in transit, or buffered at the receiver can still play briefly after muting; this
 control is not an immediate stop. It resets when the session ends.
+The foreground notification also offers **Mute sending** or **Unmute sending**;
+its action and the activity switch reflect the same service-owned state.
+On 2026-11-24 an API 37 emulator invoked these notification actions while paired
+with the software listener and checked synchronization with the activity switch,
+including activity recreation. The listener observed peaks near 0.093 before
+muting, zero across six reported intervals while muted, and about 0.094 after
+unmuting; it reported 654 packets, 7 late packets and 8 resync drops. A separate
+test returned to capture from the notification. These checks invoked notification
+intents programmatically and do not establish drawer presentation, physical WLAN,
+or audible playback.
 On 2026-11-24, an API 37 emulator paired with the software listener, continued
 sending packets while muted, retained the switch state after activity recreation,
 and unmuted and stopped. With `--signal-status`, the listener reported decoded

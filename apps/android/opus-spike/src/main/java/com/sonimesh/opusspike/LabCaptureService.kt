@@ -54,6 +54,9 @@ class LabCaptureService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     private var foregroundNotificationManager: NotificationManager? = null
     private var foregroundNotificationBuilder: Notification.Builder? = null
+    private var stopAction: Notification.Action? = null
+    private var muteAction: Notification.Action? = null
+    private var unmuteAction: Notification.Action? = null
     private val handler = Handler(Looper.getMainLooper())
     private var terminalStatus = false
     private var started = false
@@ -71,6 +74,7 @@ class LabCaptureService : Service() {
                 val muted = intent.getBooleanExtra(EXTRA_MUTED, false)
                 senderMuted.set(muted)
                 LabStatus.publishSenderMuted(muted)
+                updateForegroundActions(muted)
             } else if (!started) {
                 stopSelf()
             }
@@ -99,6 +103,14 @@ class LabCaptureService : Service() {
             manager.createNotificationChannel(NotificationChannel("lab", "Audio lab", NotificationManager.IMPORTANCE_LOW))
             val stop = PendingIntent.getService(this, 0, Intent(this, LabCaptureService::class.java).setAction("stop"),
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+            fun muteIntent(muted: Boolean) = PendingIntent.getService(
+                this, if (muted) 1 else 2,
+                Intent(this, LabCaptureService::class.java).setAction(ACTION_SET_MUTED).putExtra(EXTRA_MUTED, muted),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+            stopAction = Notification.Action.Builder(null, "Stop", stop).build()
+            muteAction = Notification.Action.Builder(null, "Mute sending", muteIntent(true)).build()
+            unmuteAction = Notification.Action.Builder(null, "Unmute sending", muteIntent(false)).build()
             val open = PendingIntent.getActivity(this, 0, Intent(this, LabActivity::class.java).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             }, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
@@ -108,7 +120,7 @@ class LabCaptureService : Service() {
                 .setContentText("Transport: ${transport.label}")
                 .setSubText("Capture duration: —")
                 .setContentIntent(open)
-                .addAction(Notification.Action.Builder(null, "Stop", stop).build())
+                .setActions(stopAction, muteAction)
             foregroundNotificationManager = manager
             foregroundNotificationBuilder = notification
             startForeground(1, notification.build())
@@ -510,6 +522,13 @@ class LabCaptureService : Service() {
         manager.notify(1, builder.build())
     }
 
+    private fun updateForegroundActions(muted: Boolean) {
+        val builder = foregroundNotificationBuilder ?: return
+        val manager = foregroundNotificationManager ?: return
+        builder.setActions(stopAction, if (muted) unmuteAction else muteAction)
+        manager.notify(1, builder.build())
+    }
+
     private fun requestStop() {
         if (!running.getAndSet(false)) return
         LabStatus.publishSenderMuted(null)
@@ -532,6 +551,9 @@ class LabCaptureService : Service() {
             wakeLock = null
             foregroundNotificationManager = null
             foregroundNotificationBuilder = null
+            stopAction = null
+            muteAction = null
+            unmuteAction = null
         }
         if (!terminalStatus) {
             LabStatus.publish(if (workerStarted && !workerFinished) "Stopping capture…" else "Capture stopped.")
