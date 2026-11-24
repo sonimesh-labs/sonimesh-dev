@@ -56,6 +56,23 @@ describe('OutputPanel', () => {
     expect(wrapper.emitted('testTone')).toHaveLength(1)
   })
 
+  it('explains when the saved endpoint is missing and a fallback is selected', () => {
+    const wrapper = mount(OutputPanel, {
+      props: {
+        devices: [
+          { id: 'default', label: 'Speakers', sampleRateHz: 48_000, channels: 2, isDefault: true },
+        ],
+        selectedId: 'default',
+        output: outputSnapshot({ selectionFallback: true }),
+        gain: 1,
+        muted: false,
+        busy: false,
+      },
+    })
+
+    expect(wrapper.get('.selection-fallback').text()).toContain('The saved output is unavailable.')
+  })
+
   it('keeps the output test disabled until an endpoint is selected', () => {
     const wrapper = mount(OutputPanel, {
       props: {

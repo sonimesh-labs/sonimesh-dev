@@ -13,6 +13,7 @@ use sonimesh_platform::{
 struct ShellState {
     output: CpalOutput,
     output_inventory: OutputInventory,
+    preferred_output_id: Option<String>,
     selected_output_id: Option<String>,
     selection_path: PathBuf,
     test_tone_running: Arc<AtomicBool>,
@@ -118,6 +119,7 @@ struct OutputDevice {
 #[serde(rename_all = "camelCase")]
 struct OutputState {
     selection_retained: bool,
+    selection_fallback: bool,
     stream_active: bool,
     fault_reported: bool,
     health: &'static str,
@@ -184,10 +186,11 @@ impl DesktopSnapshot {
         state
             .output_inventory
             .ensure_initialized(|| probe_output_devices(output))?;
-        state.selected_output_id = retain_available_output(
-            state.selected_output_id.as_deref(),
+        let (selected_output_id, selection_fallback) = resolve_output_selection(
+            state.preferred_output_id.as_deref(),
             &state.output_inventory.devices,
         );
+        state.selected_output_id = selected_output_id;
 
         Ok(Self {
             session: "idle",
@@ -197,6 +200,7 @@ impl DesktopSnapshot {
             muted: false,
             output: OutputState {
                 selection_retained: state.selected_output_id.is_some(),
+                selection_fallback,
                 stream_active: false,
                 fault_reported: false,
                 health: "healthy",
@@ -275,6 +279,7 @@ fn desktop_select_output(
     state.output_inventory.refresh(|| Ok(devices))?;
     let selected_output_id = select_available_output(&device_id, &state.output_inventory.devices)?;
     save_selected_output(&state.selection_path, &selected_output_id)?;
+    state.preferred_output_id = Some(selected_output_id.clone());
     state.selected_output_id = Some(selected_output_id);
     DesktopSnapshot::from_state(&mut state)
 }
@@ -286,9 +291,6 @@ fn desktop_refresh_output_devices(
     let mut state = state.lock().map_err(|_| "Desktop state is unavailable.")?;
     let devices = probe_output_devices(&state.output)?;
     state.output_inventory.refresh(|| Ok(devices))?;
-    let selected_id = state.selected_output_id.clone();
-    state.selected_output_id =
-        retain_available_output(selected_id.as_deref(), &state.output_inventory.devices);
     DesktopSnapshot::from_state(&mut state)
 }
 
@@ -420,12 +422,22 @@ fn select_available_output(device_id: &str, devices: &[OutputDevice]) -> Result<
         .ok_or_else(|| "The selected output device is no longer available.".into())
 }
 
-fn retain_available_output(selected_id: Option<&str>, devices: &[OutputDevice]) -> Option<String> {
-    selected_id
-        .and_then(|selected_id| devices.iter().find(|device| device.id == selected_id))
-        .or_else(|| devices.iter().find(|device| device.is_default))
+fn resolve_output_selection(
+    preferred_id: Option<&str>,
+    devices: &[OutputDevice],
+) -> (Option<String>, bool) {
+    if let Some(device) = preferred_id
+        .and_then(|preferred_id| devices.iter().find(|device| device.id == preferred_id))
+    {
+        return (Some(device.id.clone()), false);
+    }
+
+    let fallback = devices
+        .iter()
+        .find(|device| device.is_default)
         .or_else(|| devices.first())
-        .map(|device| device.id.clone())
+        .map(|device| device.id.clone());
+    (fallback, preferred_id.is_some())
 }
 
 fn probe_output_devices(output: &CpalOutput) -> Result<Vec<OutputDevice>, String> {
@@ -462,11 +474,12 @@ fn main() {
             use tauri::Manager;
 
             let selection_path = app.path().app_config_dir()?.join("output-selection.json");
-            let selected_output_id = load_selected_output(&selection_path);
+            let preferred_output_id = load_selected_output(&selection_path);
             app.manage(Mutex::new(ShellState {
                 output: CpalOutput::new(),
                 output_inventory: OutputInventory::default(),
-                selected_output_id,
+                preferred_output_id,
+                selected_output_id: None,
                 selection_path,
                 test_tone_running: Arc::new(AtomicBool::new(false)),
             }));
@@ -486,7 +499,7 @@ fn main() {
 mod tests {
     use super::{
         DesktopCapabilities, DesktopSnapshot, OutputDevice, OutputInventory, OutputTestTone,
-        load_selected_output, retain_available_output, save_selected_output,
+        load_selected_output, resolve_output_selection, save_selected_output,
         select_available_output,
     };
     use sonimesh_platform::RenderSource;
@@ -600,7 +613,7 @@ mod tests {
     }
 
     #[test]
-    fn refreshing_inventory_falls_back_when_selected_output_disappears() {
+    fn refreshing_inventory_falls_back_and_restores_preferred_output_when_it_returns() {
         let devices = vec![
             OutputDevice {
                 id: "default-device".into(),
@@ -619,14 +632,30 @@ mod tests {
         ];
 
         assert_eq!(
-            retain_available_output(Some("removed-device"), &devices).as_deref(),
-            Some("default-device")
+            resolve_output_selection(Some("removed-device"), &devices),
+            (Some("default-device".into()), true)
         );
         assert_eq!(
-            retain_available_output(Some("other-device"), &devices).as_deref(),
-            Some("other-device")
+            resolve_output_selection(Some("other-device"), &devices),
+            (Some("other-device".into()), false)
         );
-        assert_eq!(retain_available_output(None, &[]), None);
+        assert_eq!(resolve_output_selection(None, &[]), (None, false));
+        assert_eq!(
+            resolve_output_selection(
+                Some("removed-device"),
+                &[
+                    devices[0].clone(),
+                    OutputDevice {
+                        id: "removed-device".into(),
+                        label: "Reconnected headphones".into(),
+                        sample_rate_hz: 48_000,
+                        channels: 2,
+                        is_default: false,
+                    },
+                ],
+            ),
+            (Some("removed-device".into()), false)
+        );
     }
 
     #[test]
@@ -675,6 +704,7 @@ mod tests {
             muted: false,
             output: super::OutputState {
                 selection_retained: false,
+                selection_fallback: false,
                 stream_active: false,
                 fault_reported: false,
                 health: "healthy",
@@ -700,6 +730,7 @@ mod tests {
 
         assert_eq!(encoded["outputDevices"].as_array().unwrap().len(), 0);
         assert_eq!(encoded["selectedOutputId"], serde_json::Value::Null);
+        assert_eq!(encoded["output"]["selectionFallback"], false);
         assert_eq!(encoded["previewAdapter"], false);
         assert!(encoded.get("output_devices").is_none());
         assert_eq!(encoded["metrics"]["authenticatedPackets"], "0");

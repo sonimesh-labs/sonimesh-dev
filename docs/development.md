@@ -1451,6 +1451,8 @@ directory and restores it at launch when it is still present. Missing or invalid
 settings use the default endpoint; a missing selected endpoint falls back to the
 current default or first available endpoint. This preference does not change
 Windows' system default output.
+The saved preference remains intact during that fallback. After reconnecting the
+preferred endpoint, use **Refresh output devices** to select it again.
 The output inventory is cached between low-rate session snapshots. Use the
 output panel's **Refresh output devices** control to re-enumerate endpoints after
 connecting or removing a device.

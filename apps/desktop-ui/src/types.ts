@@ -25,6 +25,8 @@ export type OutputHealth = 'healthy' | 'callbackCapacityExceeded' | 'streamError
 export interface OutputSnapshot {
   /** Whether a recovery output selection is retained by the controller. */
   selectionRetained: boolean
+  /** Whether the saved output is missing and another available endpoint is active. */
+  selectionFallback?: boolean
   /** Whether the controller currently owns an active output stream. */
   streamActive: boolean
   /** Whether a non-healthy output fault has already been reported. */

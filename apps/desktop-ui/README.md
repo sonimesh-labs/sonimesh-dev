@@ -85,8 +85,9 @@ tone through the selected endpoint. Selecting an endpoint does not change
 Windows' default device. The live device inventory is cached between snapshots;
 use the output panel's refresh control to discover newly attached or removed
 devices. If a selected endpoint disappears, refreshing the inventory selects the
-current default endpoint, falling back to the first available endpoint; an
-unreadable settings file uses the same default selection.
+current default endpoint, falling back to the first available endpoint. The saved
+preference remains in effect, so refreshing again after reconnecting that endpoint
+restores it. An unreadable settings file uses the default selection.
 Pairing, receiving, stream controls, and live diagnostics
 remain disabled until their runtime owners are connected. The standalone Tauri shell
 currently requires Rust 1.88 because of its resolved Windows build dependencies;

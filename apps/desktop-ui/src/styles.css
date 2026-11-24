@@ -188,6 +188,7 @@ button:focus-visible, select:focus-visible, a:focus-visible { outline: 3px solid
 .selected-device > div { min-width: 0; display: grid; gap: 3px; }
 .selected-device strong { color: var(--ink-soft); font-size: 12.5px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .selected-device span:not(.device-check) { color: var(--muted); font-size: 10.5px; }
+.selection-fallback { margin: -10px 0 16px; color: var(--rose); font-size: 11px; line-height: 1.45; }
 .device-check { width: 30px; height: 30px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 10px; color: var(--signal-ink); background: var(--signal-soft); }
 .output-status { display: flex; align-items: flex-start; gap: 11px; margin: 0 0 20px; padding: 13px; border: 1px solid var(--line); border-radius: 15px; background: var(--surface-soft); }
 .output-status > div { min-width: 0; display: grid; gap: 4px; }

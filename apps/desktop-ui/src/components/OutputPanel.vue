@@ -98,6 +98,9 @@ const displayStatus = computed<DisplayStatus>(() => {
         <span>{{ preview ? 'Synthetic preview · ' : '' }}{{ selectedDevice.sampleRateHz.toLocaleString() }} Hz · {{ selectedDevice.channels }} channels</span>
       </div>
     </div>
+    <p v-if="output.selectionFallback" class="selection-fallback" role="status">
+      The saved output is unavailable. Refresh devices to restore it when it returns.
+    </p>
 
     <div class="output-status" :class="`health-${displayStatus.kind}`" aria-label="Output status">
       <span class="output-status-icon" aria-hidden="true">
