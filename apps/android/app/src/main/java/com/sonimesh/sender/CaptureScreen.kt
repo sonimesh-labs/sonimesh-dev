@@ -417,7 +417,6 @@ private fun CaptureActionCard(
                 OutlinedButton(
                     modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp),
                     onClick = onToggleTestTone,
-                    enabled = !usageCheckRunning,
                     shape = TileShape,
                 ) {
                     Text(stringResource(if (testTonePlaying) R.string.capture_test_tone_stop else R.string.capture_test_tone_start))
@@ -425,12 +424,12 @@ private fun CaptureActionCard(
                 OutlinedButton(
                     modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp),
                     onClick = onRunUsageCheck,
-                    enabled = !usageCheckRunning && !testTonePlaying,
+                    enabled = usageCheckRunning || !testTonePlaying,
                     shape = TileShape,
                 ) {
                     Text(
                         stringResource(
-                            if (usageCheckRunning) R.string.capture_usage_check_running
+                            if (usageCheckRunning) R.string.capture_usage_check_cancel
                             else R.string.capture_usage_check_start,
                         ),
                     )

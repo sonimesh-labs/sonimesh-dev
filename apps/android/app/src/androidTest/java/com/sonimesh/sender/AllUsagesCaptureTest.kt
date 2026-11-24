@@ -192,6 +192,20 @@ class AllUsagesCaptureTest {
                         "Usage check: Media: detected; Game: detected; Other: detected",
                     ) == true
                 })
+                assertTrue(
+                    "second usage check could not start",
+                    clickText(automation, "Check supported usages", scroll = true),
+                )
+                assertTrue(
+                    "usage check cancellation control missing",
+                    clickText(automation, "Cancel usage check", scroll = true),
+                )
+                assertTrue("usage check did not report cancellation", waitUntil(5_000) {
+                    automation.rootInActiveWindow?.containsText("Usage check stopped") == true
+                })
+                assertTrue("cancellation did not stop the usage tone", waitUntil(8_000) {
+                    CaptureStateStore.state.value.status is CaptureStatus.NoCapturableAudio
+                })
                 assertEquals(0L, CaptureStateStore.state.value.evidence.readErrors)
             } finally {
                 instrumentation.targetContext.startService(

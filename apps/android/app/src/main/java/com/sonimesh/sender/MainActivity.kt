@@ -118,7 +118,11 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun runUsageCheck() {
-        if (usageCheckRunning || !CaptureStateStore.state.value.status.isActive()) return
+        if (usageCheckRunning) {
+            cancelUsageCheck()
+            return
+        }
+        if (!CaptureStateStore.state.value.status.isActive()) return
         stopTestTone()
         usageCheckResults.clear()
         usageCheckSources = listOf(CaptureSource.Media, CaptureSource.Game, CaptureSource.Unknown)
