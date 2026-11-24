@@ -103,6 +103,7 @@ impl Lab {
         output_id: Option<&str>,
         startup_buffer_ms: u16,
         adaptive: bool,
+        media_port: u16,
     ) -> Result<LabSnapshot, String> {
         self.refresh();
         if self.child.is_some() {
@@ -110,6 +111,9 @@ impl Lab {
         }
         if !(20..=120).contains(&startup_buffer_ms) || !startup_buffer_ms.is_multiple_of(20) {
             return Err("Startup buffer must be 20 to 120 ms in 20 ms steps.".into());
+        }
+        if media_port == 0 {
+            return Err("Receiver UDP port must be between 1 and 65535.".into());
         }
         let host: Ipv4Addr = host.parse().map_err(|_| "Enter a valid IPv4 address.")?;
         if host.is_unspecified() || host.is_multicast() || host.is_broadcast() {
@@ -131,6 +135,8 @@ impl Lab {
                 &host.to_string(),
                 "--startup-buffer-ms",
                 &startup_buffer_ms.to_string(),
+                "--media-port",
+                &media_port.to_string(),
             ])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -658,11 +664,12 @@ mod tests {
     fn rejects_invalid_host_before_launch() {
         let mut lab = Lab::default();
         for host in ["invalid", "0.0.0.0", "224.0.0.1", "255.255.255.255"] {
-            assert!(lab.start(host, None, 60, false).is_err());
+            assert!(lab.start(host, None, 60, false, 39093).is_err());
         }
         for value in [0, 19, 30, 121, 140] {
-            assert!(lab.start("127.0.0.1", None, value, false).is_err());
+            assert!(lab.start("127.0.0.1", None, value, false, 39093).is_err());
         }
+        assert!(lab.start("127.0.0.1", None, 60, false, 0).is_err());
         assert!(!lab.refresh().running);
         assert!(lab.control(Some(101), None).is_err());
         assert!(lab.control(None, None).is_err());
@@ -1059,7 +1066,7 @@ mod tests {
         let output = sonimesh_platform::CpalOutput::new();
         let device = output.default_device_probe().unwrap().device.id;
         let mut lab = Lab::default();
-        lab.start("127.0.0.1", Some(device.as_str()), 40, false)
+        lab.start("127.0.0.1", Some(device.as_str()), 40, false, 39094)
             .unwrap();
         let deadline = Instant::now() + Duration::from_secs(10);
         let snapshot = loop {
@@ -1102,7 +1109,7 @@ mod tests {
             );
             std::thread::sleep(Duration::from_millis(25));
         }
-        assert!(lab.start("127.0.0.1", None, 60, false).is_err());
+        assert!(lab.start("127.0.0.1", None, 60, false, 39093).is_err());
         let stopped = lab.stop();
         assert!(!stopped.running);
         assert!(stopped.invitation.is_none());
@@ -1115,7 +1122,7 @@ mod tests {
         assert!(lab.child.is_none());
 
         let restarted = lab
-            .start("127.0.0.1", Some("unavailable-output-id"), 60, false)
+            .start("127.0.0.1", Some("unavailable-output-id"), 60, false, 39093)
             .unwrap();
         assert!(restarted.events.is_empty());
         assert!(restarted.metrics.is_none());

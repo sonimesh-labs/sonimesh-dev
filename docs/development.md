@@ -154,6 +154,10 @@ still queued when its configured duration ends. Queued copies are discarded at
 exit; choose a duration that covers setup, capture, and drain. Its seed fixes
 model decisions for the received packet sequence, but actual arrival and delivery
 timing depend on the host and OS. The control channel is not impaired.
+The desktop output probe can instead start the playback-enabled listener: set
+its **Receiver UDP port** to 39094 and run the relay separately. Restore the
+default port 39093 for a direct connection; changing the receiver port does not
+change Android's destination or configure the relay.
 
 On 2026-11-24, one API 37 x86_64 emulator run sent 100 encoded packets through
 the example profile. The relay reported 14 random losses and 12 packets given

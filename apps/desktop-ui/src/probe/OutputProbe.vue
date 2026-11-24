@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import QRCode from 'qrcode'
 
 interface OutputDevice {
@@ -94,6 +94,7 @@ interface StoredLabSettings {
   labOutput?: string
   startupBufferMs?: number
   adaptive?: boolean
+  mediaPort?: number
 }
 
 function readLabSettings(): StoredLabSettings {
@@ -107,6 +108,7 @@ function readLabSettings(): StoredLabSettings {
       labOutput: parsed.labOutput === '' || (typeof parsed.labOutput === 'string' && /^\d+$/.test(parsed.labOutput)) ? parsed.labOutput as string : undefined,
       startupBufferMs: typeof parsed.startupBufferMs === 'number' && startupBufferChoices.includes(parsed.startupBufferMs) ? parsed.startupBufferMs : undefined,
       adaptive: typeof parsed.adaptive === 'boolean' ? parsed.adaptive : undefined,
+      mediaPort: typeof parsed.mediaPort === 'number' && Number.isInteger(parsed.mediaPort) && parsed.mediaPort >= 1 && parsed.mediaPort <= 65535 ? parsed.mediaPort : undefined,
     }
   } catch {
     return {}
@@ -132,6 +134,7 @@ function clearLabSettings() {
   labOutput.value = ''
   startupBufferMs.value = 60
   adaptive.value = false
+  mediaPort.value = '39093'
   suggestedHost.value = null
   suggestError.value = null
 }
@@ -218,6 +221,8 @@ const suggestBusy = ref(false)
 const labOutput = ref(storedLabSettings.labOutput ?? '')
 const startupBufferMs = ref(storedLabSettings.startupBufferMs ?? 60)
 const adaptive = ref(storedLabSettings.adaptive ?? false)
+const mediaPort = ref(String(storedLabSettings.mediaPort ?? 39093))
+const mediaPortValid = computed(() => /^\d{1,5}$/.test(mediaPort.value) && Number(mediaPort.value) >= 1 && Number(mediaPort.value) <= 65535)
 const labBusy = ref(true)
 let labKnown = false
 const restoredLab = ref(false)
@@ -232,13 +237,14 @@ let controlRequest = 0
 let controlTimer: ReturnType<typeof setTimeout> | undefined
 let pendingControl: { volume: number | null; muted: boolean | null; sent: boolean } | null = null
 
-watch([labHost, androidHost, labOutput, startupBufferMs, adaptive], () => {
+watch([labHost, androidHost, labOutput, startupBufferMs, adaptive, mediaPort], () => {
   writeLabSettings({
     labHost: labHost.value,
     androidHost: androidHost.value,
     labOutput: labOutput.value === 'unavailable' ? '' : labOutput.value,
     startupBufferMs: startupBufferMs.value,
     adaptive: adaptive.value,
+    mediaPort: mediaPortValid.value ? Number(mediaPort.value) : undefined,
   })
 })
 
@@ -311,7 +317,7 @@ async function pollLab(retryUnknown = false) {
 }
 
 async function toggleLab() {
-  if (labBusy.value || !window.__TAURI__ || (!lab.value.running && (playing.value !== null || busy.value || labOutput.value === 'unavailable'))) return
+  if (labBusy.value || !window.__TAURI__ || (!lab.value.running && (playing.value !== null || busy.value || labOutput.value === 'unavailable' || !mediaPortValid.value))) return
   labBusy.value = true
   labError.value = null
   clearControl()
@@ -322,7 +328,7 @@ async function toggleLab() {
   try {
     lab.value = lab.value.running
       ? await window.__TAURI__.core.invoke<LabSnapshot>('stop_lab')
-      : await window.__TAURI__.core.invoke<LabSnapshot>('start_lab', { host: labHost.value.trim(), generation: generation.value, index: labOutput.value === '' ? null : Number(labOutput.value), startupBufferMs: startupBufferMs.value, adaptive: adaptive.value })
+      : await window.__TAURI__.core.invoke<LabSnapshot>('start_lab', { host: labHost.value.trim(), generation: generation.value, index: labOutput.value === '' ? null : Number(labOutput.value), startupBufferMs: startupBufferMs.value, adaptive: adaptive.value, mediaPort: Number(mediaPort.value) })
     if (starting) labEvidenceMessage.value = null
     restoredLab.value = false
     if (!disposed && lab.value.running) timer = setTimeout(pollLab, 1000)
@@ -475,6 +481,10 @@ onBeforeUnmount(() => { disposed = true; labRequest++; clearTimeout(timer); clea
       <p v-if="suggestError" class="command-error" role="alert">{{ suggestError }}</p>
       <p v-if="suggestedHost" role="status">Suggested desktop address: {{ suggestedHost }} <button type="button" class="preview-action" :disabled="lab.running || labBusy" @click="labHost = suggestedHost">Use address</button></p>
       <p class="preview-note">The suggestion follows the current route to Android; it does not verify connectivity.</p>
+      <label for="lab-media-port">Receiver UDP port</label>
+      <input id="lab-media-port" v-model="mediaPort" inputmode="numeric" maxlength="5" :disabled="lab.running || labBusy" :aria-invalid="!mediaPortValid" aria-describedby="lab-media-port-help" />
+      <p id="lab-media-port-help" class="preview-note">Use 39093 for direct capture, or the relay's forwarding port for an impairment experiment. Android still sends to 39093.</p>
+      <p v-if="!mediaPortValid" class="command-error" role="alert">Enter a receiver UDP port from 1 to 65535.</p>
       <label for="lab-buffer">Startup buffer</label>
       <select id="lab-buffer" v-model.number="startupBufferMs" :disabled="lab.running || labBusy">
         <option v-for="value in startupBufferChoices" :key="value" :value="value">{{ value }} ms</option>
@@ -487,7 +497,7 @@ onBeforeUnmount(() => { disposed = true; labRequest++; clearTimeout(timer); clea
       </select>
       <p class="preview-note">Adaptive mode may pause audio while buffering; restart the listener to change modes.</p>
       <button type="button" class="preview-action" :disabled="lab.running || labBusy || busy" @click="clearLabSettings">Reset lab settings</button>
-      <button type="button" class="preview-action" :disabled="labBusy || suggestBusy || (!lab.running && (playing !== null || busy || labOutput === 'unavailable'))" @click="toggleLab">{{ lab.running ? 'Stop listener' : 'Start listener' }}</button>
+      <button type="button" class="preview-action" :disabled="labBusy || suggestBusy || (!lab.running && (playing !== null || busy || labOutput === 'unavailable' || !mediaPortValid))" @click="toggleLab">{{ lab.running ? 'Stop listener' : 'Start listener' }}</button>
       <p v-if="playing !== null" class="preview-note">Wait for the test sound to finish before starting the listener.</p>
       <p v-else-if="lab.running" class="preview-note">Stop the listener before testing an output.</p>
       <p role="status">{{ lab.status }}</p>

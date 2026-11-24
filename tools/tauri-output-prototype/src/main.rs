@@ -110,6 +110,7 @@ fn start_lab(
     index: Option<usize>,
     startup_buffer_ms: u16,
     adaptive: bool,
+    media_port: u16,
 ) -> Result<lab::LabSnapshot, String> {
     let output = match index {
         Some(index) => Some(
@@ -127,6 +128,7 @@ fn start_lab(
             output.as_ref().map(|id| id.as_str()),
             startup_buffer_ms,
             adaptive,
+            media_port,
         )
     })
 }

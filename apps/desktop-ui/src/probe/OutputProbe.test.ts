@@ -29,6 +29,34 @@ function mountStoppedProbe() {
 }
 
 describe('desktop output probe', () => {
+  it('validates and passes the receiver port while keeping stop available', async () => {
+    const running = { running: true, sessionActive: false, status: 'Waiting', invitation: null, metrics: null, volume: null, muted: null }
+    const invoke = vi.fn((command: string) => {
+      if (command === 'probe_outputs') return Promise.resolve({ generation: 1, devices: [] })
+      return Promise.resolve(running)
+    })
+    window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+    const wrapper = mountStoppedProbe()
+    await flushPromises()
+    const port = wrapper.get('#lab-media-port')
+    const start = wrapper.findAll('button').find(button => button.text() === 'Start listener')!
+    for (const invalid of ['', '0', '65536', '12x']) {
+      await port.setValue(invalid)
+      expect(start.attributes('disabled')).toBeDefined()
+      expect(port.attributes('aria-invalid')).toBe('true')
+      expect(wrapper.text()).toContain('Enter a receiver UDP port from 1 to 65535.')
+    }
+    await port.setValue('39094')
+    expect(start.attributes('disabled')).toBeUndefined()
+    expect(JSON.parse(localStorage.getItem('sonimesh.outputProbe.labSettings')!).mediaPort).toBe(39094)
+    await start.trigger('click')
+    await flushPromises()
+    expect(invoke).toHaveBeenCalledWith('start_lab', expect.objectContaining({ mediaPort: 39094 }))
+    expect(port.attributes('disabled')).toBeDefined()
+    expect(wrapper.findAll('button').find(button => button.text() === 'Stop listener')!.attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+
   it('shows the host error if a listener starts before a test sound request', async () => {
     const invoke = vi.fn((command: string) => {
       if (command === 'probe_outputs') return Promise.resolve({ generation: 1, devices: [{ label: 'Speakers', sampleRateHz: 48000, channels: 2, isDefault: true }] })
@@ -302,7 +330,7 @@ describe('desktop output probe', () => {
     expect((wrapper.get('#lab-host').element as HTMLInputElement).value).toBe('127.0.0.1')
     await wrapper.findAll('button').find(button => button.text() === 'Use address')!.trigger('click')
     await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
-    expect(invoke).toHaveBeenCalledWith('start_lab', { host: '192.168.1.10', generation: 1, index: null, startupBufferMs: 60, adaptive: false })
+    expect(invoke).toHaveBeenCalledWith('start_lab', { host: '192.168.1.10', generation: 1, index: null, startupBufferMs: 60, adaptive: false, mediaPort: 39093 })
     wrapper.unmount()
   })
 
@@ -438,7 +466,7 @@ describe('desktop output probe', () => {
     await wrapper.get('#lab-playout').setValue(true)
     await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
     await flushPromises()
-    expect(invoke).toHaveBeenCalledWith('start_lab', { host: '127.0.0.1', generation: 4, index: 1, startupBufferMs: 40, adaptive: true })
+    expect(invoke).toHaveBeenCalledWith('start_lab', { host: '127.0.0.1', generation: 4, index: 1, startupBufferMs: 40, adaptive: true, mediaPort: 39093 })
     expect(wrapper.get('#lab-buffer').attributes('disabled')).toBeDefined()
     expect(wrapper.get('#lab-output').attributes('disabled')).toBeDefined()
     expect(wrapper.get('button').attributes('disabled')).toBeDefined()
@@ -468,7 +496,7 @@ describe('desktop output probe', () => {
     expect(invoke).toHaveBeenCalledWith('probe_outputs', { generation: 4, selectedIndex: 1 })
     expect((wrapper.get('#lab-output').element as HTMLSelectElement).value).toBe('0')
     await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
-    expect(invoke).toHaveBeenCalledWith('start_lab', { host: '127.0.0.1', generation: 5, index: 0, startupBufferMs: 60, adaptive: false })
+    expect(invoke).toHaveBeenCalledWith('start_lab', { host: '127.0.0.1', generation: 5, index: 0, startupBufferMs: 60, adaptive: false, mediaPort: 39093 })
     wrapper.unmount()
   })
   it.each(['format unavailable', 'refresh failed'])('requires reselection when %s', async (failure) => {
@@ -499,7 +527,7 @@ describe('desktop output probe', () => {
     await wrapper.get('#lab-host').setValue('10.0.2.2')
     await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
     await flushPromises()
-    expect(invoke).toHaveBeenCalledWith('start_lab', { host: '10.0.2.2', generation: 1, index: null, startupBufferMs: 60, adaptive: false })
+    expect(invoke).toHaveBeenCalledWith('start_lab', { host: '10.0.2.2', generation: 1, index: null, startupBufferMs: 60, adaptive: false, mediaPort: 39093 })
     expect(wrapper.text()).toContain('Starting listener')
     await wrapper.findAll('button').find(button => button.text() === 'Stop listener')!.trigger('click')
     await flushPromises()
@@ -938,7 +966,7 @@ describe('desktop output probe', () => {
 
   it('restores bounded lab settings and selected output from local storage', async () => {
     localStorage.setItem('sonimesh.outputProbe.labSettings', JSON.stringify({
-      labHost: '192.168.1.7', androidHost: '192.168.1.22', labOutput: '1', startupBufferMs: 100, adaptive: true,
+      labHost: '192.168.1.7', androidHost: '192.168.1.22', labOutput: '1', startupBufferMs: 100, adaptive: true, mediaPort: 39094,
     }))
     const invoke = vi.fn().mockResolvedValueOnce({ generation: 3, devices: [
       { label: 'Default', sampleRateHz: 48_000, channels: 2, isDefault: true },
@@ -950,6 +978,7 @@ describe('desktop output probe', () => {
     expect((wrapper.get('#lab-host').element as HTMLInputElement).value).toBe('192.168.1.7')
     expect((wrapper.get('#android-host').element as HTMLInputElement).value).toBe('192.168.1.22')
     expect((wrapper.get('#lab-buffer').element as HTMLSelectElement).value).toBe('100')
+    expect((wrapper.get('#lab-media-port').element as HTMLInputElement).value).toBe('39094')
     expect((wrapper.get('#lab-playout').element as HTMLSelectElement).value).toBe('true')
     expect((wrapper.get('#lab-output').element as HTMLSelectElement).value).toBe('1')
     expect(invoke).toHaveBeenCalledWith('probe_outputs', { generation: 0, selectedIndex: 1 })
@@ -976,7 +1005,7 @@ describe('desktop output probe', () => {
 
   it('resets persisted lab settings without touching listener state', async () => {
     localStorage.setItem('sonimesh.outputProbe.labSettings', JSON.stringify({
-      labHost: '192.168.1.7', androidHost: '192.168.1.22', labOutput: '1', startupBufferMs: 100, adaptive: true,
+      labHost: '192.168.1.7', androidHost: '192.168.1.22', labOutput: '1', startupBufferMs: 100, adaptive: true, mediaPort: 39094,
     }))
     const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [] })
     window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
@@ -986,6 +1015,7 @@ describe('desktop output probe', () => {
     expect((wrapper.get('#lab-host').element as HTMLInputElement).value).toBe('127.0.0.1')
     expect((wrapper.get('#android-host').element as HTMLInputElement).value).toBe('')
     expect((wrapper.get('#lab-buffer').element as HTMLSelectElement).value).toBe('60')
+    expect((wrapper.get('#lab-media-port').element as HTMLInputElement).value).toBe('39093')
     expect((wrapper.get('#lab-playout').element as HTMLSelectElement).value).toBe('false')
     expect((wrapper.get('#lab-output').element as HTMLSelectElement).value).toBe('')
     expect(localStorage.getItem('sonimesh.outputProbe.labSettings')).toContain('127.0.0.1')
