@@ -221,6 +221,33 @@ class LabStatusTest {
     }
 
     @Test
+    fun retryUsesLastTransportAfterClosingAndReopeningActivity() {
+        for (transport in listOf(LabTransport.Udp, LabTransport.PairedUdp)) {
+            ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+                scenario.onActivity {
+                    LabStatus.serviceStarted(LabCaptureUsage.Media, OpusBitrate.STANDARD, transport)
+                    LabStatus.serviceFinished()
+                }
+            }
+            ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    val root = activity.window.decorView
+                    requireNotNull(findTextField(root, "Desktop IPv4 address for UDP"))
+                        .text = if (transport == LabTransport.Udp) "" else "10.0.2.2"
+                    requireNotNull(findTextField(root, "Paired control IPv4 address")).text = ""
+                    val retry = requireNotNull(findButton(root, "Retry last capture"))
+                    assertEquals(View.VISIBLE, retry.visibility)
+                    retry.performClick()
+                    val expected = if (transport == LabTransport.Udp) "Status: Enter a valid desktop IPv4 address for UDP."
+                        else "Status: Enter a valid paired control IPv4 address."
+                    assertTrue("retry must validate the last transport", hasStatus(root, expected))
+                    assertTrue("failed validation must allow another attempt", LabStatus.captureAdmission.canBegin())
+                }
+            }
+        }
+    }
+
+    @Test
     fun captureSelectorsPersistForTheNextLabLaunch() {
         ActivityScenario.launch(LabActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->

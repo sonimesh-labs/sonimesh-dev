@@ -169,7 +169,14 @@ class LabActivity : Activity() {
         retryButton = Button(this).apply {
             text = "Retry last capture"
             visibility = View.GONE
-            setOnClickListener { startCapture(udpMode, pairedMode) }
+            setOnClickListener {
+                when (LabStatus.retryTransport) {
+                    LabTransport.Adb -> startCapture(false)
+                    LabTransport.Udp -> startCapture(true)
+                    LabTransport.PairedUdp -> startCapture(true, paired = true)
+                    null -> updateRetryButton()
+                }
+            }
         }
         layout.addView(retryButton)
         signal = TextView(this)
@@ -475,7 +482,7 @@ class LabActivity : Activity() {
 
     private fun updateRetryButton() {
         if (!::retryButton.isInitialized) return
-        val retryable = LabStatus.captureAdmission.canBegin() && LabStatus.retryAvailable
+        val retryable = LabStatus.captureAdmission.canBegin() && LabStatus.retryTransport != null
         retryButton.visibility = if (retryable) View.VISIBLE else View.GONE
     }
 

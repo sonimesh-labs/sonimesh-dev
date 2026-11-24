@@ -46,6 +46,8 @@ internal object LabStatus {
     private var sentPackets: Long? = null
     private val sentPacketObservers = mutableSetOf<(Long?) -> Unit>()
     private var sessionConfig: LabSessionConfig? = null
+    val retryTransport: LabTransport?
+        get() = if (retryAvailable) sessionConfig?.transport else null
     private val sessionObservers = mutableSetOf<(LabSessionConfig?) -> Unit>()
     private var signalState: LabSignalState? = null
     private val signalObservers = mutableSetOf<(LabSignalState?) -> Unit>()

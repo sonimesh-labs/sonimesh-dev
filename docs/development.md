@@ -248,8 +248,10 @@ device instead of crashing the activity. It tries common 48 kHz and 44.1 kHz
 stereo/mono formats before reporting that failure.
 After a capture service finishes, including after a desktop connection or capture
 failure, it also shows **Retry last capture** near the same status area. The
-button appears after cleanup completes. The retry reuses the last transport and current setup
-fields, then requests any required permission or screen-capture consent again;
+button appears after cleanup completes. The retry reuses the last service's
+transport even if the activity was closed and reopened in the same process. It
+uses the current setup fields, then requests any required permission or
+screen-capture consent again;
 starting a new session hides the retry action.
 Unmute resumes captured audio without a new consent session. Audio already encoded,
 in transit, or buffered at the receiver can still play briefly after muting; this
