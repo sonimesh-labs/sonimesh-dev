@@ -56,10 +56,11 @@ system audio policy still apply.
 The local observations also show the highest PCM sample magnitude seen during
 the current run as a percentage of full scale. It helps distinguish a very weak
 signal from silence, but is not an audible loudness or quality measurement.
-On 2026-11-24, an API 37 x86_64 emulator captured the built-in Media tone,
-returned to silence after stopping it, captured it again after restarting, and
-returned to silence after activity recreation. This does not establish audible
-output or physical-device behavior.
+On 2026-11-24, an API 37 x86_64 emulator captured the built-in Media tone and
+reported a nonzero peak sample. The instrumentation flow then failed to locate
+the stop-tone control, so stop, restart, and activity-recreation behavior were
+not verified in that run. This does not establish audible output or
+physical-device behavior.
 On 2026-11-23, an API 37 x86_64 emulator accepted **All supported** and began
 capturing after fresh consent; the screen showed the selected usage, increasing
 silent-frame counts, and zero read errors. No playback source was exercised in

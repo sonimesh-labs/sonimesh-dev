@@ -98,19 +98,14 @@ class AllUsagesCaptureTest {
                 assertTrue("notification return stopped the active capture", CaptureStateStore.state.value.status.isActive())
             }
             ActivityScenario.launch(MainActivity::class.java).use {
-                val selected = waitUntil(8_000) {
-                    val root = automation.rootInActiveWindow ?: return@waitUntil false
-                    if (root.hasSelectedText("All supported")) return@waitUntil true
-                    root.findScrollable()?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
-                    false
-                }
+                val selected = findOnScreen(automation, scroll = true) { it.hasSelectedText("All supported") }
                 assertTrue("reopened activity did not show the active usage", selected)
                 assertTrue("stop button missing", clickText(automation, "Stop capture", scroll = true))
                 assertTrue("capture did not stop", waitUntil(8_000) {
                     CaptureStateStore.state.value.status is CaptureStatus.Stopped
                 })
-                assertTrue("usage was not retained after stop", waitUntil(8_000) {
-                    automation.rootInActiveWindow?.hasSelectedText("All supported") == true
+                assertTrue("usage was not retained after stop", findOnScreen(automation, scroll = true) {
+                    it.hasSelectedText("All supported")
                 })
             }
         } finally {
@@ -205,14 +200,23 @@ class AllUsagesCaptureTest {
         return condition()
     }
 
-    private fun clickText(automation: android.app.UiAutomation, text: String, scroll: Boolean = false): Boolean {
+    private fun clickText(automation: android.app.UiAutomation, text: String, scroll: Boolean = false): Boolean =
+        findOnScreen(automation, scroll) { it.clickMatchingText(text) }
+
+    private fun findOnScreen(
+        automation: android.app.UiAutomation,
+        scroll: Boolean,
+        match: (AccessibilityNodeInfo) -> Boolean,
+    ): Boolean {
         var scrollForward = true
         return waitUntil(8_000) {
             val root = automation.rootInActiveWindow ?: return@waitUntil false
-            if (root.clickMatchingText(text)) return@waitUntil true
+            if (match(root)) return@waitUntil true
             if (scroll) {
                 val action = if (scrollForward) AccessibilityNodeInfo.ACTION_SCROLL_FORWARD else AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
                 if (root.findScrollable()?.performAction(action) == false) scrollForward = !scrollForward
+                // Compose animates accessibility scroll actions; inspect each page after it settles.
+                SystemClock.sleep(500)
             }
             false
         }
