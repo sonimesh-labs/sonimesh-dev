@@ -116,9 +116,13 @@ const displayStatus = computed<DisplayStatus>(() => {
     </div>
 
     <label class="field-label" for="output-device">{{ preview ? 'Change simulated output' : 'Change output device' }}</label>
+    <p v-if="!preview && devices.length === 0" class="preview-note" role="status">
+      No output devices found. Connect an output device, then refresh.
+    </p>
     <div class="device-select-row">
       <div class="select-wrap">
-        <select id="output-device" class="device-select" :value="selectedId ?? ''" :disabled="busy" @change="emit('select', ($event.target as HTMLSelectElement).value)">
+        <select id="output-device" class="device-select" :value="selectedId ?? ''" :disabled="busy || devices.length === 0" @change="emit('select', ($event.target as HTMLSelectElement).value)">
+          <option v-if="devices.length === 0" value="" disabled>No output devices available</option>
           <option v-for="device in devices" :key="device.id" :value="device.id">
             {{ device.label }}{{ device.isDefault ? ' (default)' : '' }}
           </option>

@@ -89,6 +89,27 @@ describe('OutputPanel', () => {
     expect((wrapper.get('.output-test-button').element as HTMLButtonElement).disabled).toBe(true)
   })
 
+  it('explains an empty Windows output list and keeps refresh available', async () => {
+    const wrapper = mount(OutputPanel, {
+      props: {
+        devices: [],
+        selectedId: null,
+        output: outputSnapshot(),
+        gain: 1,
+        muted: false,
+        busy: false,
+      },
+    })
+
+    expect(wrapper.get('[role="status"]').text()).toBe('No output devices found. Connect an output device, then refresh.')
+    expect((wrapper.get('#output-device').element as HTMLSelectElement).disabled).toBe(true)
+    expect(wrapper.get('#output-device').text()).toContain('No output devices available')
+    expect((wrapper.get('.device-refresh').element as HTMLButtonElement).disabled).toBe(false)
+
+    await wrapper.get('.device-refresh').trigger('click')
+    expect(wrapper.emitted('refreshDevices')).toHaveLength(1)
+  })
+
   it('renders the linear gain as a percentage label', () => {
     const wrapper = mount(OutputPanel, {
       props: {
