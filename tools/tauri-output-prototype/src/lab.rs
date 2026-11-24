@@ -95,6 +95,20 @@ struct ObservedLine {
 
 impl Lab {
     #[cfg(test)]
+    pub fn test_output_burst(&mut self) {
+        let (sender, events) = mpsc::sync_channel(128);
+        let mut output = "CONTROL volume 1 muted false\n".repeat(512);
+        output.push_str("CONTROL volume 42 muted false\n");
+        read_output(std::io::Cursor::new(output.into_bytes()), sender);
+        self.events = Some(events);
+    }
+
+    #[cfg(test)]
+    pub fn test_volume(&self) -> Option<u8> {
+        self.snapshot.volume
+    }
+
+    #[cfg(test)]
     pub fn simulate_running(&mut self) {
         self.snapshot.running = true;
     }

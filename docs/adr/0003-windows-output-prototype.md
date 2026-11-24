@@ -79,7 +79,11 @@ low-rate status, and stop it when requested or when the probe exits. The child
 owns pairing, UDP, decoding, and selected-device playback; the UI carries no
 audio. During an active session the probe displays the child's periodic packet,
 decode, jitter-buffer, and output-recovery observations; the last available
-metrics remain until the next client attempt. On listener exit, the probe waits up to 200 ms
+metrics remain until the next client attempt. A probe-side worker drains the
+bounded listener-output queue periodically even when the UI is not polling, so
+normal status reporting does not depend on an open or responsive web view.
+Sustained output faster than the worker can process can still apply backpressure.
+On listener exit, the probe waits up to 200 ms
 for reader output and collects at most 2,048 lines before retaining the last
 available observations. They do not establish audibility or latency.
 The probe resolves a selection from its device snapshot and passes the opaque

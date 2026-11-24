@@ -9,7 +9,19 @@ use std::sync::{
 struct ProbeState {
     snapshot: Mutex<SelectionSnapshot>,
     playing: Arc<AtomicBool>,
-    lab: Mutex<lab::Lab>,
+    lab: Arc<Mutex<lab::Lab>>,
+}
+
+fn spawn_lab_monitor(lab: &Arc<Mutex<lab::Lab>>) -> std::thread::JoinHandle<()> {
+    let lab = Arc::downgrade(lab);
+    std::thread::spawn(move || {
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            let Some(lab) = lab.upgrade() else { break };
+            let Ok(mut lab) = lab.lock() else { break };
+            lab.refresh();
+        }
+    })
 }
 
 #[tauri::command]
@@ -43,7 +55,28 @@ fn suggest_lab_host(android_host: &str) -> Result<String, &'static str> {
 
 #[cfg(test)]
 mod route_tests {
-    use super::{ProbeState, suggest_lab_host};
+    use super::{ProbeState, spawn_lab_monitor, suggest_lab_host};
+
+    #[test]
+    fn listener_output_is_drained_without_ui_polling() {
+        use std::time::{Duration, Instant};
+        let state = ProbeState::default();
+        let monitor = spawn_lab_monitor(&state.lab);
+        state.lab.lock().unwrap().test_output_burst();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if state.lab.lock().unwrap().test_volume() == Some(42) {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "background output drain timed out"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        drop(state);
+        monitor.join().unwrap();
+    }
 
     #[test]
     fn rejects_addresses_that_cannot_identify_an_android_peer() {
@@ -568,8 +601,10 @@ mod tests {
 
 fn main() {
     use tauri::Manager;
+    let state = ProbeState::default();
+    let _monitor = spawn_lab_monitor(&state.lab);
     tauri::Builder::default()
-        .manage(ProbeState::default())
+        .manage(state)
         .invoke_handler(tauri::generate_handler![
             probe_outputs,
             play_test_tone,
