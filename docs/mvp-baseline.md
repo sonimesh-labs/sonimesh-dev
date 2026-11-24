@@ -429,6 +429,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   An activity-owned test tone can exercise the current session's selected usage;
   it stops when the activity leaves the foreground or capture ends. This only
   exercises the app's own playback and does not establish other apps' policies.
+  The capture screen also offers a one-button Media/Game/Other self-check during
+  one active session and reports per-usage signal observations; this remains a
+  test of SoniMesh's own tones, not other apps' playback-capture behavior.
   The capture-only evidence also includes the run's maximum PCM16 sample level;
   host tests cover its calculation and reset; API 37 x86_64 emulator
   instrumentation now confirms a nonzero peak during built-in tone capture and

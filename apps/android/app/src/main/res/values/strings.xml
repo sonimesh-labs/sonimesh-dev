@@ -27,4 +27,12 @@
     <string name="capture_test_tone_stop">Stop test tone</string>
     <string name="capture_test_tone_hint">Play a tone to check capture of this app’s audio.</string>
     <string name="capture_test_tone_failed">Unable to play the test tone on this device</string>
+    <string name="capture_usage_check_start">Check supported usages</string>
+    <string name="capture_usage_check_running">Checking supported usages…</string>
+    <string name="capture_usage_check_hint">Plays this app’s tone under each usage. Other apps may behave differently.</string>
+    <string name="capture_usage_check_summary">Usage check: %1$s</string>
+    <string name="capture_usage_check_detected">%1$s: detected</string>
+    <string name="capture_usage_check_not_detected">%1$s: no signal detected</string>
+    <string name="capture_usage_check_tone_unavailable">%1$s: test tone unavailable</string>
+    <string name="capture_usage_check_stopped">Usage check stopped</string>
 </resources>

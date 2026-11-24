@@ -72,6 +72,9 @@ internal fun CaptureScreen(
     onShareEvidence: () -> Unit,
     testTonePlaying: Boolean,
     onToggleTestTone: () -> Unit,
+    usageCheckRunning: Boolean,
+    usageCheckSummary: String,
+    onRunUsageCheck: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -94,6 +97,9 @@ internal fun CaptureScreen(
             onStop = onStop,
             testTonePlaying = testTonePlaying,
             onToggleTestTone = onToggleTestTone,
+            usageCheckRunning = usageCheckRunning,
+            usageCheckSummary = usageCheckSummary,
+            onRunUsageCheck = onRunUsageCheck,
         )
         CaptureSummaryCard(status = state.status, evidence = state.evidence)
         if (state.evidence.hasObservations()) {
@@ -366,6 +372,9 @@ private fun CaptureActionCard(
     onStop: () -> Unit,
     testTonePlaying: Boolean,
     onToggleTestTone: () -> Unit,
+    usageCheckRunning: Boolean,
+    usageCheckSummary: String,
+    onRunUsageCheck: () -> Unit,
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -408,9 +417,35 @@ private fun CaptureActionCard(
                 OutlinedButton(
                     modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp),
                     onClick = onToggleTestTone,
+                    enabled = !usageCheckRunning,
                     shape = TileShape,
                 ) {
                     Text(stringResource(if (testTonePlaying) R.string.capture_test_tone_stop else R.string.capture_test_tone_start))
+                }
+                OutlinedButton(
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp),
+                    onClick = onRunUsageCheck,
+                    enabled = !usageCheckRunning && !testTonePlaying,
+                    shape = TileShape,
+                ) {
+                    Text(
+                        stringResource(
+                            if (usageCheckRunning) R.string.capture_usage_check_running
+                            else R.string.capture_usage_check_start,
+                        ),
+                    )
+                }
+                Text(
+                    text = stringResource(R.string.capture_usage_check_hint),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                if (usageCheckSummary.isNotEmpty()) {
+                    Text(
+                        text = usageCheckSummary,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
                 }
                 CaptureSourceSelector(
                     enabled = false,

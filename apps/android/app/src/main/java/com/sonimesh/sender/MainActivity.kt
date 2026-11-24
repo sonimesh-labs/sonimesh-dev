@@ -10,6 +10,9 @@ import android.content.pm.PackageManager
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -38,6 +41,12 @@ class MainActivity : ComponentActivity() {
     private var pendingCaptureSource = CaptureSource.Media
     private val testTone = CaptureTestTone()
     private var testTonePlaying by mutableStateOf(false)
+    private val usageCheckHandler = Handler(Looper.getMainLooper())
+    private var usageCheckRunnable: Runnable? = null
+    private var usageCheckSources = emptyList<CaptureSource>()
+    private val usageCheckResults = mutableListOf<String>()
+    private var usageCheckRunning by mutableStateOf(false)
+    private var usageCheckSummary by mutableStateOf("")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         pendingCaptureSource = CaptureSource.fromWireValue(
@@ -48,7 +57,10 @@ class MainActivity : ComponentActivity() {
         setContent {
             val state by CaptureStateStore.state.collectAsState()
             LaunchedEffect(state.status.isActive()) {
-                if (!state.status.isActive()) stopTestTone()
+                if (!state.status.isActive()) {
+                    cancelUsageCheck()
+                    stopTestTone()
+                }
             }
             var selectedSourceWire by rememberSaveable {
                 mutableStateOf(
@@ -68,6 +80,9 @@ class MainActivity : ComponentActivity() {
                         onShareEvidence = ::shareCaptureEvidence,
                         testTonePlaying = testTonePlaying,
                         onToggleTestTone = ::toggleTestTone,
+                        usageCheckRunning = usageCheckRunning,
+                        usageCheckSummary = usageCheckSummary,
+                        onRunUsageCheck = ::runUsageCheck,
                     )
                 }
             }
@@ -80,6 +95,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onStop() {
+        cancelUsageCheck()
         stopTestTone()
         super.onStop()
     }
@@ -90,6 +106,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun toggleTestTone() {
+        if (usageCheckRunning) cancelUsageCheck()
         if (testTonePlaying) {
             stopTestTone()
             return
@@ -98,6 +115,100 @@ class MainActivity : ComponentActivity() {
         if (!state.status.isActive()) return
         testTonePlaying = testTone.start(state.evidence.captureSource ?: CaptureSource.Media)
         if (!testTonePlaying) Toast.makeText(this, R.string.capture_test_tone_failed, Toast.LENGTH_SHORT).show()
+    }
+
+    private fun runUsageCheck() {
+        if (usageCheckRunning || !CaptureStateStore.state.value.status.isActive()) return
+        stopTestTone()
+        usageCheckResults.clear()
+        usageCheckSources = listOf(CaptureSource.Media, CaptureSource.Game, CaptureSource.Unknown)
+        usageCheckSummary = getString(R.string.capture_usage_check_running)
+        usageCheckRunning = true
+        runNextUsageCheck()
+    }
+
+    private fun runNextUsageCheck() {
+        val source = usageCheckSources.firstOrNull()
+        if (source == null) {
+            usageCheckRunning = false
+            usageCheckSummary = getString(
+                R.string.capture_usage_check_summary,
+                usageCheckResults.joinToString("; "),
+            )
+            return
+        }
+        usageCheckSources = usageCheckSources.drop(1)
+        if (!CaptureStateStore.state.value.status.isActive()) {
+            cancelUsageCheck()
+            return
+        }
+
+        val beforeFrames = nonSilentFrames()
+        if (!testTone.start(source)) {
+            usageCheckResults += getString(R.string.capture_usage_check_tone_unavailable, source.displayName)
+            usageCheckSummary = getString(
+                R.string.capture_usage_check_summary,
+                usageCheckResults.joinToString("; "),
+            )
+            scheduleNextUsageCheck()
+            return
+        }
+        testTonePlaying = true
+        val startedAt = SystemClock.elapsedRealtime()
+        val checkTone = object : Runnable {
+            override fun run() {
+                if (!usageCheckRunning) return
+                if (SystemClock.elapsedRealtime() - startedAt < USAGE_CHECK_TONE_DURATION_MILLIS) {
+                    usageCheckHandler.postDelayed(this, USAGE_CHECK_POLL_MILLIS)
+                    return
+                }
+                usageCheckRunnable = null
+                val format = CaptureStateStore.state.value.evidence.captureFormat
+                val requiredFrames = (format?.sampleRateHz ?: 8_000) / 50
+                val detected = nonSilentFrames() - beforeFrames >= requiredFrames
+                stopTestTone()
+                usageCheckResults += getString(
+                    if (detected) R.string.capture_usage_check_detected
+                    else R.string.capture_usage_check_not_detected,
+                    source.displayName,
+                )
+                usageCheckSummary = getString(
+                    R.string.capture_usage_check_summary,
+                    usageCheckResults.joinToString("; "),
+                )
+                scheduleNextUsageCheck()
+            }
+        }
+        usageCheckRunnable = checkTone
+        usageCheckHandler.postDelayed(checkTone, USAGE_CHECK_POLL_MILLIS)
+    }
+
+    private fun scheduleNextUsageCheck() {
+        if (usageCheckSources.isEmpty()) {
+            usageCheckRunning = false
+            return
+        }
+        val next = Runnable {
+            usageCheckRunnable = null
+            runNextUsageCheck()
+        }
+        usageCheckRunnable = next
+        usageCheckHandler.postDelayed(next, USAGE_CHECK_GAP_MILLIS)
+    }
+
+    private fun cancelUsageCheck() {
+        if (!usageCheckRunning) return
+        usageCheckRunnable?.let(usageCheckHandler::removeCallbacks)
+        usageCheckRunnable = null
+        usageCheckSources = emptyList()
+        usageCheckRunning = false
+        stopTestTone()
+        usageCheckSummary = getString(R.string.capture_usage_check_stopped)
+    }
+
+    private fun nonSilentFrames(): Long {
+        val evidence = CaptureStateStore.state.value.evidence
+        return evidence.capturedFrames - evidence.silentFrames
     }
 
     private val audioPermissionLauncher =
@@ -188,6 +299,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun sendStopCommand() {
+        cancelUsageCheck()
         stopTestTone()
         startService(Intent(this, CaptureService::class.java).setAction(CaptureService.ACTION_STOP))
     }
@@ -217,6 +329,9 @@ class MainActivity : ComponentActivity() {
 
     private companion object {
         const val STATE_PENDING_CAPTURE_SOURCE = "pending_capture_source"
+        const val USAGE_CHECK_TONE_DURATION_MILLIS = 750L
+        const val USAGE_CHECK_POLL_MILLIS = 100L
+        const val USAGE_CHECK_GAP_MILLIS = 250L
     }
 }
 

@@ -53,6 +53,11 @@ same control. The tone also stops when capture ends or the activity leaves the
 foreground. Use the signal and evidence counters to check this app's own audio;
 success does not mean another application permits playback capture. Device and
 system audio policy still apply.
+**Check supported usages** runs one short local tone for Media, Game, and Other
+in the same capture session and reports whether each appears in the captured
+frames. Leaving the activity, stopping capture, or starting/stopping a manual
+tone cancels the sequence. This checks only SoniMesh's own playback under those
+usage tags; it does not predict another app's capture behavior.
 The local observations also show the highest PCM sample magnitude seen during
 the current run as a percentage of full scale. It helps distinguish a very weak
 signal from silence, but is not an audible loudness or quality measurement. The

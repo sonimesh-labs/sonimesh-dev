@@ -183,6 +183,15 @@ class AllUsagesCaptureTest {
                         track.release()
                     }
                 }
+                assertTrue(
+                    "usage check control missing: $lastScreenSnapshot",
+                    clickText(automation, "Check supported usages", scroll = true),
+                )
+                assertTrue("usage check did not report each captured test tone", waitUntil(15_000) {
+                    automation.rootInActiveWindow?.containsText(
+                        "Usage check: Media: detected; Game: detected; Other: detected",
+                    ) == true
+                })
                 assertEquals(0L, CaptureStateStore.state.value.evidence.readErrors)
             } finally {
                 instrumentation.targetContext.startService(
