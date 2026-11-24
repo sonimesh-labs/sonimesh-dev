@@ -767,6 +767,10 @@ client attempt.
 During an active session, the probe also shows the last reported one-second
 decoded-frame count and peak before output gain, excluding concealment. A zero
 frame count means no frames were decoded in that interval, not decoded silence.
+If no new signal line has been read for three seconds, the probe labels the
+last observation as stale in both the window and copied or shared evidence. The
+timer measures when the probe read the listener output, not when audio was
+played; output buffering can delay observations.
 This observation clears when the session ends and does not establish audible
 playback. Rebuild the listener after updating the probe so it supports the
 `--signal-status` option.

@@ -30,7 +30,7 @@ interface LabMetrics {
   playout: 'fixed' | 'adaptive' | null
   adaptive: { target: number; min: number; max: number; jitterMs: number; gated: string; forced: string; resets: string } | null
 }
-interface LabSnapshot { running: boolean; sessionActive: boolean; status: string; invitation: string | null; events?: string[]; metrics: LabMetrics | null; signal?: { decoded: number; peak: number | null } | null; volume: number | null; muted: boolean | null }
+interface LabSnapshot { running: boolean; sessionActive: boolean; status: string; invitation: string | null; events?: string[]; metrics: LabMetrics | null; signal?: { decoded: number; peak: number | null } | null; signalStale?: boolean; volume: number | null; muted: boolean | null }
 const lab = ref<LabSnapshot>({ running: false, sessionActive: false, status: 'Checking listener…', invitation: null, metrics: null, volume: null, muted: null })
 const invitationQr = ref<string | null>(null)
 const invitationQrError = ref(false)
@@ -151,7 +151,7 @@ function labEvidenceText(): string | null {
     `Session: ${lab.value.sessionActive ? 'active' : 'last reported'}`,
   ]
   if (signal) {
-    lines.push(`Last decoded interval: ${signal.decoded} frames${signal.peak === null ? '; no peak' : `; peak ${signal.peak.toFixed(6)}`} (before output gain; excludes concealment)`)
+    lines.push(`Last decoded interval${lab.value.signalStale ? ' (stale: no update for at least 3 seconds)' : ''}: ${signal.decoded} frames${signal.peak === null ? '; no peak' : `; peak ${signal.peak.toFixed(6)}`} (before output gain; excludes concealment)`)
   }
   if (metrics) {
     lines.push(`Accepted packets: ${evidenceValue(metrics.packets)}`)
@@ -503,6 +503,7 @@ onBeforeUnmount(() => { disposed = true; labRequest++; clearTimeout(timer); clea
         <p v-if="!lab.signal">Waiting for a signal observation.</p>
         <p v-else-if="lab.signal.decoded === 0">No decoded frames in this interval.</p>
         <p v-else>{{ lab.signal.decoded }} decoded frames; peak {{ lab.signal.peak?.toFixed(6) }}.</p>
+        <p v-if="lab.signal && lab.signalStale" role="status">Stale observation: no update for at least 3 seconds.</p>
         <p class="preview-note">Approximately one second, before output gain and excluding concealment. This does not confirm audible playback.</p>
       </section>
       <section v-if="lab.metrics || lab.events?.length || (lab.sessionActive && lab.signal)" aria-labelledby="lab-evidence-title">

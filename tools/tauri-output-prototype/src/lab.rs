@@ -3,9 +3,11 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::Ipv4Addr;
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, SyncSender};
+use std::time::{Duration, Instant};
 
 const MAX_LAB_EVENTS: usize = 32;
 const MAX_LAB_EVENT_CHARS: usize = 256;
+const SIGNAL_STALE_AFTER: Duration = Duration::from_secs(3);
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -16,6 +18,7 @@ pub struct LabSnapshot {
     pub events: Vec<String>,
     pub metrics: Option<LabMetrics>,
     pub signal: Option<LabSignal>,
+    pub signal_stale: bool,
     pub volume: Option<u8>,
     pub muted: Option<bool>,
     pub session_active: bool,
@@ -67,6 +70,7 @@ impl Default for LabSnapshot {
             events: Vec::new(),
             metrics: None,
             signal: None,
+            signal_stale: false,
             volume: None,
             muted: None,
             session_active: false,
@@ -77,8 +81,14 @@ impl Default for LabSnapshot {
 #[derive(Default)]
 pub struct Lab {
     child: Option<Child>,
-    events: Option<Receiver<String>>,
+    events: Option<Receiver<ObservedLine>>,
     snapshot: LabSnapshot,
+    signal_received_at: Option<Instant>,
+}
+
+struct ObservedLine {
+    text: String,
+    received_at: Instant,
 }
 
 impl Lab {
@@ -162,6 +172,7 @@ impl Lab {
         read_output(child.stderr.take().expect("piped stderr"), sender);
         self.child = Some(child);
         self.events = Some(events);
+        self.signal_received_at = None;
         self.snapshot = LabSnapshot {
             running: true,
             status: "Starting listener…".into(),
@@ -169,6 +180,7 @@ impl Lab {
             events: Vec::new(),
             metrics: None,
             signal: None,
+            signal_stale: false,
             volume: None,
             muted: None,
             session_active: false,
@@ -177,10 +189,21 @@ impl Lab {
     }
 
     pub fn refresh(&mut self) -> LabSnapshot {
+        self.refresh_at(Instant::now())
+    }
+
+    fn refresh_at(&mut self, now: Instant) -> LabSnapshot {
         if let Some(events) = &self.events {
             for line in events.try_iter().take(128) {
-                record_event(&mut self.snapshot, &line);
-                update_snapshot(&mut self.snapshot, &line);
+                record_event(&mut self.snapshot, &line.text);
+                let valid_signal =
+                    self.snapshot.session_active && parse_signal(&line.text).is_some();
+                update_snapshot(&mut self.snapshot, &line.text);
+                if valid_signal {
+                    self.signal_received_at = Some(line.received_at);
+                } else if self.snapshot.signal.is_none() {
+                    self.signal_received_at = None;
+                }
             }
         }
         if let Some(child) = &mut self.child {
@@ -192,6 +215,7 @@ impl Lab {
                     self.snapshot.muted = None;
                     self.snapshot.session_active = false;
                     self.snapshot.signal = None;
+                    self.signal_received_at = None;
                     self.snapshot.status = "Listener exited. Rebuild it and check the selected output device and whether port 47610 is in use.".into();
                     self.child = None;
                     self.events = None;
@@ -200,6 +224,10 @@ impl Lab {
                 Ok(None) => {}
             }
         }
+        self.snapshot.signal_stale = self.snapshot.signal.is_some()
+            && self.signal_received_at.is_none_or(|received| {
+                now.saturating_duration_since(received) >= SIGNAL_STALE_AFTER
+            });
         self.snapshot.clone()
     }
 
@@ -209,6 +237,7 @@ impl Lab {
             let _ = child.wait();
         }
         self.events = None;
+        self.signal_received_at = None;
         self.snapshot = LabSnapshot::default();
         self.snapshot.clone()
     }
@@ -237,7 +266,7 @@ impl Drop for Lab {
     }
 }
 
-fn read_output(output: impl Read + Send + 'static, sender: SyncSender<String>) {
+fn read_output(output: impl Read + Send + 'static, sender: SyncSender<ObservedLine>) {
     std::thread::spawn(move || {
         let mut reader = BufReader::new(output);
         let mut line = Vec::with_capacity(4096);
@@ -262,7 +291,10 @@ fn read_output(output: impl Read + Send + 'static, sender: SyncSender<String>) {
                     // Apply bounded backpressure instead of silently dropping a
                     // state transition when the UI is between snapshot polls.
                     if sender
-                        .send(text.trim_end_matches(['\r', '\n']).to_owned())
+                        .send(ObservedLine {
+                            text: text.trim_end_matches(['\r', '\n']).to_owned(),
+                            received_at: Instant::now(),
+                        })
                         .is_err()
                     {
                         break;
@@ -506,6 +538,42 @@ mod tests {
     use super::*;
 
     #[test]
+    fn signal_freshness_uses_read_time_and_resets_with_session() {
+        let (sender, events) = mpsc::sync_channel(8);
+        let start = Instant::now();
+        let send = |text: &str, received_at| {
+            sender
+                .send(ObservedLine {
+                    text: text.into(),
+                    received_at,
+                })
+                .unwrap();
+        };
+        let mut lab = Lab::default();
+        lab.events = Some(events);
+        send("RESULT receiver started", start);
+        send("SIGNAL decoded 50 peak 0.1", start);
+        assert!(
+            !lab.refresh_at(start + Duration::from_millis(2999))
+                .signal_stale
+        );
+        send("SIGNAL decoded 1 peak NaN", start + Duration::from_secs(3));
+        assert!(lab.refresh_at(start + Duration::from_secs(3)).signal_stale);
+        send("SIGNAL decoded 0 peak none", start + Duration::from_secs(4));
+        assert!(!lab.refresh_at(start + Duration::from_secs(4)).signal_stale);
+        send("RESULT session complete", start + Duration::from_secs(5));
+        let ended = lab.refresh_at(start + Duration::from_secs(5));
+        assert!(ended.signal.is_none());
+        assert!(!ended.signal_stale);
+        send("RESULT receiver started", start + Duration::from_secs(6));
+        let next = lab.refresh_at(start + Duration::from_secs(6));
+        assert!(next.signal.is_none());
+        assert!(!next.signal_stale);
+        send("SIGNAL decoded 50 peak 0.1", start + Duration::from_secs(6));
+        assert!(lab.refresh_at(start + Duration::from_secs(10)).signal_stale);
+    }
+
+    #[test]
     fn signal_observations_follow_session_lifecycle() {
         let mut snapshot = LabSnapshot::default();
         update_snapshot(&mut snapshot, "SIGNAL decoded 50 peak 0.1");
@@ -622,8 +690,17 @@ mod tests {
             .spawn()
             .unwrap();
         let (sender, events) = mpsc::sync_channel(4);
-        sender.try_send("RESULT receiver started".into()).unwrap();
-        sender.try_send("STATUS packets 120 rejected 3 decoded 115 peak 0.250 plc 2 decode_errors 1 buffered 4 output active".into()).unwrap();
+        for line in [
+            "RESULT receiver started",
+            "STATUS packets 120 rejected 3 decoded 115 peak 0.250 plc 2 decode_errors 1 buffered 4 output active",
+        ] {
+            sender
+                .try_send(ObservedLine {
+                    text: line.into(),
+                    received_at: Instant::now(),
+                })
+                .unwrap();
+        }
         let mut lab = Lab {
             child: Some(child),
             events: Some(events),
@@ -634,6 +711,7 @@ mod tests {
                 muted: Some(false),
                 ..LabSnapshot::default()
             },
+            signal_received_at: None,
         };
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         let snapshot = loop {
@@ -862,7 +940,7 @@ mod tests {
             "RESULT pairing verified",
         ] {
             assert_eq!(
-                events.recv_timeout(Duration::from_secs(1)).unwrap(),
+                events.recv_timeout(Duration::from_secs(1)).unwrap().text,
                 expected
             );
         }
@@ -877,7 +955,12 @@ mod tests {
             "MEDIA receiving",
             "OUTPUT recovering",
         ] {
-            sender.send(line.to_owned()).unwrap();
+            sender
+                .send(ObservedLine {
+                    text: line.to_owned(),
+                    received_at: Instant::now(),
+                })
+                .unwrap();
         }
         drop(sender);
 
