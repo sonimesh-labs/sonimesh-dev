@@ -38,6 +38,8 @@ the notification still exposes only control text and no audio data. Tapping its
 content action returns to the capture activity without changing the running
 service.
 
+The capture-only screen places its controls immediately after the status card;
+session metrics and evidence follow below them.
 Before starting, the capture-only screen lets the operator choose **Media**,
 **Game**, **Other**, or **All supported** (the three groups together).
 Media remains the default. The choice is passed to the

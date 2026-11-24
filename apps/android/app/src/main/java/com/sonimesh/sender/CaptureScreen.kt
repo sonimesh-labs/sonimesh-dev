@@ -84,14 +84,6 @@ internal fun CaptureScreen(
     ) {
         CaptureHeader()
         CaptureStatusCard(status = state.status)
-        CaptureSummaryCard(status = state.status, evidence = state.evidence)
-        if (state.evidence.hasObservations()) {
-            CaptureEvidenceCard(
-                evidence = state.evidence,
-                onCopyEvidence = onCopyEvidence,
-                onShareEvidence = onShareEvidence,
-            )
-        }
         CaptureActionCard(
             active = state.status.isActive(),
             starting = state.status.isAwaitingAuthorization(),
@@ -102,6 +94,14 @@ internal fun CaptureScreen(
             testTonePlaying = testTonePlaying,
             onToggleTestTone = onToggleTestTone,
         )
+        CaptureSummaryCard(status = state.status, evidence = state.evidence)
+        if (state.evidence.hasObservations()) {
+            CaptureEvidenceCard(
+                evidence = state.evidence,
+                onCopyEvidence = onCopyEvidence,
+                onShareEvidence = onShareEvidence,
+            )
+        }
         CaptureBoundaryCard()
     }
 }
