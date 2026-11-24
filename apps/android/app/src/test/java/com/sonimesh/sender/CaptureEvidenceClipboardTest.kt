@@ -40,6 +40,7 @@ class CaptureEvidenceClipboardTest {
                 silentFrames = 96_000,
                 silentReads = 150,
                 readErrors = 1,
+                peakSampleMagnitude = 3_000,
             ),
         )
 
@@ -49,9 +50,16 @@ class CaptureEvidenceClipboardTest {
                 "channel mask 0xc, 7680 byte buffer (platform minimum 3840). The source " +
                 "may be silent or policy-restricted; the cause is not identifiable here.\n" +
                 "Observed 120000 frames over 2.5 s, 96000 silent frames across 150 reads, " +
-                "1 read errors. Requested usage: Game. Last successful read at +2.4 s.",
+                "1 read errors. Requested usage: Game. Last successful read at +2.4 s. Peak sample level: 9.155%.",
             state.copyableEvidence(),
         )
+    }
+
+    @Test
+    fun peak_format_distinguishes_weak_signal_from_silence() {
+        assertEquals("0.000%", formatCapturePeak(0))
+        assertEquals("0.003%", formatCapturePeak(1))
+        assertEquals("100.000%", formatCapturePeak(32_768))
     }
 
     @Test

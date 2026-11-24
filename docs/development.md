@@ -50,6 +50,9 @@ same control. The tone also stops when capture ends or the activity leaves the
 foreground. Use the signal and evidence counters to check this app's own audio;
 success does not mean another application permits playback capture. Device and
 system audio policy still apply.
+The local observations also show the highest PCM sample magnitude seen during
+the current run as a percentage of full scale. It helps distinguish a very weak
+signal from silence, but is not an audible loudness or quality measurement.
 On 2026-11-24, an API 37 x86_64 emulator captured the built-in Media tone,
 returned to silence after stopping it, captured it again after restarting, and
 returned to silence after activity recreation. This does not establish audible

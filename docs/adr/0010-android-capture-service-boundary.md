@@ -75,6 +75,9 @@ The latest observed capture format remains in the process-local evidence after
 stop or failure, so an operator can review or share it with the final counters.
 A fresh capture request clears it with the previous evidence. It is not persisted
 across process death and does not identify a source application.
+The same low-rate evidence includes the current run's maximum absolute PCM16
+sample as a percentage of full scale. No samples are retained for this summary;
+the value is a peak, not a loudness or audio-quality measurement.
 When an activity is opened during an active capture, its disabled usage selector
 shows the usage owned by that capture session. A newly opened activity also
 initializes its next choice from that usage; after capture stops, the operator

@@ -1,6 +1,7 @@
 package com.sonimesh.sender.capture
 
 import android.os.SystemClock
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -14,6 +15,7 @@ internal class CaptureEvidence(
 ) {
     private val captureStartedAtMillis = AtomicLong(NO_CAPTURE_START)
     private val lastReadCompletedAtMillis = AtomicLong(NO_READ_COMPLETION)
+    private val peakSampleMagnitude = AtomicInteger(-1)
 
     @Volatile
     private var captureSource: CaptureSource? = null
@@ -22,9 +24,11 @@ internal class CaptureEvidence(
     private var captureFormat: CaptureFormat? = null
 
     /** Records one successful read and its local monotonic completion time. */
-    fun recordRead(frames: Int, silent: Boolean, completedAtMillis: Long) {
+    fun recordRead(frames: Int, silent: Boolean, completedAtMillis: Long, peakMagnitude: Int? = null) {
         require(frames > 0) { "completed read must contain at least one frame" }
         require(completedAtMillis >= 0) { "read completion time must be monotonic" }
+        require(peakMagnitude == null || peakMagnitude in 0..32768) { "invalid PCM16 peak" }
+        if (peakMagnitude != null) peakSampleMagnitude.getAndUpdate { previous -> maxOf(previous, peakMagnitude) }
         capturedFrames.add(frames)
         if (silent) {
             silentFrames.add(frames)
@@ -53,6 +57,7 @@ internal class CaptureEvidence(
     fun reset() {
         captureStartedAtMillis.set(NO_CAPTURE_START)
         lastReadCompletedAtMillis.set(NO_READ_COMPLETION)
+        peakSampleMagnitude.set(-1)
         captureSource = null
         captureFormat = null
         capturedFrames.reset()
@@ -90,6 +95,7 @@ internal class CaptureEvidence(
             silentFrames = observedSilentFrames,
             silentReads = observedSilentReads,
             readErrors = readErrors.get(),
+            peakSampleMagnitude = peakSampleMagnitude.get().takeIf { it >= 0 },
         )
     }
 

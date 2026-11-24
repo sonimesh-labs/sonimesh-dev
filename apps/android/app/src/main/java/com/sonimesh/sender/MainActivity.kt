@@ -32,6 +32,7 @@ import com.sonimesh.sender.capture.CaptureStatus
 import com.sonimesh.sender.capture.canStart
 import com.sonimesh.sender.capture.isActive
 import com.sonimesh.sender.capture.isAwaitingAuthorization
+import java.util.Locale
 
 class MainActivity : ComponentActivity() {
     private var pendingCaptureSource = CaptureSource.Media
@@ -254,10 +255,14 @@ internal fun com.sonimesh.sender.capture.CaptureEvidenceSnapshot.description(): 
     val latestRead = lastReadCompletionOffsetMillis?.let { offset ->
         " Last successful read at +${formatDuration(offset)}."
     }.orEmpty()
+    val peak = peakSampleMagnitude?.let { " Peak sample level: ${formatCapturePeak(it)}." }.orEmpty()
     return "Observed ${capturedFrames} frames over ${formatDuration(captureDurationMillis)}, " +
         "${silentFrames} silent frames across ${silentReads} reads, " +
-        "${readErrors} read errors.$source$latestRead"
+        "${readErrors} read errors.$source$latestRead$peak"
 }
+
+internal fun formatCapturePeak(magnitude: Int): String =
+    String.format(Locale.US, "%.3f%%", magnitude * 100.0 / 32_768)
 
 internal fun com.sonimesh.sender.capture.CaptureUiState.copyableEvidence(): String {
     val terminalFormat = if (status is CaptureStatus.Stopped || status is CaptureStatus.Failed) {

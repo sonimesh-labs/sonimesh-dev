@@ -353,19 +353,13 @@ class CaptureService : Service() {
                 }
                 readProgress.stalled(empty = false, nowMillis = readCompletedAtMillis)
 
-                var silent = true
-                var index = 0
-                while (index < read) {
-                    if (buffer[index] != 0.toShort()) {
-                        silent = false
-                        break
-                    }
-                    index++
-                }
+                val peakMagnitude = capturePeakMagnitude(buffer, read)
+                val silent = peakMagnitude == 0
                 CaptureStateStore.evidence.recordRead(
                     frames = framesRead,
                     silent = silent,
                     completedAtMillis = readCompletedAtMillis,
+                    peakMagnitude = peakMagnitude,
                 )
                 if (evidenceThrottle.shouldPublish(readCompletedAtMillis)) {
                     mainHandler.post {

@@ -427,6 +427,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   An activity-owned test tone can exercise the current session's selected usage;
   it stops when the activity leaves the foreground or capture ends. This only
   exercises the app's own playback and does not establish other apps' policies.
+  The capture-only evidence also includes the run's maximum PCM16 sample level;
+  host tests cover its calculation and reset, while device evidence for the new
+  readout remains open. It is not a loudness measurement.
 - a buildable Vue/Vite receiver-control preview with a single low-rate bridge
   boundary, session controls, output selection, per-stream volume and mute,
   pairing-invitation state, and diagnostics presentation for packet,

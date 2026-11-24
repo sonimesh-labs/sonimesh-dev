@@ -328,6 +328,11 @@ private fun CaptureEvidenceCard(
                     Modifier.weight(1f),
                 )
             }
+            EvidenceItem(
+                stringResource(R.string.capture_evidence_peak),
+                evidence.peakSampleMagnitude?.let(::formatCapturePeak) ?: stringResource(R.string.capture_evidence_unavailable),
+                Modifier.fillMaxWidth(),
+            )
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedButton(
                     modifier = Modifier

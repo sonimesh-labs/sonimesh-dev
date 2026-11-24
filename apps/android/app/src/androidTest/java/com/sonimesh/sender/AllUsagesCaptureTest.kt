@@ -41,6 +41,7 @@ class AllUsagesCaptureTest {
                     nonSilentFrames() - before >= 2_000
                 }
                 assertTrue("built-in tone was not captured: ${CaptureStateStore.state.value}", detected)
+                assertTrue("captured tone peak missing", (CaptureStateStore.state.value.evidence.peakSampleMagnitude ?: 0) > 0)
                 assertTrue("tone stop control missing", clickText(automation, "Stop test tone", scroll = true))
                 assertTrue("capture did not return to silence", waitUntil(8_000) {
                     CaptureStateStore.state.value.status is CaptureStatus.NoCapturableAudio

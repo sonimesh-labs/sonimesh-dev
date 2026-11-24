@@ -99,6 +99,8 @@ data class CaptureEvidenceSnapshot(
     val silentFrames: Long = 0,
     val silentReads: Long = 0,
     val readErrors: Long = 0,
+    /** Largest absolute PCM16 sample in this run, or null before a completed read. */
+    val peakSampleMagnitude: Int? = null,
 )
 
 
