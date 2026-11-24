@@ -506,6 +506,53 @@ describe('desktop output probe', () => {
     expect(invoke).toHaveBeenCalledWith('start_lab', { host: '127.0.0.1', generation: 5, index: 0, startupBufferMs: 60, adaptive: false, mediaPort: 39093 })
     wrapper.unmount()
   })
+
+  it('restores the selected endpoint by device details after the list is reordered', async () => {
+    localStorage.setItem('sonimesh.outputProbe.labSettings', JSON.stringify({
+      labOutput: '0',
+      labOutputDevice: { label: 'Headphones', sampleRateHz: 48_000, channels: 2 },
+    }))
+    const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [
+      { label: 'Speakers', sampleRateHz: 48_000, channels: 2, isDefault: true },
+      { label: 'Headphones', sampleRateHz: 48_000, channels: 2, isDefault: false },
+    ] })
+    window.__TAURI__ = { core: { invoke } }
+    const wrapper = mountStoppedProbe()
+    await flushPromises()
+    expect(invoke).toHaveBeenCalledWith('probe_outputs', { generation: 0, selectedIndex: null })
+    expect((wrapper.get('#lab-output').element as HTMLSelectElement).value).toBe('1')
+    expect(wrapper.findAll('button').find(button => button.text() === 'Start listener')!.attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('requires reselection when a saved output description is ambiguous', async () => {
+    localStorage.setItem('sonimesh.outputProbe.labSettings', JSON.stringify({
+      labOutput: '0',
+      labOutputDevice: { label: 'USB DAC', sampleRateHz: 48_000, channels: 2 },
+    }))
+    const device = { label: 'USB DAC', sampleRateHz: 48_000, channels: 2, isDefault: false }
+    const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [device, device] })
+    window.__TAURI__ = { core: { invoke } }
+    const wrapper = mountStoppedProbe()
+    await flushPromises()
+    expect((wrapper.get('#lab-output').element as HTMLSelectElement).value).toBe('unavailable')
+    expect(wrapper.text()).toContain('Select an available output before starting the listener.')
+    wrapper.unmount()
+  })
+
+  it('requires reselection for legacy saved output indexes without device details', async () => {
+    localStorage.setItem('sonimesh.outputProbe.labSettings', JSON.stringify({ labOutput: '0' }))
+    const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [
+      { label: 'Speakers', sampleRateHz: 48_000, channels: 2, isDefault: true },
+    ] })
+    window.__TAURI__ = { core: { invoke } }
+    const wrapper = mountStoppedProbe()
+    await flushPromises()
+    expect((wrapper.get('#lab-output').element as HTMLSelectElement).value).toBe('unavailable')
+    expect(wrapper.findAll('button').find(button => button.text() === 'Start listener')!.attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
+
   it.each(['format unavailable', 'refresh failed'])('requires reselection when %s', async (failure) => {
     const device = { label: 'Headphones', sampleRateHz: 48_000, channels: 2, isDefault: false }
     const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [device], selectedIndex: null })
@@ -1012,7 +1059,7 @@ describe('desktop output probe', () => {
     expect((wrapper.get('#lab-media-port').element as HTMLInputElement).value).toBe('39094')
     expect((wrapper.get('#lab-playout').element as HTMLSelectElement).value).toBe('true')
     expect((wrapper.get('#lab-output').element as HTMLSelectElement).value).toBe('unavailable')
-    expect(invoke).toHaveBeenCalledWith('probe_outputs', { generation: 0, selectedIndex: 1 })
+    expect(invoke).toHaveBeenCalledWith('probe_outputs', { generation: 0, selectedIndex: null })
     wrapper.unmount()
   })
 

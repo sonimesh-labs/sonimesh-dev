@@ -471,7 +471,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   the probe also retains a bounded ordered history of listener lifecycle events
   for session diagnosis. The probe does not own a product receiver session or
   change the system default output. The observations are not evidence of audible
-  playback or latency.
+  playback or latency. A saved lab output is restored by its device label and
+  default format rather than its transient list index; missing or ambiguous
+  matches require an explicit new selection.
 - a dependency-free `tools/latency-measurement` crate that generates a
   deterministic MLS reference WAVE (PCM 16/24/32 or IEEE float 32/64), reads
   and reports the declared properties of WAVE recordings (PCM 16/24/32, IEEE

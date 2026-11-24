@@ -92,6 +92,7 @@ interface StoredLabSettings {
   labHost?: string
   androidHost?: string
   labOutput?: string
+  labOutputDevice?: { label: string; sampleRateHz: number; channels: number }
   startupBufferMs?: number
   adaptive?: boolean
   mediaPort?: number
@@ -106,6 +107,11 @@ function readLabSettings(): StoredLabSettings {
       labHost: typeof parsed.labHost === 'string' && parsed.labHost.length <= 64 ? parsed.labHost : undefined,
       androidHost: typeof parsed.androidHost === 'string' && parsed.androidHost.length <= 64 ? parsed.androidHost : undefined,
       labOutput: parsed.labOutput === '' || parsed.labOutput === 'unavailable' || (typeof parsed.labOutput === 'string' && /^\d+$/.test(parsed.labOutput)) ? parsed.labOutput as string : undefined,
+      labOutputDevice: parsed.labOutputDevice && typeof parsed.labOutputDevice === 'object' &&
+        typeof (parsed.labOutputDevice as Record<string, unknown>).label === 'string' &&
+        typeof (parsed.labOutputDevice as Record<string, unknown>).sampleRateHz === 'number' &&
+        typeof (parsed.labOutputDevice as Record<string, unknown>).channels === 'number'
+        ? parsed.labOutputDevice as StoredLabSettings['labOutputDevice'] : undefined,
       startupBufferMs: typeof parsed.startupBufferMs === 'number' && startupBufferChoices.includes(parsed.startupBufferMs) ? parsed.startupBufferMs : undefined,
       adaptive: typeof parsed.adaptive === 'boolean' ? parsed.adaptive : undefined,
       mediaPort: typeof parsed.mediaPort === 'number' && Number.isInteger(parsed.mediaPort) && parsed.mediaPort >= 1 && parsed.mediaPort <= 65535 ? parsed.mediaPort : undefined,
@@ -132,6 +138,7 @@ function clearLabSettings() {
   labHost.value = '127.0.0.1'
   androidHost.value = ''
   labOutput.value = ''
+  labOutputDevice.value = null
   startupBufferMs.value = 60
   adaptive.value = false
   mediaPort.value = '39093'
@@ -140,6 +147,7 @@ function clearLabSettings() {
 }
 
 const storedLabSettings = readLabSettings()
+const labOutputDevice = ref(storedLabSettings.labOutputDevice ?? null)
 
 const labEvidenceMessage = ref<string | null>(null)
 
@@ -238,14 +246,30 @@ let controlTimer: ReturnType<typeof setTimeout> | undefined
 let pendingControl: { volume: number | null; muted: boolean | null; sent: boolean } | null = null
 
 watch([labHost, androidHost, labOutput, startupBufferMs, adaptive, mediaPort], () => {
+  const selected = !loaded.value || labOutput.value === '' || labOutput.value === 'unavailable'
+    ? undefined
+    : devices.value[Number(labOutput.value)]
+  if (selected?.sampleRateHz != null && selected.channels != null) {
+    labOutputDevice.value = {
+      label: selected.label,
+      sampleRateHz: selected.sampleRateHz,
+      channels: selected.channels,
+    }
+  }
   writeLabSettings({
     labHost: labHost.value,
     androidHost: androidHost.value,
     labOutput: labOutput.value,
+    labOutputDevice: labOutputDevice.value ?? undefined,
     startupBufferMs: startupBufferMs.value,
     adaptive: adaptive.value,
     mediaPort: mediaPortValid.value ? Number(mediaPort.value) : undefined,
   })
+})
+
+watch(labOutputDevice, (device) => {
+  const settings = readLabSettings()
+  writeLabSettings({ ...settings, labOutputDevice: device ?? undefined })
 })
 
 function clearControl() {
@@ -390,19 +414,44 @@ async function refresh() {
   message.value = null
   try {
     if (!window.__TAURI__) throw new Error('Desktop probe unavailable')
-    const selectedIndex = labOutput.value !== '' && labOutput.value !== 'unavailable' ? Number(labOutput.value) : null
+    const selectedIndex = loaded.value && labOutput.value !== '' && labOutput.value !== 'unavailable' ? Number(labOutput.value) : null
     const snapshot = await window.__TAURI__.core.invoke<{ generation: number; devices: OutputDevice[]; selectedIndex?: number | null }>('probe_outputs', { generation: generation.value, selectedIndex })
     generation.value = snapshot.generation
     devices.value = snapshot.devices
-    if (selectedIndex !== null) {
+    if (!loaded.value && labOutputDevice.value) {
+      const matches = snapshot.devices.flatMap((device, index) =>
+        device.label === labOutputDevice.value?.label &&
+        device.sampleRateHz === labOutputDevice.value?.sampleRateHz &&
+        device.channels === labOutputDevice.value?.channels &&
+        device.sampleRateHz !== null
+          ? [index]
+          : [],
+      )
+      if (matches.length === 1) {
+        labOutput.value = String(matches[0])
+      } else {
+        labOutputDevice.value = null
+        labOutput.value = 'unavailable'
+      }
+    } else if (!loaded.value && labOutput.value !== '' && labOutput.value !== 'unavailable') {
+      labOutput.value = 'unavailable'
+    } else if (selectedIndex !== null) {
       const restored = snapshot.selectedIndex
-      labOutput.value = restored != null && snapshot.devices[restored]?.sampleRateHz != null ? String(restored) : 'unavailable'
+      if (restored != null && snapshot.devices[restored]?.sampleRateHz != null) {
+        labOutput.value = String(restored)
+      } else {
+        labOutputDevice.value = null
+        labOutput.value = 'unavailable'
+      }
     }
     loaded.value = true
   } catch {
     devices.value = []
     loaded.value = false
-    if (labOutput.value !== '') labOutput.value = 'unavailable'
+    if (labOutput.value !== '') {
+      labOutputDevice.value = null
+      labOutput.value = 'unavailable'
+    }
     error.value = 'Could not inspect output devices. Try refreshing.'
   } finally {
     busy.value = false
