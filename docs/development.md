@@ -172,6 +172,9 @@ default port 39093 for a direct connection. Android's **Desktop UDP port** is
 independent and defaults to 39093; set it to the relay's listen port or the
 listener's media port for a direct connection. Changing either setting does not
 configure the other endpoint.
+The probe shows the running listener's configured UDP port separately from the
+settings for its next start, including after the probe view is reopened. This
+is the requested port, not a connectivity or successful-bind check.
 For the paired capture instrumentation, pass `-e mediaPort 39094` when testing
 a direct listener started with `--media-port 39094`; omit it for the default.
 This argument applies to `PairedCaptureTest`, which drives the interactive lab

@@ -30,7 +30,7 @@ interface LabMetrics {
   playout: 'fixed' | 'adaptive' | null
   adaptive: { target: number; min: number; max: number; jitterMs: number; gated: string; forced: string; resets: string } | null
 }
-interface LabSnapshot { running: boolean; sessionActive: boolean; status: string; invitation: string | null; events?: string[]; metrics: LabMetrics | null; signal?: { decoded: number; peak: number | null } | null; signalStale?: boolean; volume: number | null; muted: boolean | null }
+interface LabSnapshot { running: boolean; sessionActive: boolean; status: string; invitation: string | null; events?: string[]; metrics: LabMetrics | null; signal?: { decoded: number; peak: number | null } | null; signalStale?: boolean; volume: number | null; muted: boolean | null; mediaPort?: number | null }
 const lab = ref<LabSnapshot>({ running: false, sessionActive: false, status: 'Checking listener…', invitation: null, metrics: null, volume: null, muted: null })
 const invitationQr = ref<string | null>(null)
 const invitationQrError = ref(false)
@@ -465,6 +465,7 @@ onBeforeUnmount(() => { disposed = true; labRequest++; clearTimeout(timer); clea
       <h2 id="lab-title">Paired audio lab</h2>
       <p class="preview-note">Uses a public test invitation. Use only on a controlled network; this is not product pairing.</p>
       <p v-if="restoredLab" class="preview-note">Listener settings below apply to the next start; the running listener may use different settings.</p>
+      <p v-if="lab.running && lab.mediaPort != null" class="preview-note">Running listener UDP port: {{ lab.mediaPort }}</p>
       <label for="lab-output">Playback output</label>
       <select id="lab-output" v-model="labOutput" :disabled="lab.running || labBusy || busy">
         <option value="">System default output</option>
@@ -483,7 +484,7 @@ onBeforeUnmount(() => { disposed = true; labRequest++; clearTimeout(timer); clea
       <p class="preview-note">The suggestion follows the current route to Android; it does not verify connectivity.</p>
       <label for="lab-media-port">Receiver UDP port</label>
       <input id="lab-media-port" v-model="mediaPort" inputmode="numeric" maxlength="5" :disabled="lab.running || labBusy" :aria-invalid="!mediaPortValid" aria-describedby="lab-media-port-help" />
-      <p id="lab-media-port-help" class="preview-note">For direct capture, set Android's Desktop UDP port to this value. With a relay, use its forwarding port here and its listen port on Android.</p>
+      <p id="lab-media-port-help" class="preview-note">{{ lab.running ? "For direct capture, use the running listener UDP port on Android. With a relay, use its listen port on Android." : "For direct capture, set Android's Desktop UDP port to this value. With a relay, use its forwarding port here and its listen port on Android." }}</p>
       <p v-if="!mediaPortValid" class="command-error" role="alert">Enter a receiver UDP port from 1 to 65535.</p>
       <label for="lab-buffer">Startup buffer</label>
       <select id="lab-buffer" v-model.number="startupBufferMs" :disabled="lab.running || labBusy">

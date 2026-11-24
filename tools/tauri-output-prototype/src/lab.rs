@@ -24,6 +24,7 @@ pub struct LabSnapshot {
     pub volume: Option<u8>,
     pub muted: Option<bool>,
     pub session_active: bool,
+    pub media_port: Option<u16>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -76,6 +77,7 @@ impl Default for LabSnapshot {
             volume: None,
             muted: None,
             session_active: false,
+            media_port: None,
         }
     }
 }
@@ -211,6 +213,7 @@ impl Lab {
             volume: None,
             muted: None,
             session_active: false,
+            media_port: Some(media_port),
         };
         Ok(self.snapshot.clone())
     }
@@ -230,6 +233,7 @@ impl Lab {
                     self.snapshot.volume = None;
                     self.snapshot.muted = None;
                     self.snapshot.session_active = false;
+                    self.snapshot.media_port = None;
                     self.snapshot.signal = None;
                     self.signal_received_at = None;
                     self.snapshot.status = "Listener exited. Rebuild it and check the selected output device and whether port 47610 is in use.".into();
@@ -262,6 +266,7 @@ impl Lab {
         self.snapshot.volume = None;
         self.snapshot.muted = None;
         self.snapshot.session_active = false;
+        self.snapshot.media_port = None;
         self.snapshot.signal = None;
         self.snapshot.signal_stale = false;
         self.snapshot.clone()
@@ -1150,8 +1155,10 @@ mod tests {
         let output = sonimesh_platform::CpalOutput::new();
         let device = output.default_device_probe().unwrap().device.id;
         let mut lab = Lab::default();
-        lab.start("127.0.0.1", Some(device.as_str()), 40, false, 39094)
+        let started = lab
+            .start("127.0.0.1", Some(device.as_str()), 40, false, 39094)
             .unwrap();
+        assert_eq!(started.media_port, Some(39094));
         let deadline = Instant::now() + Duration::from_secs(10);
         let snapshot = loop {
             let snapshot = lab.refresh();
@@ -1161,6 +1168,7 @@ mod tests {
             std::thread::sleep(Duration::from_millis(25));
         };
         assert!(snapshot.running, "{}", snapshot.status);
+        assert_eq!(snapshot.media_port, Some(39094));
         assert!(
             snapshot.invitation.is_some(),
             "listener did not publish an invitation"
@@ -1196,6 +1204,7 @@ mod tests {
         assert!(lab.start("127.0.0.1", None, 60, false, 39093).is_err());
         let stopped = lab.stop();
         assert!(!stopped.running);
+        assert_eq!(stopped.media_port, None);
         assert!(stopped.invitation.is_none());
         assert!(
             stopped
@@ -1210,10 +1219,12 @@ mod tests {
             .unwrap();
         assert!(restarted.events.is_empty());
         assert!(restarted.metrics.is_none());
+        assert_eq!(restarted.media_port, Some(39093));
         let deadline = Instant::now() + Duration::from_secs(10);
         while lab.refresh().running && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(25));
         }
         assert!(!lab.refresh().running, "unavailable device must fail");
+        assert_eq!(lab.refresh().media_port, None);
     }
 }
