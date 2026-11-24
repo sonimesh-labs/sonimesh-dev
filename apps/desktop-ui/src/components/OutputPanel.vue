@@ -84,7 +84,7 @@ const displayStatus = computed<DisplayStatus>(() => {
         <p class="eyebrow">{{ preview ? 'Output preview' : receiverAvailable ? 'Listening output' : 'Windows output' }}</p>
         <h2 id="output-heading">{{ preview ? 'Simulated output' : receiverAvailable ? 'Where sound lands' : 'Preferred output' }}</h2>
         <p v-if="preview" class="preview-note">No hardware is inspected or changed.</p>
-        <p v-else-if="!receiverAvailable" class="preview-note">Selected for this app session.</p>
+        <p v-else-if="!receiverAvailable" class="preview-note">Explicit output choices are remembered for this app.</p>
       </div>
     </div>
 

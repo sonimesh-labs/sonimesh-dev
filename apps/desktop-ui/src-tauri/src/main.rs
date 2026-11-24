@@ -1,18 +1,26 @@
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
 };
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sonimesh_platform::{
     AudioOutput, CpalDeviceProbe, CpalOutput, MAX_CALLBACK_FRAMES, OutputDeviceId, RenderSource,
 };
 
-#[derive(Default)]
 struct ShellState {
     output: CpalOutput,
     selected_output_id: Option<String>,
+    selection_path: PathBuf,
     test_tone_running: Arc<AtomicBool>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct OutputSelectionPreference {
+    selected_output_id: String,
 }
 
 #[derive(Serialize)]
@@ -234,7 +242,9 @@ fn desktop_select_output(
         .into_iter()
         .map(OutputDevice::from)
         .collect::<Vec<_>>();
-    state.selected_output_id = Some(select_available_output(&device_id, &inventory)?);
+    let selected_output_id = select_available_output(&device_id, &inventory)?;
+    save_selected_output(&state.selection_path, &selected_output_id)?;
+    state.selected_output_id = Some(selected_output_id);
     DesktopSnapshot::from_state(&mut state)
 }
 
@@ -374,9 +384,42 @@ fn retain_available_output(selected_id: Option<&str>, devices: &[OutputDevice]) 
         .map(|device| device.id.clone())
 }
 
+fn load_selected_output(path: &Path) -> Option<String> {
+    fs::read(path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<OutputSelectionPreference>(&bytes).ok())
+        .map(|preference| preference.selected_output_id)
+}
+
+fn save_selected_output(path: &Path, device_id: &str) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| "The output settings path is invalid.".to_owned())?;
+    fs::create_dir_all(parent)
+        .map_err(|error| format!("Could not create output settings: {error}"))?;
+    let preference = OutputSelectionPreference {
+        selected_output_id: device_id.to_owned(),
+    };
+    let bytes = serde_json::to_vec(&preference)
+        .map_err(|error| format!("Could not encode output settings: {error}"))?;
+    fs::write(path, bytes).map_err(|error| format!("Could not save output settings: {error}"))
+}
+
 fn main() {
     tauri::Builder::default()
-        .manage(Mutex::new(ShellState::default()))
+        .setup(|app| {
+            use tauri::Manager;
+
+            let selection_path = app.path().app_config_dir()?.join("output-selection.json");
+            let selected_output_id = load_selected_output(&selection_path);
+            app.manage(Mutex::new(ShellState {
+                output: CpalOutput::new(),
+                selected_output_id,
+                selection_path,
+                test_tone_running: Arc::new(AtomicBool::new(false)),
+            }));
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             desktop_snapshot,
             desktop_select_output,
@@ -389,14 +432,34 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::{
-        DesktopCapabilities, DesktopSnapshot, OutputDevice, OutputTestTone,
-        retain_available_output, select_available_output,
+        DesktopCapabilities, DesktopSnapshot, OutputDevice, OutputTestTone, load_selected_output,
+        retain_available_output, save_selected_output, select_available_output,
     };
     use sonimesh_platform::RenderSource;
     use std::sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
     };
+
+    #[test]
+    fn output_selection_preference_persists_and_ignores_invalid_data() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!(
+            "sonimesh-output-selection-{}-{unique}",
+            std::process::id()
+        ));
+        let path = directory.join("output-selection.json");
+
+        save_selected_output(&path, "device-a").unwrap();
+        assert_eq!(load_selected_output(&path).as_deref(), Some("device-a"));
+
+        std::fs::write(&path, b"{").unwrap();
+        assert_eq!(load_selected_output(&path), None);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 
     #[test]
     fn output_selection_requires_an_id_from_the_current_inventory() {

@@ -1446,6 +1446,11 @@ injectable `TauriDesktopBridge` only maps low-rate commands to a shell-provided
 realtime callbacks. The Windows Tauri shell exposes a one-shot **Test output**
 command backed by the selected CPAL endpoint; this verifies that the callback
 rendered the bounded tone without proving that speakers are audible to a person.
+The shell saves an explicitly selected output ID in its Tauri app configuration
+directory and restores it at launch when it is still present. Missing or invalid
+settings use the default endpoint; a missing selected endpoint falls back to the
+current default or first available endpoint. This preference does not change
+Windows' system default output.
 The shell-neutral `DesktopControlOwner` now provides the
 low-rate command owner for lifecycle, output, stream, and diagnostics actions;
 the live shell currently binds only output inventory, selection, and test tone.

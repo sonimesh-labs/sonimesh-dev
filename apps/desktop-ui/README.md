@@ -78,12 +78,14 @@ through this adapter so the UI cannot mistake test controls for receiver
 operations.
 
 On Windows, `npm run desktop` starts the Tauri shell after building the UI. The
-current shell reads the live CPAL/WASAPI output inventory and retains the
-selected output for the app session. **Test output** plays a short, low-level
+current shell reads the live CPAL/WASAPI output inventory and restores the
+last explicitly selected output from the app configuration directory.
+**Test output** plays a short, low-level
 tone through the selected endpoint. Selecting an endpoint does not change
 Windows' default device. If a selected endpoint disappears, refreshing the
 inventory selects the current default endpoint, falling back to the first
-available endpoint. Pairing, receiving, stream controls, and live diagnostics
+available endpoint; an unreadable settings file uses the same default selection.
+Pairing, receiving, stream controls, and live diagnostics
 remain disabled until their runtime owners are connected. The standalone Tauri shell
 currently requires Rust 1.88 because of its resolved Windows build dependencies;
 the main workspace remains on Rust 1.85.
