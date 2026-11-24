@@ -371,7 +371,7 @@ class CaptureService : Service() {
                     mainHandler.post {
                         if (!teardownGate.isTeardownStarted()) {
                             CaptureStateStore.publishEvidence()
-                            updateForegroundDuration()
+                            updateForegroundNotification()
                         }
                     }
                 }
@@ -380,6 +380,7 @@ class CaptureService : Service() {
                         mainHandler.post {
                             if (!teardownGate.isTeardownStarted()) {
                                 CaptureStateStore.publishNoCapturableAudio(format)
+                                updateForegroundNotification()
                             }
                         }
                     }
@@ -387,6 +388,7 @@ class CaptureService : Service() {
                         mainHandler.post {
                             if (!teardownGate.isTeardownStarted()) {
                                 CaptureStateStore.publishCapturing(format)
+                                updateForegroundNotification()
                             }
                         }
                     }
@@ -412,7 +414,7 @@ class CaptureService : Service() {
         val builder = NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentTitle(getString(R.string.capture_notification_title))
-            .setContentText(getString(R.string.capture_notification_text))
+            .setContentText(getString(R.string.capture_notification_checking))
             .setSubText(getString(R.string.capture_notification_duration, 0))
             .setContentIntent(openActivityPendingIntent())
             .setOngoing(true)
@@ -433,10 +435,21 @@ class CaptureService : Service() {
         )
     }
 
-    private fun updateForegroundDuration() {
+    private fun updateForegroundNotification() {
         val builder = notificationBuilder ?: return
         val manager = notificationManager ?: return
-        val seconds = CaptureStateStore.evidence.snapshot(SystemClock.elapsedRealtime()).captureDurationMillis / 1_000
+        val state = CaptureStateStore.state.value
+        val text = when (state.status) {
+            is CaptureStatus.NoCapturableAudio -> R.string.capture_notification_no_signal
+            is CaptureStatus.Capturing -> if (state.evidence.capturedFrames > state.evidence.silentFrames) {
+                R.string.capture_notification_signal
+            } else {
+                R.string.capture_notification_checking
+            }
+            else -> return
+        }
+        val seconds = state.evidence.captureDurationMillis / 1_000
+        builder.setContentText(getString(text))
         builder.setSubText(getString(R.string.capture_notification_duration, seconds))
         manager.notify(NOTIFICATION_ID, builder.build())
     }

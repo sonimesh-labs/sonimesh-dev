@@ -66,6 +66,9 @@ immediately after selecting the usage to check that the selection reaches the
 service without waiting for a redraw. On 2026-11-23 it
 passed twice on an API 37 x86_64 emulator; this is not a physical-device or
 source-app compatibility claim. CI builds the test APK but does not run it.
+On 2026-11-24, the same emulator test also checked that the capture notification
+changes between no capturable audio and observed signal for each usage. The
+notification reports a signal observation, not the cause of silence.
 
 ### Android Opus interoperability lab
 

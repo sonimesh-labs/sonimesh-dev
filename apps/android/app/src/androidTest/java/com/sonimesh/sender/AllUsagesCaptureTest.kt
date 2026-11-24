@@ -100,12 +100,18 @@ class AllUsagesCaptureTest {
                     assertTrue("capture did not return to silence before usage $usage", waitUntil(8_000) {
                         CaptureStateStore.state.value.status is CaptureStatus.NoCapturableAudio
                     })
+                    assertTrue("notification did not report the absence of capturable audio", waitUntil(8_000) {
+                        captureNotificationText() == "No capturable audio detected"
+                    })
                     val before = nonSilentFrames()
                     val track = tone(usage)
                     try {
                         track.play()
                         assertTrue("no captured signal for usage $usage", waitUntil(8_000) {
                             nonSilentFrames() - before >= 2_000
+                        })
+                        assertTrue("notification did not report the captured signal", waitUntil(8_000) {
+                            captureNotificationText() == "Audio signal observed"
                         })
                     } finally {
                         track.stop()
@@ -127,6 +133,11 @@ class AllUsagesCaptureTest {
         val evidence = CaptureStateStore.state.value.evidence
         return evidence.capturedFrames - evidence.silentFrames
     }
+
+    private fun captureNotificationText(): String? =
+        InstrumentationRegistry.getInstrumentation().targetContext.getSystemService(NotificationManager::class.java)
+            .activeNotifications.firstOrNull { it.id == 1001 }?.notification?.extras
+            ?.getCharSequence(Notification.EXTRA_TEXT)?.toString()
 
     private fun tone(usage: Int): AudioTrack {
         val samples = ShortArray(4_800) { index -> (sin(2.0 * PI * 440 * index / 48_000) * 12_000).toInt().toShort() }

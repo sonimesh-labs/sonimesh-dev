@@ -59,6 +59,11 @@ been accepted. It owns:
 - service state publication to the activity through a bounded, low-rate state
   model.
 
+The capture-only foreground notification also presents the same checking,
+signal-observed, or no-capturable-audio state as the activity, alongside elapsed
+capture time. This is a signal observation, not an explanation of source policy;
+the activity remains available for the fuller diagnostic context.
+
 The latest observed capture format remains in the process-local evidence after
 stop or failure, so an operator can review or share it with the final counters.
 A fresh capture request clears it with the previous evidence. It is not persisted
