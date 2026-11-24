@@ -714,17 +714,23 @@ class LabActivity : Activity() {
         val samples = ShortArray(48_000 * 2) { index ->
             (sin(2.0 * PI * (index / 2 % 48) / 48.0) * 3_000).toInt().toShort()
         }
-        val track = AudioTrack.Builder()
-            .setAudioAttributes(AudioAttributes.Builder().setUsage((LabStatus.captureUsage ?: selectedUsage()).usages.first()).build())
-            .setAudioFormat(AudioFormat.Builder().setSampleRate(48_000)
-                .setEncoding(AudioFormat.ENCODING_PCM_16BIT).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build())
-            .setTransferMode(AudioTrack.MODE_STATIC)
-            .setBufferSizeInBytes(samples.size * Short.SIZE_BYTES)
-            .build()
-        track.write(samples, 0, samples.size)
-        track.setLoopPoints(0, 48_000, -1)
-        track.play()
-        tone = track
+        var track: AudioTrack? = null
+        try {
+            track = AudioTrack.Builder()
+                .setAudioAttributes(AudioAttributes.Builder().setUsage((LabStatus.captureUsage ?: selectedUsage()).usages.first()).build())
+                .setAudioFormat(AudioFormat.Builder().setSampleRate(48_000)
+                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build())
+                .setTransferMode(AudioTrack.MODE_STATIC)
+                .setBufferSizeInBytes(samples.size * Short.SIZE_BYTES)
+                .build()
+            check(track.write(samples, 0, samples.size) == samples.size)
+            track.setLoopPoints(0, 48_000, -1)
+            track.play()
+            tone = track
+        } catch (_: RuntimeException) {
+            track?.release()
+            LabStatus.publish("Unable to play test tone on this device.")
+        }
     }
 
     override fun onRetainNonConfigurationInstance(): Any? = tone

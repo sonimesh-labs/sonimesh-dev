@@ -7,6 +7,7 @@ import android.view.ViewGroup
 import android.widget.Button
 import android.widget.Spinner
 import android.widget.Switch
+import android.widget.TextView
 import androidx.test.core.app.ActivityScenario
 import com.sonimesh.sender.encoder.OpusBitrate
 import org.junit.Assert.assertEquals
@@ -37,6 +38,22 @@ class LabCaptureUsageUiTest {
         } finally {
             androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().runOnMainSync {
                 LabStatus.serviceFinished()
+            }
+        }
+    }
+
+    @Test
+    fun testToneFailureLeavesControlReadyForRetry() {
+        ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                val root = activity.window.decorView
+                val tone = findButton(root, "Start test tone")
+                tone.performClick()
+                if (tone.text.toString() == "Start test tone") {
+                    assertTrue(findStatus(root).text.toString().contains("Unable to play test tone"))
+                } else {
+                    findButton(root, "Stop test tone").performClick()
+                }
             }
         }
     }
@@ -178,6 +195,17 @@ class LabCaptureUsageUiTest {
             }
         }
         error("mute switch not found")
+    }
+
+    private fun findStatus(view: View): TextView {
+        if (view is TextView && view.text.toString().startsWith("Status:")) return view
+        if (view is ViewGroup) {
+            for (index in 0 until view.childCount) {
+                val found = runCatching { findStatus(view.getChildAt(index)) }.getOrNull()
+                if (found != null) return found
+            }
+        }
+        error("status not found")
     }
 
     private fun findSpinner(view: View, description: String): Spinner {
