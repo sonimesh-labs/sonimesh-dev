@@ -417,14 +417,31 @@ struct MediaActivity {
     packets: u64,
     last_packet: Option<Instant>,
     last_reported: Option<&'static str>,
+    gaps: u64,
+    longest_gap: Duration,
 }
 
 impl MediaActivity {
     fn observe(&mut self, now: Instant, packets: u64) {
         if packets > self.packets {
+            if let Some(last) = self.last_packet {
+                let gap = now.duration_since(last);
+                if gap >= MEDIA_IDLE {
+                    self.gaps = self.gaps.saturating_add(1);
+                    self.longest_gap = self.longest_gap.max(gap);
+                }
+            }
             self.last_packet = Some(now);
         }
         self.packets = packets;
+    }
+
+    fn gap_summary(&self, now: Instant) -> (u64, Duration) {
+        let trailing = self.last_packet.map(|last| now.duration_since(last));
+        match trailing.filter(|gap| *gap >= MEDIA_IDLE) {
+            Some(gap) => (self.gaps.saturating_add(1), self.longest_gap.max(gap)),
+            None => (self.gaps, self.longest_gap),
+        }
     }
 
     fn status(&self, now: Instant) -> &'static str {
@@ -1103,6 +1120,11 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                             let snapshot = metrics.snapshot();
                             let now = Instant::now();
                             activity.observe(now, snapshot.authenticated_packets);
+                            let (gaps, longest_gap) = activity.gap_summary(now);
+                            lab_println!(
+                                "RESULT media_gaps {gaps} longest_gap_ms {}",
+                                longest_gap.as_millis()
+                            );
                             if options.status {
                                 lab_println!(
                                     "{}",
@@ -2377,6 +2399,32 @@ mod tests {
         assert_eq!(
             activity.changed(now + Duration::from_secs(23)),
             Some("receiving")
+        );
+    }
+
+    #[test]
+    fn media_gap_summary_counts_resumed_and_ongoing_gaps_once() {
+        let start = Instant::now();
+        let mut activity = MediaActivity::default();
+        activity.observe(start, 0);
+        assert_eq!(
+            activity.gap_summary(start + Duration::from_secs(20)),
+            (0, Duration::ZERO)
+        );
+        activity.observe(start + Duration::from_secs(20), 1);
+        activity.observe(start + Duration::from_secs(21), 2);
+        assert_eq!(
+            activity.gap_summary(start + Duration::from_secs(23)),
+            (1, Duration::from_secs(2))
+        );
+        activity.observe(start + Duration::from_secs(24), 3);
+        assert_eq!(
+            activity.gap_summary(start + Duration::from_secs(25)),
+            (1, Duration::from_secs(3))
+        );
+        assert_eq!(
+            activity.gap_summary(start + Duration::from_secs(28)),
+            (2, Duration::from_secs(4))
         );
     }
 

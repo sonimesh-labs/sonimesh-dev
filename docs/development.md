@@ -501,6 +501,14 @@ packet, a packet received within the last two seconds, and a longer gap after
 reception. State changes are reported as the listener observes them; the probe
 polls its listener snapshot once per second. A gap can have several causes and does not by itself establish that
 the sender, network, or listener is responsible. Older listeners omit it.
+On a normal stop, the listener also reports the number and longest duration of
+observed gaps of at least two seconds between increases in the authenticated
+packet counter. The listener polls that counter, so these are not exact packet
+arrival timestamps.
+The final gap ends when the stop snapshot is taken, after the tail drain; time
+before the first packet is excluded. These are listener observations, not a
+measurement of audible interruptions, and abnormal termination has no final
+summary.
 On 2026-11-23, an API 37 emulator and software listener reported 7 late packets
 and 24 resynchronization drops in both the final status and result; 174 frames
 were decoded. This does not characterize physical WLAN or audible playback.
