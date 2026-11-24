@@ -844,7 +844,9 @@ reach. The listener binds TCP 47610 on all IPv4 interfaces and uses UDP 39093;
 it plays through the selected output, or the default output when no device is
 selected. Refreshing the device list retains an explicitly selected output when
 the same endpoint remains available. If it disappears or its format is unavailable,
-choose another output or the system default before starting the listener. On
+choose another output or the system default before starting the listener. This
+reselection requirement persists when the probe view is reopened if local storage
+is available; an unavailable selection does not silently become the system default. On
 2026-11-23, an explicitly selected endpoint remained selected after a refresh in
 the Windows Tauri probe. This check did not cover device removal, reordered
 devices, or audible playback.

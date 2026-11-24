@@ -517,6 +517,30 @@ describe('desktop output probe', () => {
     expect(invoke).not.toHaveBeenCalledWith('start_lab', expect.anything())
     wrapper.unmount()
   })
+  it.each(['format unavailable', 'refresh failed'])('retains the reselection requirement after reopening when %s', async (failure) => {
+    const device = { label: 'Headphones', sampleRateHz: 48_000, channels: 2, isDefault: false }
+    const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [device], selectedIndex: null })
+    if (failure === 'refresh failed') invoke.mockRejectedValueOnce(new Error('unavailable'))
+    else invoke.mockResolvedValueOnce({ generation: 2, devices: [{ ...device, sampleRateHz: null }], selectedIndex: 0 })
+    invoke.mockResolvedValueOnce({ generation: 3, devices: [device], selectedIndex: null })
+    window.__TAURI__ = { core: { invoke } }
+    const first = mountStoppedProbe()
+    await flushPromises()
+    await first.get('#lab-output').setValue('0')
+    await first.findAll('button').find(button => button.text() === 'Refresh devices')!.trigger('click')
+    await flushPromises()
+    first.unmount()
+
+    const reopened = mountStoppedProbe()
+    await flushPromises()
+    expect((reopened.get('#lab-output').element as HTMLSelectElement).value).toBe('unavailable')
+    const start = reopened.findAll('button').find(button => button.text() === 'Start listener')!
+    expect(start.attributes('disabled')).toBeDefined()
+    await reopened.get('#lab-output').setValue('')
+    expect(start.attributes('disabled')).toBeUndefined()
+    expect(JSON.parse(localStorage.getItem('sonimesh.outputProbe.labSettings')!).labOutput).toBe('')
+    reopened.unmount()
+  })
   it('starts and stops the lab listener with the specified control address', async () => {
     const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [] })
       .mockResolvedValueOnce({ running: true, status: 'Starting listener…', invitation: null })
@@ -964,14 +988,14 @@ describe('desktop output probe', () => {
     wrapper.unmount()
   })
 
-  it('restores bounded lab settings and selected output from local storage', async () => {
+  it('restores lab settings and requires reselection when the saved device snapshot is stale', async () => {
     localStorage.setItem('sonimesh.outputProbe.labSettings', JSON.stringify({
       labHost: '192.168.1.7', androidHost: '192.168.1.22', labOutput: '1', startupBufferMs: 100, adaptive: true, mediaPort: 39094,
     }))
     const invoke = vi.fn().mockResolvedValueOnce({ generation: 3, devices: [
       { label: 'Default', sampleRateHz: 48_000, channels: 2, isDefault: true },
       { label: 'USB', sampleRateHz: 48_000, channels: 2, isDefault: false },
-    ], selectedIndex: 1 })
+    ], selectedIndex: null })
     window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
     const wrapper = mountStoppedProbe()
     await flushPromises()
@@ -980,7 +1004,7 @@ describe('desktop output probe', () => {
     expect((wrapper.get('#lab-buffer').element as HTMLSelectElement).value).toBe('100')
     expect((wrapper.get('#lab-media-port').element as HTMLInputElement).value).toBe('39094')
     expect((wrapper.get('#lab-playout').element as HTMLSelectElement).value).toBe('true')
-    expect((wrapper.get('#lab-output').element as HTMLSelectElement).value).toBe('1')
+    expect((wrapper.get('#lab-output').element as HTMLSelectElement).value).toBe('unavailable')
     expect(invoke).toHaveBeenCalledWith('probe_outputs', { generation: 0, selectedIndex: 1 })
     wrapper.unmount()
   })

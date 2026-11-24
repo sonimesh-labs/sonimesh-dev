@@ -105,7 +105,7 @@ function readLabSettings(): StoredLabSettings {
     return {
       labHost: typeof parsed.labHost === 'string' && parsed.labHost.length <= 64 ? parsed.labHost : undefined,
       androidHost: typeof parsed.androidHost === 'string' && parsed.androidHost.length <= 64 ? parsed.androidHost : undefined,
-      labOutput: parsed.labOutput === '' || (typeof parsed.labOutput === 'string' && /^\d+$/.test(parsed.labOutput)) ? parsed.labOutput as string : undefined,
+      labOutput: parsed.labOutput === '' || parsed.labOutput === 'unavailable' || (typeof parsed.labOutput === 'string' && /^\d+$/.test(parsed.labOutput)) ? parsed.labOutput as string : undefined,
       startupBufferMs: typeof parsed.startupBufferMs === 'number' && startupBufferChoices.includes(parsed.startupBufferMs) ? parsed.startupBufferMs : undefined,
       adaptive: typeof parsed.adaptive === 'boolean' ? parsed.adaptive : undefined,
       mediaPort: typeof parsed.mediaPort === 'number' && Number.isInteger(parsed.mediaPort) && parsed.mediaPort >= 1 && parsed.mediaPort <= 65535 ? parsed.mediaPort : undefined,
@@ -241,7 +241,7 @@ watch([labHost, androidHost, labOutput, startupBufferMs, adaptive, mediaPort], (
   writeLabSettings({
     labHost: labHost.value,
     androidHost: androidHost.value,
-    labOutput: labOutput.value === 'unavailable' ? '' : labOutput.value,
+    labOutput: labOutput.value,
     startupBufferMs: startupBufferMs.value,
     adaptive: adaptive.value,
     mediaPort: mediaPortValid.value ? Number(mediaPort.value) : undefined,
