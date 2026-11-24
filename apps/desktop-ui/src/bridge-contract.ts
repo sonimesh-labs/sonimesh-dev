@@ -5,6 +5,8 @@ export interface DesktopBridge {
   startStream(): Promise<DesktopSnapshot>
   stopStream(): Promise<DesktopSnapshot>
   selectOutput(deviceId: string): Promise<DesktopSnapshot>
+  /** Plays a short test tone through the currently selected desktop output. */
+  testOutput(): Promise<void>
   /** Publishes a bounded linear gain target; out-of-range or non-finite values are ignored. */
   setGain(gain: number): Promise<DesktopSnapshot>
   /** Publishes the per-stream mute flag. */

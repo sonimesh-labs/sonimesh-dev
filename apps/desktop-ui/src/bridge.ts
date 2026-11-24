@@ -130,6 +130,10 @@ export class PreviewDesktopBridge implements DesktopBridge {
     return this.copy()
   }
 
+  async testOutput(): Promise<void> {
+    throw new Error('Output testing is available only in the desktop shell')
+  }
+
   async setGain(gain: number): Promise<DesktopSnapshot> {
     if (Number.isFinite(gain) && gain >= 0 && gain <= 1) {
       this.snapshotState.gain = gain

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Activity, Check, CircleAlert, Headphones, Volume2, VolumeX } from '@lucide/vue'
+import { Activity, Check, CircleAlert, Headphones, Play, Volume2, VolumeX } from '@lucide/vue'
 
 import type { OutputDevice, OutputHealth, OutputSnapshot } from '../types'
 
@@ -14,16 +14,21 @@ const props = withDefaults(defineProps<{
   preview?: boolean
   receiverAvailable?: boolean
   streamControlsAvailable?: boolean
+  testToneAvailable?: boolean
+  testToneStatus?: string | null
 }>(), {
   preview: false,
   receiverAvailable: true,
   streamControlsAvailable: true,
+  testToneAvailable: false,
+  testToneStatus: null,
 })
 
 const emit = defineEmits<{
   select: [id: string]
   gain: [gain: number]
   mute: [muted: boolean]
+  testTone: []
 }>()
 
 const selectedDevice = computed(() => props.devices.find((device) => device.id === props.selectedId) ?? null)
@@ -111,6 +116,14 @@ const displayStatus = computed<DisplayStatus>(() => {
           {{ device.label }}{{ device.isDefault ? ' (default)' : '' }}
         </option>
       </select>
+    </div>
+
+    <div v-if="testToneAvailable" class="output-test-control">
+      <button class="secondary-action output-test-button" type="button" :disabled="busy || !selectedId" @click="emit('testTone')">
+        <Play :size="16" aria-hidden="true" />
+        Test output
+      </button>
+      <p v-if="testToneStatus" class="output-test-status" role="status">{{ testToneStatus }}</p>
     </div>
 
     <div class="volume-block">

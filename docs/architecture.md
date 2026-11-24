@@ -127,6 +127,9 @@ An isolated Tauri desktop probe can display Windows output devices and their
 default formats and play an explicitly requested short test tone through one
 selected endpoint. It is a platform experiment, separate from the synthetic
 receiver preview and from a desktop session or system output selection.
+The Windows output-setup shell also provides a short test tone for its selected
+endpoint. This confirms callback generation and stream completion only; it does
+not prove an audible result.
 
 The first product goal is not synchronized multi-device playback, recording of
 calls, remote desktop, or a universal Bluetooth receiver. It is a practical

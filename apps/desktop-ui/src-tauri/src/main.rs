@@ -1,12 +1,18 @@
-use std::sync::Mutex;
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
+};
 
 use serde::Serialize;
-use sonimesh_platform::{CpalDeviceProbe, CpalOutput};
+use sonimesh_platform::{
+    AudioOutput, CpalDeviceProbe, CpalOutput, MAX_CALLBACK_FRAMES, OutputDeviceId, RenderSource,
+};
 
 #[derive(Default)]
 struct ShellState {
     output: CpalOutput,
     selected_output_id: Option<String>,
+    test_tone_running: Arc<AtomicBool>,
 }
 
 #[derive(Serialize)]
@@ -49,6 +55,7 @@ struct DesktopCapabilities {
     pairing: bool,
     stream_controls: bool,
     diagnostics: bool,
+    output_test: bool,
 }
 
 #[derive(Serialize)]
@@ -162,6 +169,7 @@ impl DesktopSnapshot {
                 pairing: false,
                 stream_controls: false,
                 diagnostics: false,
+                output_test: true,
             },
             preview_adapter: false,
         })
@@ -230,6 +238,126 @@ fn desktop_select_output(
     DesktopSnapshot::from_state(&mut state)
 }
 
+#[tauri::command]
+async fn desktop_test_output(state: tauri::State<'_, Mutex<ShellState>>) -> Result<(), String> {
+    let (device_id, running_guard) = {
+        let state = state.lock().map_err(|_| "Desktop state is unavailable.")?;
+        let device_id = state
+            .selected_output_id
+            .as_ref()
+            .map(|id| OutputDeviceId::new(id.clone()))
+            .ok_or_else(|| "Select an available output device first.".to_owned())?;
+        state
+            .test_tone_running
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .map_err(|_| "An output test is already running.".to_owned())?;
+        (
+            device_id,
+            TestToneRunGuard(Arc::clone(&state.test_tone_running)),
+        )
+    };
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let _running_guard = running_guard;
+        play_test_tone(&device_id)
+    })
+    .await
+    .map_err(|_| "The output test could not complete.".to_owned())?
+}
+
+struct TestToneRunGuard(Arc<AtomicBool>);
+
+impl Drop for TestToneRunGuard {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
+fn play_test_tone(device_id: &OutputDeviceId) -> Result<(), String> {
+    let mut output = CpalOutput::new();
+    let probe = output
+        .device_probe(device_id)
+        .map_err(|error| format!("Could not inspect the selected output: {error}"))?;
+    let config = probe
+        .output_config(None, MAX_CALLBACK_FRAMES)
+        .map_err(|error| format!("The selected output format is unsupported: {error}"))?;
+    let completed = Arc::new(AtomicBool::new(false));
+    output
+        .start(
+            Some(device_id),
+            config,
+            Box::new(OutputTestTone::new(
+                config.sample_rate_hz,
+                config.channels,
+                Arc::clone(&completed),
+            )),
+        )
+        .map_err(|error| format!("Could not start the selected output: {error}"))?;
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(4);
+    while !completed.load(Ordering::Acquire) && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let generated = completed.load(Ordering::Acquire);
+    let status = output.status();
+    if generated {
+        let callback_drain =
+            f64::from(status.maximum_callback_frames) / f64::from(config.sample_rate_hz);
+        std::thread::sleep(std::time::Duration::from_secs_f64(callback_drain + 0.1));
+    }
+    output.stop();
+
+    if !generated || status.callback_count == 0 || status.stream_errors > 0 {
+        return Err("The output stopped before the test tone completed.".into());
+    }
+    if status.oversized_callbacks > 0 {
+        return Err("The output requested a callback larger than the configured limit.".into());
+    }
+    Ok(())
+}
+
+struct OutputTestTone {
+    sample_rate_hz: u32,
+    channels: usize,
+    frame: u32,
+    completed: Arc<AtomicBool>,
+}
+
+impl OutputTestTone {
+    fn new(sample_rate_hz: u32, channels: u16, completed: Arc<AtomicBool>) -> Self {
+        Self {
+            sample_rate_hz,
+            channels: usize::from(channels),
+            frame: 0,
+            completed,
+        }
+    }
+}
+
+impl RenderSource for OutputTestTone {
+    fn render(&mut self, output: &mut [f32]) {
+        let duration_frames = self.sample_rate_hz * 6 / 5;
+        let fade_frames = (self.sample_rate_hz / 100).max(1);
+        for samples in output.chunks_mut(self.channels) {
+            let value = if self.frame < duration_frames {
+                let remaining = duration_frames - self.frame;
+                let envelope = (self.frame.min(remaining) as f32 / fade_frames as f32).min(1.0);
+                let phase =
+                    std::f32::consts::TAU * 440.0 * (self.frame % self.sample_rate_hz) as f32
+                        / self.sample_rate_hz as f32;
+                self.frame += 1;
+                phase.sin() * 0.03 * envelope
+            } else {
+                0.0
+            };
+            samples.fill(value);
+        }
+        if self.frame >= duration_frames {
+            self.completed.store(true, Ordering::Release);
+        }
+    }
+}
+
 fn select_available_output(device_id: &str, devices: &[OutputDevice]) -> Result<String, String> {
     devices
         .iter()
@@ -251,7 +379,8 @@ fn main() {
         .manage(Mutex::new(ShellState::default()))
         .invoke_handler(tauri::generate_handler![
             desktop_snapshot,
-            desktop_select_output
+            desktop_select_output,
+            desktop_test_output
         ])
         .run(tauri::generate_context!())
         .expect("failed to run SoniMesh desktop shell");
@@ -260,8 +389,13 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::{
-        DesktopCapabilities, DesktopSnapshot, OutputDevice, retain_available_output,
-        select_available_output,
+        DesktopCapabilities, DesktopSnapshot, OutputDevice, OutputTestTone,
+        retain_available_output, select_available_output,
+    };
+    use sonimesh_platform::RenderSource;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
     };
 
     #[test]
@@ -312,12 +446,31 @@ mod tests {
     }
 
     #[test]
+    fn output_test_tone_is_bounded_and_finishes_in_silence() {
+        let completed = Arc::new(AtomicBool::new(false));
+        let mut tone = OutputTestTone::new(48_000, 2, Arc::clone(&completed));
+        let mut samples = vec![0.0; 48_000 * 2 * 2];
+
+        tone.render(&mut samples);
+
+        assert!(completed.load(Ordering::Acquire));
+        assert!(samples.iter().all(|sample| sample.abs() <= 0.03));
+        assert_eq!(samples[0], 0.0);
+        assert!(
+            samples[48_000 * 12 / 5..]
+                .iter()
+                .all(|sample| *sample == 0.0)
+        );
+    }
+
+    #[test]
     fn output_setup_snapshot_marks_unimplemented_receiver_controls_unavailable() {
         let capabilities = DesktopCapabilities {
             receiver: false,
             pairing: false,
             stream_controls: false,
             diagnostics: false,
+            output_test: true,
         };
         let encoded = serde_json::to_value(capabilities).unwrap();
 
@@ -325,6 +478,7 @@ mod tests {
         assert_eq!(encoded["pairing"], false);
         assert_eq!(encoded["streamControls"], false);
         assert_eq!(encoded["diagnostics"], false);
+        assert_eq!(encoded["outputTest"], true);
     }
 
     #[test]
@@ -354,6 +508,7 @@ mod tests {
                 pairing: false,
                 stream_controls: false,
                 diagnostics: false,
+                output_test: true,
             },
             preview_adapter: false,
         };

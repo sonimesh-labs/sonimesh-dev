@@ -5,7 +5,7 @@ import type {
 import type { DesktopSnapshot, JitterMode } from './types'
 
 /**
- * Low-rate production adapter for the future Tauri shell.
+ * Low-rate production adapter for the Tauri shell.
  *
  * The adapter owns no state and never carries media frames. The shell owns the
  * receiver session and returns the same redacted snapshot shape used by the
@@ -28,6 +28,10 @@ export class TauriDesktopBridge implements DesktopBridge {
 
   selectOutput(deviceId: string): Promise<DesktopSnapshot> {
     return this.call('desktop_select_output', { deviceId })
+  }
+
+  testOutput(): Promise<void> {
+    return this.invoke<void>('desktop_test_output')
   }
 
   setGain(gain: number): Promise<DesktopSnapshot> {

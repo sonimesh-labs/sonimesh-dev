@@ -1,8 +1,8 @@
 # Desktop UI
 
 Vue/Vite control surface for desktop lifecycle commands. `src/bridge.ts` is the
-only frontend integration point. `TauriDesktopBridge` now provides the low-rate
-IPC adapter for the future shell: it maps receiver commands to injected Tauri
+only frontend integration point. `TauriDesktopBridge` provides the low-rate
+IPC adapter for the shell: it maps receiver commands to injected Tauri
 `invoke` calls and normalizes every returned snapshot as a live (`previewAdapter:
 false`) state. `createDesktopBridge()` selects that adapter automatically when
 the Tauri v2 global `__TAURI__.core.invoke` is present; browser builds continue
@@ -79,12 +79,12 @@ operations.
 
 On Windows, `npm run desktop` starts the Tauri shell after building the UI. The
 current shell reads the live CPAL/WASAPI output inventory and retains the
-selected output for the app session. Selecting an endpoint updates the app's
-preferred output, but does not open a playback stream or change Windows' default
-device. If a selected endpoint disappears, refreshing the inventory selects the
-current default endpoint, falling back to the first available endpoint. Pairing,
-receiving, stream controls, and live diagnostics remain
-disabled until their runtime owners are connected. The standalone Tauri shell
+selected output for the app session. **Test output** plays a short, low-level
+tone through the selected endpoint. Selecting an endpoint does not change
+Windows' default device. If a selected endpoint disappears, refreshing the
+inventory selects the current default endpoint, falling back to the first
+available endpoint. Pairing, receiving, stream controls, and live diagnostics
+remain disabled until their runtime owners are connected. The standalone Tauri shell
 currently requires Rust 1.88 because of its resolved Windows build dependencies;
 the main workspace remains on Rust 1.85.
 The browser continues to use the synthetic preview bridge.

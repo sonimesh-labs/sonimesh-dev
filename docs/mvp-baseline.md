@@ -454,11 +454,11 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   boundary, session controls, output selection, per-stream volume and mute,
   pairing-invitation state, and diagnostics presentation for packet,
   PCM-queue/refill, and resampling state; it uses in-memory preview data by
-  default and also contains an injectable Tauri IPC adapter for the future shell.
+  default and also contains an injectable Tauri IPC adapter for the desktop shell.
   The Rust app crate now also exposes a Tauri-independent `DesktopControlOwner`
   that composes synchronized snapshots, pairing lifecycle, output inventory and
   stopped-state selection, stream-local gain/mute, redacted active-stream metrics,
-  and bounded diagnostic export for a future shell command layer. Its identity-free
+  and bounded diagnostic export for a future receiver command layer. Its identity-free
   gain/mute commands resolve the unique active stream and reject zero or ambiguous
   stream state; multi-stream callers retain identity-addressed controls. It can also
   persist an export through the existing bounded `ExportStore`. A generic
@@ -466,9 +466,10 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   pipeline and executes authenticated stream actions through the same completion
   path. A standalone Tauri shell now exposes the real Windows CPAL output
   inventory and app-session output selection; selection is not persisted and
-  does not start playback or change the system default. Refreshing after the
-  selected endpoint disappears falls back to the current default or first
-  available endpoint. The shell explicitly
+  does not change the system default. A short low-level test tone can be played
+  through the selected endpoint. Refreshing after the selected endpoint
+  disappears falls back to the current default or first available endpoint.
+  The shell explicitly
   disables pairing, receiver, stream controls, and live diagnostics because it
   does not yet construct the receiver owner. No live receiver, audio, key, or
   realtime integration is connected to the desktop UI process.

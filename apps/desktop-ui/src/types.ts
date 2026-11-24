@@ -124,6 +124,7 @@ export interface DesktopSnapshot {
     pairing: boolean
     streamControls: boolean
     diagnostics: boolean
+    outputTest?: boolean
   }
   previewAdapter: boolean
 }

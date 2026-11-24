@@ -36,6 +36,42 @@ describe('OutputPanel', () => {
     expect(wrapper.get('label[for="output-device"]').text()).toBe('Change simulated output')
   })
 
+  it('only enables the output test action when the shell exposes it', async () => {
+    const wrapper = mount(OutputPanel, {
+      props: {
+        devices: [
+          { id: 'default', label: 'Speakers', sampleRateHz: 48_000, channels: 2, isDefault: true },
+        ],
+        selectedId: 'default',
+        output: outputSnapshot(),
+        gain: 1,
+        muted: false,
+        busy: false,
+        testToneAvailable: true,
+      },
+    })
+
+    await wrapper.get('.output-test-button').trigger('click')
+
+    expect(wrapper.emitted('testTone')).toHaveLength(1)
+  })
+
+  it('keeps the output test disabled until an endpoint is selected', () => {
+    const wrapper = mount(OutputPanel, {
+      props: {
+        devices: [],
+        selectedId: null,
+        output: outputSnapshot(),
+        gain: 1,
+        muted: false,
+        busy: false,
+        testToneAvailable: true,
+      },
+    })
+
+    expect((wrapper.get('.output-test-button').element as HTMLButtonElement).disabled).toBe(true)
+  })
+
   it('renders the linear gain as a percentage label', () => {
     const wrapper = mount(OutputPanel, {
       props: {

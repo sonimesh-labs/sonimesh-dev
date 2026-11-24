@@ -98,6 +98,7 @@ describe('TauriDesktopBridge', () => {
     await bridge.snapshot()
     await bridge.startStream()
     await bridge.selectOutput('speakers')
+    await bridge.testOutput()
     await bridge.setGain(0.5)
     await bridge.setMuted(true)
     await bridge.setJitterMode('stable')
@@ -110,6 +111,7 @@ describe('TauriDesktopBridge', () => {
       ['desktop_snapshot', undefined],
       ['desktop_start_stream', undefined],
       ['desktop_select_output', { deviceId: 'speakers' }],
+      ['desktop_test_output', undefined],
       ['desktop_set_gain', { gain: 0.5 }],
       ['desktop_set_muted', { muted: true }],
       ['desktop_set_jitter_mode', { mode: 'stable' }],

@@ -10,6 +10,7 @@ const desktopBridgeMock = vi.hoisted(() => ({
   revokePairing: vi.fn(),
   resetPreview: vi.fn(),
   selectOutput: vi.fn(),
+  testOutput: vi.fn(),
   setGain: vi.fn(),
   setMuted: vi.fn(),
   simulateCommandRejection: vi.fn(),
@@ -183,6 +184,7 @@ describe('App', () => {
         pairing: false,
         streamControls: false,
         diagnostics: false,
+        outputTest: true,
       },
     }
     desktopBridgeMock.snapshot.mockResolvedValueOnce(shellSnapshot)
@@ -193,9 +195,17 @@ describe('App', () => {
     expect(wrapper.get('.session-copy p').text()).toContain('not connected yet')
     expect((wrapper.get('#output-device').element as HTMLSelectElement).disabled).toBe(false)
     expect(wrapper.get('#output-device option').text()).toContain('Headphones')
+    expect((wrapper.get('.output-test-button').element as HTMLButtonElement).disabled).toBe(false)
     expect((wrapper.get('#output-volume').element as HTMLInputElement).disabled).toBe(true)
-    expect((wrapper.get('button.secondary-action').element as HTMLButtonElement).disabled).toBe(true)
+    expect((wrapper.get('.inline-actions button.secondary-action').element as HTMLButtonElement).disabled).toBe(true)
     expect(wrapper.find('#diagnostics').exists()).toBe(false)
+
+    desktopBridgeMock.testOutput.mockResolvedValueOnce(undefined)
+    await wrapper.get('.output-test-button').trigger('click')
+    await flushPromises()
+
+    expect(desktopBridgeMock.testOutput).toHaveBeenCalledOnce()
+    expect(wrapper.get('.output-test-status').text()).toBe('Test tone completed on the selected output.')
   })
   it('simulates the sender consuming the preview invitation from the pairing panel', async () => {
     desktopBridgeMock.snapshot.mockResolvedValueOnce({

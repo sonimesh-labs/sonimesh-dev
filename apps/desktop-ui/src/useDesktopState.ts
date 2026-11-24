@@ -10,9 +10,10 @@ export function useDesktopState() {
   const snapshot = ref<DesktopSnapshot | null>(null)
   const busy = ref(false)
   const error = ref<string | null>(null)
+  const outputTestStatus = ref<string | null>(null)
   let snapshotPollTimer: ReturnType<typeof setInterval> | undefined
 
-  async function run(command: () => Promise<DesktopSnapshot | undefined>) {
+  async function run(command: () => Promise<DesktopSnapshot | void>) {
     if (busy.value) return
 
     busy.value = true
@@ -32,7 +33,17 @@ export function useDesktopState() {
   const refresh = () => run(() => desktopBridge.snapshot())
   const start = () => run(() => desktopBridge.startStream())
   const stop = () => run(() => desktopBridge.stopStream())
-  const selectOutput = (id: string) => run(() => desktopBridge.selectOutput(id))
+  const selectOutput = (id: string) => {
+    outputTestStatus.value = null
+    return run(() => desktopBridge.selectOutput(id))
+  }
+  const testOutput = () => {
+    outputTestStatus.value = null
+    return run(async () => {
+      await desktopBridge.testOutput()
+      outputTestStatus.value = 'Test tone completed on the selected output.'
+    })
+  }
   const setGain = (gain: number) => run(() => desktopBridge.setGain(gain))
   const setMuted = (muted: boolean) => run(() => desktopBridge.setMuted(muted))
   const setJitterMode = (mode: JitterMode) => run(() => desktopBridge.setJitterMode(mode))
@@ -68,10 +79,12 @@ export function useDesktopState() {
     snapshot,
     busy,
     error,
+    outputTestStatus,
     refresh,
     start,
     stop,
     selectOutput,
+    testOutput,
     setGain,
     setMuted,
     setJitterMode,

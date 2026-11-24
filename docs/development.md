@@ -1443,9 +1443,12 @@ shell, receiver owner, audio, pairing, or platform capability.
 The bundled preview bridge remains the default browser implementation. The
 injectable `TauriDesktopBridge` only maps low-rate commands to a shell-provided
 `invoke` function; it does not create a receiver owner or carry audio, keys, or
-realtime callbacks. The shell-neutral `DesktopControlOwner` now provides the
+realtime callbacks. The Windows Tauri shell exposes a one-shot **Test output**
+command backed by the selected CPAL endpoint; this verifies that the callback
+rendered the bounded tone without proving that speakers are audible to a person.
+The shell-neutral `DesktopControlOwner` now provides the
 low-rate command owner for lifecycle, output, stream, and diagnostics actions;
-a live Tauri shell and its command bindings remain pending platform integration.
+the live shell currently binds only output inventory, selection, and test tone.
 Control transports can use `execute_control_action` to route negotiated and
 tokenized stream actions without duplicating start/rotate/stop dispatch logic.
 `DesktopReceiverOwner` is the next composition boundary: it stores that owner,
@@ -1466,8 +1469,8 @@ correlated wire error for an owner rejection. Completed duplicate start/stop
 requests receive status replies; pending duplicates and starts with unavailable
 or not-yet-readmitted output receive retryable errors. After recreating output,
 `DesktopReceiverOwner::recover_stream` reconnects a persisted stream to its
-owned pipeline. It is still a composition
-boundary, not a live Tauri shell or a proof of Windows audio output.
+owned pipeline. This remains a composition boundary separate from the current
+output-setup shell; it is not a proof of Windows receiver audio output.
 `DesktopReceiverScheduler` now owns that receiver owner plus an optional control
 channel, automatically retires a closed/error channel, and exposes the UDP
 `tick_media` operation through the same scheduling boundary.

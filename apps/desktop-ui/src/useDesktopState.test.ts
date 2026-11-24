@@ -11,6 +11,7 @@ const desktopBridgeMock = vi.hoisted(() => ({
   revokePairing: vi.fn(),
   resetPreview: vi.fn(),
   selectOutput: vi.fn(),
+  testOutput: vi.fn(),
   setGain: vi.fn(),
   setJitterMode: vi.fn(),
   setMuted: vi.fn(),
@@ -322,6 +323,23 @@ describe('useDesktopState', () => {
 
     expect(desktopBridgeMock.setMuted).toHaveBeenCalledWith(true)
     expect(wrapper.vm.snapshot?.muted).toBe(true)
+  })
+
+  it('reports successful completion of the selected-output test tone', async () => {
+    desktopBridgeMock.snapshot.mockResolvedValueOnce(receiverSnapshot('ready'))
+    desktopBridgeMock.testOutput.mockResolvedValueOnce(undefined)
+    const wrapper = mount(StateHarness)
+    await flushPromises()
+
+    await wrapper.vm.testOutput()
+
+    expect(desktopBridgeMock.testOutput).toHaveBeenCalledOnce()
+    expect(wrapper.vm.outputTestStatus).toBe('Test tone completed on the selected output.')
+    expect(wrapper.vm.error).toBe(null)
+
+    desktopBridgeMock.selectOutput.mockResolvedValueOnce(receiverSnapshot('ready'))
+    await wrapper.vm.selectOutput('other-output')
+    expect(wrapper.vm.outputTestStatus).toBe(null)
   })
 
   it('forwards the jitter mode command and projects the returned snapshot', async () => {
