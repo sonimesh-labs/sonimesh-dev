@@ -143,12 +143,16 @@ const labEvidenceMessage = ref<string | null>(null)
 function labEvidenceText(): string | null {
   const metrics = lab.value.metrics
   const events = lab.value.events ?? []
-  if (!metrics && events.length === 0) return null
+  const signal = lab.value.sessionActive ? lab.value.signal : null
+  if (!metrics && !signal && events.length === 0) return null
   const lines = [
     'SoniMesh paired audio lab',
     `Status: ${evidenceValue(lab.value.status)}`,
     `Session: ${lab.value.sessionActive ? 'active' : 'last reported'}`,
   ]
+  if (signal) {
+    lines.push(`Last decoded interval: ${signal.decoded} frames${signal.peak === null ? '; no peak' : `; peak ${signal.peak.toFixed(6)}`} (before output gain; excludes concealment)`)
+  }
   if (metrics) {
     lines.push(`Accepted packets: ${evidenceValue(metrics.packets)}`)
     lines.push(`Packets rejected: ${evidenceValue(metrics.rejected)}`)
@@ -501,7 +505,7 @@ onBeforeUnmount(() => { disposed = true; labRequest++; clearTimeout(timer); clea
         <p v-else>{{ lab.signal.decoded }} decoded frames; peak {{ lab.signal.peak?.toFixed(6) }}.</p>
         <p class="preview-note">Approximately one second, before output gain and excluding concealment. This does not confirm audible playback.</p>
       </section>
-      <section v-if="lab.metrics || lab.events?.length" aria-labelledby="lab-evidence-title">
+      <section v-if="lab.metrics || lab.events?.length || (lab.sessionActive && lab.signal)" aria-labelledby="lab-evidence-title">
         <h3 id="lab-evidence-title">{{ lab.metrics ? (lab.sessionActive ? 'Session observations' : 'Last session observations') : 'Session evidence' }}</h3>
         <dl v-if="lab.metrics" class="lab-metrics">
           <div><dt>Accepted packets</dt><dd>{{ lab.metrics.packets }}</dd></div>

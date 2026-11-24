@@ -770,8 +770,8 @@ frame count means no frames were decoded in that interval, not decoded silence.
 This observation clears when the session ends and does not establish audible
 playback. Rebuild the listener after updating the probe so it supports the
 `--signal-status` option.
-When metrics are available, **Copy session evidence** copies a bounded text
-summary of the displayed status, counters, and the latest listener lifecycle
+When observations are available, **Copy session evidence** copies a bounded text
+summary of the displayed status, counters, active-session signal interval, and latest listener lifecycle
 events without including the invitation or audio data. The listener retains the
 latest 32 transitions and bounds each stored event; copied events are shortened
 again to keep the operator report compact. If clipboard access is unavailable,

@@ -176,6 +176,8 @@ describe('desktop output probe', () => {
 
   it('distinguishes decoded silence from an interval without frames and clears it on session end', async () => {
     vi.useFakeTimers()
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
     const base = { running: true, sessionActive: true, status: 'Session active', invitation: null, metrics: null, volume: 50, muted: false }
     const invoke = vi.fn()
       .mockResolvedValueOnce({ ...base, signal: null })
@@ -192,10 +194,15 @@ describe('desktop output probe', () => {
     expect(wrapper.text()).toContain('50 decoded frames; peak 0.100000.')
     await vi.advanceTimersByTimeAsync(1000)
     expect(wrapper.text()).toContain('50 decoded frames; peak 0.000000.')
+    await wrapper.findAll('button').find(button => button.text() === 'Copy session evidence')!.trigger('click')
+    expect(writeText.mock.calls[0][0]).toContain('Last decoded interval: 50 frames; peak 0.000000 (before output gain; excludes concealment)')
     await vi.advanceTimersByTimeAsync(1000)
     expect(wrapper.text()).toContain('No decoded frames in this interval.')
+    await wrapper.findAll('button').find(button => button.text() === 'Copy session evidence')!.trigger('click')
+    expect(writeText.mock.calls[1][0]).toContain('Last decoded interval: 0 frames; no peak')
     await vi.advanceTimersByTimeAsync(1000)
     expect(wrapper.text()).not.toContain('Last reported decoded interval')
+    expect(wrapper.text()).not.toContain('Copy session evidence')
     wrapper.unmount()
   })
 
