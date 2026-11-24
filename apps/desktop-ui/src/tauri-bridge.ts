@@ -30,6 +30,10 @@ export class TauriDesktopBridge implements DesktopBridge {
     return this.call('desktop_select_output', { deviceId })
   }
 
+  refreshOutputDevices(): Promise<DesktopSnapshot> {
+    return this.call('desktop_refresh_output_devices')
+  }
+
   testOutput(): Promise<void> {
     return this.invoke<void>('desktop_test_output')
   }

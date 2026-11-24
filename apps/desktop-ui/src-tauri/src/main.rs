@@ -12,9 +12,47 @@ use sonimesh_platform::{
 
 struct ShellState {
     output: CpalOutput,
+    output_inventory: OutputInventory,
     selected_output_id: Option<String>,
     selection_path: PathBuf,
     test_tone_running: Arc<AtomicBool>,
+}
+
+#[derive(Default)]
+struct OutputInventory {
+    devices: Vec<OutputDevice>,
+    initialized: bool,
+}
+
+impl OutputInventory {
+    fn ensure_initialized(
+        &mut self,
+        probe: impl FnOnce() -> Result<Vec<OutputDevice>, String>,
+    ) -> Result<(), String> {
+        if !self.initialized {
+            match probe() {
+                Ok(devices) => {
+                    self.devices = devices;
+                    self.initialized = true;
+                }
+                Err(error) => {
+                    self.initialized = true;
+                    return Err(error);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn refresh(
+        &mut self,
+        probe: impl FnOnce() -> Result<Vec<OutputDevice>, String>,
+    ) -> Result<(), String> {
+        let devices = probe()?;
+        self.devices = devices;
+        self.initialized = true;
+        Ok(())
+    }
 }
 
 #[derive(Deserialize, Serialize)]
@@ -66,7 +104,7 @@ struct DesktopCapabilities {
     output_test: bool,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct OutputDevice {
     id: String,
@@ -142,19 +180,18 @@ impl From<CpalDeviceProbe> for OutputDevice {
 
 impl DesktopSnapshot {
     fn from_state(state: &mut ShellState) -> Result<Self, String> {
-        let output_devices = state
-            .output
-            .probe_devices()
-            .map_err(|error| error.to_string())?
-            .into_iter()
-            .map(OutputDevice::from)
-            .collect::<Vec<_>>();
-        state.selected_output_id =
-            retain_available_output(state.selected_output_id.as_deref(), &output_devices);
+        let output = &state.output;
+        state
+            .output_inventory
+            .ensure_initialized(|| probe_output_devices(output))?;
+        state.selected_output_id = retain_available_output(
+            state.selected_output_id.as_deref(),
+            &state.output_inventory.devices,
+        );
 
         Ok(Self {
             session: "idle",
-            output_devices,
+            output_devices: state.output_inventory.devices.clone(),
             selected_output_id: state.selected_output_id.clone(),
             gain: 1.0,
             muted: false,
@@ -234,17 +271,24 @@ fn desktop_select_output(
     device_id: String,
 ) -> Result<DesktopSnapshot, String> {
     let mut state = state.lock().map_err(|_| "Desktop state is unavailable.")?;
-    let available = state
-        .output
-        .probe_devices()
-        .map_err(|error| error.to_string())?;
-    let inventory = available
-        .into_iter()
-        .map(OutputDevice::from)
-        .collect::<Vec<_>>();
-    let selected_output_id = select_available_output(&device_id, &inventory)?;
+    let devices = probe_output_devices(&state.output)?;
+    state.output_inventory.refresh(|| Ok(devices))?;
+    let selected_output_id = select_available_output(&device_id, &state.output_inventory.devices)?;
     save_selected_output(&state.selection_path, &selected_output_id)?;
     state.selected_output_id = Some(selected_output_id);
+    DesktopSnapshot::from_state(&mut state)
+}
+
+#[tauri::command]
+fn desktop_refresh_output_devices(
+    state: tauri::State<'_, Mutex<ShellState>>,
+) -> Result<DesktopSnapshot, String> {
+    let mut state = state.lock().map_err(|_| "Desktop state is unavailable.")?;
+    let devices = probe_output_devices(&state.output)?;
+    state.output_inventory.refresh(|| Ok(devices))?;
+    let selected_id = state.selected_output_id.clone();
+    state.selected_output_id =
+        retain_available_output(selected_id.as_deref(), &state.output_inventory.devices);
     DesktopSnapshot::from_state(&mut state)
 }
 
@@ -384,6 +428,13 @@ fn retain_available_output(selected_id: Option<&str>, devices: &[OutputDevice]) 
         .map(|device| device.id.clone())
 }
 
+fn probe_output_devices(output: &CpalOutput) -> Result<Vec<OutputDevice>, String> {
+    output
+        .probe_devices()
+        .map_err(|error| error.to_string())
+        .map(|devices| devices.into_iter().map(OutputDevice::from).collect())
+}
+
 fn load_selected_output(path: &Path) -> Option<String> {
     fs::read(path)
         .ok()
@@ -414,6 +465,7 @@ fn main() {
             let selected_output_id = load_selected_output(&selection_path);
             app.manage(Mutex::new(ShellState {
                 output: CpalOutput::new(),
+                output_inventory: OutputInventory::default(),
                 selected_output_id,
                 selection_path,
                 test_tone_running: Arc::new(AtomicBool::new(false)),
@@ -423,6 +475,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             desktop_snapshot,
             desktop_select_output,
+            desktop_refresh_output_devices,
             desktop_test_output
         ])
         .run(tauri::generate_context!())
@@ -432,14 +485,82 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::{
-        DesktopCapabilities, DesktopSnapshot, OutputDevice, OutputTestTone, load_selected_output,
-        retain_available_output, save_selected_output, select_available_output,
+        DesktopCapabilities, DesktopSnapshot, OutputDevice, OutputInventory, OutputTestTone,
+        load_selected_output, retain_available_output, save_selected_output,
+        select_available_output,
     };
     use sonimesh_platform::RenderSource;
     use std::sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
     };
+
+    #[test]
+    fn output_inventory_is_cached_until_explicitly_refreshed() {
+        let mut inventory = OutputInventory::default();
+        let mut probes = 0;
+        let devices = vec![OutputDevice {
+            id: "device-a".into(),
+            label: "Speakers".into(),
+            sample_rate_hz: 48_000,
+            channels: 2,
+            is_default: true,
+        }];
+
+        inventory
+            .ensure_initialized(|| {
+                probes += 1;
+                Ok(devices.clone())
+            })
+            .unwrap();
+        inventory
+            .ensure_initialized(|| {
+                probes += 1;
+                Ok(Vec::new())
+            })
+            .unwrap();
+        assert_eq!(probes, 1);
+        assert_eq!(inventory.devices.len(), 1);
+
+        inventory
+            .refresh(|| {
+                probes += 1;
+                Ok(Vec::new())
+            })
+            .unwrap();
+        assert_eq!(probes, 2);
+        assert!(inventory.devices.is_empty());
+    }
+
+    #[test]
+    fn failed_initial_inventory_probe_waits_for_an_explicit_retry() {
+        let mut inventory = OutputInventory::default();
+        let mut probes = 0;
+
+        assert!(
+            inventory
+                .ensure_initialized(|| {
+                    probes += 1;
+                    Err("backend unavailable".into())
+                })
+                .is_err()
+        );
+        inventory
+            .ensure_initialized(|| {
+                probes += 1;
+                Ok(Vec::new())
+            })
+            .unwrap();
+        assert_eq!(probes, 1);
+
+        inventory
+            .refresh(|| {
+                probes += 1;
+                Ok(Vec::new())
+            })
+            .unwrap();
+        assert_eq!(probes, 2);
+    }
 
     #[test]
     fn output_selection_preference_persists_and_ignores_invalid_data() {

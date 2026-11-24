@@ -12,6 +12,7 @@ export function useDesktopState() {
   const refreshing = ref(false)
   const error = ref<string | null>(null)
   const outputTestStatus = ref<string | null>(null)
+  const refreshingDevices = ref(false)
   let snapshotPollTimer: ReturnType<typeof setInterval> | undefined
   let snapshotRevision = 0
 
@@ -57,6 +58,16 @@ export function useDesktopState() {
   const selectOutput = (id: string) => {
     outputTestStatus.value = null
     return run(() => desktopBridge.selectOutput(id))
+  }
+  async function refreshOutputDevices() {
+    if (busy.value) return
+
+    refreshingDevices.value = true
+    try {
+      await run(() => desktopBridge.refreshOutputDevices())
+    } finally {
+      refreshingDevices.value = false
+    }
   }
   const testOutput = () => {
     outputTestStatus.value = null
@@ -106,6 +117,8 @@ export function useDesktopState() {
     start,
     stop,
     selectOutput,
+    refreshOutputDevices,
+    refreshingDevices,
     testOutput,
     setGain,
     setMuted,

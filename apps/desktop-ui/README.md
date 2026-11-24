@@ -82,9 +82,11 @@ current shell reads the live CPAL/WASAPI output inventory and restores the
 last explicitly selected output from the app configuration directory.
 **Test output** plays a short, low-level
 tone through the selected endpoint. Selecting an endpoint does not change
-Windows' default device. If a selected endpoint disappears, refreshing the
-inventory selects the current default endpoint, falling back to the first
-available endpoint; an unreadable settings file uses the same default selection.
+Windows' default device. The live device inventory is cached between snapshots;
+use the output panel's refresh control to discover newly attached or removed
+devices. If a selected endpoint disappears, refreshing the inventory selects the
+current default endpoint, falling back to the first available endpoint; an
+unreadable settings file uses the same default selection.
 Pairing, receiving, stream controls, and live diagnostics
 remain disabled until their runtime owners are connected. The standalone Tauri shell
 currently requires Rust 1.88 because of its resolved Windows build dependencies;

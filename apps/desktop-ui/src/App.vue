@@ -8,7 +8,7 @@ import RepliesPanel from './components/RepliesPanel.vue'
 import SessionPanel from './components/SessionPanel.vue'
 import { useDesktopState } from './useDesktopState'
 
-const { busy, createPairing, error, expirePairing, outputTestStatus, refresh, refreshing, resetPreview, revokePairing, selectOutput, setGain, setJitterMode, setMuted, simulateCommandRejection, simulateConnectionLost, simulateMetricsBurst, simulateOutputLost, simulateOutputRestored, simulatePairingConsumed, simulateReconnected, simulateSessionExpired, snapshot, start, stop, testOutput, exportDiagnostics } = useDesktopState()
+const { busy, createPairing, error, expirePairing, outputTestStatus, refresh, refreshing, refreshOutputDevices, refreshingDevices, resetPreview, revokePairing, selectOutput, setGain, setJitterMode, setMuted, simulateCommandRejection, simulateConnectionLost, simulateMetricsBurst, simulateOutputLost, simulateOutputRestored, simulatePairingConsumed, simulateReconnected, simulateSessionExpired, snapshot, start, stop, testOutput, exportDiagnostics } = useDesktopState()
 </script>
 
 <template>
@@ -88,7 +88,7 @@ const { busy, createPairing, error, expirePairing, outputTestStatus, refresh, re
             @simulate-command-rejection="simulateCommandRejection"
           />
           <div class="secondary-stack">
-            <OutputPanel :devices="snapshot.outputDevices" :selected-id="snapshot.selectedOutputId" :output="snapshot.output" :gain="snapshot.gain" :muted="snapshot.muted" :busy="busy" :preview="snapshot.previewAdapter" :receiver-available="snapshot.capabilities?.receiver !== false" :stream-controls-available="snapshot.capabilities?.streamControls !== false" :test-tone-available="snapshot.capabilities?.outputTest === true" :test-tone-status="outputTestStatus" @select="selectOutput" @gain="setGain" @mute="setMuted" @test-tone="testOutput" />
+            <OutputPanel :devices="snapshot.outputDevices" :selected-id="snapshot.selectedOutputId" :output="snapshot.output" :gain="snapshot.gain" :muted="snapshot.muted" :busy="busy" :refreshing-devices="refreshingDevices" :preview="snapshot.previewAdapter" :receiver-available="snapshot.capabilities?.receiver !== false" :stream-controls-available="snapshot.capabilities?.streamControls !== false" :test-tone-available="snapshot.capabilities?.outputTest === true" :test-tone-status="outputTestStatus" @select="selectOutput" @refresh-devices="refreshOutputDevices" @gain="setGain" @mute="setMuted" @test-tone="testOutput" />
             <PairingPanel :pairing="snapshot.pairing" :busy="busy" :preview="snapshot.previewAdapter" :available="snapshot.capabilities?.pairing !== false" @create="createPairing" @expire="expirePairing" @refresh="refresh" @revoke="revokePairing" @simulate-pairing-consumed="simulatePairingConsumed" />
           </div>
         </div>

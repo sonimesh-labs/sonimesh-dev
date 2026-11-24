@@ -130,6 +130,10 @@ export class PreviewDesktopBridge implements DesktopBridge {
     return this.copy()
   }
 
+  async refreshOutputDevices(): Promise<DesktopSnapshot> {
+    return this.copy()
+  }
+
   async testOutput(): Promise<void> {
     throw new Error('Output testing is available only in the desktop shell')
   }

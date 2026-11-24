@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Activity, Check, CircleAlert, Headphones, Play, Volume2, VolumeX } from '@lucide/vue'
+import { Activity, Check, CircleAlert, Headphones, Play, RefreshCw, Volume2, VolumeX } from '@lucide/vue'
 
 import type { OutputDevice, OutputHealth, OutputSnapshot } from '../types'
 
@@ -11,6 +11,7 @@ const props = withDefaults(defineProps<{
   gain: number
   muted: boolean
   busy: boolean
+  refreshingDevices?: boolean
   preview?: boolean
   receiverAvailable?: boolean
   streamControlsAvailable?: boolean
@@ -18,6 +19,7 @@ const props = withDefaults(defineProps<{
   testToneStatus?: string | null
 }>(), {
   preview: false,
+  refreshingDevices: false,
   receiverAvailable: true,
   streamControlsAvailable: true,
   testToneAvailable: false,
@@ -26,6 +28,7 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   select: [id: string]
+  refreshDevices: []
   gain: [gain: number]
   mute: [muted: boolean]
   testTone: []
@@ -110,12 +113,25 @@ const displayStatus = computed<DisplayStatus>(() => {
     </div>
 
     <label class="field-label" for="output-device">{{ preview ? 'Change simulated output' : 'Change output device' }}</label>
-    <div class="select-wrap">
-      <select id="output-device" class="device-select" :value="selectedId ?? ''" :disabled="busy" @change="emit('select', ($event.target as HTMLSelectElement).value)">
-        <option v-for="device in devices" :key="device.id" :value="device.id">
-          {{ device.label }}{{ device.isDefault ? ' (default)' : '' }}
-        </option>
-      </select>
+    <div class="device-select-row">
+      <div class="select-wrap">
+        <select id="output-device" class="device-select" :value="selectedId ?? ''" :disabled="busy" @change="emit('select', ($event.target as HTMLSelectElement).value)">
+          <option v-for="device in devices" :key="device.id" :value="device.id">
+            {{ device.label }}{{ device.isDefault ? ' (default)' : '' }}
+          </option>
+        </select>
+      </div>
+      <button
+        v-if="!preview"
+        class="icon-action device-refresh"
+        type="button"
+        title="Refresh output devices"
+        aria-label="Refresh output devices"
+        :disabled="busy"
+        @click="emit('refreshDevices')"
+      >
+        <RefreshCw :size="16" :class="{ spinning: refreshingDevices }" aria-hidden="true" />
+      </button>
     </div>
 
     <div v-if="testToneAvailable" class="output-test-control">

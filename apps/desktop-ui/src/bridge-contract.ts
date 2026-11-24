@@ -5,6 +5,8 @@ export interface DesktopBridge {
   startStream(): Promise<DesktopSnapshot>
   stopStream(): Promise<DesktopSnapshot>
   selectOutput(deviceId: string): Promise<DesktopSnapshot>
+  /** Re-enumerates desktop output devices and returns the updated snapshot. */
+  refreshOutputDevices(): Promise<DesktopSnapshot>
   /** Plays a short test tone through the currently selected desktop output. */
   testOutput(): Promise<void>
   /** Publishes a bounded linear gain target; out-of-range or non-finite values are ignored. */

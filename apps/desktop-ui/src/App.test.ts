@@ -10,6 +10,7 @@ const desktopBridgeMock = vi.hoisted(() => ({
   revokePairing: vi.fn(),
   resetPreview: vi.fn(),
   selectOutput: vi.fn(),
+  refreshOutputDevices: vi.fn(),
   testOutput: vi.fn(),
   setGain: vi.fn(),
   setMuted: vi.fn(),
@@ -312,6 +313,35 @@ describe('App', () => {
     await flushPromises()
     expect(wrapper.get('#output-device').element).toHaveProperty('value', 'alternate')
     vi.useRealTimers()
+  })
+
+  it('refreshes the desktop output inventory on request', async () => {
+    const liveSnapshot: DesktopSnapshot = {
+      ...previewSnapshot(),
+      previewAdapter: false,
+      capabilities: {
+        receiver: false,
+        pairing: false,
+        streamControls: false,
+        diagnostics: false,
+        outputTest: true,
+      },
+    }
+    desktopBridgeMock.snapshot.mockResolvedValueOnce(liveSnapshot)
+    desktopBridgeMock.refreshOutputDevices.mockResolvedValueOnce({
+      ...liveSnapshot,
+      outputDevices: [
+        { id: 'default', label: 'System default output', sampleRateHz: 48_000, channels: 2, isDefault: true },
+      ],
+    })
+    const wrapper = mount(App)
+    await flushPromises()
+
+    await wrapper.get('[aria-label="Refresh output devices"]').trigger('click')
+    await flushPromises()
+
+    expect(desktopBridgeMock.refreshOutputDevices).toHaveBeenCalledOnce()
+    expect(wrapper.findAll('#output-device option')).toHaveLength(1)
   })
 
   it('simulates session expiry from the preview session panel', async () => {

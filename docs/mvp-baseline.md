@@ -467,10 +467,11 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   path. A standalone Tauri shell now exposes the real Windows CPAL output
   inventory and persisted output selection in the app configuration directory;
   selection does not change the system default. A missing or unreadable setting
-  uses the default endpoint, and a selected endpoint that disappears falls back
-  to the current default or first available endpoint. A short low-level test tone
-  can be played through the selected endpoint. Refreshing after the selected endpoint
-  disappears falls back to the current default or first available endpoint.
+  uses the default endpoint. Device inventory is cached between desktop
+  snapshots and re-enumerated by the output panel's refresh command or when an
+  output is selected; a disappeared selection falls back to the current default
+  or first available endpoint. A short low-level test tone can be played through
+  the selected endpoint.
   The shell explicitly
   disables pairing, receiver, stream controls, and live diagnostics because it
   does not yet construct the receiver owner. No live receiver, audio, key, or

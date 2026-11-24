@@ -204,6 +204,8 @@ button:focus-visible, select:focus-visible, a:focus-visible { outline: 3px solid
 .select-wrap::after { content: "⌄"; position: absolute; top: 50%; right: 14px; color: var(--muted); font-size: 16px; transform: translateY(-58%); pointer-events: none; }
 .device-select { width: 100%; min-height: 44px; appearance: none; padding: 0 38px 0 13px; border: 1px solid var(--line); border-radius: 13px; color: var(--ink-soft); background: #fff; font-size: 12px; font-weight: 620; cursor: pointer; }
 .device-select:hover:not(:disabled) { border-color: var(--line-strong); }
+.device-select-row { display: grid; grid-template-columns: minmax(0, 1fr) 40px; align-items: center; gap: 8px; }
+.device-refresh { width: 40px; height: 40px; }
 .volume-block { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--line); }
 .volume-heading { display: flex; align-items: center; gap: 9px; }
 .volume-icon { width: 30px; height: 30px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 10px; color: var(--signal-ink); background: var(--signal-soft); }

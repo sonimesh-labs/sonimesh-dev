@@ -11,6 +11,7 @@ const desktopBridgeMock = vi.hoisted(() => ({
   revokePairing: vi.fn(),
   resetPreview: vi.fn(),
   selectOutput: vi.fn(),
+  refreshOutputDevices: vi.fn(),
   testOutput: vi.fn(),
   setGain: vi.fn(),
   setJitterMode: vi.fn(),
@@ -170,6 +171,25 @@ describe('useDesktopState', () => {
 
     expect(wrapper.vm.snapshot?.session).toBe('streaming')
     expect(wrapper.vm.refreshing).toBe(false)
+  })
+
+  it('refreshes the output inventory through a serialized user command', async () => {
+    desktopBridgeMock.snapshot.mockResolvedValueOnce(receiverSnapshot('ready'))
+    const wrapper = mount(StateHarness)
+    await flushPromises()
+
+    const pendingRefresh = deferred<DesktopSnapshot>()
+    desktopBridgeMock.refreshOutputDevices.mockReturnValueOnce(pendingRefresh.promise)
+    const refresh = wrapper.vm.refreshOutputDevices()
+
+    expect(wrapper.vm.busy).toBe(true)
+    expect(wrapper.vm.refreshingDevices).toBe(true)
+    pendingRefresh.resolve({ ...receiverSnapshot('ready'), selectedOutputId: 'device-b' })
+    await refresh
+
+    expect(wrapper.vm.busy).toBe(false)
+    expect(wrapper.vm.refreshingDevices).toBe(false)
+    expect(wrapper.vm.snapshot?.selectedOutputId).toBe('device-b')
   })
 
   it('accepts only one bridge command while a prior command is pending', async () => {
