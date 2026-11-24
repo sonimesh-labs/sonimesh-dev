@@ -41,6 +41,32 @@ class LabCaptureUsageUiTest {
     }
 
     @Test
+    fun retryLastCaptureAppearsAfterConnectionFailureAndHidesForNewSession() {
+        try {
+            ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    assertEquals(View.GONE, findButton(activity.window.decorView, "Retry last capture").visibility)
+                    LabStatus.publish("Desktop connection ended. Check the listener, then start capture again.")
+                }
+                androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+                scenario.onActivity { activity ->
+                    assertEquals(View.VISIBLE, findButton(activity.window.decorView, "Retry last capture").visibility)
+                    LabStatus.serviceStarted(LabCaptureUsage.All, OpusBitrate.STANDARD)
+                    LabStatus.publish("Connecting to the desktop listener…")
+                }
+                androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+                scenario.onActivity { activity ->
+                    assertEquals(View.GONE, findButton(activity.window.decorView, "Retry last capture").visibility)
+                }
+            }
+        } finally {
+            androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().runOnMainSync {
+                LabStatus.serviceFinished()
+            }
+        }
+    }
+
+    @Test
     fun bitrateChoiceDefaultsTo96AndSurvivesActivityRecreation() {
         ActivityScenario.launch(LabActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->

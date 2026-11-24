@@ -240,6 +240,10 @@ During an active lab capture, **Mute sending** replaces subsequent encoder input
 with silence while capture, the connection, and capture-signal observation continue.
 The activity places **Stop capture** and **Mute sending** near the session status,
 ahead of the connection setup fields, for use during an active session.
+After a desktop connection or capture failure, it also shows **Retry last capture**
+near the same status area. The retry reuses the last transport and current setup
+fields, then requests any required permission or screen-capture consent again;
+starting a new session hides the retry action.
 Unmute resumes captured audio without a new consent session. Audio already encoded,
 in transit, or buffered at the receiver can still play briefly after muting; this
 control is not an immediate stop. It resets when the session ends.

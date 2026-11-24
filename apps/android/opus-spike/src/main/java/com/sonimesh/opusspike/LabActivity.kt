@@ -25,6 +25,7 @@ import android.widget.Spinner
 import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
+import android.view.View
 import com.sonimesh.sender.encoder.OpusBitrate
 import com.sonimesh.sender.protocol.PairingQr
 import com.journeyapps.barcodescanner.ScanOptions
@@ -58,6 +59,7 @@ class LabActivity : Activity() {
     private lateinit var usage: Spinner
     private lateinit var bitrate: Spinner
     private lateinit var muteSwitch: Switch
+    private lateinit var retryButton: Button
     private var updatingMute = false
     private val muteObserver: (Boolean?) -> Unit = { muted ->
         updatingMute = true
@@ -65,7 +67,10 @@ class LabActivity : Activity() {
         muteSwitch.isChecked = muted == true
         updatingMute = false
     }
-    private val statusObserver: (String) -> Unit = { status.text = "Status: $it" }
+    private val statusObserver: (String) -> Unit = {
+        status.text = "Status: $it"
+        updateRetryButton(it)
+    }
     private val signalObserver: (LabSignalState?) -> Unit = { state ->
         signal.text = "Capture signal: ${state?.label ?: "—"}"
     }
@@ -146,6 +151,12 @@ class LabActivity : Activity() {
         layout.addView(TextView(this).apply {
             text = "Already buffered audio may continue briefly after muting."
         })
+        retryButton = Button(this).apply {
+            text = "Retry last capture"
+            visibility = View.GONE
+            setOnClickListener { startCapture(udpMode, pairedMode) }
+        }
+        layout.addView(retryButton)
         signal = TextView(this)
         layout.addView(signal)
         duration = TextView(this)
@@ -433,6 +444,7 @@ class LabActivity : Activity() {
             showCaptureBusy()
             return
         }
+        retryButton.visibility = View.GONE
         if (needsPermission) {
             try {
                 requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 1)
@@ -451,6 +463,15 @@ class LabActivity : Activity() {
 
     private fun showCaptureBusy() {
         Toast.makeText(this, "Capture is already starting, running, or stopping.", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun updateRetryButton(message: String) {
+        if (!::retryButton.isInitialized) return
+        val retryable = LabStatus.captureAdmission.canBegin() &&
+            (message.contains("try again", ignoreCase = true) ||
+                message.contains("connection ended", ignoreCase = true) ||
+                message == "Capture stopped.")
+        retryButton.visibility = if (retryable) View.VISIBLE else View.GONE
     }
 
     private fun copyLabEvidence() {
