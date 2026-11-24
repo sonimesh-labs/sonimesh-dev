@@ -433,7 +433,9 @@ class LabCaptureService : Service() {
             if (paired != null) {
                 finishPairedSender(pairedProducerFinished, pairedSender)
                 try {
-                    stopResult = attemptPairedStop(pairedIdentity, pairedControlFailed, paired::stopStream)
+                    stopResult = attemptPairedStop(pairedIdentity, pairedControlFailed) { identity ->
+                        paired.stopStream(identity, 2_000)
+                    }
                     stopResult?.exceptionOrNull()?.let { Log.e("SoniMeshLab", "Paired stream stop failed", it) }
                 } finally {
                     paired.close()

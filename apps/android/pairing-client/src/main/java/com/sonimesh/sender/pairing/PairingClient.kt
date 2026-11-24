@@ -15,6 +15,16 @@ import javax.net.ssl.SSLSocket
 import javax.net.ssl.X509TrustManager
 import org.conscrypt.Conscrypt
 
+internal fun <T> withControlReadTimeout(socket: Socket, timeoutMillis: Int, action: () -> T): T {
+    require(timeoutMillis in 1..30_000) { "invalid control read timeout" }
+    socket.soTimeout = timeoutMillis
+    try {
+        return action()
+    } finally {
+        if (!socket.isClosed) socket.soTimeout = 0
+    }
+}
+
 /** A verified connection. The caller owns the socket and media root until close. */
 class PairedConnection internal constructor(
     val socket: SSLSocket,
@@ -61,10 +71,15 @@ class PairedConnection internal constructor(
 
     /** Requests a stop for an exact media identity; call off the UI thread. */
     @Synchronized
-    fun stopStream(identity: StreamIdentity): StreamControlResult {
+    fun stopStream(identity: StreamIdentity): StreamControlResult = stopStream(identity, 30_000)
+
+    /** Requests a stop with a bounded timeout for each reply read. */
+    @Synchronized
+    fun stopStream(identity: StreamIdentity, replyReadTimeoutMillis: Int): StreamControlResult {
         checkNotNull(negotiated) { "hello has not completed" }
         identity.validate()
-        return command(identity, 12) { coded ->
+        require(replyReadTimeoutMillis in 1..30_000) { "invalid control read timeout" }
+        return command(identity, 12, replyReadTimeoutMillis) { coded ->
             coded.writeUInt64(1, identity.sessionId)
             coded.writeUInt32(2, identity.streamId.toInt())
             coded.writeUInt32(3, identity.keyEpoch)
@@ -74,18 +89,18 @@ class PairedConnection internal constructor(
     private fun command(
         identity: StreamIdentity,
         field: Int,
+        replyReadTimeoutMillis: Int = 30_000,
         write: (com.google.protobuf.CodedOutputStream) -> Unit,
     ): StreamControlResult {
         check(nextRequestId > 0) { "control request IDs exhausted" }
         val requestId = nextRequestId++
         try {
-            socket.soTimeout = 30_000
-            return exchangeStreamCommand(socket.inputStream, socket.outputStream, requestId, identity, field, write)
+            return withControlReadTimeout(socket, replyReadTimeoutMillis) {
+                exchangeStreamCommand(socket.inputStream, socket.outputStream, requestId, identity, field, write)
+            }
         } catch (error: Throwable) {
             runCatching { close() }
             throw error
-        } finally {
-            if (!socket.isClosed) socket.soTimeout = 0
         }
     }
 

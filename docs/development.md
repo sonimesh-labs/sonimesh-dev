@@ -275,6 +275,11 @@ to five times at one-second intervals while retaining the current projection.
 The status reports the wait, and Stop cancels it. Other connection failures are
 reported without this retry; an established session that disconnects still
 requires a fresh capture start and consent.
+On a normal paired stop, the lab allows two seconds for each control reply read
+before reporting that the desktop did not confirm the stop. This is a socket read
+timeout, not a deadline on the entire shutdown or a guarantee that the desktop
+stopped. The capture service still attempts its bounded encoder and sender drain
+first.
 On 2026-11-24 an API 37 x86_64 emulator observed the retry, then completed a
 paired capture after a loopback control gate opened. The software listener
 authenticated 147 packets and decoded 124 frames with a peak of 0.391; it also
