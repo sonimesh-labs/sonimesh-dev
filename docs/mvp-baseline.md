@@ -428,12 +428,13 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   it stops when the activity leaves the foreground or capture ends. This only
   exercises the app's own playback and does not establish other apps' policies.
   The capture-only evidence also includes the run's maximum PCM16 sample level;
-  host tests cover its calculation and reset, while device evidence for the new
-  readout remains open. An API 37 x86_64 emulator run observed a nonzero peak
-  from the built-in tone, but the full instrumentation flow later failed to find
-  the stop-tone control. A separate activity-reopen test failed while locating
-  the stop control or checking the retained source; those UI observations need
-  further investigation. The peak is not a loudness measurement.
+  host tests cover its calculation and reset; API 37 x86_64 emulator
+  instrumentation now confirms a nonzero peak during built-in tone capture and
+  passes tone stop/restart/activity recreation, active-session activity
+  reopen/source retention, and the supported-usage capture flow. Earlier
+  failures coincided with a System UI not-responding dialog and cleared after the
+  emulator settled. This is emulator evidence, not physical-device or
+  audible-output evidence. The peak is not a loudness measurement.
 - a buildable Vue/Vite receiver-control preview with a single low-rate bridge
   boundary, session controls, output selection, per-stream volume and mute,
   pairing-invitation state, and diagnostics presentation for packet,

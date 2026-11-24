@@ -3,6 +3,7 @@ package com.sonimesh.sender
 import android.app.Notification
 import android.app.NotificationManager
 import android.content.Intent
+import android.graphics.Rect
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
@@ -22,13 +23,15 @@ import kotlin.math.PI
 import kotlin.math.sin
 
 class AllUsagesCaptureTest {
+    private var lastScreenSnapshot = "no accessibility nodes"
+
     @Test
     fun built_in_tone_is_captured_and_stops_with_activity() {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val automation = instrumentation.uiAutomation
         try {
             ActivityScenario.launch(MainActivity::class.java).use { scenario ->
-                assertTrue("start button missing", clickText(automation, "Start capture", scroll = true))
+                assertTrue("start button missing: $lastScreenSnapshot", clickText(automation, "Start capture", scroll = true))
                 assertTrue("projection chooser missing", clickText(automation, "Share one app"))
                 assertTrue("entire screen option missing", clickText(automation, "Share entire screen"))
                 assertTrue("projection confirmation missing", clickText(automation, "Share screen"))
@@ -36,18 +39,27 @@ class AllUsagesCaptureTest {
                     CaptureStateStore.state.value.status is CaptureStatus.NoCapturableAudio
                 })
                 val before = nonSilentFrames()
-                assertTrue("test tone control missing", clickText(automation, "Start test tone", scroll = true))
+                assertTrue(
+                    "test tone control missing: $lastScreenSnapshot",
+                    clickText(automation, "Start test tone", scroll = true),
+                )
                 val detected = waitUntil(8_000) {
                     nonSilentFrames() - before >= 2_000
                 }
                 assertTrue("built-in tone was not captured: ${CaptureStateStore.state.value}", detected)
                 assertTrue("captured tone peak missing", (CaptureStateStore.state.value.evidence.peakSampleMagnitude ?: 0) > 0)
-                assertTrue("tone stop control missing", clickText(automation, "Stop test tone", scroll = true))
+                assertTrue(
+                    "tone stop control missing: $lastScreenSnapshot",
+                    clickText(automation, "Stop test tone", scroll = true),
+                )
                 assertTrue("capture did not return to silence", waitUntil(8_000) {
                     CaptureStateStore.state.value.status is CaptureStatus.NoCapturableAudio
                 })
                 val beforeRestart = nonSilentFrames()
-                assertTrue("test tone could not restart", clickText(automation, "Start test tone", scroll = true))
+                assertTrue(
+                    "test tone could not restart: $lastScreenSnapshot",
+                    clickText(automation, "Start test tone", scroll = true),
+                )
                 assertTrue("restarted tone was not captured", waitUntil(8_000) {
                     nonSilentFrames() - beforeRestart >= 2_000
                 })
@@ -70,8 +82,8 @@ class AllUsagesCaptureTest {
         val automation = instrumentation.uiAutomation
         try {
             ActivityScenario.launch(MainActivity::class.java).use {
-                assertTrue("usage selector missing", clickText(automation, "All supported", scroll = true))
-                assertTrue("start button missing", clickText(automation, "Start capture", scroll = true))
+                assertTrue("usage selector missing: $lastScreenSnapshot", clickText(automation, "All supported", scroll = true))
+                assertTrue("start button missing: $lastScreenSnapshot", clickText(automation, "Start capture", scroll = true))
                 assertTrue("projection chooser missing", clickText(automation, "Share one app"))
                 assertTrue("entire screen option missing", clickText(automation, "Share entire screen"))
                 assertTrue("projection confirmation missing", clickText(automation, "Share screen"))
@@ -100,7 +112,10 @@ class AllUsagesCaptureTest {
             ActivityScenario.launch(MainActivity::class.java).use {
                 val selected = findOnScreen(automation, scroll = true) { it.hasSelectedText("All supported") }
                 assertTrue("reopened activity did not show the active usage", selected)
-                assertTrue("stop button missing", clickText(automation, "Stop capture", scroll = true))
+                assertTrue(
+                    "stop button missing: $lastScreenSnapshot",
+                    clickText(automation, "Stop capture", scroll = true),
+                )
                 assertTrue("capture did not stop", waitUntil(8_000) {
                     CaptureStateStore.state.value.status is CaptureStatus.Stopped
                 })
@@ -122,9 +137,9 @@ class AllUsagesCaptureTest {
         val automation = instrumentation.uiAutomation
         ActivityScenario.launch(MainActivity::class.java).use {
             try {
-                assertTrue("usage selector missing", clickText(automation, "All supported", scroll = true))
+                assertTrue("usage selector missing: $lastScreenSnapshot", clickText(automation, "All supported", scroll = true))
                 // Start immediately, before waiting for the selection to redraw.
-                assertTrue("start button missing", clickText(automation, "Start capture", scroll = true))
+                assertTrue("start button missing: $lastScreenSnapshot", clickText(automation, "Start capture", scroll = true))
                 assertTrue("projection chooser missing", clickText(automation, "Share one app"))
                 assertTrue("entire screen option missing", clickText(automation, "Share entire screen"))
                 assertTrue("projection confirmation missing", clickText(automation, "Share screen"))
@@ -201,25 +216,49 @@ class AllUsagesCaptureTest {
     }
 
     private fun clickText(automation: android.app.UiAutomation, text: String, scroll: Boolean = false): Boolean =
-        findOnScreen(automation, scroll) { it.clickMatchingText(text) }
+        findOnScreen(automation, scroll, initialScrollForward = !text.startsWith("Stop ")) {
+            it.clickMatchingText(text)
+        }
 
     private fun findOnScreen(
         automation: android.app.UiAutomation,
         scroll: Boolean,
+        initialScrollForward: Boolean = true,
         match: (AccessibilityNodeInfo) -> Boolean,
     ): Boolean {
-        var scrollForward = true
+        var scrollForward = initialScrollForward
         return waitUntil(8_000) {
             val root = automation.rootInActiveWindow ?: return@waitUntil false
+            lastScreenSnapshot = root.textSnapshot()
             if (match(root)) return@waitUntil true
             if (scroll) {
                 val action = if (scrollForward) AccessibilityNodeInfo.ACTION_SCROLL_FORWARD else AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
-                if (root.findScrollable()?.performAction(action) == false) scrollForward = !scrollForward
-                // Compose animates accessibility scroll actions; inspect each page after it settles.
+                val before = lastScreenSnapshot
+                val result = root.findScrollable()?.performAction(action)
                 SystemClock.sleep(500)
+                val updatedRoot = automation.rootInActiveWindow
+                val after = updatedRoot?.textSnapshot()
+                if (result != true || after == before) scrollForward = !scrollForward
             }
             false
         }
+    }
+
+    private fun AccessibilityNodeInfo.textSnapshot(): String {
+        val entries = mutableListOf<String>()
+        fun collect(node: AccessibilityNodeInfo) {
+            node.text?.toString()?.let {
+                val bounds = Rect()
+                node.getBoundsInScreen(bounds)
+                entries += "$it@${bounds.toShortString()}"
+            }
+            for (index in 0 until node.childCount) {
+                node.getChild(index)?.let(::collect)
+            }
+        }
+        collect(this)
+        return entries.joinToString(limit = 24, truncated = "...")
+            .ifEmpty { "no text nodes" }
     }
 
     private fun AccessibilityNodeInfo.clickMatchingText(text: String): Boolean {
