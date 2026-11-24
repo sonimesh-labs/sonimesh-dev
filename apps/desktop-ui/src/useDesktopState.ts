@@ -62,9 +62,16 @@ export function useDesktopState() {
   async function refreshOutputDevices() {
     if (busy.value) return
 
+    const previousSelectedOutputId = snapshot.value?.selectedOutputId ?? null
     refreshingDevices.value = true
     try {
-      await run(() => desktopBridge.refreshOutputDevices())
+      await run(async () => {
+        const nextSnapshot = await desktopBridge.refreshOutputDevices()
+        if (nextSnapshot.selectedOutputId !== previousSelectedOutputId) {
+          outputTestStatus.value = null
+        }
+        return nextSnapshot
+      })
     } finally {
       refreshingDevices.value = false
     }

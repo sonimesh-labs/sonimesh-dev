@@ -381,6 +381,18 @@ describe('useDesktopState', () => {
     expect(wrapper.vm.outputTestStatus).toBe('Test tone completed on the selected output.')
     expect(wrapper.vm.error).toBe(null)
 
+    desktopBridgeMock.refreshOutputDevices.mockResolvedValueOnce(receiverSnapshot('ready'))
+    await wrapper.vm.refreshOutputDevices()
+    expect(wrapper.vm.outputTestStatus).toBe('Test tone completed on the selected output.')
+
+    await wrapper.vm.testOutput()
+    desktopBridgeMock.refreshOutputDevices.mockResolvedValueOnce({
+      ...receiverSnapshot('ready'),
+      selectedOutputId: 'fallback-device',
+    })
+    await wrapper.vm.refreshOutputDevices()
+    expect(wrapper.vm.outputTestStatus).toBe(null)
+
     desktopBridgeMock.selectOutput.mockResolvedValueOnce(receiverSnapshot('ready'))
     await wrapper.vm.selectOutput('other-output')
     expect(wrapper.vm.outputTestStatus).toBe(null)
