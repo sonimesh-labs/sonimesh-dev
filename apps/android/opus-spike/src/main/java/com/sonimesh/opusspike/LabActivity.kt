@@ -355,7 +355,7 @@ class LabActivity : Activity() {
         setContentView(ScrollView(this).apply { addView(layout) })
         handleIncomingInvitation(intent)
         if (savedInstanceState == null && importedInvitation != null && intent?.action != Intent.ACTION_SEND) {
-            LabStatus.publish("Restored the last lab setup. Check the UDP address before starting.")
+            LabStatus.publishIfIdle("Restored the last lab setup. Check the UDP address before starting.")
         }
     }
 

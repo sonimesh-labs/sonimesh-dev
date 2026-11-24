@@ -362,6 +362,44 @@ class LabStatusTest {
     }
 
     @Test
+    fun restoredSetupDoesNotReplaceCaptureOrFailureStatus() {
+        val instrumentation = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
+        try {
+            ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    val invitation = labHex(labInvitation("ab".repeat(32), "127.0.0.1"))
+                    requireNotNull(findTextField(activity.window.decorView, "Lab invitation payload")).text = invitation
+                    requireNotNull(findButton(activity.window.decorView, "Apply invitation payload")).performClick()
+                    LabStatus.publish("Idle")
+                }
+            }
+            ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    assertTrue(hasStatus(activity.window.decorView, "Status: Restored the last lab setup."))
+                    LabStatus.serviceStarted(LabCaptureUsage.All, OpusBitrate.STANDARD, LabTransport.PairedUdp)
+                    LabStatus.publish("Capturing audio and sending to desktop.")
+                }
+            }
+            ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    assertTrue(hasStatus(activity.window.decorView, "Status: Capturing audio and sending to desktop."))
+                    LabStatus.publish("Desktop connection ended. Check the listener, then start capture again.")
+                    LabStatus.serviceFinished()
+                }
+            }
+            ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    assertTrue(hasStatus(activity.window.decorView, "Status: Desktop connection ended."))
+                    assertEquals(View.VISIBLE, requireNotNull(findButton(activity.window.decorView, "Retry last capture")).visibility)
+                    requireNotNull(findButton(activity.window.decorView, "Clear saved lab setup")).performClick()
+                }
+            }
+        } finally {
+            instrumentation.runOnMainSync { LabStatus.serviceFinished() }
+        }
+    }
+
+    @Test
     fun failedServiceStartSurvivesActivityRecreation() {
         ActivityScenario.launch(LabActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->

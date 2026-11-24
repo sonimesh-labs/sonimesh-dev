@@ -103,7 +103,9 @@ the UDP destination unchanged for ADB reverse; enter the emulator host alias
 separately. The payload contains the fixed public lab fixture secret and is not a production QR or a
 persistent trust record. When control and UDP use the same LAN address, **Use
 control address for UDP** copies it explicitly; loopback is rejected because
-ADB reverse does not forward UDP. If using the older manual setup, copy the printed
+ADB reverse does not forward UDP. Reopening the activity keeps the active capture
+or failure status instead of replacing it with the saved-setup reminder. If using
+the older manual setup, copy the printed
 `SPKI_HEX` into `$pin` and run:
 
 ~~~powershell

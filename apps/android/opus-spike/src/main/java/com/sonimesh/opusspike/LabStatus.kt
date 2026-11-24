@@ -146,6 +146,10 @@ internal object LabStatus {
         observers.toList().forEach { it(message) }
     }
 
+    fun publishIfIdle(value: String) {
+        if (message == "Idle" && captureAdmission.canBegin()) publish(value)
+    }
+
     private fun boundMessage(value: String): String {
         if (value.length <= MAX_MESSAGE_CHARS) return value
         return value.take(MAX_MESSAGE_CHARS - 3) + "..."
