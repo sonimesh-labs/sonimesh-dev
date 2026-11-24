@@ -29,8 +29,6 @@ import android.view.View
 import com.sonimesh.sender.encoder.OpusBitrate
 import com.sonimesh.sender.protocol.PairingQr
 import com.journeyapps.barcodescanner.ScanOptions
-import kotlin.math.PI
-import kotlin.math.sin
 
 @Suppress("DEPRECATION")
 class LabActivity : Activity() {
@@ -725,11 +723,7 @@ class LabActivity : Activity() {
         tone?.let { it.stop(); it.release(); tone = null; return }
         val usage = (LabStatus.captureUsage ?: selectedUsage()).usages.first()
         for (format in testToneFormats) {
-            val period = format.sampleRate / 1_000
-            val samples = ShortArray(format.sampleRate * format.channels) { index ->
-                val frame = index / format.channels
-                (sin(2.0 * PI * (frame % period) / period) * 3_000).toInt().toShort()
-            }
+            val samples = testToneSamples(format.sampleRate, format.channels)
             var track: AudioTrack? = null
             try {
                 track = AudioTrack.Builder()
@@ -740,7 +734,7 @@ class LabActivity : Activity() {
                     .setBufferSizeInBytes(samples.size * Short.SIZE_BYTES)
                     .build()
                 check(track.write(samples, 0, samples.size) == samples.size)
-                track.setLoopPoints(0, format.sampleRate, -1)
+                check(track.setLoopPoints(0, format.sampleRate, -1) == AudioTrack.SUCCESS)
                 track.play()
                 tone = track
                 return

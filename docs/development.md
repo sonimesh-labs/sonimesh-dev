@@ -156,8 +156,10 @@ also has a **Start paired UDP capture** mode: start `paired-audio-lab` without
 grant capture consent, and play a capturable source or use **Start test tone**.
 The lab's capture usage selector applies to the next capture session: **All**
 includes media, game and unknown usage, while the other choices select one
-usage. A new test tone uses the current capture session's usage while the
-service is starting, running, or stopping; otherwise it uses the selector.
+usage. The test tone is a looping 1 kHz signal at either 48 kHz or 44.1 kHz,
+depending on the output formats accepted by the device. A new test tone uses
+the current capture session's usage while the service is starting, running, or
+stopping; otherwise it uses the selector.
 **All** uses Media. Changing the selector does not change a tone already
 playing: stop and restart the tone to apply the applicable usage. On
 the interactive lab screen, **Copy lab evidence** copies a bounded text summary
