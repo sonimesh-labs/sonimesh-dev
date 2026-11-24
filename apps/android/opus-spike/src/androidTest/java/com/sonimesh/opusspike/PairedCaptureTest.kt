@@ -110,7 +110,7 @@ class PairedCaptureTest {
         val pin = args.getString("pairingSpkiHex")
         if (startFromScan) assumeTrue("scan test requires pairingInvitationHex", args.containsKey("pairingInvitationHex"))
         if (startFromPaste) assumeTrue("paste test requires pairingInvitationHex", args.containsKey("pairingInvitationHex"))
-        ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+        ActivityScenario.launch<LabActivity>(Intent(instrumentation.targetContext, LabActivity::class.java)).use { scenario ->
             args.getString("bitrateKbps")?.let { requested ->
                 val position = listOf("64", "96", "128").indexOf(requested)
                 require(position >= 0) { "unsupported test bitrate" }
@@ -274,7 +274,26 @@ class PairedCaptureTest {
                     val notification = instrumentation.targetContext.getSystemService(NotificationManager::class.java)
                         .activeNotifications.firstOrNull { it.id == 1 }?.notification
                     assertEquals("Transport: paired UDP", notification?.extras?.getString(Notification.EXTRA_TEXT))
-                    assertEquals("Capture duration: —", notification?.extras?.getString(Notification.EXTRA_SUB_TEXT))
+                    val manager = instrumentation.targetContext.getSystemService(NotificationManager::class.java)
+                    fun duration(): Long? = manager.activeNotifications.firstOrNull { it.id == 1 }
+                        ?.notification?.extras?.getString(Notification.EXTRA_SUB_TEXT)
+                        ?.let { Regex("Capture duration: ([0-9]+)s").matchEntire(it) }
+                        ?.groupValues?.get(1)?.toLongOrNull()
+                    val durationDeadline = SystemClock.elapsedRealtime() + 5_000
+                    var initialDuration = duration()
+                    while (initialDuration == null && SystemClock.elapsedRealtime() < durationDeadline) {
+                        SystemClock.sleep(100)
+                        initialDuration = duration()
+                    }
+                    assertTrue("capture notification did not expose a numeric duration", initialDuration != null)
+                    val progressionDeadline = SystemClock.elapsedRealtime() + 5_000
+                    var currentDuration = duration()
+                    while ((currentDuration == null || currentDuration <= requireNotNull(initialDuration)) &&
+                        SystemClock.elapsedRealtime() < progressionDeadline) {
+                        SystemClock.sleep(100)
+                        currentDuration = duration()
+                    }
+                    assertTrue("capture notification duration did not advance", currentDuration != null && currentDuration > requireNotNull(initialDuration))
                     requireNotNull(notification?.contentIntent) { "capture notification has no open action" }.send()
                     val returnDeadline = SystemClock.elapsedRealtime() + 10_000
                     var returned = false

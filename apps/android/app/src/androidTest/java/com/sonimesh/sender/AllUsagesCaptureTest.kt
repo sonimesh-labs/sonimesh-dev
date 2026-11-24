@@ -14,6 +14,7 @@ import com.sonimesh.sender.capture.CaptureService
 import com.sonimesh.sender.capture.CaptureSource
 import com.sonimesh.sender.capture.CaptureStateStore
 import com.sonimesh.sender.capture.CaptureStatus
+import com.sonimesh.sender.capture.isActive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -43,10 +44,16 @@ class AllUsagesCaptureTest {
                     notification?.extras?.getString(Notification.EXTRA_SUB_TEXT)?.startsWith("Capture duration: ") == true,
                 )
                 assertTrue("capture notification missing return action", notification?.contentIntent != null)
+                automation.executeShellCommand("input keyevent KEYCODE_HOME").close()
+                assertTrue("home screen did not appear", waitUntil(8_000) {
+                    val name = automation.rootInActiveWindow?.packageName?.toString()
+                    name != null && name != instrumentation.targetContext.packageName
+                })
                 notification?.contentIntent?.send()
                 assertTrue("notification did not return to capture activity", waitUntil(8_000) {
                     automation.rootInActiveWindow?.packageName?.toString() == instrumentation.targetContext.packageName
                 })
+                assertTrue("notification return stopped the active capture", CaptureStateStore.state.value.status.isActive())
             }
             ActivityScenario.launch(MainActivity::class.java).use {
                 val selected = waitUntil(8_000) {
