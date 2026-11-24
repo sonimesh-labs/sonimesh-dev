@@ -8,7 +8,7 @@ import RepliesPanel from './components/RepliesPanel.vue'
 import SessionPanel from './components/SessionPanel.vue'
 import { useDesktopState } from './useDesktopState'
 
-const { busy, createPairing, error, expirePairing, outputTestStatus, refresh, resetPreview, revokePairing, selectOutput, setGain, setJitterMode, setMuted, simulateCommandRejection, simulateConnectionLost, simulateMetricsBurst, simulateOutputLost, simulateOutputRestored, simulatePairingConsumed, simulateReconnected, simulateSessionExpired, snapshot, start, stop, testOutput, exportDiagnostics } = useDesktopState()
+const { busy, createPairing, error, expirePairing, outputTestStatus, refresh, refreshing, resetPreview, revokePairing, selectOutput, setGain, setJitterMode, setMuted, simulateCommandRejection, simulateConnectionLost, simulateMetricsBurst, simulateOutputLost, simulateOutputRestored, simulatePairingConsumed, simulateReconnected, simulateSessionExpired, snapshot, start, stop, testOutput, exportDiagnostics } = useDesktopState()
 </script>
 
 <template>
@@ -59,8 +59,8 @@ const { busy, createPairing, error, expirePairing, outputTestStatus, refresh, re
           <span v-if="snapshot" class="session-chip" :class="`chip-${snapshot.session}`" role="status" aria-live="polite">
             <span class="chip-dot" aria-hidden="true"></span>{{ snapshot.previewAdapter ? 'Preview ' : '' }}{{ snapshot.session }}
           </span>
-          <button class="icon-action refresh" title="Refresh state" aria-label="Refresh state" :disabled="busy" @click="refresh">
-            <RefreshCw :size="18" :class="{ spinning: busy }" aria-hidden="true" />
+          <button class="icon-action refresh" title="Refresh state" aria-label="Refresh state" :disabled="busy || refreshing" @click="refresh">
+            <RefreshCw :size="18" :class="{ spinning: busy || refreshing }" aria-hidden="true" />
           </button>
           <button v-if="snapshot?.previewAdapter" class="preview-action" :disabled="busy" @click="resetPreview">
             Reset preview

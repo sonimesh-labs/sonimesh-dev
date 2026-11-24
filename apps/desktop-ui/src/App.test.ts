@@ -279,6 +279,41 @@ describe('App', () => {
     expect(wrapper.find('.command-error').exists()).toBe(false)
   })
 
+  it('keeps output selection enabled while a background snapshot is pending', async () => {
+    vi.useFakeTimers()
+    const pendingSnapshot = deferred<DesktopSnapshot>()
+    const snapshotWithAlternate: DesktopSnapshot = {
+      ...previewSnapshot(),
+      outputDevices: [
+        ...previewSnapshot().outputDevices,
+        { id: 'alternate', label: 'Alternate output', sampleRateHz: 48_000, channels: 2, isDefault: false },
+      ],
+    }
+    desktopBridgeMock.snapshot
+      .mockResolvedValueOnce(snapshotWithAlternate)
+      .mockReturnValueOnce(pendingSnapshot.promise)
+    desktopBridgeMock.selectOutput.mockResolvedValueOnce({
+      ...snapshotWithAlternate,
+      selectedOutputId: 'alternate',
+    })
+    const wrapper = mount(App)
+    await flushPromises()
+
+    vi.advanceTimersByTime(1_000)
+    await flushPromises()
+    const outputSelect = wrapper.get('#output-device')
+    expect((outputSelect.element as HTMLSelectElement).disabled).toBe(false)
+
+    await outputSelect.setValue('alternate')
+    await flushPromises()
+    expect(desktopBridgeMock.selectOutput).toHaveBeenCalledWith('alternate')
+
+    pendingSnapshot.resolve(previewSnapshot())
+    await flushPromises()
+    expect(wrapper.get('#output-device').element).toHaveProperty('value', 'alternate')
+    vi.useRealTimers()
+  })
+
   it('simulates session expiry from the preview session panel', async () => {
     desktopBridgeMock.snapshot.mockResolvedValueOnce(previewSnapshot())
     const wrapper = mount(App)

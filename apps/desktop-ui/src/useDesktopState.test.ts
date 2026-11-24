@@ -148,6 +148,30 @@ describe('useDesktopState', () => {
     vi.useRealTimers()
   })
 
+  it('keeps user commands available during a pending snapshot and ignores its stale result', async () => {
+    desktopBridgeMock.snapshot.mockResolvedValueOnce(receiverSnapshot('ready'))
+    const wrapper = mount(StateHarness)
+    await flushPromises()
+
+    const pendingSnapshot = deferred<DesktopSnapshot>()
+    desktopBridgeMock.snapshot.mockReturnValueOnce(pendingSnapshot.promise)
+    desktopBridgeMock.selectOutput.mockResolvedValueOnce(receiverSnapshot('streaming'))
+
+    const refresh = wrapper.vm.refresh()
+    expect(wrapper.vm.refreshing).toBe(true)
+    expect(wrapper.vm.busy).toBe(false)
+
+    await wrapper.vm.selectOutput('device-b')
+    expect(desktopBridgeMock.selectOutput).toHaveBeenCalledWith('device-b')
+    expect(wrapper.vm.snapshot?.session).toBe('streaming')
+
+    pendingSnapshot.resolve(receiverSnapshot('idle'))
+    await refresh
+
+    expect(wrapper.vm.snapshot?.session).toBe('streaming')
+    expect(wrapper.vm.refreshing).toBe(false)
+  })
+
   it('accepts only one bridge command while a prior command is pending', async () => {
     desktopBridgeMock.snapshot.mockResolvedValueOnce(receiverSnapshot('ready'))
     const wrapper = mount(StateHarness)

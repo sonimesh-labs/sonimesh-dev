@@ -9,13 +9,16 @@ const SNAPSHOT_POLL_INTERVAL_MS = 1_000
 export function useDesktopState() {
   const snapshot = ref<DesktopSnapshot | null>(null)
   const busy = ref(false)
+  const refreshing = ref(false)
   const error = ref<string | null>(null)
   const outputTestStatus = ref<string | null>(null)
   let snapshotPollTimer: ReturnType<typeof setInterval> | undefined
+  let snapshotRevision = 0
 
   async function run(command: () => Promise<DesktopSnapshot | void>) {
     if (busy.value) return
 
+    snapshotRevision += 1
     busy.value = true
     error.value = null
     try {
@@ -30,7 +33,25 @@ export function useDesktopState() {
     }
   }
 
-  const refresh = () => run(() => desktopBridge.snapshot())
+  async function refresh() {
+    if (busy.value || refreshing.value) return
+
+    refreshing.value = true
+    error.value = null
+    const requestRevision = snapshotRevision
+    try {
+      const nextSnapshot = await desktopBridge.snapshot()
+      if (nextSnapshot !== undefined && requestRevision === snapshotRevision) {
+        snapshot.value = nextSnapshot
+      }
+    } catch {
+      if (requestRevision === snapshotRevision) {
+        error.value = 'The desktop control service did not accept this command.'
+      }
+    } finally {
+      refreshing.value = false
+    }
+  }
   const start = () => run(() => desktopBridge.startStream())
   const stop = () => run(() => desktopBridge.stopStream())
   const selectOutput = (id: string) => {
@@ -78,6 +99,7 @@ export function useDesktopState() {
   return {
     snapshot,
     busy,
+    refreshing,
     error,
     outputTestStatus,
     refresh,

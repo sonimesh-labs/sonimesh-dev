@@ -1451,6 +1451,10 @@ directory and restores it at launch when it is still present. Missing or invalid
 settings use the default endpoint; a missing selected endpoint falls back to the
 current default or first available endpoint. This preference does not change
 Windows' system default output.
+Low-rate snapshot polling has a separate UI state from user commands, so a slow
+device inventory refresh does not disable output selection. An in-flight snapshot
+is ignored after a newer user command starts, preventing stale state from replacing
+the command result.
 The shell-neutral `DesktopControlOwner` now provides the
 low-rate command owner for lifecycle, output, stream, and diagnostics actions;
 the live shell currently binds only output inventory, selection, and test tone.
