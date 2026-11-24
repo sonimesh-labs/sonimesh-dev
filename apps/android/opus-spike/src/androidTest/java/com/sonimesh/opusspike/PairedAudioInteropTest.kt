@@ -52,6 +52,7 @@ class PairedAudioInteropTest {
                     args.getString("pairingHost") ?: "127.0.0.1", 47610, pin, 120_100, encoded)
                 encoded.copyOf(size)
             }
+        val mediaPort = testMediaPort(args.getString("mediaPort"))
         val identity = StreamIdentity(0x12345678, 1, 0)
         PairingClient.connect(invitation).use { connection ->
             connection.negotiateHello("android audio lab", listOf(2))
@@ -60,7 +61,7 @@ class PairedAudioInteropTest {
             assertEquals(2, (start as StreamControlResult.Status).state)
             val sealer = LabMediaSealer(connection.mediaRoot, identity.sessionId, identity.streamId.toInt(), 0)
             try {
-                sendTone(sealer, args.getString("mediaHost") ?: "10.0.2.2", pauseMedia)
+                sendTone(sealer, args.getString("mediaHost") ?: "10.0.2.2", mediaPort, pauseMedia)
             } finally {
                 sealer.clear()
             }
@@ -70,7 +71,7 @@ class PairedAudioInteropTest {
         }
     }
 
-    private fun sendTone(sealer: LabMediaSealer, mediaHost: String, pauseMedia: Boolean) {
+    private fun sendTone(sealer: LabMediaSealer, mediaHost: String, mediaPort: Int, pauseMedia: Boolean) {
         val codec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_OPUS)
         try {
             val format = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_OPUS, 48_000, 2)
@@ -78,7 +79,7 @@ class PairedAudioInteropTest {
             codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
             codec.start()
             DatagramSocket().use { socket ->
-                socket.connect(InetAddress.getByName(mediaHost), 39093)
+                socket.connect(InetAddress.getByName(mediaHost), mediaPort)
                 val info = MediaCodec.BufferInfo()
                 var submitted = 0
                 var sent = 0L
@@ -135,7 +136,19 @@ class PairedAudioInteropTest {
         assertEquals(1_040L, nextSendDeadline(1_000, 1_020))
         assertEquals(1_520L, nextSendDeadline(1_000, 1_500))
     }
+
+    @Test
+    fun media_port_argument_defaults_and_rejects_invalid_values() {
+        assertEquals(DEFAULT_LAB_MEDIA_PORT, testMediaPort(null))
+        assertEquals(39094, testMediaPort("39094"))
+        org.junit.Assert.assertThrows(IllegalArgumentException::class.java) { testMediaPort("0") }
+        org.junit.Assert.assertThrows(IllegalArgumentException::class.java) { testMediaPort("65536") }
+        org.junit.Assert.assertThrows(IllegalArgumentException::class.java) { testMediaPort("bad") }
+    }
 }
+
+private fun testMediaPort(value: String?): Int =
+    if (value == null) DEFAULT_LAB_MEDIA_PORT else requireNotNull(parseLabMediaPort(value)) { "invalid mediaPort" }
 
 private fun nextSendDeadline(due: Long, now: Long): Long =
     (if (now - due >= 20) now else due) + 20

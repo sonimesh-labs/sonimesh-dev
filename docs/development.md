@@ -658,6 +658,9 @@ authenticated and decoded 100 packets with zero late packets and zero jitter
 resynchronization drops; each reported peak 0.250. This small sample supports
 the fixture change but does not establish the cause of earlier drops or qualify
 long-running behavior.
+The synthetic paired-audio instrumentation accepts `-e mediaPort PORT` to send
+to an alternate listener or relay port; it defaults to 39093, matching capture.
+This only selects the destination and does not configure the relay or listener.
 
 On 2026-11-23, a direct API 37 emulator run using a freshly generated invitation
 payload completed one synthetic session with 100 authenticated and decoded
