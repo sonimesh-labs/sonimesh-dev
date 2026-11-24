@@ -56,6 +56,26 @@ class CaptureEvidenceClipboardTest {
     }
 
     @Test
+    fun copyable_evidence_includes_the_latest_completed_usage_check() {
+        val state = CaptureUiState(
+            status = CaptureStatus.Idle,
+            evidence = CaptureEvidenceSnapshot(),
+        )
+
+        val text = state.copyableEvidence(
+            "Usage check: Media: detected; Game: detected; Other: no signal detected",
+        )
+
+        assertEquals(
+            "SoniMesh capture evidence\n" +
+                "Status: Ready to request playback capture consent.\n" +
+                "Observed 0 frames over 0.0 s, 0 silent frames across 0 reads, 0 read errors.\n" +
+                "Usage check: Media: detected; Game: detected; Other: no signal detected",
+            text,
+        )
+    }
+
+    @Test
     fun peak_format_distinguishes_weak_signal_from_silence() {
         assertEquals("0.000%", formatCapturePeak(0))
         assertEquals("0.003%", formatCapturePeak(1))

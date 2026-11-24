@@ -433,7 +433,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   one active session and reports per-usage signal observations; this remains a
   test of SoniMesh's own tones, not other apps' playback-capture behavior. A
   dedicated cancel action and the manual tone control can stop the sequence;
-  API 37 instrumentation verifies that cancellation stops the tone.
+  API 37 instrumentation verifies that cancellation stops the tone. Copy/share
+  capture evidence includes the latest completed usage check result from that
+  capture session.
   The capture-only evidence also includes the run's maximum PCM16 sample level;
   host tests cover its calculation and reset; API 37 x86_64 emulator
   instrumentation now confirms a nonzero peak during built-in tone capture and

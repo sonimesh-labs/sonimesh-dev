@@ -47,6 +47,7 @@ class MainActivity : ComponentActivity() {
     private val usageCheckResults = mutableListOf<String>()
     private var usageCheckRunning by mutableStateOf(false)
     private var usageCheckSummary by mutableStateOf("")
+    private var usageCheckEvidenceSummary = ""
 
     override fun onCreate(savedInstanceState: Bundle?) {
         pendingCaptureSource = CaptureSource.fromWireValue(
@@ -139,6 +140,7 @@ class MainActivity : ComponentActivity() {
                 R.string.capture_usage_check_summary,
                 usageCheckResults.joinToString("; "),
             )
+            usageCheckEvidenceSummary = usageCheckSummary
             return
         }
         usageCheckSources = usageCheckSources.drop(1)
@@ -190,6 +192,7 @@ class MainActivity : ComponentActivity() {
     private fun scheduleNextUsageCheck() {
         if (usageCheckSources.isEmpty()) {
             usageCheckRunning = false
+            usageCheckEvidenceSummary = usageCheckSummary
             return
         }
         val next = Runnable {
@@ -267,6 +270,7 @@ class MainActivity : ComponentActivity() {
             return
         }
 
+        usageCheckEvidenceSummary = ""
         pendingCaptureSource = source
         CaptureStateStore.publishAwaitingPermission()
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
@@ -309,7 +313,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun copyCaptureEvidence() {
-        val evidence = CaptureStateStore.state.value.copyableEvidence()
+        val evidence = CaptureStateStore.state.value.copyableEvidence(
+            usageCheckEvidenceSummary.takeIf { it.isNotBlank() },
+        )
         val clipboard = getSystemService(ClipboardManager::class.java)
         clipboard.setPrimaryClip(
             ClipData.newPlainText(getString(R.string.capture_evidence_clip_label), evidence),
@@ -318,7 +324,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun shareCaptureEvidence() {
-        val evidence = CaptureStateStore.state.value.copyableEvidence()
+        val evidence = CaptureStateStore.state.value.copyableEvidence(
+            usageCheckEvidenceSummary.takeIf { it.isNotBlank() },
+        )
         try {
             startActivity(
                 Intent.createChooser(
@@ -383,13 +391,16 @@ internal fun com.sonimesh.sender.capture.CaptureEvidenceSnapshot.description(): 
 internal fun formatCapturePeak(magnitude: Int): String =
     String.format(Locale.US, "%.3f%%", magnitude * 100.0 / 32_768)
 
-internal fun com.sonimesh.sender.capture.CaptureUiState.copyableEvidence(): String {
+internal fun com.sonimesh.sender.capture.CaptureUiState.copyableEvidence(
+    usageCheckSummary: String? = null,
+): String {
     val terminalFormat = if (status is CaptureStatus.Stopped || status is CaptureStatus.Failed) {
         evidence.captureFormat?.let { "\nCapture format: ${it.description()}." }.orEmpty()
     } else {
         ""
     }
-    return "SoniMesh capture evidence\nStatus: ${status.description()}$terminalFormat\n${evidence.description()}"
+    val usageCheck = usageCheckSummary?.let { "\n$it" }.orEmpty()
+    return "SoniMesh capture evidence\nStatus: ${status.description()}$terminalFormat\n${evidence.description()}$usageCheck"
 }
 
 internal fun com.sonimesh.sender.capture.CaptureEvidenceSnapshot.hasObservations(): Boolean =
