@@ -24,7 +24,8 @@ class LabCaptureUsageUiTest {
                     val root = activity.window.decorView
                     val stop = findButton(root, "Stop capture")
                     val mute = findMuteSwitch(root)
-                    for (control in listOf(stop, mute)) {
+                    val tone = findButton(root, "Start test tone")
+                    for (control in listOf(stop, mute, tone)) {
                         val visible = Rect()
                         assertTrue("${control.text} is not visible", control.getGlobalVisibleRect(visible))
                         assertEquals("${control.text} is clipped", control.height, visible.height())

@@ -240,6 +240,8 @@ During an active lab capture, **Mute sending** replaces subsequent encoder input
 with silence while capture, the connection, and capture-signal observation continue.
 The activity places **Stop capture** and **Mute sending** near the session status,
 ahead of the connection setup fields, for use during an active session.
+The **Start test tone**/**Stop test tone** control is in the same area so an
+operator can create or stop a known capturable source without scrolling.
 After a desktop connection or capture failure, it also shows **Retry last capture**
 near the same status area. The retry reuses the last transport and current setup
 fields, then requests any required permission or screen-capture consent again;

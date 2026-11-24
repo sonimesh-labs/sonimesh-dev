@@ -151,6 +151,13 @@ class LabActivity : Activity() {
         layout.addView(TextView(this).apply {
             text = "Already buffered audio may continue briefly after muting."
         })
+        layout.addView(Button(this).apply {
+            text = if (tone == null) "Start test tone" else "Stop test tone"
+            setOnClickListener {
+                toggleTone()
+                text = if (tone == null) "Start test tone" else "Stop test tone"
+            }
+        })
         retryButton = Button(this).apply {
             text = "Retry last capture"
             visibility = View.GONE
@@ -331,13 +338,6 @@ class LabActivity : Activity() {
         })
         layout.addView(TextView(this).apply {
             text = "New test tones use the current capture usage, or the selection when capture is stopped. Restart a playing tone to apply changes."
-        })
-        layout.addView(Button(this).apply {
-            text = if (tone == null) "Start test tone" else "Stop test tone"
-            setOnClickListener {
-                toggleTone()
-                text = if (tone == null) "Start test tone" else "Stop test tone"
-            }
         })
         setContentView(ScrollView(this).apply { addView(layout) })
         handleIncomingInvitation(intent)
