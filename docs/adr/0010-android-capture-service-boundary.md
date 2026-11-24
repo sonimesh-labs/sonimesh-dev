@@ -59,6 +59,13 @@ been accepted. It owns:
 - service state publication to the activity through a bounded, low-rate state
   model.
 
+In the separate controlled audio lab, an initial paired connection refused by
+the desktop may be retried briefly while the service retains the current
+projection. Stopping cancels the pending setup socket and prevents another
+attempt. Authentication errors and other connection failures are not retried
+by this policy. This is startup recovery, not automatic reconnection after an
+active stream loses its control session.
+
 The capture-only foreground notification also presents the same checking,
 signal-observed, or no-capturable-audio state as the activity, alongside elapsed
 capture time. This is a signal observation, not an explanation of source policy;

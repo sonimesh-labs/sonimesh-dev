@@ -194,10 +194,16 @@ class LabCaptureService : Service() {
         try {
             val packets = ArrayBlockingQueue<EncodedPacket>(8)
             if (invitation != null) {
-                val raw = Socket()
-                check(setupSocket.track(raw)) { "capture stopped before pairing" }
                 val connection = try {
-                    PairingClient.connect(invitation, raw)
+                    connectPairedWithRetry(running::get, Thread::sleep, onRetry = {
+                        handler.post {
+                            if (running.get() && !terminalStatus) LabStatus.publish("Desktop listener is not ready. Retrying connection…")
+                        }
+                    }) {
+                        val raw = Socket()
+                        check(setupSocket.track(raw)) { "capture stopped before pairing" }
+                        PairingClient.connect(invitation, raw)
+                    }
                 } finally {
                     invitation.fill(0)
                 }

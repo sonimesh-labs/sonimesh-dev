@@ -20,6 +20,9 @@ import android.widget.Switch
 import android.widget.TextView
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
+import java.net.DatagramPacket
+import java.net.DatagramSocket
+import java.net.InetAddress
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
@@ -75,6 +78,12 @@ class PairedCaptureTest {
     fun captures_tone_after_pairing_and_stops() = runCapture(expectDisconnect = false)
 
     @Test
+    fun captures_after_refused_connection_is_retried() {
+        assumeTrue("retry test requires a gated desktop listener", InstrumentationRegistry.getArguments().getString("retryGate") == "true")
+        runCapture(expectDisconnect = false, expectConnectionRetry = true)
+    }
+
+    @Test
     fun captures_after_scanned_invitation() = runCapture(expectDisconnect = false, startFromScan = true)
 
     @Test
@@ -104,7 +113,7 @@ class PairedCaptureTest {
     @Test
     fun mutes_and_resumes_sending_during_capture() = runCapture(expectDisconnect = false, testMute = true)
 
-    private fun runCapture(expectDisconnect: Boolean, screenOff: Boolean = false, notificationReturn: Boolean = false, startFromScan: Boolean = false, startFromPaste: Boolean = false, recreate: Boolean = false, changeUsage: Boolean = false, testMute: Boolean = false) {
+    private fun runCapture(expectDisconnect: Boolean, screenOff: Boolean = false, notificationReturn: Boolean = false, startFromScan: Boolean = false, startFromPaste: Boolean = false, recreate: Boolean = false, changeUsage: Boolean = false, testMute: Boolean = false, expectConnectionRetry: Boolean = false) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val args = InstrumentationRegistry.getArguments()
         assumeTrue(
@@ -173,6 +182,22 @@ class PairedCaptureTest {
             assertTrue("screen-capture selector missing", clickNode(automation, "Share one app"))
             assertTrue("entire-screen option missing", clickNode(automation, "Share entire screen"))
             assertTrue("screen-capture consent missing", clickNode(automation, "Share screen"))
+            if (expectConnectionRetry) {
+                var retrying = false
+                val retryDeadline = SystemClock.elapsedRealtime() + 5_000
+                while (!retrying && SystemClock.elapsedRealtime() < retryDeadline) {
+                    scenario.onActivity { activity ->
+                        retrying = containsStatus(activity.window.decorView, "Status: Desktop listener is not ready. Retrying connection")
+                    }
+                    if (!retrying) SystemClock.sleep(50)
+                }
+                assertTrue("connection retry was not reported", retrying)
+                instrumentation.sendStatus(1, Bundle().apply { putString("pairedCapture", "retrying") })
+                DatagramSocket().use { socket ->
+                    val marker = byteArrayOf(1)
+                    socket.send(DatagramPacket(marker, marker.size, InetAddress.getByName("10.0.2.2"), 47611))
+                }
+            }
             var capturing = false
             val deadline = SystemClock.elapsedRealtime() + 20_000
             while (!capturing && SystemClock.elapsedRealtime() < deadline) {

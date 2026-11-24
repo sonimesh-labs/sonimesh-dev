@@ -231,6 +231,37 @@ bitrate; changing the selector does not reconfigure an active capture. The
 usage and bitrate selectors are retained in the app's private preferences, so
 the next lab launch keeps the operator's last choices; they still only apply
 when a new capture starts.
+When a paired TCP connection is refused during startup, the service retries up
+to five times at one-second intervals while retaining the current projection.
+The status reports the wait, and Stop cancels it. Other connection failures are
+reported without this retry; an established session that disconnects still
+requires a fresh capture start and consent.
+On 2026-11-24 an API 37 x86_64 emulator observed the retry, then completed a
+paired capture after a loopback control gate opened. The software listener
+authenticated 147 packets and decoded 124 frames with a peak of 0.391; it also
+reported late packets and buffer resynchronizations. This does not establish
+physical WLAN recovery or audible continuity.
+
+To repeat that controlled test, start these commands in separate terminals
+from the repository root (leave ADB reverse for port 47610 disabled):
+
+~~~powershell
+cargo run -p opus-codec-prototype --bin paired-audio-lab -- --bind 127.0.0.2 --host 10.0.2.2 --media-port 39094 --require-tone --status
+cargo run -p sonimesh-network-simulator --bin udp-impairment-relay -- --forward 127.0.0.2:39094 --seconds 120 --delay-ms 0 --jitter-ms 0
+python tools/paired_retry_gate.py
+~~~
+
+Grant the lab's audio and notification permissions, then run the following
+instrumentation with the listener's `SPKI_HEX` in `$pin`; select the entire
+screen in the system consent UI:
+
+~~~powershell
+adb shell am instrument -w -e pairingSpkiHex $pin -e pairingHost 10.0.2.2 -e mediaHost 10.0.2.2 -e retryGate true -e class 'com.sonimesh.opusspike.PairedCaptureTest#captures_after_refused_connection_is_retried' com.sonimesh.opusspike.test/androidx.test.runner.AndroidJUnitRunner
+~~~
+
+The test sends a local UDP marker only after observing the retry status; the
+gate then accepts one control connection and forwards it to the listener. This
+is a test fixture, not a discovery or production reconnection mechanism.
 The lab displays the usage, target bitrate, and transport requested for the
 current or most recent session separately from the selectors for the next
 session. Transport is shown as **ADB TCP**, **UDP**, or **paired UDP** so an

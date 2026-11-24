@@ -148,6 +148,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   The paired lab also resumes after an authenticated Opus packet rejected as
   invalid: it resets the stream's decode state and waits for fresh media, and
   reports the decode error count. Other decoder failures still end the session.
+  A refused initial paired TCP connection is retried briefly without requesting
+  another projection consent; an API 37 emulator test exercised this with a
+  delayed loopback gate. Established-session reconnection remains open.
   Its Android service can cancel an in-progress paired connection before stream
   startup; after startup, normal shutdown still attempts StopStream. Host tests
   cover socket cancellation and ownership handoff, not Android device behavior.
