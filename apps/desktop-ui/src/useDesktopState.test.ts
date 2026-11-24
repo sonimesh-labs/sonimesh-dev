@@ -398,6 +398,44 @@ describe('useDesktopState', () => {
     expect(wrapper.vm.outputTestStatus).toBe(null)
   })
 
+  it('reports output selection failures and releases the command state', async () => {
+    desktopBridgeMock.snapshot.mockResolvedValueOnce(receiverSnapshot('ready'))
+    desktopBridgeMock.selectOutput.mockRejectedValueOnce(new Error('device unavailable'))
+    const wrapper = mount(StateHarness)
+    await flushPromises()
+
+    await wrapper.vm.selectOutput('missing-device')
+
+    expect(wrapper.vm.error).toBe('Could not select this output device. Refresh the device list and try again.')
+    expect(wrapper.vm.busy).toBe(false)
+  })
+
+  it('reports output inventory refresh failures and releases both loading states', async () => {
+    desktopBridgeMock.snapshot.mockResolvedValueOnce(receiverSnapshot('ready'))
+    desktopBridgeMock.refreshOutputDevices.mockRejectedValueOnce(new Error('enumeration failed'))
+    const wrapper = mount(StateHarness)
+    await flushPromises()
+
+    await wrapper.vm.refreshOutputDevices()
+
+    expect(wrapper.vm.error).toBe('Could not refresh output devices. Check the audio service and try again.')
+    expect(wrapper.vm.busy).toBe(false)
+    expect(wrapper.vm.refreshingDevices).toBe(false)
+  })
+
+  it('reports test-tone failures without leaving a success result', async () => {
+    desktopBridgeMock.snapshot.mockResolvedValueOnce(receiverSnapshot('ready'))
+    desktopBridgeMock.testOutput.mockRejectedValueOnce(new Error('output unavailable'))
+    const wrapper = mount(StateHarness)
+    await flushPromises()
+
+    await wrapper.vm.testOutput()
+
+    expect(wrapper.vm.error).toBe('Could not play a test tone on the selected output. Check the device and try again.')
+    expect(wrapper.vm.outputTestStatus).toBe(null)
+    expect(wrapper.vm.busy).toBe(false)
+  })
+
   it('forwards the jitter mode command and projects the returned snapshot', async () => {
     desktopBridgeMock.snapshot.mockResolvedValueOnce(receiverSnapshot('ready'))
     const wrapper = mount(StateHarness)

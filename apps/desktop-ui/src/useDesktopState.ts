@@ -16,7 +16,10 @@ export function useDesktopState() {
   let snapshotPollTimer: ReturnType<typeof setInterval> | undefined
   let snapshotRevision = 0
 
-  async function run(command: () => Promise<DesktopSnapshot | void>) {
+  async function run(
+    command: () => Promise<DesktopSnapshot | void>,
+    failureMessage = 'The desktop control service did not accept this command.',
+  ) {
     if (busy.value) return
 
     snapshotRevision += 1
@@ -28,7 +31,7 @@ export function useDesktopState() {
         snapshot.value = nextSnapshot
       }
     } catch {
-      error.value = 'The desktop control service did not accept this command.'
+      error.value = failureMessage
     } finally {
       busy.value = false
     }
@@ -57,7 +60,10 @@ export function useDesktopState() {
   const stop = () => run(() => desktopBridge.stopStream())
   const selectOutput = (id: string) => {
     outputTestStatus.value = null
-    return run(() => desktopBridge.selectOutput(id))
+    return run(
+      () => desktopBridge.selectOutput(id),
+      'Could not select this output device. Refresh the device list and try again.',
+    )
   }
   async function refreshOutputDevices() {
     if (busy.value) return
@@ -71,17 +77,20 @@ export function useDesktopState() {
           outputTestStatus.value = null
         }
         return nextSnapshot
-      })
+      }, 'Could not refresh output devices. Check the audio service and try again.')
     } finally {
       refreshingDevices.value = false
     }
   }
   const testOutput = () => {
     outputTestStatus.value = null
-    return run(async () => {
-      await desktopBridge.testOutput()
-      outputTestStatus.value = 'Test tone completed on the selected output.'
-    })
+    return run(
+      async () => {
+        await desktopBridge.testOutput()
+        outputTestStatus.value = 'Test tone completed on the selected output.'
+      },
+      'Could not play a test tone on the selected output. Check the device and try again.',
+    )
   }
   const setGain = (gain: number) => run(() => desktopBridge.setGain(gain))
   const setMuted = (muted: boolean) => run(() => desktopBridge.setMuted(muted))
