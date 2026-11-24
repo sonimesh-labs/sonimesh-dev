@@ -248,7 +248,7 @@ from the repository root (leave ADB reverse for port 47610 disabled):
 ~~~powershell
 cargo run -p opus-codec-prototype --bin paired-audio-lab -- --bind 127.0.0.2 --host 10.0.2.2 --media-port 39094 --require-tone --status
 cargo run -p sonimesh-network-simulator --bin udp-impairment-relay -- --forward 127.0.0.2:39094 --seconds 120 --delay-ms 0 --jitter-ms 0
-python tools/paired_retry_gate.py
+python tools/fixtures/paired_retry_gate.py
 ~~~
 
 Grant the lab's audio and notification permissions, then run the following
