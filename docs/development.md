@@ -789,8 +789,11 @@ stops its child. During an active session the probe shows the listener's
 initial and five-second cumulative packet and decode counters, decoded peak, buffered frames,
 and output recovery state. These are software observations, not proof of audible
 playback. Media arrival and output recovery transitions are emitted promptly;
-the cumulative counters retain their five-second cadence. The last observations remain while waiting and clear on the next
-client attempt.
+the cumulative counters retain their five-second cadence. The last observations
+remain while waiting and after stopping the listener, and clear on the next
+listener start or client attempt. Stopping the listener terminates an active
+session immediately, so its retained counters are only the last available update,
+not a final post-drain report.
 During an active session, the probe also shows the last reported one-second
 decoded-frame count and peak before output gain, excluding concealment. A zero
 frame count means no frames were decoded in that interval, not decoded silence.

@@ -316,12 +316,14 @@ async function toggleLab() {
   labError.value = null
   clearControl()
   controlError.value = null
+  const starting = !lab.value.running
   labRequest++
   clearTimeout(timer)
   try {
     lab.value = lab.value.running
       ? await window.__TAURI__.core.invoke<LabSnapshot>('stop_lab')
       : await window.__TAURI__.core.invoke<LabSnapshot>('start_lab', { host: labHost.value.trim(), generation: generation.value, index: labOutput.value === '' ? null : Number(labOutput.value), startupBufferMs: startupBufferMs.value, adaptive: adaptive.value })
+    if (starting) labEvidenceMessage.value = null
     restoredLab.value = false
     if (!disposed && lab.value.running) timer = setTimeout(pollLab, 1000)
   } catch (cause) {

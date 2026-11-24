@@ -236,6 +236,37 @@ describe('desktop output probe', () => {
     wrapper.unmount()
   })
 
+  it('keeps session evidence after stopping the listener and clears it on restart', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    const metrics = { packets: '120', rejected: '3', decoded: '115', peak: '0.250', plc: '2', decodeErrors: '1', buffered: '4', output: 'active', late: '0', resyncDropped: '0', playout: 'fixed', adaptive: null }
+    const running = { running: true, sessionActive: true, status: 'Session active', invitation: '01ab', events: ['RESULT receiver started'], metrics, volume: 50, muted: false }
+    const stopped = { ...running, running: false, sessionActive: false, status: 'Stopped', invitation: null, volume: null, muted: null }
+    const starting = { ...stopped, running: true, status: 'Starting listener…', events: [], metrics: null }
+    const invoke = vi.fn((command: string) => {
+      if (command === 'lab_status') return Promise.resolve(running)
+      if (command === 'stop_lab') return Promise.resolve(stopped)
+      if (command === 'start_lab') return Promise.resolve(starting)
+      if (command === 'probe_outputs') return Promise.resolve({ generation: 1, devices: [] })
+      return Promise.reject(new Error('unexpected command'))
+    })
+    window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+    const wrapper = mount(OutputProbe)
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'Stop listener')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Last session observations')
+    expect(wrapper.text()).toContain('Last available update')
+    expect(wrapper.text()).toContain('Last reported: Active')
+    await wrapper.findAll('button').find(button => button.text() === 'Copy session evidence')!.trigger('click')
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining('Decoded frames: 115'))
+    await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('Last session observations')
+    expect(wrapper.text()).not.toContain('Session evidence copied.')
+    wrapper.unmount()
+  })
+
   it('ignores an old status response after stopping a restored listener', async () => {
     vi.useFakeTimers()
     let resolvePoll!: (snapshot: unknown) => void

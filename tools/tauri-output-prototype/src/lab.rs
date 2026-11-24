@@ -232,13 +232,22 @@ impl Lab {
     }
 
     pub fn stop(&mut self) -> LabSnapshot {
+        self.refresh();
         if let Some(mut child) = self.child.take() {
             let _ = child.kill();
             let _ = child.wait();
         }
+        self.refresh();
         self.events = None;
         self.signal_received_at = None;
-        self.snapshot = LabSnapshot::default();
+        self.snapshot.running = false;
+        self.snapshot.status = "Stopped".into();
+        self.snapshot.invitation = None;
+        self.snapshot.volume = None;
+        self.snapshot.muted = None;
+        self.snapshot.session_active = false;
+        self.snapshot.signal = None;
+        self.snapshot.signal_stale = false;
         self.snapshot.clone()
     }
 
@@ -684,7 +693,7 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn unexpected_listener_exit_retains_last_observations_until_explicit_stop() {
+    fn unexpected_listener_exit_retains_last_observations_after_explicit_stop() {
         let child = Command::new("cmd.exe")
             .args(["/C", "exit", "1"])
             .spawn()
@@ -731,7 +740,46 @@ mod tests {
         assert!(snapshot.volume.is_none());
         assert!(snapshot.muted.is_none());
         assert!(snapshot.status.contains("Listener exited"));
-        assert!(lab.stop().metrics.is_none());
+        assert_eq!(lab.stop().metrics.unwrap().decoded, "115");
+    }
+
+    #[test]
+    fn stop_retains_pending_observations_and_clears_live_state() {
+        let (sender, events) = mpsc::sync_channel(8);
+        for line in [
+            "RESULT receiver started",
+            "STATUS packets 120 rejected 3 decoded 115 peak 0.250 plc 2 decode_errors 1 buffered 4 output active",
+            "SIGNAL decoded 50 peak 0.1",
+        ] {
+            sender
+                .send(ObservedLine {
+                    text: line.into(),
+                    received_at: Instant::now(),
+                })
+                .unwrap();
+        }
+        let mut lab = Lab {
+            child: None,
+            events: Some(events),
+            snapshot: LabSnapshot {
+                running: true,
+                invitation: Some("01ab".into()),
+                volume: Some(50),
+                muted: Some(false),
+                ..LabSnapshot::default()
+            },
+            signal_received_at: None,
+        };
+        let stopped = lab.stop();
+        assert_eq!(stopped.status, "Stopped");
+        assert!(!stopped.running && !stopped.session_active);
+        assert!(
+            stopped.invitation.is_none() && stopped.volume.is_none() && stopped.muted.is_none()
+        );
+        assert!(stopped.signal.is_none() && !stopped.signal_stale);
+        assert_eq!(stopped.metrics.unwrap().decoded, "115");
+        assert_eq!(stopped.events, ["RESULT receiver started"]);
+        assert_eq!(lab.stop().metrics.unwrap().decoded, "115");
     }
 
     #[test]
@@ -1055,11 +1103,22 @@ mod tests {
             std::thread::sleep(Duration::from_millis(25));
         }
         assert!(lab.start("127.0.0.1", None, 60, false).is_err());
-        assert!(!lab.stop().running);
+        let stopped = lab.stop();
+        assert!(!stopped.running);
+        assert!(stopped.invitation.is_none());
+        assert!(
+            stopped
+                .events
+                .iter()
+                .any(|event| event == "RESULT session failed")
+        );
         assert!(lab.child.is_none());
 
-        lab.start("127.0.0.1", Some("unavailable-output-id"), 60, false)
+        let restarted = lab
+            .start("127.0.0.1", Some("unavailable-output-id"), 60, false)
             .unwrap();
+        assert!(restarted.events.is_empty());
+        assert!(restarted.metrics.is_none());
         let deadline = Instant::now() + Duration::from_secs(10);
         while lab.refresh().running && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(25));
