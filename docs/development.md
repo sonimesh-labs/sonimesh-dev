@@ -177,6 +177,18 @@ including duplicates, and ranges from 1 to 4096 (default 256). Once full, the
 relay drops additional copies and reports them in `capacity_dropped_copies`.
 The model rounds each serialized copy up to whole milliseconds; the live host's
 scheduling and socket buffers also affect the observed result.
+For a desktop-only software check without Android, run the relay with loopback
+listen port 39093 and forward port 39094, then run
+`cargo run -p opus-codec-prototype --bin local-audio -- --check-via-relay 39093 39094`.
+This sends a generated Opus tone through the protected UDP path and checks the
+decoded software render. It uses a fixed test key and binds both endpoints to
+loopback; it does not test Android capture, authenticated pairing, or audible
+output. Loss or excessive delay can make this strict check fail. It waits for
+each frame before sending the next, so it does not reproduce a continuously
+paced sender or by itself test congestion. On 2026-11-24 a Windows software
+run with 12,000 bytes/second and a 32-copy queue decoded 100 frames and observed
+a nonzero software-render peak; the relay reported 100 shaped copies, 30,159 payload bytes, and
+no queue-capacity drops. This is not Android or physical WLAN evidence.
 The desktop output probe can instead start the playback-enabled listener: set
 its **Receiver UDP port** to 39094 and run the relay separately. Restore the
 default port 39093 for a direct connection. Android's **Desktop UDP port** is

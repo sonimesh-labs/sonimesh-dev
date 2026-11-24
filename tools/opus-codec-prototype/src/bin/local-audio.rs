@@ -4,6 +4,7 @@ mod lab_decoder;
 use lab_decoder::Decoder;
 
 use std::error::Error;
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -103,7 +104,7 @@ impl LabOutput for sonimesh_platform::CpalOutput {
     }
 }
 
-fn run<O: LabOutput>(output: O, config: OutputConfig) -> LabResult<()> {
+fn run<O: LabOutput>(output: O, config: OutputConfig, relay: Option<(u16, u16)>) -> LabResult<()> {
     let frame = OpusFrameConfig::new(48_000, 2, 20)?;
     let secret = SessionSecret::new([0x42; 32]);
     let context = MediaKeyContext::new(1, 1, 0, MediaDirection::AndroidToDesktop)?;
@@ -113,18 +114,18 @@ fn run<O: LabOutput>(output: O, config: OutputConfig) -> LabResult<()> {
     let worker =
         StreamDecodeWorker::<_, 8, 1_148, SAMPLES>::new_for_opus(decoder, producer, 0, frame)?;
     let mut receiver = UdpReceiverPipeline::bind_with_worker(
-        "127.0.0.1:0".parse()?,
+        SocketAddrV4::new(Ipv4Addr::LOCALHOST, relay.map_or(0, |(_, receive)| receive)).into(),
         &secret,
         context,
         worker,
         Arc::clone(&counters),
     )?;
-    let mut sender = MediaSessionSender::bind(
-        "127.0.0.1:0".parse()?,
-        &secret,
-        context,
-        receiver.local_addr()?,
+    let destination: SocketAddr = relay.map_or_else(
+        || receiver.local_addr(),
+        |(listen, _)| Ok(SocketAddrV4::new(Ipv4Addr::LOCALHOST, listen).into()),
     )?;
+    let mut sender =
+        MediaSessionSender::bind("127.0.0.1:0".parse()?, &secret, context, destination)?;
     let factory = ReceiverPcmEndpointFactory::new(8, SourcePcmFormat::new(48_000, 2)?, counters);
     let mut output = ReceiverOutputController::new(output, factory);
     output.start(
@@ -171,7 +172,7 @@ fn run<O: LabOutput>(output: O, config: OutputConfig) -> LabResult<()> {
     Ok(())
 }
 
-fn check() -> LabResult<()> {
+fn check(relay: Option<(u16, u16)>) -> LabResult<()> {
     let config = OutputConfig {
         sample_rate_hz: 48_000,
         channels: 2,
@@ -179,7 +180,7 @@ fn check() -> LabResult<()> {
         requested_callback_frames: None,
         maximum_callback_frames: 960,
     };
-    run(CheckOutput::default(), config)?;
+    run(CheckOutput::default(), config, relay)?;
     println!("loopback audio check passed: {FRAMES} Opus frames, non-silent render");
     Ok(())
 }
@@ -189,7 +190,7 @@ fn play() -> LabResult<()> {
     let output = sonimesh_platform::CpalOutput::new();
     let config = output.default_device_probe()?.output_config(None, 8_192)?;
     println!("Playing a quiet 1 kHz test tone on the default output for two seconds.");
-    run(output, config)?;
+    run(output, config, None)?;
     println!("loopback playback completed: {FRAMES} Opus frames");
     Ok(())
 }
@@ -200,13 +201,42 @@ fn play() -> LabResult<()> {
 }
 
 fn main() -> LabResult<()> {
-    match std::env::args().nth(1).as_deref() {
-        Some("--check") => check(),
-        Some("--play") => play(),
-        _ => {
-            println!("Usage: local-audio --check | --play");
+    match parse_args(std::env::args().skip(1))? {
+        Mode::Check(relay) => check(relay),
+        Mode::Play => play(),
+        Mode::Usage => {
+            println!(
+                "Usage: local-audio --check | --play | --check-via-relay RELAY_PORT RECEIVER_PORT"
+            );
             Ok(())
         }
+    }
+}
+
+enum Mode {
+    Check(Option<(u16, u16)>),
+    Play,
+    Usage,
+}
+
+fn parse_args(args: impl IntoIterator<Item = String>) -> LabResult<Mode> {
+    let args: Vec<String> = args.into_iter().collect();
+    match args.as_slice() {
+        [] => Ok(Mode::Usage),
+        [flag] if flag == "--check" => Ok(Mode::Check(None)),
+        [flag] if flag == "--play" => Ok(Mode::Play),
+        [flag, listen, receive] if flag == "--check-via-relay" => {
+            let listen: u16 = listen.parse()?;
+            let receive: u16 = receive.parse()?;
+            if listen == 0 || receive == 0 || listen == receive {
+                return Err("relay and receiver ports must be distinct and nonzero".into());
+            }
+            Ok(Mode::Check(Some((listen, receive))))
+        }
+        _ => Err(
+            "usage: local-audio --check | --play | --check-via-relay RELAY_PORT RECEIVER_PORT"
+                .into(),
+        ),
     }
 }
 
@@ -214,6 +244,26 @@ fn main() -> LabResult<()> {
 mod tests {
     #[test]
     fn native_opus_udp_loopback_reaches_the_render_source() {
-        super::check().expect("loopback audio path");
+        super::check(None).expect("loopback audio path");
+    }
+
+    #[test]
+    fn relay_ports_must_be_distinct_and_nonzero() {
+        fn args(values: &[&str]) -> Vec<String> {
+            values.iter().map(ToString::to_string).collect()
+        }
+        assert!(matches!(
+            super::parse_args(args(&["--check-via-relay", "39093", "39094"])),
+            Ok(super::Mode::Check(Some((39093, 39094))))
+        ));
+        for values in [
+            vec!["--check-via-relay", "0", "39094"],
+            vec!["--check-via-relay", "39093", "0"],
+            vec!["--check-via-relay", "39093", "39093"],
+            vec!["--check-via-relay", "39093"],
+            vec!["--check", "extra"],
+        ] {
+            assert!(super::parse_args(args(&values)).is_err());
+        }
     }
 }
