@@ -174,6 +174,12 @@ second to 24 hours. This option alone does not establish a completed soak.
 Add `--report-seconds 5` to print cumulative relay counters every five seconds
 while it runs. Periodic reports are disabled by default; output can affect live
 scheduling, and counters do not establish desktop receipt or playback.
+Reports also include cumulative in-limit UDP payload bytes (`received_bytes`,
+including packets later dropped by the model),
+payload bytes sent by the relay (`forwarded_bytes`, including duplicates), and
+the highest number of copies queued at once (`peak_queued`). Oversized datagrams
+are excluded from the byte counts. Compare byte-counter differences over the
+reported elapsed time to estimate traffic rates; socket sends do not prove receipt.
 For repeated short outages, add `--burst-interval 50 --burst-length 4` to
 drop four consecutive submitted packets after the first 50 and again every 50
 submissions thereafter. The interval counts packets received by the relay, not
@@ -211,7 +217,7 @@ is the requested port, not a connectivity or successful-bind check.
 For the paired capture instrumentation, pass `-e mediaPort 39094` when testing
 a direct listener started with `--media-port 39094`; omit it for the default.
 This argument applies to `PairedCaptureTest`, which drives the interactive lab
-service. `PairedAudioInteropTest` sends directly and still uses port 39093.
+service, and to `PairedAudioInteropTest`, which sends synthetic Opus directly.
 On 2026-11-24 an API 37 x86_64 emulator used port 39094 for a direct paired
 capture; the listener authenticated and decoded 155 packets with a software PCM
 peak of 0.094. This does not verify physical WLAN or audible playback.

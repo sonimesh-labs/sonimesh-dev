@@ -84,6 +84,9 @@ struct RelayReport {
     oversized: u64,
     forwarded: u64,
     queued: usize,
+    received_bytes: u64,
+    forwarded_bytes: u64,
+    peak_queued: usize,
 }
 
 fn relay(
@@ -98,13 +101,18 @@ fn relay(
     let start = Instant::now();
     let mut oversized = 0_u64;
     let mut forwarded = 0_u64;
+    let mut received_bytes = 0_u64;
+    let mut forwarded_bytes = 0_u64;
+    let mut peak_queued = 0_usize;
     let mut next_report = options.report_interval;
     while start.elapsed() < options.duration {
         for _ in 0..RECEIVE_BATCH {
             match input.recv_from(&mut buffer) {
                 Ok((size, _)) if size <= MAX_MEDIA_DATAGRAM_LEN => {
+                    received_bytes = received_bytes.saturating_add(size as u64);
                     let now = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
                     network.send(now, buffer[..size].to_vec(), size as u64);
+                    peak_queued = peak_queued.max(network.queued_copies());
                 }
                 Ok(_) => oversized = oversized.saturating_add(1),
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => break,
@@ -115,6 +123,7 @@ fn relay(
         for delivery in network.drain_ready(now) {
             output.send_to(&delivery.payload, options.forward)?;
             forwarded = forwarded.saturating_add(1);
+            forwarded_bytes = forwarded_bytes.saturating_add(delivery.payload.len() as u64);
         }
         let elapsed = start.elapsed();
         if next_report.is_some_and(|due| elapsed >= due) {
@@ -125,6 +134,9 @@ fn relay(
                     oversized,
                     forwarded,
                     queued: network.queued_copies(),
+                    received_bytes,
+                    forwarded_bytes,
+                    peak_queued,
                 },
             );
             next_report = options
@@ -138,6 +150,9 @@ fn relay(
         oversized,
         forwarded,
         queued: network.queued_copies(),
+        received_bytes,
+        forwarded_bytes,
+        peak_queued,
     })
 }
 
@@ -156,17 +171,26 @@ fn main() -> Result<(), Box<dyn Error>> {
     );
     let report = relay(&options, &input, &output, |elapsed, report| {
         println!(
-            "relay elapsed_ms={} forwarded={} oversized={} queued={} stats={:?}",
+            "relay elapsed_ms={} forwarded={} oversized={} queued={} received_bytes={} forwarded_bytes={} peak_queued={} stats={:?}",
             elapsed.as_millis(),
             report.forwarded,
             report.oversized,
             report.queued,
+            report.received_bytes,
+            report.forwarded_bytes,
+            report.peak_queued,
             report.network
         );
     })?;
     println!(
-        "relay forwarded={} oversized={} queued_at_stop={} stats={:?}",
-        report.forwarded, report.oversized, report.queued, report.network
+        "relay forwarded={} oversized={} queued_at_stop={} received_bytes={} forwarded_bytes={} peak_queued={} stats={:?}",
+        report.forwarded,
+        report.oversized,
+        report.queued,
+        report.received_bytes,
+        report.forwarded_bytes,
+        report.peak_queued,
+        report.network
     );
     Ok(())
 }
@@ -270,6 +294,9 @@ mod tests {
         assert_eq!(report.network.capacity_dropped_copies, 1);
         assert_eq!(report.forwarded, 2);
         assert_eq!(report.queued, 0);
+        assert_eq!(report.received_bytes, 300);
+        assert_eq!(report.forwarded_bytes, 200);
+        assert_eq!(report.peak_queued, 2);
         sink.set_read_timeout(Some(Duration::from_millis(100)))
             .unwrap();
         let mut received = [0_u8; 100];
@@ -312,21 +339,40 @@ mod tests {
                 report.forwarded,
                 report.oversized,
                 report.queued,
+                report.received_bytes,
+                report.forwarded_bytes,
+                report.peak_queued,
             ));
         })
         .unwrap();
         assert!(!reports.is_empty());
         assert!(reports.windows(2).all(|pair| pair[0].0 < pair[1].0));
-        assert!(
-            reports
-                .iter()
-                .all(|&(_, submitted, forwarded, oversized, queued)| (
-                    submitted, forwarded, oversized, queued
-                ) == (1, 1, 1, 0))
-        );
+        assert!(reports.iter().all(
+            |&(
+                _,
+                submitted,
+                forwarded,
+                oversized,
+                queued,
+                received_bytes,
+                forwarded_bytes,
+                peak_queued,
+            )| (
+                submitted,
+                forwarded,
+                oversized,
+                queued,
+                received_bytes,
+                forwarded_bytes,
+                peak_queued
+            ) == (1, 1, 1, 0, 5, 5, 1)
+        ));
         assert_eq!(final_report.network.submitted_packets, 1);
         assert_eq!(final_report.forwarded, 1);
         assert_eq!(final_report.oversized, 1);
+        assert_eq!(final_report.received_bytes, 5);
+        assert_eq!(final_report.forwarded_bytes, 5);
+        assert_eq!(final_report.peak_queued, 1);
         sink.set_read_timeout(Some(Duration::from_millis(100)))
             .unwrap();
         let mut bytes = [0; 16];
@@ -446,5 +492,8 @@ mod tests {
         assert_eq!(report.network.duplicate_copies, 1);
         assert_eq!(report.oversized, 1);
         assert_eq!(report.forwarded, 2);
+        assert_eq!(report.received_bytes, 5);
+        assert_eq!(report.forwarded_bytes, 10);
+        assert_eq!(report.peak_queued, 2);
     }
 }
