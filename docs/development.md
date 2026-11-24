@@ -200,6 +200,7 @@ including duplicates, and ranges from 1 to 4096 (default 256). Once full, the
 relay drops additional copies and reports them in `capacity_dropped_copies`.
 The model rounds each serialized copy up to whole milliseconds; the live host's
 scheduling and socket buffers also affect the observed result.
+
 For a desktop-only software check without Android, run the relay with loopback
 listen port 39093 and forward port 39094, then run
 `cargo run -p opus-codec-prototype --bin local-audio -- --check-via-relay 39093 39094`.
@@ -212,6 +213,28 @@ paced sender or by itself test congestion. On 2026-11-24 a Windows software
 run with 12,000 bytes/second and a 32-copy queue decoded 100 frames and observed
 a nonzero software-render peak; the relay reported 100 shaped copies, 30,159 payload bytes, and
 no queue-capacity drops. This is not Android or physical WLAN evidence.
+
+To exercise a paced software stream, start these commands in separate terminals
+from the repository root. The relay runs long enough to cover the sender's
+two-second stream and its final playout ticks:
+
+~~~powershell
+cargo run -p sonimesh-network-simulator --bin udp-impairment-relay -- --listen 127.0.0.1:39093 --forward 127.0.0.1:39094 --seconds 5 --loss 5 --delay-ms 20 --jitter-ms 5 --queue-packets 32
+cargo run -p opus-codec-prototype --bin local-audio -- --stream-via-relay 39093 39094
+~~~
+
+The paced sender emits one 20 ms frame at a time. Its receiver reports admitted,
+decoded, concealed, and empty playout ticks. Relay and receiver summaries describe
+the software path only; live host scheduling is not deterministic timing evidence.
+On 2026-11-24, a Windows loopback run with 5% configured loss, 20 ms base delay,
+and 5 ms jitter decoded 94 frames and concealed 6, matching the relay's 94
+forwarded copies. With the same profile plus a 12,000-byte/second limit and a
+32-copy queue, the relay forwarded 94 copies by shutdown while the two-second
+playout had decoded 1 frame and concealed 99; its peak modeled queue was 18.
+That run shows the configured rate cannot sustain this prototype's encoded
+stream with a 60 ms startup buffer. Neither run measures physical network timing
+or listening quality.
+
 The desktop output probe can instead start the playback-enabled listener: set
 its **Receiver UDP port** to 39094 and run the relay separately. Restore the
 default port 39093 for a direct connection. Android's **Desktop UDP port** is

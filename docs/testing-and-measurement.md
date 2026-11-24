@@ -26,6 +26,16 @@ The relay accepts a fixed run duration of up to 24 hours, sufficient to support
 the planned eight-hour software soak. This capability is not a completed soak
 result; queued packets are discarded when the run ends.
 
+`local-audio --check-via-relay` is a strict per-packet loopback check: it waits
+for each packet before sending the next and therefore does not create a
+continuous stream. The separate `--stream-via-relay` mode sends 100 Opus frames
+at 20 ms intervals while polling independently and making playout decisions at
+20 ms intervals after a 60 ms startup buffer. Record decoded, concealed, and
+empty playout ticks with the relay's queue and loss counters. This live socket
+exercise is useful for software-path behavior under a shaped relay, but host
+scheduling means it is not a deterministic timing test or physical-network
+evidence.
+
 ## Latency measurement
 
 ### Software timing
