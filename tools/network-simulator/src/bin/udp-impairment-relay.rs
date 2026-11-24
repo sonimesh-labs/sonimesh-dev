@@ -37,6 +37,8 @@ impl Options {
                 "--loss" => result.profile.loss_percent = value.parse()?,
                 "--duplicate" => result.profile.duplicate_percent = value.parse()?,
                 "--reorder" => result.profile.reorder_percent = value.parse()?,
+                "--burst-interval" => result.profile.burst_interval_packets = value.parse()?,
+                "--burst-length" => result.profile.burst_length_packets = value.parse()?,
                 "--delay-ms" => result.profile.base_delay_ms = value.parse()?,
                 "--jitter-ms" => result.profile.jitter_ms = value.parse()?,
                 "--reorder-delay-ms" => result.profile.reorder_delay_ms = value.parse()?,
@@ -109,7 +111,7 @@ fn relay(
 
 fn main() -> Result<(), Box<dyn Error>> {
     let options = Options::parse(std::env::args().skip(1)).map_err(|error| {
-        format!("{error}; usage: udp-impairment-relay [--listen IPv4:PORT] [--forward IPv4:PORT] [--seconds 1-3600] [--seed N] [--loss 0-100] [--duplicate 0-100] [--reorder 0-100] [--delay-ms N] [--jitter-ms N] [--reorder-delay-ms N]")
+        format!("{error}; usage: udp-impairment-relay [--listen IPv4:PORT] [--forward IPv4:PORT] [--seconds 1-3600] [--seed N] [--loss 0-100] [--duplicate 0-100] [--reorder 0-100] [--burst-interval N] [--burst-length N] [--delay-ms N] [--jitter-ms N] [--reorder-delay-ms N]")
     })?;
     let input = UdpSocket::bind(options.listen)?;
     let output = UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, 0))?;
@@ -145,10 +147,53 @@ mod tests {
             vec!["--seconds", "0"],
             vec!["--loss", "101"],
             vec!["--delay-ms", "60001"],
+            vec!["--burst-length", "1"],
+            vec!["--burst-interval", "2", "--burst-length", "3"],
             vec!["--seed"],
         ] {
             assert!(Options::parse(args(&values)).is_err());
         }
+    }
+
+    #[test]
+    fn forwards_only_packets_outside_configured_loss_bursts() {
+        let input = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let sink = UdpSocket::bind("127.0.0.1:0").unwrap();
+        sink.set_read_timeout(Some(Duration::from_millis(100)))
+            .unwrap();
+        let output = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let mut options = Options::parse(args(&[
+            "--burst-interval",
+            "3",
+            "--burst-length",
+            "2",
+            "--delay-ms",
+            "0",
+            "--jitter-ms",
+            "0",
+        ]))
+        .unwrap();
+        options.forward = match sink.local_addr().unwrap() {
+            std::net::SocketAddr::V4(address) => address,
+            std::net::SocketAddr::V6(_) => unreachable!(),
+        };
+        options.duration = Duration::from_millis(250);
+        for sequence in 0..9_u8 {
+            sender
+                .send_to(&[sequence], input.local_addr().unwrap())
+                .unwrap();
+        }
+        let report = relay(&options, &input, &output).unwrap();
+        let mut received = Vec::new();
+        let mut bytes = [0_u8; 1];
+        while sink.recv_from(&mut bytes).is_ok() {
+            received.push(bytes[0]);
+        }
+        assert_eq!(received, [0, 1, 2, 5, 8]);
+        assert_eq!(report.network.submitted_packets, 9);
+        assert_eq!(report.network.burst_loss_packets, 4);
+        assert_eq!(report.forwarded, 5);
     }
 
     #[test]

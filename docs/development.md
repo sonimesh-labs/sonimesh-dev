@@ -154,6 +154,10 @@ still queued when its configured duration ends. Queued copies are discarded at
 exit; choose a duration that covers setup, capture, and drain. Its seed fixes
 model decisions for the received packet sequence, but actual arrival and delivery
 timing depend on the host and OS. The control channel is not impaired.
+For repeated short outages, add `--burst-interval 50 --burst-length 4` to
+drop four consecutive submitted packets after the first 50 and again every 50
+submissions thereafter. The interval counts packets received by the relay, not
+time; the length must not exceed the interval. Both default to zero (no burst).
 The desktop output probe can instead start the playback-enabled listener: set
 its **Receiver UDP port** to 39094 and run the relay separately. Restore the
 default port 39093 for a direct connection; changing the receiver port does not

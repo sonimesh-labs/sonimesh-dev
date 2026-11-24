@@ -12,6 +12,9 @@ media. Its seeded decisions depend on the packets actually received and their
 arrival times; host scheduling and socket loss make a live run non-deterministic.
 Record the relay profile and counters with each experiment, and do not treat its
 results as physical WLAN, audible quality, or end-to-end latency evidence.
+The relay also exposes the model's packet-counted loss bursts to exercise
+playout interruption and recovery; host socket loss can change which packets
+are counted by the model.
 
 ## Latency measurement
 
