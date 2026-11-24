@@ -400,6 +400,80 @@ class LabStatusTest {
     }
 
     @Test
+    fun pairedRetryRetainsInvitationUntilManualSetupReplacesIt() {
+        val instrumentation = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
+        val original = labHex(labInvitation("ab".repeat(32), "127.0.0.1"))
+        try {
+            ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    val root = activity.window.decorView
+                    requireNotNull(findTextField(root, "Lab invitation payload")).text = original
+                    requireNotNull(findButton(root, "Apply invitation payload")).performClick()
+                    LabActivity::class.java.getDeclaredField("pairedMode").apply { isAccessible = true }.setBoolean(activity, true)
+                    LabActivity::class.java.getDeclaredField("udpMode").apply { isAccessible = true }.setBoolean(activity, true)
+                    assertTrue(LabStatus.captureAdmission.begin(false))
+                    deliverScannerResult(activity, 2, Activity.RESULT_OK, null)
+                    val field = LabActivity::class.java.getDeclaredField("importedInvitation").apply { isAccessible = true }
+                    assertEquals(original, labHex(field.get(activity) as ByteArray))
+                }
+                val deadline = SystemClock.elapsedRealtime() + 10_000
+                var ready = false
+                while (!ready && SystemClock.elapsedRealtime() < deadline) {
+                    scenario.onActivity { ready = LabStatus.captureAdmission.canBegin() }
+                    if (!ready) SystemClock.sleep(50)
+                }
+                assertTrue("failed service did not finish", ready)
+                scenario.onActivity { activity ->
+                    val root = activity.window.decorView
+                    requireNotNull(findTextField(root, "Desktop IPv4 address for UDP")).text = "10.0.2.2"
+                    requireNotNull(findTextField(root, "Paired lab desktop SPKI")).text = "cd".repeat(32)
+                    requireNotNull(findButton(root, "Retry last capture")).performClick()
+                    assertTrue(!activity.getPreferences(Activity.MODE_PRIVATE).contains("labInvitation"))
+                    LabStatus.captureAdmission.launchFailed()
+                }
+            }
+            ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    val field = LabActivity::class.java.getDeclaredField("importedInvitation").apply { isAccessible = true }
+                    assertEquals(null, field.get(activity))
+                    requireNotNull(findButton(activity.window.decorView, "Clear saved lab setup")).performClick()
+                }
+            }
+        } finally {
+            instrumentation.runOnMainSync { LabStatus.captureAdmission.launchFailed() }
+        }
+    }
+
+    @Test
+    fun restoredInvitationUsesItsOwnPinWhenSavedManualSetupDiffers() {
+        val invitation = labHex(labInvitation("ab".repeat(32), "127.0.0.1"))
+        try {
+            ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    activity.getPreferences(Activity.MODE_PRIVATE).edit()
+                        .putString("labInvitation", invitation)
+                        .putString("labPin", "cd".repeat(32))
+                        .putString("labHost", "127.0.0.1")
+                        .putString("desktopAddress", "10.0.2.2")
+                        .commit()
+                }
+            }
+            ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    requireNotNull(findButton(activity.window.decorView, "Start paired UDP capture")).performClick()
+                    assertTrue(!activity.getPreferences(Activity.MODE_PRIVATE).contains("labInvitation"))
+                    LabStatus.captureAdmission.launchFailed()
+                    requireNotNull(findButton(activity.window.decorView, "Clear saved lab setup")).performClick()
+                }
+            }
+        } finally {
+            androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().runOnMainSync {
+                LabStatus.captureAdmission.launchFailed()
+            }
+        }
+    }
+
+    @Test
     fun failedServiceStartSurvivesActivityRecreation() {
         ActivityScenario.launch(LabActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->

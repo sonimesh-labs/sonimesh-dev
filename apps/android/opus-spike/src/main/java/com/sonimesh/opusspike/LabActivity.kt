@@ -113,13 +113,20 @@ class LabActivity : Activity() {
         pendingBitrate = OpusBitrate.fromBitsPerSecond(savedInstanceState?.getInt("pendingBitrate", defaultBitrate) ?: defaultBitrate)
         savedInvitation?.let { encoded ->
             runCatching { labHexToBytes(encoded) }.onSuccess { bytes ->
-                importedInvitation = bytes
-                importedPin = savedInstanceState?.getString("importedPin")
-                    ?: labPreferences.getString(PREF_PIN, "")
-                    ?: ""
-                importedHost = savedInstanceState?.getString("importedHost")
-                    ?: labPreferences.getString(PREF_HOST, "")
-                    ?: ""
+                try {
+                    val decoded = PairingQr.decode(bytes)
+                    try {
+                        importedInvitation = bytes
+                        importedPin = labHex(decoded.desktopTlsSpki)
+                        importedHost = decoded.controlHost
+                    } finally {
+                        decoded.pairingId.fill(0)
+                        decoded.pairingSecret.fill(0)
+                        decoded.desktopTlsSpki.fill(0)
+                    }
+                } catch (_: IllegalArgumentException) {
+                    bytes.fill(0)
+                }
             }
         }
         val layout = LinearLayout(this).apply {
@@ -400,8 +407,6 @@ class LabActivity : Activity() {
         outState.putInt("pendingBitrate", pendingBitrate.bitsPerSecond)
         outState.putInt("selectedBitrate", selectedBitrate().bitsPerSecond)
         importedInvitation?.let { outState.putString("importedInvitation", labHex(it)) }
-        outState.putString("importedPin", importedPin)
-        outState.putString("importedHost", importedHost)
         outState.putString("address", address.text.toString())
         outState.putString("invitation", invitation.text.toString())
         outState.putString("pin", pin.text.toString())
@@ -438,6 +443,7 @@ class LabActivity : Activity() {
             if (importedInvitation != null && (entered != importedPin || parsedHost != importedHost)) {
                 importedInvitation?.fill(0)
                 importedInvitation = null
+                labPreferences.edit().remove(PREF_INVITATION).apply()
             }
             pendingPin = entered
             pendingHost = parsedHost
@@ -714,8 +720,6 @@ class LabActivity : Activity() {
                 LabStatus.captureAdmission.launchFailed()
                 LabStatus.publish("Unable to start capture. Try again.")
             }
-            importedInvitation?.fill(0)
-            importedInvitation = null
         }
     }
 

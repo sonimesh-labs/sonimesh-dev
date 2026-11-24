@@ -105,7 +105,10 @@ persistent trust record. When control and UDP use the same LAN address, **Use
 control address for UDP** copies it explicitly; loopback is rejected because
 ADB reverse does not forward UDP. Reopening the activity keeps the active capture
 or failure status instead of replacing it with the saved-setup reminder. If using
-the older manual setup, copy the printed
+the same lab invitation for a retry, the activity retains its complete payload;
+editing its SPKI or control host switches to manual setup and clears the saved
+invitation. This reuse applies to the public lab fixture, not production pairing.
+If using the older manual setup, copy the printed
 `SPKI_HEX` into `$pin` and run:
 
 ~~~powershell
