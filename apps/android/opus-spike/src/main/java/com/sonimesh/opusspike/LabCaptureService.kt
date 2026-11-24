@@ -57,6 +57,7 @@ class LabCaptureService : Service() {
     private var stopAction: Notification.Action? = null
     private var muteAction: Notification.Action? = null
     private var unmuteAction: Notification.Action? = null
+    private var foregroundTransportLabel: String? = null
     private val handler = Handler(Looper.getMainLooper())
     private var terminalStatus = false
     private var started = false
@@ -91,6 +92,7 @@ class LabCaptureService : Service() {
         val udpMode = intent?.getBooleanExtra("udpMode", false) ?: false
         val pairedMode = intent?.getBooleanExtra("pairedMode", false) ?: false
         val transport = LabTransport.fromFlags(udpMode, pairedMode)
+            foregroundTransportLabel = transport.label
         LabStatus.serviceStarted(usage, bitrate, transport)
         running.set(true)
         LabStatus.publishSenderQueueDrops(null)
@@ -526,6 +528,8 @@ class LabCaptureService : Service() {
         val builder = foregroundNotificationBuilder ?: return
         val manager = foregroundNotificationManager ?: return
         builder.setActions(stopAction, if (muted) unmuteAction else muteAction)
+        val transport = foregroundTransportLabel ?: return
+        builder.setContentText("Transport: $transport${if (muted) " · Sending muted" else ""}")
         manager.notify(1, builder.build())
     }
 
@@ -551,6 +555,7 @@ class LabCaptureService : Service() {
             wakeLock = null
             foregroundNotificationManager = null
             foregroundNotificationBuilder = null
+            foregroundTransportLabel = null
             stopAction = null
             muteAction = null
             unmuteAction = null

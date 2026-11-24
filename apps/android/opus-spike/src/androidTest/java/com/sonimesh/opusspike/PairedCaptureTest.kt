@@ -248,6 +248,11 @@ class PairedCaptureTest {
                     automation.executeShellCommand("input keyevent KEYCODE_HOME").close()
                     awaitAction("Mute sending").actionIntent.send()
                     awaitAction("Unmute sending")
+                    assertEquals(
+                        "Transport: paired UDP · Sending muted",
+                        manager.activeNotifications.firstOrNull { it.id == 1 }?.notification
+                            ?.extras?.getString(Notification.EXTRA_TEXT),
+                    )
                     SystemClock.sleep(2_000)
                     requireNotNull(manager.activeNotifications.firstOrNull { it.id == 1 }?.notification?.contentIntent).send()
                     val returnDeadline = SystemClock.elapsedRealtime() + 10_000
@@ -290,6 +295,11 @@ class PairedCaptureTest {
                     }
                     awaitAction("Unmute sending").actionIntent.send()
                     awaitAction("Mute sending")
+                    assertEquals(
+                        "Transport: paired UDP",
+                        manager.activeNotifications.firstOrNull { it.id == 1 }?.notification
+                            ?.extras?.getString(Notification.EXTRA_TEXT),
+                    )
                     scenario.onActivity { activity ->
                         val control = find(activity.window.decorView) { it is Switch && it.text.toString() == "Mute sending" } as Switch
                         assertTrue("notification unmute did not update activity", !control.isChecked)

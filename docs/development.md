@@ -249,6 +249,8 @@ in transit, or buffered at the receiver can still play briefly after muting; thi
 control is not an immediate stop. It resets when the session ends.
 The foreground notification also offers **Mute sending** or **Unmute sending**;
 its action and the activity switch reflect the same service-owned state.
+While muted, its transport text also says **Sending muted** and returns to the
+normal transport text after unmuting.
 On 2026-11-24 an API 37 emulator invoked these notification actions while paired
 with the software listener and checked synchronization with the activity switch,
 including activity recreation. The listener observed peaks near 0.093 before
