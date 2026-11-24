@@ -244,7 +244,8 @@ The **Start test tone**/**Stop test tone** control is in the same area so an
 operator can create or stop a known capturable source without scrolling.
 If the selected output cannot create an `AudioTrack`, the lab keeps the control
 ready for another attempt and reports that the test tone is unavailable on the
-device instead of crashing the activity.
+device instead of crashing the activity. It tries common 48 kHz and 44.1 kHz
+stereo/mono formats before reporting that failure.
 After a desktop connection or capture failure, it also shows **Retry last capture**
 near the same status area. The retry reuses the last transport and current setup
 fields, then requests any required permission or screen-capture consent again;

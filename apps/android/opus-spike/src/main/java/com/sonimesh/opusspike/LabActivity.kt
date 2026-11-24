@@ -34,6 +34,14 @@ import kotlin.math.sin
 
 @Suppress("DEPRECATION")
 class LabActivity : Activity() {
+    private data class TestToneFormat(val sampleRate: Int, val channelMask: Int, val channels: Int)
+
+    private val testToneFormats = listOf(
+        TestToneFormat(48_000, AudioFormat.CHANNEL_OUT_STEREO, 2),
+        TestToneFormat(44_100, AudioFormat.CHANNEL_OUT_STEREO, 2),
+        TestToneFormat(48_000, AudioFormat.CHANNEL_OUT_MONO, 1),
+        TestToneFormat(44_100, AudioFormat.CHANNEL_OUT_MONO, 1),
+    )
     private var tone: AudioTrack? = null
     private var udpMode = false
     private var pairedMode = false
@@ -711,26 +719,32 @@ class LabActivity : Activity() {
 
     private fun toggleTone() {
         tone?.let { it.stop(); it.release(); tone = null; return }
-        val samples = ShortArray(48_000 * 2) { index ->
-            (sin(2.0 * PI * (index / 2 % 48) / 48.0) * 3_000).toInt().toShort()
+        val usage = (LabStatus.captureUsage ?: selectedUsage()).usages.first()
+        for (format in testToneFormats) {
+            val period = format.sampleRate / 1_000
+            val samples = ShortArray(format.sampleRate * format.channels) { index ->
+                val frame = index / format.channels
+                (sin(2.0 * PI * (frame % period) / period) * 3_000).toInt().toShort()
+            }
+            var track: AudioTrack? = null
+            try {
+                track = AudioTrack.Builder()
+                    .setAudioAttributes(AudioAttributes.Builder().setUsage(usage).build())
+                    .setAudioFormat(AudioFormat.Builder().setSampleRate(format.sampleRate)
+                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT).setChannelMask(format.channelMask).build())
+                    .setTransferMode(AudioTrack.MODE_STATIC)
+                    .setBufferSizeInBytes(samples.size * Short.SIZE_BYTES)
+                    .build()
+                check(track.write(samples, 0, samples.size) == samples.size)
+                track.setLoopPoints(0, format.sampleRate, -1)
+                track.play()
+                tone = track
+                return
+            } catch (_: RuntimeException) {
+                track?.release()
+            }
         }
-        var track: AudioTrack? = null
-        try {
-            track = AudioTrack.Builder()
-                .setAudioAttributes(AudioAttributes.Builder().setUsage((LabStatus.captureUsage ?: selectedUsage()).usages.first()).build())
-                .setAudioFormat(AudioFormat.Builder().setSampleRate(48_000)
-                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT).setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build())
-                .setTransferMode(AudioTrack.MODE_STATIC)
-                .setBufferSizeInBytes(samples.size * Short.SIZE_BYTES)
-                .build()
-            check(track.write(samples, 0, samples.size) == samples.size)
-            track.setLoopPoints(0, 48_000, -1)
-            track.play()
-            tone = track
-        } catch (_: RuntimeException) {
-            track?.release()
-            LabStatus.publish("Unable to play test tone on this device.")
-        }
+        LabStatus.publish("Unable to play test tone on this device.")
     }
 
     override fun onRetainNonConfigurationInstance(): Any? = tone
