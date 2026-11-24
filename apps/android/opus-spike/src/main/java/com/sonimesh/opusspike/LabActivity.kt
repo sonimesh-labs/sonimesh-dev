@@ -44,6 +44,7 @@ class LabActivity : Activity() {
     private var udpMode = false
     private var pairedMode = false
     private var pendingAddress = DEFAULT_LAB_ADDRESS
+    private var pendingMediaPort = DEFAULT_LAB_MEDIA_PORT
     private var pendingPin = ""
     private var pendingHost = "127.0.0.1"
     private var pendingUsage = LabCaptureUsage.All
@@ -52,6 +53,7 @@ class LabActivity : Activity() {
     private var importedPin = ""
     private var importedHost = ""
     private lateinit var address: EditText
+    private lateinit var mediaPort: EditText
     private lateinit var invitation: EditText
     private lateinit var pin: EditText
     private lateinit var host: EditText
@@ -106,6 +108,7 @@ class LabActivity : Activity() {
         udpMode = savedInstanceState?.getBoolean("udpMode") ?: false
         pairedMode = savedInstanceState?.getBoolean("pairedMode") ?: false
         pendingAddress = savedInstanceState?.getString("pendingAddress") ?: DEFAULT_LAB_ADDRESS
+        pendingMediaPort = savedInstanceState?.getInt("pendingMediaPort", DEFAULT_LAB_MEDIA_PORT) ?: DEFAULT_LAB_MEDIA_PORT
         pendingPin = savedInstanceState?.getString("pendingPin") ?: ""
         pendingHost = savedInstanceState?.getString("pendingHost") ?: "127.0.0.1"
         pendingUsage = LabCaptureUsage.fromValue(savedInstanceState?.getString("pendingUsage"))
@@ -261,6 +264,15 @@ class LabActivity : Activity() {
                 ?: getPreferences(MODE_PRIVATE).getString("desktopAddress", DEFAULT_LAB_ADDRESS))
         }
         layout.addView(address)
+        layout.addView(TextView(this).apply { text = "Desktop UDP port" })
+        mediaPort = EditText(this).apply {
+            contentDescription = "Desktop UDP port"
+            keyListener = DigitsKeyListener.getInstance("0123456789")
+            setSingleLine(true)
+            setText(savedInstanceState?.getString("mediaPort")
+                ?: labPreferences.getInt(PREF_MEDIA_PORT, DEFAULT_LAB_MEDIA_PORT).toString())
+        }
+        layout.addView(mediaPort)
         layout.addView(TextView(this).apply {
             text = "Lab invitation payload hex (optional; from the desktop listener)"
         })
@@ -400,6 +412,7 @@ class LabActivity : Activity() {
         outState.putBoolean("udpMode", udpMode)
         outState.putBoolean("pairedMode", pairedMode)
         outState.putString("pendingAddress", pendingAddress)
+        outState.putInt("pendingMediaPort", pendingMediaPort)
         outState.putString("pendingPin", pendingPin)
         outState.putString("pendingHost", pendingHost)
         outState.putString("pendingUsage", pendingUsage.value)
@@ -408,6 +421,7 @@ class LabActivity : Activity() {
         outState.putInt("selectedBitrate", selectedBitrate().bitsPerSecond)
         importedInvitation?.let { outState.putString("importedInvitation", labHex(it)) }
         outState.putString("address", address.text.toString())
+        outState.putString("mediaPort", mediaPort.text.toString())
         outState.putString("invitation", invitation.text.toString())
         outState.putString("pin", pin.text.toString())
         outState.putString("host", host.text.toString())
@@ -425,8 +439,14 @@ class LabActivity : Activity() {
                 LabStatus.publish("Enter a valid desktop IPv4 address for UDP.")
                 return
             }
+            val port = parseLabMediaPort(mediaPort.text.toString())
+            if (port == null) {
+                LabStatus.publish("Enter a desktop UDP port from 1 to 65535.")
+                return
+            }
             pendingAddress = requireNotNull(parsed.hostAddress)
-            getPreferences(MODE_PRIVATE).edit().putString("desktopAddress", pendingAddress).apply()
+            pendingMediaPort = port
+            labPreferences.edit().putString("desktopAddress", pendingAddress).putInt(PREF_MEDIA_PORT, port).apply()
         }
         if (paired) {
             val enteredHost = host.text.toString().trim()
@@ -628,11 +648,13 @@ class LabActivity : Activity() {
             .remove(PREF_PIN)
             .remove(PREF_HOST)
             .remove("desktopAddress")
+            .remove(PREF_MEDIA_PORT)
             .apply()
         invitation.setText("")
         pin.setText("")
         host.setText("127.0.0.1")
         address.setText(DEFAULT_LAB_ADDRESS)
+        mediaPort.setText(DEFAULT_LAB_MEDIA_PORT.toString())
         LabStatus.publish("Saved lab setup cleared.")
     }
 
@@ -707,6 +729,7 @@ class LabActivity : Activity() {
                     putExtra("resultData", data)
                     putExtra("udpMode", udpMode)
                     putExtra("udpAddress", pendingAddress)
+                    putExtra("udpPort", pendingMediaPort)
                     putExtra("pairedMode", pairedMode)
                     putExtra("captureUsage", pendingUsage.value)
                     putExtra("bitrate", pendingBitrate.bitsPerSecond)
@@ -775,3 +798,4 @@ private const val PREF_PIN = "labPin"
 private const val PREF_HOST = "labHost"
 private const val PREF_USAGE = "labCaptureUsage"
 private const val PREF_BITRATE = "labBitrate"
+private const val PREF_MEDIA_PORT = "labMediaPort"

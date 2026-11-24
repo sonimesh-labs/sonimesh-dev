@@ -149,8 +149,8 @@ cargo run -p opus-codec-prototype --bin paired-audio-lab -- --media-port 39094 -
 cargo run -p sonimesh-network-simulator --bin udp-impairment-relay -- --seconds 120 --seed 17 --loss 10 --delay-ms 20 --jitter-ms 5 --reorder 10 --reorder-delay-ms 30
 ~~~
 
-Run the instrumentation command above while both are running. The sender still
-uses UDP port 39093; the relay forwards to the listener on 39094. Defaults bind
+Run the instrumentation command above while both are running. The sender defaults
+to UDP port 39093; the relay forwards to the listener on 39094. Defaults bind
 only to loopback. For a physical sender, use the listener's existing `--bind`
 and `--host` options and bind the relay to the intended interface with
 `--listen IPv4:39093`. The relay accepts at most 1,200 bytes per datagram, queues
@@ -168,8 +168,17 @@ submissions thereafter. The interval counts packets received by the relay, not
 time; the length must not exceed the interval. Both default to zero (no burst).
 The desktop output probe can instead start the playback-enabled listener: set
 its **Receiver UDP port** to 39094 and run the relay separately. Restore the
-default port 39093 for a direct connection; changing the receiver port does not
-change Android's destination or configure the relay.
+default port 39093 for a direct connection. Android's **Desktop UDP port** is
+independent and defaults to 39093; set it to the relay's listen port or the
+listener's media port for a direct connection. Changing either setting does not
+configure the other endpoint.
+For the paired capture instrumentation, pass `-e mediaPort 39094` when testing
+a direct listener started with `--media-port 39094`; omit it for the default.
+This argument applies to `PairedCaptureTest`, which drives the interactive lab
+service. `PairedAudioInteropTest` sends directly and still uses port 39093.
+On 2026-11-24 an API 37 x86_64 emulator used port 39094 for a direct paired
+capture; the listener authenticated and decoded 155 packets with a software PCM
+peak of 0.094. This does not verify physical WLAN or audible playback.
 
 On 2026-11-24, one API 37 x86_64 emulator run sent 100 encoded packets through
 the example profile. The relay reported 14 random losses and 12 packets given

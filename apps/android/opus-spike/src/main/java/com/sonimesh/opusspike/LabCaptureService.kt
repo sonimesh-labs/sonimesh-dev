@@ -140,11 +140,13 @@ class LabCaptureService : Service() {
             val pairedMode = intent.getBooleanExtra("pairedMode", false)
             val destination = if (udpMode) parseLabAddress(intent.getStringExtra("udpAddress") ?: "")
                 ?: error("invalid desktop address") else null
+            val destinationPort = intent.getIntExtra("udpPort", DEFAULT_LAB_MEDIA_PORT)
+            require(!udpMode || destinationPort in 1..65535) { "invalid desktop UDP port" }
             pendingInvitation = if (pairedMode) intent.getByteArrayExtra("pairedInvitation")
                 ?: labInvitation(intent.getStringExtra("pairedPin") ?: "",
                     intent.getStringExtra("pairedHost") ?: "127.0.0.1") else null
             val invitation = pendingInvitation
-            Thread({ capture(current, udpMode, destination, invitation, usage, bitrate) }, "audio-lab-capture").start()
+            Thread({ capture(current, udpMode, destination, destinationPort, invitation, usage, bitrate) }, "audio-lab-capture").start()
             workerStarted = true
             pendingInvitation = null
         } catch (error: Exception) {
@@ -160,6 +162,7 @@ class LabCaptureService : Service() {
         projection: MediaProjection,
         udpMode: Boolean,
         destination: java.net.Inet4Address?,
+        destinationPort: Int,
         invitation: ByteArray?,
         usage: LabCaptureUsage,
         bitrate: OpusBitrate,
@@ -226,7 +229,7 @@ class LabCaptureService : Service() {
                 check(setupSocket.handoff()) { "capture stopped while starting stream" }
                 check(running.get()) { "capture stopped while starting stream" }
                 val sealer = LabMediaSealer(connection.mediaRoot, session, 1, 0)
-                pairedSender = Thread({ sendDatagrams(sealer, packets, requireNotNull(destination), pairedProducerFinished, packetSent) }, "audio-lab-sender")
+                pairedSender = Thread({ sendDatagrams(sealer, packets, requireNotNull(destination), destinationPort, pairedProducerFinished, packetSent) }, "audio-lab-sender")
                     .also { it.start() }
             } else {
                 val connection = Socket()
@@ -248,7 +251,7 @@ class LabCaptureService : Service() {
                     }
                     connection.soTimeout = 0
                     Thread({ watchControl(connection) }, "audio-lab-control").start()
-                    Thread({ sendDatagrams(sealer, packets, requireNotNull(destination), onSent = packetSent) }, "audio-lab-sender").start()
+                    Thread({ sendDatagrams(sealer, packets, requireNotNull(destination), destinationPort, onSent = packetSent) }, "audio-lab-sender").start()
                 } else {
                     Thread({ writePackets(connection, packets, packetSent) }, "audio-lab-sender").start()
                 }
@@ -476,12 +479,13 @@ class LabCaptureService : Service() {
         sealer: LabMediaSealer,
         packets: ArrayBlockingQueue<EncodedPacket>,
         destination: java.net.Inet4Address,
+        destinationPort: Int,
         producerFinished: AtomicBoolean? = null,
         onSent: () -> Unit = {},
     ) {
         try {
             DatagramSocket().use { udp ->
-                udp.connect(destination, 39093)
+                udp.connect(destination, destinationPort)
                 val send = { packet: EncodedPacket ->
                     val datagram = sealer.seal(packet.sequence, packet.sequence * 960, 0, packet.bytes)
                     udp.send(DatagramPacket(datagram, datagram.size))

@@ -147,6 +147,8 @@ class PairedCaptureTest {
                     (find(root) { it is EditText && it.contentDescription == "Desktop IPv4 address for UDP" } as EditText)
                         .setText(mediaHost)
                 }
+                (find(root) { it is EditText && it.contentDescription == "Desktop UDP port" } as EditText)
+                    .setText(args.getString("mediaPort") ?: DEFAULT_LAB_MEDIA_PORT.toString())
                 if (changeUsage) {
                     (find(root) { it is Spinner && it.contentDescription == "Playback usage for capture" } as Spinner)
                         .setSelection(1)

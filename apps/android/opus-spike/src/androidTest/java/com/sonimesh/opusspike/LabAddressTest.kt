@@ -6,13 +6,64 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.Button
+import android.widget.TextView
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class LabAddressTest {
+    @Test
+    fun udpPortSurvivesRecreationAndRejectsInvalidBeforeConsent() {
+        ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                val root = activity.window.decorView
+                val field = requireNotNull(findField(root, "Desktop UDP port"))
+                requireNotNull(findField(root, "Desktop IPv4 address for UDP")).setText("10.0.2.2")
+                field.setText("65536")
+                requireNotNull(findButton(root, "Start UDP capture")).performClick()
+                assertTrue(LabStatus.captureAdmission.canBegin())
+                assertTrue(hasText(root, "Status: Enter a desktop UDP port from 1 to 65535."))
+                field.setText("39094")
+            }
+            scenario.recreate()
+            scenario.onActivity { activity ->
+                assertEquals("39094", requireNotNull(findField(activity.window.decorView, "Desktop UDP port")).text.toString())
+            }
+        }
+    }
+
+    @Test
+    fun validUdpPortIsRememberedAndClearedWithLabSetup() {
+        ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                activity.getPreferences(android.content.Context.MODE_PRIVATE).edit().clear().commit()
+                val root = activity.window.decorView
+                requireNotNull(findField(root, "Desktop IPv4 address for UDP")).setText("10.0.2.2")
+                requireNotNull(findField(root, "Desktop UDP port")).setText("39094")
+                requireNotNull(findField(root, "Paired control IPv4 address")).setText("")
+                requireNotNull(findButton(root, "Start paired UDP capture")).performClick()
+                assertEquals(39094, activity.getPreferences(android.content.Context.MODE_PRIVATE).getInt("labMediaPort", 0))
+            }
+        }
+        ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                val root = activity.window.decorView
+                val field = requireNotNull(findField(root, "Desktop UDP port"))
+                assertEquals("39094", field.text.toString())
+                requireNotNull(findButton(root, "Clear saved lab setup")).performClick()
+                assertEquals(DEFAULT_LAB_MEDIA_PORT.toString(), field.text.toString())
+                assertTrue(!activity.getPreferences(android.content.Context.MODE_PRIVATE).contains("labMediaPort"))
+            }
+        }
+    }
+
+    private fun hasText(view: View, text: String): Boolean {
+        if (view is TextView && view.text.toString() == text) return true
+        return view is ViewGroup && (0 until view.childCount).any { hasText(view.getChildAt(it), text) }
+    }
     @Test
     fun acceptsNumericUnicastAndRejectsUnsuitableDestinations() {
         assertEquals("10.0.2.2", parseLabAddress(" 10.0.2.2 ")?.hostAddress)
@@ -44,7 +95,8 @@ class LabAddressTest {
                 val preferences = activity.getPreferences(android.content.Context.MODE_PRIVATE)
                 preferences.edit().clear().commit()
                 val field = requireNotNull(findField(activity.window.decorView))
-                val start = requireNotNull(findButton(activity.window.decorView, "Start UDP capture"))
+                val start = requireNotNull(findButton(activity.window.decorView, "Start paired UDP capture"))
+                requireNotNull(findField(activity.window.decorView, "Paired control IPv4 address")).setText("")
                 field.setText("invalid")
                 start.performClick()
                 assertNull(preferences.getString("desktopAddress", null))
