@@ -174,6 +174,31 @@ describe('desktop output probe', () => {
     wrapper.unmount()
   })
 
+  it('distinguishes decoded silence from an interval without frames and clears it on session end', async () => {
+    vi.useFakeTimers()
+    const base = { running: true, sessionActive: true, status: 'Session active', invitation: null, metrics: null, volume: 50, muted: false }
+    const invoke = vi.fn()
+      .mockResolvedValueOnce({ ...base, signal: null })
+      .mockResolvedValueOnce({ ...base, signal: { decoded: 50, peak: 0.1 } })
+      .mockResolvedValueOnce({ ...base, signal: { decoded: 50, peak: 0 } })
+      .mockResolvedValueOnce({ ...base, signal: { decoded: 0, peak: null } })
+      .mockResolvedValueOnce({ ...base, sessionActive: false, signal: null })
+      .mockResolvedValueOnce({ generation: 1, devices: [] })
+    window.__TAURI__ = { core: { invoke } }
+    const wrapper = mount(OutputProbe)
+    await flushPromises()
+    expect(wrapper.text()).toContain('Waiting for a signal observation.')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(wrapper.text()).toContain('50 decoded frames; peak 0.100000.')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(wrapper.text()).toContain('50 decoded frames; peak 0.000000.')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(wrapper.text()).toContain('No decoded frames in this interval.')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(wrapper.text()).not.toContain('Last reported decoded interval')
+    wrapper.unmount()
+  })
+
   it('keeps the last session observations visible after the listener exits', async () => {
     vi.useFakeTimers()
     const metrics = { packets: '120', rejected: '3', decoded: '115', peak: '0.250', plc: '2', decodeErrors: '1', buffered: '4', output: 'active', late: '0', resyncDropped: '0', playout: 'fixed', adaptive: null }

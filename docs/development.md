@@ -764,6 +764,12 @@ and output recovery state. These are software observations, not proof of audible
 playback. Media arrival and output recovery transitions are emitted promptly;
 the cumulative counters retain their five-second cadence. The last observations remain while waiting and clear on the next
 client attempt.
+During an active session, the probe also shows the last reported one-second
+decoded-frame count and peak before output gain, excluding concealment. A zero
+frame count means no frames were decoded in that interval, not decoded silence.
+This observation clears when the session ends and does not establish audible
+playback. Rebuild the listener after updating the probe so it supports the
+`--signal-status` option.
 When metrics are available, **Copy session evidence** copies a bounded text
 summary of the displayed status, counters, and the latest listener lifecycle
 events without including the invitation or audio data. The listener retains the

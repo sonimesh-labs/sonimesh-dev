@@ -15,9 +15,17 @@ pub struct LabSnapshot {
     pub invitation: Option<String>,
     pub events: Vec<String>,
     pub metrics: Option<LabMetrics>,
+    pub signal: Option<LabSignal>,
     pub volume: Option<u8>,
     pub muted: Option<bool>,
     pub session_active: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LabSignal {
+    decoded: u32,
+    peak: Option<f32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -58,6 +66,7 @@ impl Default for LabSnapshot {
             invitation: None,
             events: Vec::new(),
             metrics: None,
+            signal: None,
             volume: None,
             muted: None,
             session_active: false,
@@ -104,6 +113,7 @@ impl Lab {
                 "--play",
                 "--keep-listening",
                 "--status",
+                "--signal-status",
                 "--control",
                 "--bind",
                 "0.0.0.0",
@@ -158,6 +168,7 @@ impl Lab {
             invitation: None,
             events: Vec::new(),
             metrics: None,
+            signal: None,
             volume: None,
             muted: None,
             session_active: false,
@@ -180,7 +191,8 @@ impl Lab {
                     self.snapshot.volume = None;
                     self.snapshot.muted = None;
                     self.snapshot.session_active = false;
-                    self.snapshot.status = "Listener exited. Check the selected output device and whether port 47610 is in use.".into();
+                    self.snapshot.signal = None;
+                    self.snapshot.status = "Listener exited. Rebuild it and check the selected output device and whether port 47610 is in use.".into();
                     self.child = None;
                     self.events = None;
                 }
@@ -284,16 +296,23 @@ fn update_snapshot(snapshot: &mut LabSnapshot, line: &str) {
             snapshot.status = "Waiting for Android".into();
         }
         snapshot.session_active = false;
+        snapshot.signal = None;
     } else if line == "RESULT client connected" {
         snapshot.status = "Android connecting".into();
         snapshot.metrics = None;
+        snapshot.signal = None;
         snapshot.session_active = false;
     } else if line == "RESULT pairing verified" {
         snapshot.status = "Paired; negotiating session".into();
     } else if line == "RESULT receiver started" {
         snapshot.status = "Session active".into();
         snapshot.metrics = None;
+        snapshot.signal = None;
         snapshot.session_active = true;
+    } else if snapshot.session_active
+        && let Some(signal) = parse_signal(line)
+    {
+        snapshot.signal = Some(signal);
     } else if snapshot.session_active
         && let Some(state @ ("waiting" | "receiving" | "interrupted")) = line.strip_prefix("MEDIA ")
         && let Some(metrics) = &mut snapshot.metrics
@@ -316,10 +335,33 @@ fn update_snapshot(snapshot: &mut LabSnapshot, line: &str) {
     } else if line == "RESULT session complete" {
         snapshot.status = "Session ended; waiting for Android".into();
         snapshot.session_active = false;
+        snapshot.signal = None;
     } else if line == "RESULT session failed" {
         snapshot.status = "Session failed; waiting for Android".into();
         snapshot.session_active = false;
+        snapshot.signal = None;
     }
+}
+
+fn parse_signal(line: &str) -> Option<LabSignal> {
+    let parts: Vec<_> = line.split_whitespace().collect();
+    let ["SIGNAL", "decoded", decoded, "peak", peak] = parts.as_slice() else {
+        return None;
+    };
+    let decoded = decoded.parse::<u32>().ok()?;
+    let peak = if *peak == "none" {
+        None
+    } else {
+        let peak = peak.parse::<f32>().ok()?;
+        if !peak.is_finite() || peak < 0.0 {
+            return None;
+        }
+        Some(peak)
+    };
+    if (decoded == 0) != peak.is_none() {
+        return None;
+    }
+    Some(LabSignal { decoded, peak })
 }
 
 fn record_event(snapshot: &mut LabSnapshot, line: &str) {
@@ -462,6 +504,65 @@ fn parse_metrics(line: &str) -> Option<LabMetrics> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn signal_observations_follow_session_lifecycle() {
+        let mut snapshot = LabSnapshot::default();
+        update_snapshot(&mut snapshot, "SIGNAL decoded 50 peak 0.1");
+        assert_eq!(snapshot.signal, None);
+        update_snapshot(&mut snapshot, "RESULT receiver started");
+        for (line, expected) in [
+            (
+                "SIGNAL decoded 50 peak 0.1",
+                Some(LabSignal {
+                    decoded: 50,
+                    peak: Some(0.1),
+                }),
+            ),
+            (
+                "SIGNAL decoded 50 peak 0.000000",
+                Some(LabSignal {
+                    decoded: 50,
+                    peak: Some(0.0),
+                }),
+            ),
+            (
+                "SIGNAL decoded 0 peak none",
+                Some(LabSignal {
+                    decoded: 0,
+                    peak: None,
+                }),
+            ),
+        ] {
+            update_snapshot(&mut snapshot, line);
+            assert_eq!(snapshot.signal, expected);
+            record_event(&mut snapshot, line);
+        }
+        assert!(snapshot.events.is_empty());
+        for invalid in [
+            "SIGNAL decoded 0 peak 0",
+            "SIGNAL decoded 1 peak none",
+            "SIGNAL decoded 1 peak NaN",
+            "SIGNAL decoded 1 peak -1",
+            "SIGNAL decoded 1 peak 0 extra",
+        ] {
+            update_snapshot(&mut snapshot, invalid);
+            assert_eq!(
+                snapshot.signal,
+                Some(LabSignal {
+                    decoded: 0,
+                    peak: None
+                })
+            );
+        }
+        update_snapshot(&mut snapshot, "RESULT session complete");
+        assert_eq!(snapshot.signal, None);
+        update_snapshot(&mut snapshot, "RESULT receiver started");
+        assert_eq!(snapshot.signal, None);
+        update_snapshot(&mut snapshot, "SIGNAL decoded 1 peak 0.1");
+        update_snapshot(&mut snapshot, "RESULT session failed");
+        assert_eq!(snapshot.signal, None);
+    }
 
     #[test]
     fn status_tracks_sessions_and_accepts_only_bounded_hex_invitations() {

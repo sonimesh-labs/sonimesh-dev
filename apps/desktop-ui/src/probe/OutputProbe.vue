@@ -30,7 +30,7 @@ interface LabMetrics {
   playout: 'fixed' | 'adaptive' | null
   adaptive: { target: number; min: number; max: number; jitterMs: number; gated: string; forced: string; resets: string } | null
 }
-interface LabSnapshot { running: boolean; sessionActive: boolean; status: string; invitation: string | null; events?: string[]; metrics: LabMetrics | null; volume: number | null; muted: boolean | null }
+interface LabSnapshot { running: boolean; sessionActive: boolean; status: string; invitation: string | null; events?: string[]; metrics: LabMetrics | null; signal?: { decoded: number; peak: number | null } | null; volume: number | null; muted: boolean | null }
 const lab = ref<LabSnapshot>({ running: false, sessionActive: false, status: 'Checking listener…', invitation: null, metrics: null, volume: null, muted: null })
 const invitationQr = ref<string | null>(null)
 const invitationQrError = ref(false)
@@ -494,6 +494,13 @@ onBeforeUnmount(() => { disposed = true; labRequest++; clearTimeout(timer); clea
         <p class="preview-note">The displayed values are confirmed by the listener; system volume is unchanged.</p>
         <p v-if="controlError" class="command-error" role="alert">{{ controlError }}</p>
       </div>
+      <section v-if="lab.sessionActive" aria-labelledby="lab-signal-title">
+        <h3 id="lab-signal-title">Last reported decoded interval</h3>
+        <p v-if="!lab.signal">Waiting for a signal observation.</p>
+        <p v-else-if="lab.signal.decoded === 0">No decoded frames in this interval.</p>
+        <p v-else>{{ lab.signal.decoded }} decoded frames; peak {{ lab.signal.peak?.toFixed(6) }}.</p>
+        <p class="preview-note">Approximately one second, before output gain and excluding concealment. This does not confirm audible playback.</p>
+      </section>
       <section v-if="lab.metrics || lab.events?.length" aria-labelledby="lab-evidence-title">
         <h3 id="lab-evidence-title">{{ lab.metrics ? (lab.sessionActive ? 'Session observations' : 'Last session observations') : 'Session evidence' }}</h3>
         <dl v-if="lab.metrics" class="lab-metrics">
