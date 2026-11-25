@@ -20,7 +20,9 @@ is audible. Device names may be personal; review output before sharing it.
 
 On the development machine, Windows build 26200 with an Intel Bluetooth
 adapter initially returned zero candidates on 2026-11-25; a later run returned
-one. The connection was not opened in that run. Neither observation verifies
-playback, latency, or an application-readable PCM path. An open, close, and
-listening experiment with a compatible source is needed to assess system-routed
-playback.
+one. On a later attempt that day, both the desktop probe backend and the command
+line experiment failed to open the sole candidate; the latter reported Windows
+status 3 and HRESULT `0x8007001F`. The source's state was not established, so
+the cause is unknown. These observations do not verify playback, latency, or an
+application-readable PCM path. A successful open, close, and listening
+experiment with a compatible source is still needed.

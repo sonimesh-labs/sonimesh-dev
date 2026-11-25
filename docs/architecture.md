@@ -291,7 +291,8 @@ The separate desktop output probe may offer the same system-routed connection
 experiment with explicit selection and stop controls. It does not route this
 audio through the WLAN receiver or claim a supported PCM input. Its interface
 restores the current connection state when the view opens, so a connection can
-still be stopped after the view reloads.
+still be stopped after the view reloads. Known Windows open failures are shown
+as timeout, system denial, or an unspecified failure rather than numeric codes.
 
 ## 4. Quality targets and latency budget
 

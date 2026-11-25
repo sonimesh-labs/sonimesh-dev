@@ -16,6 +16,16 @@ mod platform {
         AudioPlaybackConnectionState,
     };
 
+    fn open_error(status: AudioPlaybackConnectionOpenResultStatus) -> &'static str {
+        if status == AudioPlaybackConnectionOpenResultStatus::RequestTimedOut {
+            "Windows timed out connecting. Check that the source is nearby and try again."
+        } else if status == AudioPlaybackConnectionOpenResultStatus::DeniedBySystem {
+            "Windows denied the playback connection. Check the device's Bluetooth connection and try again."
+        } else {
+            "Windows could not open the playback connection. Check the source and try again."
+        }
+    }
+
     #[derive(Default)]
     pub struct Bluetooth {
         devices: Vec<DeviceInformation>,
@@ -58,15 +68,12 @@ mod platform {
             let connection =
                 AudioPlaybackConnection::TryCreateFromId(&device.Id().map_err(|e| e.to_string())?)
                     .map_err(|e| e.to_string())?;
-            let result = (|| {
+            let result: Result<(), String> = (|| {
                 connection.Start().map_err(|e| e.to_string())?;
                 let result = connection.Open().map_err(|e| e.to_string())?;
                 let status = result.Status().map_err(|e| e.to_string())?;
                 if status != AudioPlaybackConnectionOpenResultStatus::Success {
-                    return Err(format!(
-                        "Could not open system playback (status {}).",
-                        status.0
-                    ));
+                    return Err(open_error(status).into());
                 }
                 Ok(())
             })();
@@ -109,7 +116,24 @@ mod platform {
 
     #[cfg(test)]
     mod tests {
-        use super::Bluetooth;
+        use super::{Bluetooth, open_error};
+        use windows::Media::Audio::AudioPlaybackConnectionOpenResultStatus;
+
+        #[test]
+        fn open_failures_explain_what_happened() {
+            assert!(
+                open_error(AudioPlaybackConnectionOpenResultStatus::RequestTimedOut)
+                    .contains("timed out")
+            );
+            assert!(
+                open_error(AudioPlaybackConnectionOpenResultStatus::DeniedBySystem)
+                    .contains("denied")
+            );
+            assert!(
+                open_error(AudioPlaybackConnectionOpenResultStatus::UnknownFailure)
+                    .contains("could not open")
+            );
+        }
 
         #[test]
         fn connection_requires_a_current_list_and_valid_selection() {
@@ -128,6 +152,26 @@ mod platform {
             assert_eq!(snapshot.generation, 1);
             assert!(snapshot.names.len() <= 64);
             assert!(bluetooth.connect(0, 0).is_err());
+        }
+
+        #[test]
+        #[ignore = "opens the sole Windows playback candidate; requires a test source"]
+        fn real_connection_opens_reports_state_and_closes() {
+            let mut bluetooth = Bluetooth::default();
+            let snapshot = bluetooth.refresh().unwrap();
+            assert_eq!(
+                snapshot.names.len(),
+                1,
+                "the test requires exactly one candidate"
+            );
+            bluetooth
+                .connect(snapshot.generation, 0)
+                .expect("opening the system playback connection failed");
+            assert!(bluetooth.status().expect("could not read connection state"));
+            bluetooth
+                .disconnect()
+                .expect("closing the system playback connection failed");
+            assert!(!bluetooth.status().unwrap());
         }
     }
 }

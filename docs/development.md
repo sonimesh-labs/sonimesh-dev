@@ -1175,6 +1175,16 @@ does not confirm sound is audible; this system-routed path does not supply PCM
 to the SoniMesh mixer. Playback and disconnect behavior still need real-device
 validation.
 
+The opt-in backend hardware check below requires exactly one listed playback
+candidate and attempts to open and close it. It may change the source's audio
+route. On 2026-11-25 the candidate enumerated on the development host could not
+be opened; the equivalent command-line experiment reported Windows status 3 and
+HRESULT `0x8007001F`, without establishing the cause.
+
+~~~powershell
+cargo +1.98.1 test --manifest-path tools/tauri-output-prototype/Cargo.toml real_connection_opens_reports_state_and_closes -- --ignored
+~~~
+
 This separate prototype uses Rust 1.98.1 for its locked Tauri dependencies; the
 shared workspace remains on Rust 1.85.0. Windows WebView2 is required. To use
 its **Paired audio lab**, first build the child listener from the repository root:
