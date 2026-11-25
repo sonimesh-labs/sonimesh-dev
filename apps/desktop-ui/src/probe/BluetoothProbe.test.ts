@@ -35,6 +35,25 @@ it('opens Windows Bluetooth settings from the probe', async () => {
   wrapper.unmount()
 })
 
+it('shows discovery progress until Bluetooth candidates return', async () => {
+  let finishDiscovery!: (result: { generation: number; names: string[] }) => void
+  const invoke = vi.fn((command: string) => {
+    if (command === 'bluetooth_status') return Promise.resolve('idle')
+    if (command === 'loopback_status') return Promise.resolve({ running: false, endpointName: '', sampleRate: 0, channels: 0, samples: 0, peak: 0, error: null })
+    if (command === 'bluetooth_candidates') return new Promise<{ generation: number; names: string[] }>(resolve => { finishDiscovery = resolve })
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  expect(wrapper.text()).toContain('Searching for Bluetooth sources...')
+  finishDiscovery({ generation: 1, names: ['Phone'] })
+  await flushPromises()
+  expect(wrapper.text()).not.toContain('Searching for Bluetooth sources...')
+  expect(wrapper.get('#bluetooth-source').text()).toContain('Phone')
+  wrapper.unmount()
+})
+
 it('preserves the selected source by name when discovery order changes', async () => {
   let generation = 0
   const invoke = vi.fn((command: string) => {

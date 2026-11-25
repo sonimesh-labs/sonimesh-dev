@@ -9,6 +9,7 @@ const LOOPBACK_NO_SAMPLES_DELAY_MS = 5000
 const generation = ref(0)
 const selected = ref('')
 const loaded = ref(false)
+const discovering = ref(false)
 const busy = ref(false)
 const phase = ref<'idle' | 'waiting' | 'open'>('idle')
 const error = ref<string | null>(null)
@@ -72,6 +73,7 @@ async function resumeBluetoothWait(request: number): Promise<'recovered' | 'fail
 
 async function refresh() {
   busy.value = true
+  discovering.value = true
   error.value = null
   suggestPhoneInitiated.value = false
   const previousIndex = selected.value === '' ? -1 : Number(selected.value)
@@ -93,6 +95,7 @@ async function refresh() {
     error.value = String(cause)
   } finally {
     busy.value = false
+    discovering.value = false
   }
 }
 
@@ -399,7 +402,8 @@ onBeforeUnmount(() => {
     <p class="preview-note">Connect a paired source through Windows. Audio is played by the system and does not enter the SoniMesh mixer.</p>
     <button type="button" class="preview-action" :disabled="busy" @click="openBluetoothSettings">Open Bluetooth settings</button>
     <button type="button" class="preview-action" :disabled="busy || phase !== 'idle'" @click="refresh">Refresh Bluetooth sources</button>
-    <p v-if="loaded && names.length === 0" role="status">No playback sources found. Pair a compatible device in Windows, then refresh.</p>
+    <p v-if="discovering" role="status">{{ loaded ? 'Refreshing Bluetooth sources...' : 'Searching for Bluetooth sources...' }}</p>
+    <p v-else-if="loaded && names.length === 0" role="status">No playback sources found. Pair a compatible device in Windows, then refresh.</p>
     <template v-if="names.length">
       <label for="bluetooth-source">Playback source</label>
       <select id="bluetooth-source" v-model="selected" :disabled="busy || phase !== 'idle'">
