@@ -22,6 +22,39 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class LabStatusTest {
     @Test
+    fun setup_feedback_does_not_replace_active_capture_status() {
+        val instrumentation = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
+        try {
+            ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    val root = activity.window.decorView
+                    LabStatus.serviceStarted(LabCaptureUsage.All, OpusBitrate.STANDARD, LabTransport.PairedUdp, 39093)
+                    LabStatus.publish("Capturing audio and sending to desktop.")
+                    val invitation = "SONIMESH-LAB1:39094:${labHex(labInvitation("ab".repeat(32)))}"
+                    requireNotNull(findTextField(root, "Lab invitation payload")).text = invitation
+                    requireNotNull(findButton(root, "Apply invitation payload")).performClick()
+                    assertTrue(hasStatus(root, "Status: Capturing audio and sending to desktop."))
+                    assertTrue(hasStatus(root, "Next setup: Invitation applied. UDP port set to 39094."))
+                    assertTrue(hasStatus(root, "Session request: All supported usages, 96 kbps target\nTransport: paired UDP\nRequested UDP port: 39093"))
+                    activity.applyScannedInvitation("invalid")
+                    assertTrue(hasStatus(root, "Status: Capturing audio and sending to desktop."))
+                    assertTrue(hasStatus(root, "Next setup: Paste a valid lab invitation payload."))
+                }
+                scenario.recreate()
+                scenario.onActivity { activity ->
+                    val root = activity.window.decorView
+                    assertTrue(hasStatus(root, "Status: Capturing audio and sending to desktop."))
+                    assertTrue(hasStatus(root, "Next setup: Paste a valid lab invitation payload."))
+                    LabStatus.publish("Desktop connection ended.")
+                    assertTrue(hasStatus(root, "Status: Desktop connection ended."))
+                }
+            }
+        } finally {
+            instrumentation.runOnMainSync { LabStatus.serviceFinished() }
+        }
+    }
+
+    @Test
     fun sessionRequestSurvivesRecreationAndStop() {
         try {
             ActivityScenario.launch(LabActivity::class.java).use { scenario ->

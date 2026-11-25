@@ -58,6 +58,7 @@ class LabActivity : Activity() {
     private lateinit var pin: EditText
     private lateinit var host: EditText
     private lateinit var status: TextView
+    private lateinit var setupFeedback: TextView
     private lateinit var signal: TextView
     private lateinit var duration: TextView
     private lateinit var senderQueueDrops: TextView
@@ -146,6 +147,11 @@ class LabActivity : Activity() {
         })
         status = TextView(this).apply { accessibilityLiveRegion = android.view.View.ACCESSIBILITY_LIVE_REGION_POLITE }
         layout.addView(status)
+        setupFeedback = TextView(this).apply {
+            accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+            text = savedInstanceState?.getString("setupFeedback") ?: ""
+        }
+        layout.addView(setupFeedback)
         layout.addView(Button(this).apply {
             text = "Stop capture"
             setOnClickListener {
@@ -353,7 +359,7 @@ class LabActivity : Activity() {
             setOnClickListener {
                 val parsed = parseLabAddress(address.text.toString())
                 if (parsed == null) {
-                    LabStatus.publish("Enter a valid desktop IPv4 address for UDP.")
+                    showSetupFeedback("Enter a valid desktop IPv4 address for UDP.")
                 } else {
                     host.setText(parsed.hostAddress)
                 }
@@ -364,7 +370,7 @@ class LabActivity : Activity() {
             setOnClickListener {
                 val parsed = parseLabAddress(host.text.toString())
                 if (parsed == null) {
-                    LabStatus.publish("Enter a non-loopback control IPv4 address before copying it to UDP.")
+                    showSetupFeedback("Enter a non-loopback control IPv4 address before copying it to UDP.")
                 } else {
                     address.setText(parsed.hostAddress)
                 }
@@ -429,6 +435,7 @@ class LabActivity : Activity() {
         outState.putString("address", address.text.toString())
         outState.putString("mediaPort", mediaPort.text.toString())
         outState.putString("invitation", invitation.text.toString())
+        outState.putString("setupFeedback", setupFeedback.text.toString())
         outState.putString("pin", pin.text.toString())
         outState.putString("host", host.text.toString())
         super.onSaveInstanceState(outState)
@@ -489,6 +496,7 @@ class LabActivity : Activity() {
             showCaptureBusy()
             return
         }
+        setupFeedback.text = ""
         retryButton.visibility = View.GONE
         if (needsPermission) {
             try {
@@ -508,6 +516,15 @@ class LabActivity : Activity() {
 
     private fun showCaptureBusy() {
         Toast.makeText(this, "Capture is already starting, running, or stopping.", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun showSetupFeedback(message: String) {
+        if (LabStatus.captureAdmission.canBegin()) {
+            setupFeedback.text = ""
+            LabStatus.publish(message)
+        } else {
+            setupFeedback.text = "Next setup: $message"
+        }
     }
 
     private fun updateRetryButton() {
@@ -568,14 +585,14 @@ class LabActivity : Activity() {
     private fun setInvitationText(value: String?, successMessage: String, emptyMessage: String) {
         val text = value?.trim()
         when {
-            text.isNullOrEmpty() -> LabStatus.publish(emptyMessage)
+            text.isNullOrEmpty() -> showSetupFeedback(emptyMessage)
             else -> {
                 try {
                     parseLabInvitationText(text).payload.fill(0)
                     invitation.setText(text)
-                    LabStatus.publish(successMessage)
+                    showSetupFeedback(successMessage)
                 } catch (_: IllegalArgumentException) {
-                    LabStatus.publish("Paste a valid lab invitation payload.")
+                    showSetupFeedback("Paste a valid lab invitation payload.")
                 }
             }
         }
@@ -589,15 +606,15 @@ class LabActivity : Activity() {
             ?.toString()
             ?.trim()
         if (text.isNullOrEmpty()) {
-            LabStatus.publish("Copy the desktop SPKI_HEX first.")
+            showSetupFeedback("Copy the desktop SPKI_HEX first.")
             return
         }
         try {
             labInvitation(text).fill(0)
             pin.setText(text)
-            LabStatus.publish("Desktop SPKI pasted. Enter the control address and start paired capture.")
+            showSetupFeedback("Desktop SPKI pasted. Enter the control address and start paired capture.")
         } catch (_: IllegalArgumentException) {
-            LabStatus.publish("The copied desktop SPKI_HEX is invalid.")
+            showSetupFeedback("The copied desktop SPKI_HEX is invalid.")
         }
     }
 
@@ -637,14 +654,14 @@ class LabActivity : Activity() {
                 val portMessage = parsed.mediaPort?.let { " UDP port set to $it." } ?: ""
                 val addressMessage = if (useAddressForUdp && udpAddress != null) " UDP uses the same address."
                     else " Check the desktop IPv4 for UDP separately."
-                LabStatus.publish("Invitation applied.$portMessage$addressMessage")
+                showSetupFeedback("Invitation applied.$portMessage$addressMessage")
             } finally {
                 decoded.pairingId.fill(0)
                 decoded.pairingSecret.fill(0)
                 decoded.desktopTlsSpki.fill(0)
             }
         } catch (_: IllegalArgumentException) {
-            LabStatus.publish("Paste a valid lab invitation payload.")
+            showSetupFeedback("Paste a valid lab invitation payload.")
         } finally {
             if (!retained) raw?.fill(0)
         }
@@ -668,12 +685,12 @@ class LabActivity : Activity() {
         host.setText("127.0.0.1")
         address.setText(DEFAULT_LAB_ADDRESS)
         mediaPort.setText(DEFAULT_LAB_MEDIA_PORT.toString())
-        LabStatus.publish("Saved lab setup cleared.")
+        showSetupFeedback("Saved lab setup cleared.")
     }
 
     internal fun applyScannedInvitation(contents: String?, startAfterScan: Boolean = false) {
         if (contents == null || contents.length > MAX_LAB_INVITATION_TEXT) {
-            LabStatus.publish("Scan a valid lab invitation, or paste its payload.")
+            showSetupFeedback("Scan a valid lab invitation, or paste its payload.")
             return
         }
         invitation.setText(contents)
