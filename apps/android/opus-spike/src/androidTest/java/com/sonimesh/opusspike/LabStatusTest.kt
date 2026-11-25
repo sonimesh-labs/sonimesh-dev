@@ -23,6 +23,43 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class LabStatusTest {
     @Test
+    fun changedControlPortReplacesImportedInvitationAndIsSaved() {
+        val invitation = labHex(labInvitation("ab".repeat(32), "127.0.0.1", 47612))
+        try {
+            ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    val root = activity.window.decorView
+                    requireNotNull(findTextField(root, "Lab invitation payload")).text = invitation
+                    requireNotNull(findButton(root, "Apply invitation payload")).performClick()
+                    requireNotNull(findTextField(root, "Desktop IPv4 address for UDP")).text = "10.0.2.2"
+                    val controlPort = requireNotNull(findTextField(root, "Paired control TCP port"))
+                    controlPort.text = "0"
+                    requireNotNull(findButton(root, "Start paired UDP capture")).performClick()
+                    assertTrue(hasStatus(root, "Status: Enter a paired control TCP port from 1 to 65535."))
+                    assertTrue(activity.getPreferences(Activity.MODE_PRIVATE).contains("labInvitation"))
+                    controlPort.text = "47613"
+                    requireNotNull(findButton(root, "Start paired UDP capture")).performClick()
+                    assertTrue(!activity.getPreferences(Activity.MODE_PRIVATE).contains("labInvitation"))
+                    assertEquals(47613, activity.getPreferences(Activity.MODE_PRIVATE).getInt("labControlPort", 0))
+                    LabStatus.captureAdmission.launchFailed()
+                }
+            }
+            ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    val root = activity.window.decorView
+                    assertEquals("47613", requireNotNull(findTextField(root, "Paired control TCP port")).text.toString())
+                    requireNotNull(findButton(root, "Clear saved lab setup")).performClick()
+                    assertEquals("47610", requireNotNull(findTextField(root, "Paired control TCP port")).text.toString())
+                }
+            }
+        } finally {
+            androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().runOnMainSync {
+                LabStatus.captureAdmission.launchFailed()
+            }
+        }
+    }
+
+    @Test
     fun customControlPortInvitationSurvivesActivityRecreation() {
         val invitation = labHex(labInvitation("ab".repeat(32), "127.0.0.1", 47612))
         ActivityScenario.launch(LabActivity::class.java).use { scenario ->

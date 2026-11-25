@@ -160,7 +160,8 @@ class LabCaptureService : Service() {
             require(!udpMode || destinationPort in 1..65535) { "invalid desktop UDP port" }
             pendingInvitation = if (pairedMode) intent.getByteArrayExtra("pairedInvitation")
                 ?: labInvitation(intent.getStringExtra("pairedPin") ?: "",
-                    intent.getStringExtra("pairedHost") ?: "127.0.0.1") else null
+                    intent.getStringExtra("pairedHost") ?: "127.0.0.1",
+                    intent.getIntExtra("pairedControlPort", DEFAULT_LAB_CONTROL_PORT)) else null
             val invitation = pendingInvitation
             Thread({ capture(current, udpMode, destination, destinationPort, invitation, usage, bitrate) }, "audio-lab-capture")
                 .also { captureWorker = it; it.start() }

@@ -2,8 +2,10 @@ package com.sonimesh.opusspike
 
 import com.sonimesh.sender.protocol.PairingQr
 
+internal const val DEFAULT_LAB_CONTROL_PORT = 47610
+
 /** Public test fixture shared with paired-audio-lab. */
-internal fun labInvitation(pinText: String, controlHost: String = "127.0.0.1", controlPort: Int = 47610): ByteArray {
+internal fun labInvitation(pinText: String, controlHost: String = "127.0.0.1", controlPort: Int = DEFAULT_LAB_CONTROL_PORT): ByteArray {
     val text = pinText.trim()
     require(text.length in PairingQr.SPKI_MIN_BYTES * 2..PairingQr.SPKI_MAX_BYTES * 2 &&
         text.length % 2 == 0 && text.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }) {

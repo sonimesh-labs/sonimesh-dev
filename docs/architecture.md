@@ -105,7 +105,9 @@ controlled local network using a manually entered desktop IPv4 address and an
 ADB-reversed connection for its temporary session secret. This is a development
 path rather than discovery, pairing, or the production control plane.
 The paired lab listener can select a TCP control port; the lab invitation carries
-that same port, independently of the UDP media port.
+that same port, independently of the UDP media port. The Android lab also accepts
+a manual control port for its public test fixture. Editing the port after importing
+an invitation selects the manual fixture for the next capture.
 The Android lab can select media, game, unknown, or all three playback usages
 for a capture session; platform and source capture policies still apply.
 The capture-only Android app can play an explicitly requested local test tone

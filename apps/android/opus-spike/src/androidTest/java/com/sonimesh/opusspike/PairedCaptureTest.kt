@@ -90,6 +90,9 @@ class PairedCaptureTest {
     fun captures_when_next_invitation_changes_during_consent() = runCapture(startFromScan = true, changeSetupDuringConsent = true)
 
     @Test
+    fun captures_when_manual_control_port_changes_during_consent() = runCapture(changeManualPortDuringConsent = true)
+
+    @Test
     fun captures_after_pasted_invitation() = runCapture(startFromPaste = true)
 
     @Test
@@ -143,7 +146,7 @@ class PairedCaptureTest {
     @Test
     fun plays_latency_probe_during_paired_capture() = runCapture(testLatencyProbe = true)
 
-    private fun runCapture(expectReconnect: Boolean = false, repeatedReconnects: Boolean = false, stopDuringReconnect: Boolean = false, retryAfterReconnectExhaustion: Boolean = false, screenOff: Boolean = false, notificationReturn: Boolean = false, startFromScan: Boolean = false, startFromPaste: Boolean = false, recreate: Boolean = false, changeUsage: Boolean = false, testMute: Boolean = false, expectConnectionRetry: Boolean = false, changeSetupDuringConsent: Boolean = false, testNotificationSignal: Boolean = false, testLatencyProbe: Boolean = false) {
+    private fun runCapture(expectReconnect: Boolean = false, repeatedReconnects: Boolean = false, stopDuringReconnect: Boolean = false, retryAfterReconnectExhaustion: Boolean = false, screenOff: Boolean = false, notificationReturn: Boolean = false, startFromScan: Boolean = false, startFromPaste: Boolean = false, recreate: Boolean = false, changeUsage: Boolean = false, testMute: Boolean = false, expectConnectionRetry: Boolean = false, changeSetupDuringConsent: Boolean = false, changeManualPortDuringConsent: Boolean = false, testNotificationSignal: Boolean = false, testLatencyProbe: Boolean = false) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val args = InstrumentationRegistry.getArguments()
         var stopAcknowledgement = "unavailable"
@@ -154,6 +157,7 @@ class PairedCaptureTest {
         val pin = args.getString("pairingSpkiHex")
         if (startFromScan) assumeTrue("scan test requires pairingInvitationHex", args.containsKey("pairingInvitationHex"))
         if (startFromPaste) assumeTrue("paste test requires pairingInvitationHex", args.containsKey("pairingInvitationHex"))
+        if (changeManualPortDuringConsent) assumeTrue("manual port test requires pairingSpkiHex and pairingPort", args.containsKey("pairingSpkiHex") && args.containsKey("pairingPort"))
         ActivityScenario.launch<LabActivity>(Intent(instrumentation.targetContext, LabActivity::class.java)).use { scenario ->
             scenario.onActivity { activity ->
                 (find(activity.window.decorView) {
@@ -208,11 +212,19 @@ class PairedCaptureTest {
                         args.getString("pairingHost")?.let { host ->
                             (find(root) { it is EditText && it.contentDescription == "Paired control IPv4 address" } as EditText).setText(host)
                         }
+                        args.getString("pairingPort")?.let { port ->
+                            (find(root) { it is EditText && it.contentDescription == "Paired control TCP port" } as EditText).setText(port)
+                        }
                     }
                     find(root) { it is Button && it.text.toString().equals("Start paired UDP capture", true) }.performClick()
                 }
             }
             val automation = instrumentation.uiAutomation
+            if (changeManualPortDuringConsent) {
+                scenario.onActivity { activity ->
+                    (find(activity.window.decorView) { it is EditText && it.contentDescription == "Paired control TCP port" } as EditText).setText("1")
+                }
+            }
             if (changeSetupDuringConsent) {
                 scenario.onActivity { activity ->
                     activity.applyScannedInvitation("SONIMESH-LAB1:39095:${labHex(labInvitation("ab".repeat(32)))}")

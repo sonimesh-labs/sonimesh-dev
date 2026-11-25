@@ -52,17 +52,20 @@ class LabActivity : Activity() {
     private var pendingMediaPort = DEFAULT_LAB_MEDIA_PORT
     private var pendingPin = ""
     private var pendingHost = "127.0.0.1"
+    private var pendingControlPort = DEFAULT_LAB_CONTROL_PORT
     private var pendingUsage = LabCaptureUsage.All
     private var pendingBitrate = OpusBitrate.STANDARD
     private var importedInvitation: ByteArray? = null
     private var pendingInvitation: ByteArray? = null
     private var importedPin = ""
     private var importedHost = ""
+    private var importedControlPort = DEFAULT_LAB_CONTROL_PORT
     private lateinit var address: EditText
     private lateinit var mediaPort: EditText
     private lateinit var invitation: EditText
     private lateinit var pin: EditText
     private lateinit var host: EditText
+    private lateinit var controlPort: EditText
     private lateinit var status: TextView
     private lateinit var setupFeedback: TextView
     private lateinit var signal: TextView
@@ -130,6 +133,7 @@ class LabActivity : Activity() {
         pendingMediaPort = savedInstanceState?.getInt("pendingMediaPort", DEFAULT_LAB_MEDIA_PORT) ?: DEFAULT_LAB_MEDIA_PORT
         pendingPin = savedInstanceState?.getString("pendingPin") ?: ""
         pendingHost = savedInstanceState?.getString("pendingHost") ?: "127.0.0.1"
+        pendingControlPort = savedInstanceState?.getInt("pendingControlPort", DEFAULT_LAB_CONTROL_PORT) ?: DEFAULT_LAB_CONTROL_PORT
         pendingInvitation = if (LabStatus.captureAdmission.canBegin()) null
             else savedInstanceState?.getByteArray("pendingInvitation")?.copyOf()
         pendingUsage = LabCaptureUsage.fromValue(savedInstanceState?.getString("pendingUsage"))
@@ -143,6 +147,7 @@ class LabActivity : Activity() {
                         importedInvitation = bytes
                         importedPin = labHex(decoded.desktopTlsSpki)
                         importedHost = decoded.controlHost
+                        importedControlPort = decoded.controlPort
                     } finally {
                         decoded.pairingId.fill(0)
                         decoded.pairingSecret.fill(0)
@@ -387,6 +392,14 @@ class LabActivity : Activity() {
             setText(savedInstanceState?.getString("host") ?: labPreferences.getString(PREF_HOST, "127.0.0.1"))
         }
         layout.addView(host)
+        layout.addView(TextView(this).apply { text = "Paired control TCP port" })
+        controlPort = EditText(this).apply {
+            contentDescription = "Paired control TCP port"
+            keyListener = DigitsKeyListener.getInstance("0123456789")
+            setSingleLine(true)
+            setText(savedInstanceState?.getString("controlPort") ?: labPreferences.getInt(PREF_CONTROL_PORT, DEFAULT_LAB_CONTROL_PORT).toString())
+        }
+        layout.addView(controlPort)
         layout.addView(Button(this).apply {
             text = "Use UDP address for control"
             setOnClickListener {
@@ -461,6 +474,7 @@ class LabActivity : Activity() {
         outState.putInt("pendingMediaPort", pendingMediaPort)
         outState.putString("pendingPin", pendingPin)
         outState.putString("pendingHost", pendingHost)
+        outState.putInt("pendingControlPort", pendingControlPort)
         outState.putString("pendingUsage", pendingUsage.value)
         outState.putString("selectedUsage", selectedUsage().value)
         outState.putInt("pendingBitrate", pendingBitrate.bitsPerSecond)
@@ -473,6 +487,7 @@ class LabActivity : Activity() {
         outState.putString("setupFeedback", setupFeedback.text.toString())
         outState.putString("pin", pin.text.toString())
         outState.putString("host", host.text.toString())
+        outState.putString("controlPort", controlPort.text.toString())
         super.onSaveInstanceState(outState)
     }
 
@@ -503,21 +518,28 @@ class LabActivity : Activity() {
                 LabStatus.publish("Enter a valid paired control IPv4 address.")
                 return
             }
+            val parsedControlPort = parseLabMediaPort(controlPort.text.toString())
+            if (parsedControlPort == null) {
+                LabStatus.publish("Enter a paired control TCP port from 1 to 65535.")
+                return
+            }
             val entered = pin.text.toString().trim()
-            if (runCatching { labInvitation(entered, parsedHost) }.isFailure) {
+            if (runCatching { labInvitation(entered, parsedHost, parsedControlPort).fill(0) }.isFailure) {
                 LabStatus.publish("Paste the desktop listener's complete SPKI_HEX.")
                 return
             }
-            if (importedInvitation != null && (entered != importedPin || parsedHost != importedHost)) {
+            if (importedInvitation != null && (entered != importedPin || parsedHost != importedHost || parsedControlPort != importedControlPort)) {
                 importedInvitation?.fill(0)
                 importedInvitation = null
                 labPreferences.edit().remove(PREF_INVITATION).apply()
             }
             pendingPin = entered
             pendingHost = parsedHost
+            pendingControlPort = parsedControlPort
             labPreferences.edit()
                 .putString(PREF_PIN, entered)
                 .putString(PREF_HOST, parsedHost)
+                .putInt(PREF_CONTROL_PORT, parsedControlPort)
                 .apply()
         }
         udpMode = udp
@@ -678,6 +700,7 @@ class LabActivity : Activity() {
                 val decodedPin = labHex(decoded.desktopTlsSpki)
                 pin.setText(decodedPin)
                 host.setText(decoded.controlHost)
+                controlPort.setText(decoded.controlPort.toString())
                 parsed.mediaPort?.let { port ->
                     mediaPort.setText(port.toString())
                     labPreferences.edit().putInt(PREF_MEDIA_PORT, port).apply()
@@ -690,17 +713,19 @@ class LabActivity : Activity() {
                 importedInvitation = raw
                 importedPin = decodedPin
                 importedHost = decoded.controlHost
+                importedControlPort = decoded.controlPort
                 labPreferences.edit()
                     .putString(PREF_INVITATION, labHex(raw))
                     .putString(PREF_PIN, decodedPin)
                     .putString(PREF_HOST, decoded.controlHost)
+                    .putInt(PREF_CONTROL_PORT, decoded.controlPort)
                     .apply()
                 retained = true
                 invitation.setText("")
                 val portMessage = parsed.mediaPort?.let { " UDP port set to $it." } ?: ""
                 val addressMessage = if (useAddressForUdp && udpAddress != null) " UDP uses the same address."
                     else " Check the desktop IPv4 for UDP separately."
-                val controlMessage = if (decoded.controlPort != 47610) " Control TCP port ${decoded.controlPort}." else ""
+                val controlMessage = if (decoded.controlPort != DEFAULT_LAB_CONTROL_PORT) " Control TCP port ${decoded.controlPort}." else ""
                 showSetupFeedback("Invitation applied.$portMessage$addressMessage$controlMessage")
             } finally {
                 decoded.pairingId.fill(0)
@@ -720,16 +745,19 @@ class LabActivity : Activity() {
         importedInvitation = null
         importedPin = ""
         importedHost = ""
+        importedControlPort = DEFAULT_LAB_CONTROL_PORT
         labPreferences.edit()
             .remove(PREF_INVITATION)
             .remove(PREF_PIN)
             .remove(PREF_HOST)
+            .remove(PREF_CONTROL_PORT)
             .remove("desktopAddress")
             .remove(PREF_MEDIA_PORT)
             .apply()
         invitation.setText("")
         pin.setText("")
         host.setText("127.0.0.1")
+        controlPort.setText(DEFAULT_LAB_CONTROL_PORT.toString())
         address.setText(DEFAULT_LAB_ADDRESS)
         mediaPort.setText(DEFAULT_LAB_MEDIA_PORT.toString())
         showSetupFeedback("Saved lab setup cleared.")
@@ -834,6 +862,7 @@ class LabActivity : Activity() {
                     if (pairedMode) {
                         putExtra("pairedPin", pendingPin)
                         putExtra("pairedHost", pendingHost)
+                        putExtra("pairedControlPort", pendingControlPort)
                         pendingInvitation?.let { putExtra("pairedInvitation", it.copyOf()) }
                     }
                 })
@@ -966,6 +995,7 @@ internal fun buildLabEvidenceShareIntent(evidence: String): Intent =
 private const val PREF_INVITATION = "labInvitation"
 private const val PREF_PIN = "labPin"
 private const val PREF_HOST = "labHost"
+private const val PREF_CONTROL_PORT = "labControlPort"
 private const val PREF_USAGE = "labCaptureUsage"
 private const val PREF_BITRATE = "labBitrate"
 private const val PREF_MEDIA_PORT = "labMediaPort"
