@@ -11,6 +11,7 @@ const loaded = ref(false)
 const busy = ref(false)
 const phase = ref<'idle' | 'waiting' | 'open'>('idle')
 const error = ref<string | null>(null)
+const suggestPhoneInitiated = ref(false)
 const message = ref<string | null>(null)
 const loopback = ref<LoopbackSnapshot | null>(null)
 const loopbackEndpoints = ref<LoopbackEndpoint[]>([])
@@ -29,6 +30,7 @@ function sourceName() {
 async function refresh() {
   busy.value = true
   error.value = null
+  suggestPhoneInitiated.value = false
   selected.value = ''
   try {
     if (!window.__TAURI__) throw new Error('Desktop probe unavailable')
@@ -110,6 +112,7 @@ async function toggle(mode: 'connect' | 'wait' = 'connect') {
   if (!window.__TAURI__) return
   busy.value = true
   error.value = null
+  suggestPhoneInitiated.value = false
   message.value = null
   statusRequest++
   clearTimeout(timer)
@@ -129,6 +132,7 @@ async function toggle(mode: 'connect' | 'wait' = 'connect') {
     }
   } catch (cause) {
     error.value = String(cause)
+    suggestPhoneInitiated.value = mode === 'connect' && phase.value === 'idle'
     if (phase.value !== 'idle') void poll()
   } finally {
     busy.value = false
@@ -180,6 +184,7 @@ onBeforeUnmount(() => { disposed = true; statusRequest++; clearTimeout(timer); c
     <button v-if="names.length && phase === 'idle'" type="button" class="preview-action" :disabled="busy || selected === ''" @click="toggle('wait')">Wait for phone to connect</button>
     <p v-if="message" role="status">{{ message }}</p>
     <p v-if="error" class="command-error" role="alert">{{ error }}</p>
+    <p v-if="suggestPhoneInitiated" role="status">Try waiting for the phone to connect, then start playback from the phone.</p>
     <h3>System output PCM check</h3>
     <p class="preview-note">Measures the selected Windows playback mix; other apps' audio may also appear here.</p>
     <button type="button" class="preview-action" :disabled="loopbackBusy || loopback?.running" @click="refreshLoopbackEndpoints">Refresh output devices</button>

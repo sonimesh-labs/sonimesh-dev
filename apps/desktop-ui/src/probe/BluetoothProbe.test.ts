@@ -56,6 +56,34 @@ it('reports empty discovery and system closure', async () => {
   wrapper.unmount()
 })
 
+it('suggests the phone-initiated path after a direct connection fails', async () => {
+  let phase = 'idle'
+  const invoke = vi.fn((command: string) => {
+    if (command === 'loopback_status') return Promise.resolve({ running: false, endpointName: '', sampleRate: 0, channels: 0, samples: 0, peak: 0, error: null })
+    if (command === 'bluetooth_candidates') return Promise.resolve({ generation: 2, names: ['Phone'] })
+    if (command === 'bluetooth_status') return Promise.resolve(phase)
+    if (command === 'bluetooth_connect') return Promise.reject(new Error('Windows could not open the connection.'))
+    if (command === 'bluetooth_prepare') phase = 'waiting'
+    if (command === 'bluetooth_disconnect') phase = 'idle'
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  await wrapper.findAll('button').find(button => button.text() === 'Refresh Bluetooth sources')!.trigger('click')
+  await flushPromises()
+  await wrapper.get('#bluetooth-source').setValue('0')
+  await wrapper.findAll('button').find(button => button.text() === 'Connect Bluetooth')!.trigger('click')
+  await flushPromises()
+  expect(wrapper.text()).toContain('Try waiting for the phone to connect, then start playback from the phone.')
+  await wrapper.findAll('button').find(button => button.text() === 'Wait for phone to connect')!.trigger('click')
+  await flushPromises()
+  expect(invoke).toHaveBeenCalledWith('bluetooth_prepare', { generation: 2, index: 0 })
+  expect(wrapper.text()).toContain('Waiting for the phone to connect to Phone')
+  expect(wrapper.text()).not.toContain('Try waiting for the phone to connect')
+  wrapper.unmount()
+})
+
 it('restores an existing connection and allows disconnect without refreshing', async () => {
   const invoke = vi.fn((command: string) => Promise.resolve(command === 'bluetooth_status' ? 'open' : command === 'loopback_status' ? { running: false, endpointName: '', sampleRate: 0, channels: 0, samples: 0, peak: 0, error: null } : undefined))
   window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
