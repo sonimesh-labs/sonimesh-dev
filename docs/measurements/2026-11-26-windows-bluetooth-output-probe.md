@@ -30,6 +30,10 @@
   The remote source's state was not established, so the cause remains unknown.
   Retrying through the API's async projection returned the same status and error;
   the implementation remains on the synchronous projection.
+- A recovery check reproduced that direct-open failure, refreshed the same sole
+  candidate, then entered inbound wait and closed cleanly. This verifies the
+  fallback connection flow after failure; it does not verify phone-initiated
+  playback.
 
 Commands run from the repository root:
 
@@ -40,6 +44,7 @@ cargo +1.98.1 test --offline -j 1 --manifest-path tools/tauri-output-prototype/C
 cargo +1.98.1 test --offline -j 1 --manifest-path tools/tauri-output-prototype/Cargo.toml windows_discovery_returns_a_usable_snapshot -- --ignored --nocapture
 cargo +1.98.1 test --offline -j 1 --manifest-path tools/tauri-output-prototype/Cargo.toml real_windows_inbound_wait_reports_state_and_closes -- --ignored --nocapture
 cargo +1.98.1 test --offline -j 1 --manifest-path tools/tauri-output-prototype/Cargo.toml bluetooth_wait_and_default_endpoint_monitor_run_together -- --ignored --nocapture
+cargo +1.98.1 test --offline -j 1 --manifest-path tools/tauri-output-prototype/Cargo.toml direct_open_failure_can_fall_back_to_inbound_wait -- --ignored --nocapture
 cargo +1.98.1 test --offline -j 1 --manifest-path tools/tauri-output-prototype/Cargo.toml real_connection_opens_reports_state_and_closes -- --ignored --nocapture
 ~~~
 

@@ -221,6 +221,38 @@ mod platform {
         }
 
         #[test]
+        #[ignore = "requires a Windows Bluetooth candidate that can enter inbound wait"]
+        fn direct_open_failure_can_fall_back_to_inbound_wait() {
+            let mut bluetooth = Bluetooth::default();
+            let initial = bluetooth.refresh().unwrap();
+            assert_eq!(
+                initial.names.len(),
+                1,
+                "the test requires exactly one candidate"
+            );
+
+            if let Err(error) = bluetooth.connect(initial.generation, 0) {
+                eprintln!("direct open result: {error}");
+            } else {
+                assert_eq!(bluetooth.status().unwrap(), PlaybackState::Open);
+                bluetooth.disconnect().unwrap();
+            }
+            assert_eq!(bluetooth.status().unwrap(), PlaybackState::Idle);
+
+            let refreshed = bluetooth.refresh().unwrap();
+            assert_eq!(refreshed.names.len(), 1);
+            bluetooth
+                .prepare(refreshed.generation, 0)
+                .expect("inbound wait should remain available after direct open");
+            assert!(matches!(
+                bluetooth.status().unwrap(),
+                PlaybackState::Waiting | PlaybackState::Open
+            ));
+            bluetooth.disconnect().unwrap();
+            assert_eq!(bluetooth.status().unwrap(), PlaybackState::Idle);
+        }
+
+        #[test]
         #[ignore = "starts a short Windows playback wait; requires exactly one candidate"]
         fn real_windows_inbound_wait_reports_state_and_closes() {
             let mut bluetooth = Bluetooth::default();

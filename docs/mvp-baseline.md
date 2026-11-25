@@ -100,9 +100,10 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   be re-resolved and selected default and non-default endpoint loopback streams
   started and stopped. A combined Bluetooth-wait and default-output-loopback
   check also started and closed both successfully without playing audio. The
-  Bluetooth inbound-wait check passed, while direct open again returned
-  `UnknownFailure` / `0x8007001F`; phone-initiated playback and an application
-  PCM source remain unverified
+  Bluetooth inbound-wait check passed. A recovery check reproduced direct open's
+  `UnknownFailure` / `0x8007001F`, then refreshed the candidate and entered
+  inbound wait successfully. Phone-initiated playback and an application PCM
+  source remain unverified
   (see `tools/windows-bluetooth-prototype/README.md`);
 - a shell-neutral `DesktopControlSession` that attaches the existing bounded
   framed transport to `DesktopReceiverOwner`, executes one authenticated
