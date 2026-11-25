@@ -448,6 +448,14 @@ service exited, capture admission reset, and paired control/media worker threads
 terminated. The ordinary paired-stop control test also passed. This verifies
 emulator loopback service lifecycle, not physical WLAN recovery or audible
 continuity.
+During paired reconnects, the foreground notification now reports connecting,
+reconnecting, and restored states alongside transport and mute state. On
+2026-11-25, API 37 x86_64 instrumentation moved the activity to the background
+before the injected disconnect, observed the reconnecting notification, returned
+through its open action, and verified the restored notification while capture
+continued. The loopback listener received 188 packets and decoded 178 frames
+with a cumulative peak of 0.436. This is emulator service and decoder evidence,
+not physical WLAN or audible continuity evidence.
 
 To verify recovery after automatic reconnect exhaustion, run the listener with
 `--keep-listening --disconnect-after-ms 1000 --reject-starts 33` and invoke

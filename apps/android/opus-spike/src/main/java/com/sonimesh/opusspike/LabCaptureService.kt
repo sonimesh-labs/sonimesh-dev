@@ -56,6 +56,7 @@ class LabCaptureService : Service() {
     private var muteAction: Notification.Action? = null
     private var unmuteAction: Notification.Action? = null
     private var foregroundTransportLabel: String? = null
+    private var foregroundConnectionStatus: String? = null
     private val handler = Handler(Looper.getMainLooper())
     private var terminalStatus = false
     private var started = false
@@ -203,7 +204,10 @@ class LabCaptureService : Service() {
                     setupSocket = setupSocket,
                     onStatus = { message ->
                         handler.post {
-                            if (running.get() && !terminalStatus) LabStatus.publish(message)
+                            if (running.get() && !terminalStatus) {
+                                LabStatus.publish(message)
+                                updateForegroundConnectionStatus(message)
+                            }
                         }
                     },
                     onReconnectFailure = { message ->
@@ -507,9 +511,31 @@ class LabCaptureService : Service() {
         val builder = foregroundNotificationBuilder ?: return
         val manager = foregroundNotificationManager ?: return
         builder.setActions(stopAction, if (muted) unmuteAction else muteAction)
-        val transport = foregroundTransportLabel ?: return
-        builder.setContentText("Transport: $transport${if (muted) " · Sending muted" else ""}")
+        updateForegroundContentText(builder)
         manager.notify(1, builder.build())
+    }
+
+    private fun updateForegroundConnectionStatus(message: String) {
+        foregroundConnectionStatus = when {
+            message.startsWith("Desktop listener is not ready.") -> "Connecting to desktop"
+            message.startsWith("Desktop connection lost.") -> "Reconnecting to desktop"
+            message.startsWith("Desktop connection restored.") -> "Desktop reconnected"
+            else -> return
+        }
+        val builder = foregroundNotificationBuilder ?: return
+        val manager = foregroundNotificationManager ?: return
+        updateForegroundContentText(builder)
+        manager.notify(1, builder.build())
+    }
+
+    private fun updateForegroundContentText(builder: Notification.Builder) {
+        val transport = foregroundTransportLabel ?: return
+        val content = buildList {
+            add("Transport: $transport")
+            foregroundConnectionStatus?.let(::add)
+            if (senderMuted.get()) add("Sending muted")
+        }.joinToString(" · ")
+        builder.setContentText(content)
     }
 
     private fun requestStop() {
@@ -537,6 +563,7 @@ class LabCaptureService : Service() {
             foregroundNotificationManager = null
             foregroundNotificationBuilder = null
             foregroundTransportLabel = null
+            foregroundConnectionStatus = null
             stopAction = null
             muteAction = null
             unmuteAction = null

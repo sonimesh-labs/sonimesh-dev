@@ -252,15 +252,37 @@ class PairedCaptureTest {
             }
             if (expectReconnect || stopDuringReconnect || retryAfterReconnectExhaustion) {
                 instrumentation.sendStatus(1, Bundle().apply { putString("pairedCapture", "ready") })
+                if (expectReconnect) automation.executeShellCommand("input keyevent KEYCODE_HOME").close()
                 var disconnected = false
                 val disconnectDeadline = SystemClock.elapsedRealtime() + 20_000
                 while (!disconnected && SystemClock.elapsedRealtime() < disconnectDeadline) {
-                    scenario.onActivity { activity ->
-                        disconnected = containsStatus(activity.window.decorView, "Status: Desktop connection lost. Reconnecting")
+                    if (expectReconnect) {
+                        val notification = instrumentation.targetContext
+                            .getSystemService(NotificationManager::class.java)
+                            .activeNotifications.firstOrNull { it.id == 1 }?.notification
+                        disconnected = notification?.extras?.getString(Notification.EXTRA_TEXT) ==
+                            "Transport: paired UDP · Reconnecting to desktop"
+                    } else {
+                        scenario.onActivity { activity ->
+                            disconnected = containsStatus(activity.window.decorView, "Status: Desktop connection lost. Reconnecting")
+                        }
                     }
                     if (!disconnected) SystemClock.sleep(100)
                 }
                 assertTrue("desktop disconnect was not reported", disconnected)
+                if (expectReconnect) {
+                    val manager = instrumentation.targetContext.getSystemService(NotificationManager::class.java)
+                    val notification = manager.activeNotifications.firstOrNull { it.id == 1 }?.notification
+                    requireNotNull(notification?.contentIntent) { "reconnecting notification has no open action" }.send()
+                    val returnDeadline = SystemClock.elapsedRealtime() + 10_000
+                    var returned = false
+                    while (!returned && SystemClock.elapsedRealtime() < returnDeadline) {
+                        returned = automation.rootInActiveWindow?.packageName?.toString() ==
+                            instrumentation.targetContext.packageName
+                        if (!returned) SystemClock.sleep(100)
+                    }
+                    assertTrue("notification did not return to capture activity", returned)
+                }
                 if (retryAfterReconnectExhaustion) {
                     var retryAvailable = false
                     val retryDeadline = SystemClock.elapsedRealtime() + 60_000
@@ -331,6 +353,15 @@ class PairedCaptureTest {
                         if (!restored) SystemClock.sleep(100)
                     }
                     assertTrue("desktop session did not recover", restored)
+                    if (expectReconnect) {
+                        val notification = instrumentation.targetContext
+                            .getSystemService(NotificationManager::class.java)
+                            .activeNotifications.firstOrNull { it.id == 1 }?.notification
+                        assertEquals(
+                            "Transport: paired UDP · Desktop reconnected",
+                            notification?.extras?.getString(Notification.EXTRA_TEXT),
+                        )
+                    }
                     var durationAdvanced = false
                     val durationDeadline = SystemClock.elapsedRealtime() + 3_000
                     while (!durationAdvanced && SystemClock.elapsedRealtime() < durationDeadline) {
