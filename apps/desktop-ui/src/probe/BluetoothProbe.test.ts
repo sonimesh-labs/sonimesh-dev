@@ -461,11 +461,13 @@ it('distinguishes an open PCM stream with no recent signal', async () => {
 })
 
 it('shows when a running loopback stream has not delivered samples yet', async () => {
+  vi.useFakeTimers()
   let running = false
+  let samples = 0
   const invoke = vi.fn((command: string) => {
     if (command === 'bluetooth_status') return Promise.resolve('idle')
     if (command === 'loopback_endpoints') return Promise.resolve([{ id: 'default-endpoint', name: 'Default speakers', isDefault: true }])
-    if (command === 'loopback_status') return Promise.resolve({ running, endpointName: 'Default speakers', sampleRate: running ? 48000 : 0, channels: running ? 2 : 0, samples: 0, peak: 0, error: null })
+    if (command === 'loopback_status') return Promise.resolve({ running, endpointName: 'Default speakers', sampleRate: running ? 48000 : 0, channels: running ? 2 : 0, samples, peak: 0, error: null })
     if (command === 'loopback_start') { running = true; return Promise.resolve({ running, endpointName: 'Default speakers', sampleRate: 48000, channels: 2, samples: 0, peak: 0, error: null }) }
     return Promise.resolve()
   })
@@ -475,6 +477,13 @@ it('shows when a running loopback stream has not delivered samples yet', async (
   await wrapper.findAll('button').find(button => button.text() === 'Start PCM check')!.trigger('click')
   await flushPromises()
   expect(wrapper.text()).toContain('Waiting for Windows audio samples.')
-  expect(wrapper.text()).not.toContain('No recent PCM activity.')
+  await vi.advanceTimersByTimeAsync(5000)
+  await flushPromises()
+  expect(wrapper.text()).toContain('No Windows audio samples have arrived yet. Start playback and check the selected output endpoint.')
+  samples = 4096
+  await vi.advanceTimersByTimeAsync(1000)
+  await flushPromises()
+  expect(wrapper.text()).not.toContain('No Windows audio samples have arrived yet.')
+  expect(wrapper.text()).toContain('No recent PCM activity.')
   wrapper.unmount()
 })

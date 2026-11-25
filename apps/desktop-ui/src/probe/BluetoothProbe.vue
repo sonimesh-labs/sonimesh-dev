@@ -5,6 +5,7 @@ type LoopbackSnapshot = { running: boolean; endpointName: string; sampleRate: nu
 type LoopbackEndpoint = { id: string; name: string; isDefault: boolean }
 
 const names = ref<string[]>([])
+const LOOPBACK_NO_SAMPLES_DELAY_MS = 5000
 const generation = ref(0)
 const selected = ref('')
 const loaded = ref(false)
@@ -18,15 +19,27 @@ const loopbackEndpoints = ref<LoopbackEndpoint[]>([])
 const loopbackEndpointId = ref('')
 const loopbackBusy = ref(false)
 const loopbackError = ref<string | null>(null)
+const loopbackNoSamplesLong = ref(false)
 const combinedMonitorOwned = ref(false)
 let timer: ReturnType<typeof setTimeout> | undefined
 let loopbackTimer: ReturnType<typeof setTimeout> | undefined
+let loopbackStartedAt: number | undefined
 let disposed = false
 let statusRequest = 0
 let loopbackRequest = 0
 
 function sourceName() {
   return names.value[Number(selected.value)] ?? 'selected source'
+}
+
+function updateLoopbackWaitState(snapshot: LoopbackSnapshot) {
+  if (!snapshot.running || snapshot.samples > 0) {
+    loopbackStartedAt = undefined
+    loopbackNoSamplesLong.value = false
+    return
+  }
+  loopbackStartedAt ??= Date.now()
+  loopbackNoSamplesLong.value = Date.now() - loopbackStartedAt >= LOOPBACK_NO_SAMPLES_DELAY_MS
 }
 
 async function refresh() {
@@ -74,6 +87,7 @@ async function pollLoopback() {
     const snapshot = await window.__TAURI__!.core.invoke<LoopbackSnapshot>('loopback_status')
     if (disposed || request !== loopbackRequest) return
     loopback.value = snapshot
+    updateLoopbackWaitState(snapshot)
   } catch (cause) {
     if (!disposed && request === loopbackRequest && loopback.value) {
       loopback.value = { ...loopback.value, error: String(cause) }
@@ -105,16 +119,23 @@ async function toggleLoopback() {
   if (loopback.value?.running) {
     loopbackRequest++
     clearTimeout(loopbackTimer)
+    loopbackStartedAt = undefined
+    loopbackNoSamplesLong.value = false
   }
   try {
     const result = loopback.value?.running
       ? await window.__TAURI__.core.invoke<LoopbackSnapshot>('loopback_stop')
       : await window.__TAURI__.core.invoke<LoopbackSnapshot>('loopback_start', { endpointId: loopbackEndpointId.value })
     loopback.value = result
-    if (result.running) void pollLoopback()
-    else {
+    if (result.running) {
+      loopbackStartedAt = Date.now()
+      loopbackNoSamplesLong.value = false
+      void pollLoopback()
+    } else {
       loopbackRequest++
       clearTimeout(loopbackTimer)
+      loopbackStartedAt = undefined
+      loopbackNoSamplesLong.value = false
       combinedMonitorOwned.value = false
     }
   } catch (cause) {
@@ -131,6 +152,8 @@ async function stopCombinedMonitor() {
   loopbackBusy.value = true
   try {
     loopback.value = await window.__TAURI__.core.invoke<LoopbackSnapshot>('loopback_stop')
+    loopbackStartedAt = undefined
+    loopbackNoSamplesLong.value = false
     combinedMonitorOwned.value = false
   } catch (cause) {
     loopbackError.value = String(cause)
@@ -167,6 +190,8 @@ async function toggle(mode: 'connect' | 'wait' = 'connect', monitorOutput = fals
           if (!loopback.value.running) throw new Error('Windows output monitoring did not start.')
           loopbackStartedHere = true
           combinedMonitorOwned.value = true
+          loopbackStartedAt = Date.now()
+          loopbackNoSamplesLong.value = false
         } catch (cause) {
           loopbackError.value = String(cause)
           throw cause
@@ -227,7 +252,11 @@ onMounted(async () => {
     }
     const loopbackState = await window.__TAURI__.core.invoke<LoopbackSnapshot>('loopback_status')
     loopback.value = loopbackState
-    if (loopbackState.running) void pollLoopback()
+    if (loopbackState.running) {
+      loopbackStartedAt = Date.now()
+      loopbackNoSamplesLong.value = false
+      void pollLoopback()
+    }
     await refreshLoopbackEndpoints()
   } catch (cause) {
     if (!disposed && request === statusRequest) error.value = String(cause)
@@ -270,7 +299,7 @@ onBeforeUnmount(() => { disposed = true; statusRequest++; loopbackRequest++; cle
       <option v-for="endpoint in loopbackEndpoints" :key="endpoint.id" :value="endpoint.id">{{ endpoint.name }}{{ endpoint.isDefault ? ' (default)' : '' }}</option>
     </select>
     <button type="button" class="preview-action" :disabled="loopbackBusy || (!loopback?.running && !loopbackEndpointId)" @click="toggleLoopback">{{ loopbackBusy ? 'Working...' : loopback?.running ? 'Stop PCM check' : 'Start PCM check' }}</button>
-    <p v-if="loopback?.running && loopback.samples === 0" role="status">Waiting for Windows audio samples.</p>
+    <p v-if="loopback?.running && loopback.samples === 0" role="status">{{ loopbackNoSamplesLong ? 'No Windows audio samples have arrived yet. Start playback and check the selected output endpoint.' : 'Waiting for Windows audio samples.' }}</p>
     <p v-if="loopback && (loopback.running || loopback.sampleRate > 0)" role="status">{{ loopback.endpointName }} · {{ loopback.sampleRate }} Hz, {{ loopback.channels }} channels; {{ loopback.samples }} samples; recent peak {{ (loopback.peak * 100).toFixed(1) }}%<template v-if="loopback.samples > 0">; {{ loopback.peak > 0.001 ? 'PCM activity detected recently' : 'No recent PCM activity' }}</template>.</p>
     <p v-if="loopbackError || loopback?.error" class="command-error" role="alert">{{ loopbackError || loopback?.error }}</p>
   </section>
