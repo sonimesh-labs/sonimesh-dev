@@ -76,9 +76,11 @@ correlated Hello response containing the negotiated version and capabilities.
 Completed duplicate start/stop commands receive correlated status replies;
 pending duplicates receive a retryable error. Received status/error envelopes are
 ignored. The adapter exposes explicit flush/closed states and
-does not enter the realtime output callback. A
-future Tauri shell can delegate to this owner without moving UI code into the
-realtime path. The projection excludes pairing IDs,
+does not enter the realtime output callback. A software integration test drives
+the scheduler over loopback TCP control alongside protected UDP and native
+Opus; its trusted session is supplied by the test, without TLS pairing or a
+platform host. A future Tauri shell can delegate to this owner without moving
+UI code into the realtime path. The projection excludes pairing IDs,
 proofs, addresses, session material, PCM,
 encoded media, realtime callbacks, platform output handles, and device-selection
 metadata. Within its redacted output value, `stream_active` and

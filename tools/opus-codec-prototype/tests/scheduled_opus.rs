@@ -3,14 +3,16 @@
 #[path = "../src/bin/lab_decoder/mod.rs"]
 mod lab_decoder;
 
-use std::io;
+use std::io::{Read, Write};
+use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use sonimesh_app::{
-    ControlToMixerBridge, DesktopControlOwner, DesktopReceiverOwner, DesktopReceiverScheduler,
-    OutputSelection, PairingAttemptOutcome, PairingId, PairingInvitationController,
-    PairingProofVerification, PairingSource, ScheduledReceiverState, SessionState,
-    UdpReceiverPipeline,
+    ControlSessionPoll, ControlToMixerBridge, DesktopControlOwner, DesktopReceiverOwner,
+    DesktopReceiverScheduler, OutputSelection, PairingAttemptOutcome, PairingId,
+    PairingInvitationController, PairingProofVerification, PairingSource, ScheduledReceiverState,
+    SessionState, UdpReceiverPipeline,
 };
 use sonimesh_audio::{DecodeStep, OpusFrameConfig, StreamDecodeWorker, realtime_pcm_queue};
 use sonimesh_diagnostics::StreamCounters;
@@ -20,8 +22,9 @@ use sonimesh_platform::{
     RenderSource, SampleFormat,
 };
 use sonimesh_protocol::{
-    CONTROL_PROTOCOL_VERSION, Capability, Envelope, Hello, MediaDirection, MediaKeyContext,
-    SessionSecret, StartStream, envelope,
+    CONTROL_PROTOCOL_VERSION, Capability, Envelope, Hello, MAX_CONTROL_FRAME_BYTES, MediaDirection,
+    MediaKeyContext, SessionSecret, StartStream, StopStream, StreamState, decode_control_frame,
+    encode_control_frame, envelope,
 };
 
 const SAMPLES: usize = 1_920;
@@ -90,22 +93,15 @@ impl AudioOutput for MemoryOutput {
     }
 }
 
-struct IdleControl;
-
-impl io::Read for IdleControl {
-    fn read(&mut self, _buffer: &mut [u8]) -> io::Result<usize> {
-        Err(io::ErrorKind::WouldBlock.into())
-    }
-}
-
-impl io::Write for IdleControl {
-    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
-        Ok(buffer.len())
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
+fn read_reply(stream: &mut TcpStream) -> Envelope {
+    let mut prefix = [0; 4];
+    stream.read_exact(&mut prefix).unwrap();
+    let length = u32::from_be_bytes(prefix) as usize;
+    assert!(length <= MAX_CONTROL_FRAME_BYTES);
+    let mut frame = Vec::from(prefix);
+    frame.resize(4 + length, 0);
+    stream.read_exact(&mut frame[4..]).unwrap();
+    decode_control_frame(&frame).unwrap()
 }
 
 #[test]
@@ -162,13 +158,22 @@ fn scheduled_protected_opus_reaches_memory_output_and_conceals_loss() {
     )
     .unwrap();
     let owner = DesktopControlOwner::new(bridge).unwrap();
-    let mut scheduler: DesktopReceiverScheduler<_, _, 1, 256, 1, SAMPLES, IdleControl> =
+    let mut scheduler: DesktopReceiverScheduler<_, _, 1, 256, 1, SAMPLES, TcpStream> =
         DesktopReceiverScheduler::new(DesktopReceiverOwner::new(owner, pipeline, Some(counters)));
     let session = scheduler
         .receiver_mut()
         .owner_mut()
         .install_authenticated_control_session()
         .unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+    client
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    client.set_nodelay(true).unwrap();
+    let (server, _) = listener.accept().unwrap();
+    server.set_nonblocking(true).unwrap();
+    scheduler.attach_control(session, server).unwrap();
     let hello = Envelope {
         protocol_version: CONTROL_PROTOCOL_VERSION,
         request_id: 1,
@@ -193,10 +198,22 @@ fn scheduled_protected_opus_reaches_memory_output_and_conceals_loss() {
             media_key_epoch: 0,
         })),
     };
-    scheduler
-        .receiver_mut()
-        .accept_and_execute(session, &hello)
+    client
+        .write_all(&encode_control_frame(&hello).unwrap())
         .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        match scheduler.poll_control_once().unwrap() {
+            Some(ControlSessionPoll::Processed { .. }) => break,
+            Some(ControlSessionPoll::Empty) if Instant::now() < deadline => {
+                std::thread::yield_now();
+            }
+            result => panic!("hello did not complete: {result:?}"),
+        }
+    }
+    let reply = read_reply(&mut client);
+    assert_eq!(reply.request_id, hello.request_id);
+    assert!(matches!(reply.payload, Some(envelope::Payload::Hello(_))));
     for (sample_rate, channels, duration) in [(44_100, 2, 20), (48_000, 1, 20), (48_000, 2, 10)] {
         let mut mismatch = start.clone();
         let Some(envelope::Payload::StartStream(request)) = mismatch.payload.as_mut() else {
@@ -212,10 +229,25 @@ fn scheduled_protected_opus_reaches_memory_output_and_conceals_loss() {
             Err(sonimesh_app::DesktopControlOwnerError::MediaFormatMismatch)
         ));
     }
-    scheduler
-        .receiver_mut()
-        .accept_and_execute(session, &start)
+    client
+        .write_all(&encode_control_frame(&start).unwrap())
         .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        match scheduler.poll_control_once().unwrap() {
+            Some(ControlSessionPoll::Processed { .. }) => break,
+            Some(ControlSessionPoll::Empty) if Instant::now() < deadline => {
+                std::thread::yield_now();
+            }
+            result => panic!("start did not complete: {result:?}"),
+        }
+    }
+    let reply = read_reply(&mut client);
+    assert_eq!(reply.request_id, start.request_id);
+    assert!(
+        matches!(reply.payload, Some(envelope::Payload::StreamStatus(status))
+        if status.state == StreamState::Streaming as i32)
+    );
 
     let mut sender =
         MediaSessionSender::bind("127.0.0.1:0".parse().unwrap(), &secret, context, address)
@@ -308,4 +340,38 @@ fn scheduled_protected_opus_reaches_memory_output_and_conceals_loss() {
         scheduler.tick_scheduled_at(520).playout,
         Ok(Some(DecodeStep::Decoded { sequence: 8, .. }))
     ));
+
+    let stop = Envelope {
+        protocol_version: CONTROL_PROTOCOL_VERSION,
+        request_id: 3,
+        payload: Some(envelope::Payload::StopStream(StopStream {
+            media_session_id: 7,
+            stream_id: 1,
+            media_key_epoch: 0,
+        })),
+    };
+    client
+        .write_all(&encode_control_frame(&stop).unwrap())
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        let tick = scheduler.tick_scheduled_at(521);
+        assert!(tick.packets.is_ok() && tick.pump.is_ok());
+        match tick.control.unwrap() {
+            Some(ControlSessionPoll::Processed { .. }) => {
+                assert_eq!(tick.state, ScheduledReceiverState::Idle);
+                break;
+            }
+            Some(ControlSessionPoll::Empty) if Instant::now() < deadline => {
+                std::thread::yield_now();
+            }
+            result => panic!("stop did not complete: {result:?}"),
+        }
+    }
+    let reply = read_reply(&mut client);
+    assert_eq!(reply.request_id, stop.request_id);
+    assert!(
+        matches!(reply.payload, Some(envelope::Payload::StreamStatus(status))
+        if status.state == StreamState::Stopped as i32)
+    );
 }
