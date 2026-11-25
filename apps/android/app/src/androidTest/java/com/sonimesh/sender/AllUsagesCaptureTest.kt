@@ -287,13 +287,13 @@ class AllUsagesCaptureTest {
                 )
                 assertTrue("usage check did not report each captured test tone", waitUntil(15_000) {
                     automation.rootInActiveWindow?.containsText(
-                        "Usage check: Media: detected; Game: detected; Other: detected",
+                        "Usage check: Media: signal observed; Game: signal observed; Other: signal observed",
                     ) == true
                 })
                 scenario.recreate()
                 assertTrue("completed usage check was not restored", waitUntil(8_000) {
                     automation.rootInActiveWindow?.containsText(
-                        "Usage check: Media: detected; Game: detected; Other: detected",
+                        "Usage check: Media: signal observed; Game: signal observed; Other: signal observed",
                     ) == true
                 })
                 assertTrue(
@@ -309,6 +309,26 @@ class AllUsagesCaptureTest {
                 })
                 assertTrue("cancellation did not stop the usage tone", waitUntil(8_000) {
                     CaptureStateStore.state.value.status is CaptureStatus.NoCapturableAudio
+                })
+                val backgroundTone = tone(AudioAttributes.USAGE_MEDIA)
+                try {
+                    backgroundTone.play()
+                    assertTrue("background tone was not captured", waitUntil(8_000) {
+                        CaptureStateStore.state.value.status is CaptureStatus.Capturing
+                    })
+                    assertTrue("usage check could not start with background audio", clickText(automation, "Check supported usages", scroll = true))
+                    assertTrue("background audio did not make the check inconclusive", waitUntil(10_000) {
+                        automation.rootInActiveWindow?.containsText("Usage check inconclusive. Pause other audio, check capture, and try again.") == true
+                    })
+                } finally {
+                    backgroundTone.stop()
+                    backgroundTone.release()
+                }
+                assertTrue("usage check could not retry", clickText(automation, "Check supported usages", scroll = true))
+                assertTrue("usage check did not recover after background audio stopped", waitUntil(15_000) {
+                    automation.rootInActiveWindow?.containsText(
+                        "Usage check: Media: signal observed; Game: signal observed; Other: signal observed",
+                    ) == true
                 })
                 assertEquals(0L, CaptureStateStore.state.value.evidence.readErrors)
             } finally {

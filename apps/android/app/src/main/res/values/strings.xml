@@ -30,10 +30,11 @@
     <string name="capture_usage_check_start">Check supported usages</string>
     <string name="capture_usage_check_cancel">Cancel usage check</string>
     <string name="capture_usage_check_running">Checking supported usages…</string>
-    <string name="capture_usage_check_hint">Plays this app’s tone under each usage. Other apps may behave differently.</string>
+    <string name="capture_usage_check_hint">Pause other audio during this check. Signal may come from another source, and other apps may behave differently.</string>
     <string name="capture_usage_check_summary">Usage check: %1$s</string>
-    <string name="capture_usage_check_detected">%1$s: detected</string>
+    <string name="capture_usage_check_detected">%1$s: signal observed</string>
     <string name="capture_usage_check_not_detected">%1$s: no signal detected</string>
     <string name="capture_usage_check_tone_unavailable">%1$s: test tone unavailable</string>
     <string name="capture_usage_check_stopped">Usage check stopped</string>
+    <string name="capture_usage_check_background_audio">Usage check inconclusive. Pause other audio, check capture, and try again.</string>
 </resources>

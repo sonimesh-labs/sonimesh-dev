@@ -110,6 +110,10 @@ the capture service remains the owner of projection and audio capture. The tone
 uses the current session's capture usage, or media for an all-usage session, and
 is released when the activity leaves the foreground or capture ends. This checks
 only the app's own capturable playback and does not establish another app's policy.
+The usage self-check waits for a measured quiet interval before each test tone;
+if capture remains non-silent it stops with an inconclusive result. Observed
+signal during a tone is not source identification, since other playback can
+begin during the test.
 The capture-only service also summarizes the highest absolute PCM sample in the
 current run and the highest sample since the previous state update. The latter
 provides a low-rate recent signal indicator while capture is active; it is not

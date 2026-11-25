@@ -56,11 +56,17 @@ same control. The tone also stops when capture ends or the activity leaves the
 foreground. Use the signal and evidence counters to check this app's own audio;
 success does not mean another application permits playback capture. Device and
 system audio policy still apply.
-**Check supported usages** runs one short local tone for Media, Game, and Other
-in the same capture session and reports whether each appears in the captured
-frames. Leaving the activity or stopping capture cancels the sequence. A
+**Check supported usages** waits for a measured quiet interval before playing
+one short local tone for Media, Game, and Other in the same capture session. If
+capture stays non-silent, the check stops and asks the operator to pause other
+audio. A signal observed while a tone plays may still come from another source
+that starts during the test; the check does not identify the source. Leaving the
+activity or stopping capture cancels the sequence. A
 dedicated **Cancel usage check** button is available while it runs; using the
 test tone control also cancels the sequence and starts or stops the manual tone.
+On 2026-11-25, API 37 x86_64 instrumentation completed the quiet check, observed
+an inconclusive result with a continuous background tone, and retried successfully
+after stopping it without restarting capture. Physical-device behavior remains open.
 This checks only SoniMesh's own playback under those usage tags; it does not
 predict another app's capture behavior. Copying or sharing capture evidence
 includes the most recently completed usage check result from that capture

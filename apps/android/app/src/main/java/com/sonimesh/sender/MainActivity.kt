@@ -141,7 +141,44 @@ class MainActivity : ComponentActivity() {
         usageCheckSources = listOf(CaptureSource.Media, CaptureSource.Game, CaptureSource.Unknown)
         usageCheckSummary = getString(R.string.capture_usage_check_running)
         usageCheckRunning = true
-        runNextUsageCheck()
+        awaitQuietForUsageCheck()
+    }
+
+    private fun awaitQuietForUsageCheck() {
+        val startedAt = SystemClock.elapsedRealtime()
+        var quietSince = startedAt
+        var lastEvidence = CaptureStateStore.state.value.evidence
+        val checkQuiet = object : Runnable {
+            override fun run() {
+                if (!usageCheckRunning) return
+                val state = CaptureStateStore.state.value
+                if (!state.status.isActive()) {
+                    cancelUsageCheck()
+                    return
+                }
+                val now = SystemClock.elapsedRealtime()
+                val current = state.evidence
+                val newFrames = current.capturedFrames - lastEvidence.capturedFrames
+                val newSilentFrames = current.silentFrames - lastEvidence.silentFrames
+                if (newFrames != newSilentFrames || newFrames < 0 || newSilentFrames < 0) quietSince = now
+                lastEvidence = current
+                if (state.status is CaptureStatus.NoCapturableAudio &&
+                    now - quietSince >= USAGE_CHECK_QUIET_MILLIS && newFrames > 0
+                ) {
+                    usageCheckRunnable = null
+                    runNextUsageCheck()
+                } else if (now - startedAt >= USAGE_CHECK_QUIET_TIMEOUT_MILLIS) {
+                    usageCheckRunnable = null
+                    usageCheckSources = emptyList()
+                    usageCheckRunning = false
+                    usageCheckSummary = getString(R.string.capture_usage_check_background_audio)
+                } else {
+                    usageCheckHandler.postDelayed(this, USAGE_CHECK_POLL_MILLIS)
+                }
+            }
+        }
+        usageCheckRunnable = checkQuiet
+        usageCheckHandler.postDelayed(checkQuiet, USAGE_CHECK_POLL_MILLIS)
     }
 
     private fun runNextUsageCheck() {
@@ -209,7 +246,7 @@ class MainActivity : ComponentActivity() {
         }
         val next = Runnable {
             usageCheckRunnable = null
-            runNextUsageCheck()
+            awaitQuietForUsageCheck()
         }
         usageCheckRunnable = next
         usageCheckHandler.postDelayed(next, USAGE_CHECK_GAP_MILLIS)
@@ -359,6 +396,8 @@ class MainActivity : ComponentActivity() {
         const val USAGE_CHECK_TONE_DURATION_MILLIS = 750L
         const val USAGE_CHECK_POLL_MILLIS = 100L
         const val USAGE_CHECK_GAP_MILLIS = 250L
+        const val USAGE_CHECK_QUIET_MILLIS = 750L
+        const val USAGE_CHECK_QUIET_TIMEOUT_MILLIS = 6_000L
     }
 }
 
