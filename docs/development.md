@@ -1630,11 +1630,29 @@ hardware. On Windows, `--play` opens the default output device:
 
 ~~~powershell
 cargo run -p opus-codec-prototype --bin local-audio -- --check
-cargo run -p opus-codec-prototype --features playback --bin local-audio -- --play
+cargo run -p opus-codec-prototype --features playback --bin local-audio -- --play [--endpoint ID]
+cargo run -p opus-codec-prototype --bin local-audio -- --list-endpoints
+cargo run -p opus-codec-prototype --bin local-audio -- --capture-check --seconds 5
 ~~~
 
 This is a single-process lab with a public fixed test key and loopback sockets;
 it is not phone capture, pairing, physical WLAN or a production session.
+On Windows, `--list-endpoints` prints playback endpoint IDs, names, default status
+and formats. `--play --endpoint ID` sends the quiet test tone to that endpoint.
+Run it in one terminal alongside `--capture-check --endpoint ID` in another to
+check the same endpoint. `--capture-check` reads the default endpoint or selected
+one for at most 30 seconds, then passes
+captured PCM through the same Opus, UDP, decode and software-render check. Start
+non-silent playback on that endpoint first. The endpoint must currently report
+48 kHz; mono input is duplicated and inputs with more than two channels use their
+first two channels. This is a local feasibility check, not a Bluetooth-specific
+PCM source or an audible output test. On 2026-11-26, the default Windows endpoint
+captured the prototype's own two-second test tone (226,560 samples, source peak
+0.0812); 118 Opus frames were sent and decoded, including when both commands
+selected its listed endpoint ID. A two-second run without active playback
+correctly reported no captured samples. The listed Realtek non-default endpoint
+played its test tone, but its loopback stream reported a buffer underrun/overrun;
+no endpoint identified as Bluetooth appeared in that enumeration.
 
 CI runs formatting, linting, and tests on Linux and Windows, and builds the
 capture-only Android bootstrap with Java 21, API 36, and Build Tools 35.0.0.

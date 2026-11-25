@@ -174,7 +174,18 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   receiver pipeline, and its render source. An explicit Windows playback mode
   opens the default CPAL output. Its paced relay exercise supports a configurable
   one-second to one-hour software run and fails if the render is silent; it is not
-  Android capture or WLAN evidence.
+  Android capture or WLAN evidence. On Windows, an optional finite loopback
+  capture check can list Windows playback endpoint IDs and read a selected
+  endpoint's system mix, with its test tone selectable on that endpoint, through
+  the same Opus/UDP/decode path into a software
+  render check. It currently
+  requires a 48 kHz endpoint and non-silent playback; it does not identify an
+  individual source or establish Bluetooth-specific capture. On 2026-11-26, the
+  default endpoint carried the local test tone through 118 Opus frames with a
+  source peak of 0.0812; a quiet endpoint produced no captured samples as expected.
+  The enumerated Realtek non-default endpoint played the tone but its loopback
+  stream reported a buffer underrun/overrun; no separately named Bluetooth output
+  appeared in this enumeration.
   A separate Android MediaCodec spike generated 100 synthetic 20 ms Opus
   packets on an API 37 x86_64 emulator and desktop libopus decoded them to
   non-silent PCM. This is codec interoperability evidence, not capture, network,

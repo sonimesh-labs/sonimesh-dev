@@ -875,6 +875,7 @@ dependencies = [
 name = "opus-codec-prototype"
 version = "0.1.0"
 dependencies = [
+ "cpal",
  "opus",
  "rcgen",
  "rustls",
