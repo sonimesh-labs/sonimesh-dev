@@ -1,14 +1,22 @@
 # Windows Bluetooth playback discovery experiment
 
 Run on Windows with `cargo run -p windows-bluetooth-prototype`. The tool asks
-`AudioPlaybackConnection` for its device selector and reports the number of
-matching devices. It does not print device names or identifiers, open a
-connection, or capture audio. A zero count describes only the current
-enumeration; it does not establish that the adapter or operating system cannot
-support a connection.
+`AudioPlaybackConnection` for its device selector and lists up to 64 matching
+devices by name, without printing their identifiers or opening a connection.
+A zero count describes only the current enumeration; it does not establish
+that the adapter or operating system cannot support a connection.
+
+To try system-routed playback, run
+`cargo run -p windows-bluetooth-prototype -- --connect`, choose a listed
+number, and press Enter again to close the connection. The selection refers to
+the list from the same run. The tool attempts to close the connection even if
+start, open, or waiting fails. This does not capture audio or provide a PCM
+source to SoniMesh, and an open connection alone does not establish that sound
+is audible. Device names may be personal; review output before sharing it.
 
 On the development machine, Windows build 26200 with an Intel Bluetooth
-adapter returned zero candidates on 2026-11-25. No Bluetooth audio source was
-verified and this result does not demonstrate playback, latency, or an
-application-readable PCM path. A paired compatible source and a separate open,
-close, and listening experiment are needed to assess system-routed playback.
+adapter initially returned zero candidates on 2026-11-25; a later run returned
+one. The connection was not opened in that run. Neither observation verifies
+playback, latency, or an application-readable PCM path. An open, close, and
+listening experiment with a compatible source is needed to assess system-routed
+playback.

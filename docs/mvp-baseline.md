@@ -79,10 +79,10 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
 - control-domain output health monitoring and stream recreation with a fresh
   render source; platform operations never mutate session state directly, which
   remains owned by the control-session coordinator;
-- a Windows Bluetooth discovery experiment that counts system playback
-  connection candidates without opening a connection or accessing audio. One
-  local run returned zero candidates; playback and an application PCM source
-  remain unverified (see `tools/windows-bluetooth-prototype/README.md`);
+- a Windows Bluetooth experiment that lists system playback candidates and can
+  open and close a selected system-routed connection. Local enumeration found
+  one candidate, but a connection was not opened; playback and an application
+  PCM source remain unverified (see `tools/windows-bluetooth-prototype/README.md`);
 - a shell-neutral `DesktopControlSession` that attaches the existing bounded
   framed transport to `DesktopReceiverOwner`, executes one authenticated
   envelope per poll, and returns a correlated Hello response and lifecycle
