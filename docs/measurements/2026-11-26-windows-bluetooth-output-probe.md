@@ -47,9 +47,10 @@
 - The probe's **Open Bluetooth settings** action opened the Windows **Bluetooth
   & devices** page from the desktop UI. Device pairing and post-pair discovery
   were not part of this check.
-- Returning focus to the probe after opening Settings triggered candidate
-  discovery and populated the source picker. This validates the settings-return
-  refresh path; it does not establish that a newly paired device was discovered.
+- Returning focus to the probe after opening Settings triggered Bluetooth
+  candidate discovery and refreshed the output-endpoint list; the source picker
+  appeared. This validates the settings-return refresh path, not discovery of a
+  newly paired device. An already-running loopback is left alone.
 - The combined **Connect + monitor (auto wait fallback)** action entered the
   phone-wait state and started loopback on the selected default output. While no
   phone playback was active, loopback reported zero samples and zero peak. The

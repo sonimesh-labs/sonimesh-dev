@@ -6,7 +6,17 @@ import BluetoothProbe from './BluetoothProbe.vue'
 afterEach(() => { delete window.__TAURI__; vi.useRealTimers() })
 
 it('opens Windows Bluetooth settings from the probe', async () => {
-  const invoke = vi.fn((command: string) => Promise.resolve(command === 'bluetooth_status' ? 'idle' : command === 'loopback_status' ? { running: false, endpointName: '', sampleRate: 0, channels: 0, samples: 0, peak: 0, error: null } : command === 'bluetooth_candidates' ? { generation: 1, names: ['Phone'] } : undefined))
+  let endpointRefreshes = 0
+  const invoke = vi.fn((command: string) => {
+    if (command === 'bluetooth_status') return Promise.resolve('idle')
+    if (command === 'loopback_status') return Promise.resolve({ running: false, endpointName: '', sampleRate: 0, channels: 0, samples: 0, peak: 0, error: null })
+    if (command === 'bluetooth_candidates') return Promise.resolve({ generation: 1, names: ['Phone'] })
+    if (command === 'loopback_endpoints') {
+      endpointRefreshes++
+      return Promise.resolve(endpointRefreshes === 1 ? [] : [{ id: 'bluetooth-output', name: 'Bluetooth output', isDefault: true }])
+    }
+    return Promise.resolve()
+  })
   window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
   const wrapper = mount(BluetoothProbe)
   await flushPromises()
@@ -18,6 +28,8 @@ it('opens Windows Bluetooth settings from the probe', async () => {
   await flushPromises()
   expect(invoke).toHaveBeenCalledWith('bluetooth_candidates')
   expect(wrapper.get('#bluetooth-source').text()).toContain('Phone')
+  expect(endpointRefreshes).toBe(2)
+  expect(wrapper.get('#loopback-endpoint').text()).toContain('Bluetooth output')
   wrapper.unmount()
 })
 

@@ -86,7 +86,10 @@ async function openBluetoothSettings() {
 function refreshCandidatesOnFocus() {
   if (disposed || !refreshOnFocus) return
   refreshOnFocus = false
-  if (phase.value === 'idle') void refresh()
+  if (phase.value === 'idle') {
+    void refresh()
+    if (!loopback.value?.running && !loopbackBusy.value) void refreshLoopbackEndpoints()
+  }
 }
 
 async function poll() {
