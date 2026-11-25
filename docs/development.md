@@ -392,18 +392,54 @@ when a new capture starts.
 When a paired TCP connection is refused during startup, the service retries up
 to five times at one-second intervals while retaining the current projection.
 The status reports the wait, and Stop cancels it. Other connection failures are
-reported without this retry; an established session that disconnects still
-requires a fresh capture start and consent.
-On a normal paired stop, the lab allows two seconds for each control reply read
-before reporting that the desktop did not confirm the stop. This is a socket read
-timeout, not a deadline on the entire shutdown or a guarantee that the desktop
-stopped. The capture service still attempts its bounded encoder and sender drain
-first.
+reported without this startup retry. After an established paired session drops,
+the experimental sender keeps its current projection, AudioRecord, and encoder
+running while it retries a new paired media session with a 500 ms to 4 s bounded
+backoff. Encoded packets from the retired session are discarded before sending
+under the new session. Twelve unsuccessful reconnect attempts end capture with
+an actionable status; Stop cancels an in-progress retry. Automatic recovery
+requires the desktop lab to stay running with `--keep-listening`; otherwise the
+retry eventually ends. This behavior uses the public fixed lab fixture and is
+not the product pairing or reconnect policy.
+
+To verify one established-session interruption on an API 37 emulator, start the
+listener with a one-time control disconnect after five seconds:
+
+~~~powershell
+adb reverse tcp:47610 tcp:47610
+cargo run -p opus-codec-prototype --bin paired-audio-lab -- --bind 0.0.0.0 --host 10.0.2.2 --keep-listening --disconnect-after-ms 5000 --require-tone --status
+~~~
+
+Use the printed `INVITATION_HEX` and run the instrumentation method below. The
+listener closes only the first control session, then accepts the Android
+reconnect using the same public lab invitation. The test checks that capture
+duration continues and the service remains active without a second projection
+consent. This is emulator loopback evidence, not physical WLAN or audible
+continuity evidence.
+
+~~~powershell
+adb shell am instrument -w -e pairingInvitationHex $invitationHex -e mediaHost 10.0.2.2 -e reconnectTest true -e class 'com.sonimesh.opusspike.PairedCaptureTest#reconnects_after_desktop_disconnect_without_restarting_capture' com.sonimesh.opusspike.test/androidx.test.runner.AndroidJUnitRunner
+~~~
+On a normal paired stop, the capture worker is interrupted and the supervisor
+gets time to drain media and request a desktop StopStream confirmation. If it is
+still blocked, a background task closes the TLS socket after 3.5 seconds; TLS
+socket close is kept off the service main thread because Conscrypt may write a
+close-notify record. Each stop reply read has a two-second timeout, which is not
+a deadline for the entire shutdown. The UI reports when the desktop did not
+confirm the stop.
 On 2026-11-24 an API 37 x86_64 emulator observed the retry, then completed a
 paired capture after a loopback control gate opened. The software listener
 authenticated 147 packets and decoded 124 frames with a peak of 0.391; it also
 reported late packets and buffer resynchronizations. This does not establish
 physical WLAN recovery or audible continuity.
+On 2026-11-25 an API 37 x86_64 emulator passed the reconnect-and-stop test: after
+the injected first-session disconnect, the listener accepted a fresh paired
+session and the Android test confirmed media packet counts continued increasing
+after recovery. The listener completed the session after StopStream; the Android
+service exited, capture admission reset, and paired control/media worker threads
+terminated. The ordinary paired-stop control test also passed. This verifies
+emulator loopback service lifecycle, not physical WLAN recovery or audible
+continuity.
 
 To repeat that controlled test, start these commands in separate terminals
 from the repository root (leave ADB reverse for port 47610 disabled):
@@ -691,10 +727,11 @@ with Ctrl+C. To exercise two
 successive synthetic sessions, run the instrumentation method
 `PairedAudioInteropTest#pairs_twice_with_continuous_listener` with the listener
 in this mode and the same `pairingSpkiHex` and optional `pairingHost` arguments.
-If the Android lab reports that the desktop connection ended, check that the
-listener is waiting and start capture again with fresh screen-capture consent.
-The continuously running listener does not need to be restarted for a new
-session; a listener that has exited must be started again.
+After an established connection drops, the paired lab attempts to reconnect
+without ending capture or requesting projection consent again. Keep the desktop
+listener running with `--keep-listening`; a listener that has exited cannot
+accept the reconnect. The Android status reports recovery attempts and whether a
+new paired media session was established.
 Every listener status line is flushed as it is emitted, including `READY`,
 `MEDIA`, `OUTPUT`, and periodic `STATUS` lines. A wrapper process can therefore
 consume the listener's stdout as a live event stream instead of waiting for the

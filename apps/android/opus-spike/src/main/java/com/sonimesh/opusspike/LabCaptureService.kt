@@ -21,11 +21,7 @@ import android.os.SystemClock
 import android.util.Log
 import com.sonimesh.sender.encoder.OpusBitrate
 import com.sonimesh.sender.encoder.OpusEncoder
-import com.sonimesh.sender.pairing.PairedConnection
-import com.sonimesh.sender.pairing.PairingClient
 import com.sonimesh.sender.pairing.StreamControlResult
-import com.sonimesh.sender.pairing.StreamIdentity
-import com.sonimesh.sender.pairing.StreamParameters
 import java.io.DataOutputStream
 import java.net.DatagramPacket
 import java.net.DatagramSocket
@@ -50,6 +46,8 @@ class LabCaptureService : Service() {
     private val socketLock = Any()
     private var socket: Socket? = null
     private val setupSocket = SetupSocket()
+    @Volatile private var activePairedSupervisor: PairedSessionSupervisor? = null
+    @Volatile private var captureWorker: Thread? = null
     private var projection: MediaProjection? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var foregroundNotificationManager: NotificationManager? = null
@@ -146,7 +144,8 @@ class LabCaptureService : Service() {
                 ?: labInvitation(intent.getStringExtra("pairedPin") ?: "",
                     intent.getStringExtra("pairedHost") ?: "127.0.0.1") else null
             val invitation = pendingInvitation
-            Thread({ capture(current, udpMode, destination, destinationPort, invitation, usage, bitrate) }, "audio-lab-capture").start()
+            Thread({ capture(current, udpMode, destination, destinationPort, invitation, usage, bitrate) }, "audio-lab-capture")
+                .also { captureWorker = it; it.start() }
             workerStarted = true
             pendingInvitation = null
         } catch (error: Exception) {
@@ -169,13 +168,10 @@ class LabCaptureService : Service() {
     ) {
         var record: AudioRecord? = null
         var codec: OpusEncoder? = null
-        var paired: PairedConnection? = null
-        var pairedIdentity: StreamIdentity? = null
+        var pairedSupervisor: PairedSessionSupervisor? = null
         var connected = false
-        var pairedControlFailed = false
         var stopResult: Result<StreamControlResult>? = null
         val pairedProducerFinished = AtomicBoolean(false)
-        var pairedSender: Thread? = null
         var flushEncoderTail: (() -> Boolean)? = null
         var senderQueueDrops = 0L
         var lastDropPublication = 0L
@@ -197,40 +193,28 @@ class LabCaptureService : Service() {
         try {
             val packets = ArrayBlockingQueue<EncodedPacket>(8)
             if (invitation != null) {
-                val connection = try {
-                    connectPairedWithRetry(running::get, Thread::sleep, onRetry = {
+                val supervisor = PairedSessionSupervisor(
+                    running = running,
+                    producerFinished = pairedProducerFinished,
+                    packets = packets,
+                    invitation = invitation,
+                    destination = requireNotNull(destination),
+                    destinationPort = destinationPort,
+                    setupSocket = setupSocket,
+                    onStatus = { message ->
                         handler.post {
-                            if (running.get() && !terminalStatus) LabStatus.publish("Desktop listener is not ready. Retrying connection…")
+                            if (running.get() && !terminalStatus) LabStatus.publish(message)
                         }
-                    }) {
-                        val raw = Socket()
-                        check(setupSocket.track(raw)) { "capture stopped before pairing" }
-                        PairingClient.connect(invitation, raw)
-                    }
-                } finally {
-                    invitation.fill(0)
-                }
-                paired = connection
-                check(setupSocket.track(connection.socket)) { "capture stopped during pairing" }
-                check(running.get()) { "capture stopped during pairing" }
-                connection.negotiateHello("android audio lab", listOf(2))
-                val random = SecureRandom()
-                var session = random.nextLong()
-                while (session == 0L) session = random.nextLong()
-                val identity = StreamIdentity(session, 1, 0)
-                val parameters = StreamParameters(identity, 48_000, 2, 20)
-                val result = startPairedWithRetry(running::get, Thread::sleep, onRetry = {
-                    handler.post {
-                        if (running.get() && !terminalStatus) LabStatus.publish("Desktop receiver is not ready. Retrying…")
-                    }
-                }) { connection.startStream(parameters) }
-                requirePairedStart(result)
-                pairedIdentity = identity
-                check(setupSocket.handoff()) { "capture stopped while starting stream" }
-                check(running.get()) { "capture stopped while starting stream" }
-                val sealer = LabMediaSealer(connection.mediaRoot, session, 1, 0)
-                pairedSender = Thread({ sendDatagrams(sealer, packets, requireNotNull(destination), destinationPort, pairedProducerFinished, packetSent) }, "audio-lab-sender")
-                    .also { it.start() }
+                    },
+                    onReconnectFailure = { message ->
+                        handler.post { finishWith(message) }
+                    },
+                    onPacketSent = packetSent,
+                )
+                pairedSupervisor = supervisor
+                activePairedSupervisor = supervisor
+                supervisor.start()
+                supervisor.awaitStarted()
             } else {
                 val connection = Socket()
                 synchronized(socketLock) {
@@ -330,8 +314,6 @@ class LabCaptureService : Service() {
                     idle = { Thread.sleep(2) },
                 )
             }
-            paired?.socket?.soTimeout = 1
-            var nextControlPoll = SystemClock.elapsedRealtime()
             while (running.get()) {
                 val now = SystemClock.elapsedRealtime()
                 if (now - lastDurationPublication >= 1_000) {
@@ -341,20 +323,6 @@ class LabCaptureService : Service() {
                         LabStatus.publishCaptureDuration(duration)
                         updateForegroundDuration(duration)
                     }
-                }
-                if (paired != null && SystemClock.elapsedRealtime() >= nextControlPoll) {
-                    try {
-                        val value = paired.socket.inputStream.read()
-                        error(if (value == -1) "desktop closed control connection" else "unexpected control data")
-                    } catch (_: SocketTimeoutException) {
-                        // The control channel has no messages while capture is running.
-                    } catch (error: Exception) {
-                        pairedControlFailed = true
-                        Log.e("SoniMeshLab", "Paired control connection ended", error)
-                        handler.post { finishWith("Desktop connection ended. Check the listener, then start capture again.") }
-                        break
-                    }
-                    nextControlPoll = SystemClock.elapsedRealtime() + 250
                 }
                 if (filled < pcm.size) {
                     val read = activeRecord.read(pcm, filled, pcm.size - filled, AudioRecord.READ_NON_BLOCKING)
@@ -410,7 +378,7 @@ class LabCaptureService : Service() {
         } finally {
             try { record?.stop() } catch (_: IllegalStateException) { }
             record?.release()
-            if (!running.get() && paired != null && !pairedControlFailed && pairedSender?.isAlive == true) {
+            if (!running.get() && pairedSupervisor != null && !terminalStatus) {
                 try {
                     if (flushEncoderTail?.invoke() == false) Log.w("SoniMeshLab", "Encoder tail drain timed out")
                 } catch (error: Exception) {
@@ -430,16 +398,17 @@ class LabCaptureService : Service() {
                 }
             }
             codec?.close()
-            if (paired != null) {
-                finishPairedSender(pairedProducerFinished, pairedSender)
-                try {
-                    stopResult = attemptPairedStop(pairedIdentity, pairedControlFailed) { identity ->
-                        paired.stopStream(identity, 2_000)
-                    }
-                    stopResult?.exceptionOrNull()?.let { Log.e("SoniMeshLab", "Paired stream stop failed", it) }
-                } finally {
-                    paired.close()
+            pairedProducerFinished.set(true)
+            if (pairedSupervisor != null) {
+                val supervisorExited = joinUninterrupted(pairedSupervisor, PAIRED_STOP_TIMEOUT_MS)
+                if (!supervisorExited) {
+                    pairedSupervisor.interrupt()
+                    stopResult = Result.failure(java.io.IOException("paired session supervisor did not stop before timeout"))
+                } else {
+                    stopResult = pairedSupervisor.stopResult
                 }
+                stopResult?.exceptionOrNull()?.let { Log.e("SoniMeshLab", "Paired stream stop failed", it) }
+                if (activePairedSupervisor === pairedSupervisor) activePairedSupervisor = null
             }
             if (captureStarted) {
                 handler.post { LabStatus.publishSentPackets(sentPackets.get()) }
@@ -457,8 +426,6 @@ class LabCaptureService : Service() {
             }
         }
     }
-
-    private data class EncodedPacket(val sequence: Long, val bytes: ByteArray)
 
     private fun writePackets(connection: Socket, packets: ArrayBlockingQueue<EncodedPacket>, onSent: () -> Unit) {
         try {
@@ -548,12 +515,14 @@ class LabCaptureService : Service() {
     private fun requestStop() {
         if (!running.getAndSet(false)) return
         LabStatus.publishSenderMuted(null)
-        if (!terminalStatus) LabStatus.publish("Stopping capture…")
         setupSocket.cancel()
         synchronized(socketLock) {
             try { socket?.close() } catch (_: java.io.IOException) { }
             socket = null
         }
+        captureWorker?.interrupt()
+        activePairedSupervisor?.cancel()
+        if (!terminalStatus) LabStatus.publish("Stopping capture…")
         projection?.stop()
         projection = null
         if (!workerStarted) stopSelf()
@@ -581,7 +550,28 @@ class LabCaptureService : Service() {
     }
 
     companion object {
+        private const val PAIRED_STOP_TIMEOUT_MS = 4_000L
         const val ACTION_SET_MUTED = "com.sonimesh.opusspike.SET_MUTED"
         const val EXTRA_MUTED = "muted"
+    }
+}
+
+internal fun joinUninterrupted(thread: Thread, timeoutMillis: Long): Boolean {
+    require(timeoutMillis >= 0)
+    val deadline = SystemClock.elapsedRealtime() + timeoutMillis
+    var interrupted = false
+    try {
+        while (thread.isAlive) {
+            val remaining = deadline - SystemClock.elapsedRealtime()
+            if (remaining <= 0) return false
+            try {
+                thread.join(remaining)
+            } catch (_: InterruptedException) {
+                interrupted = true
+            }
+        }
+        return true
+    } finally {
+        if (interrupted) Thread.currentThread().interrupt()
     }
 }

@@ -152,10 +152,20 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   reports the decode error count. Other decoder failures still end the session.
   A refused initial paired TCP connection is retried briefly without requesting
   another projection consent; an API 37 emulator test exercised this with a
-  delayed loopback gate. Established-session reconnection remains open.
+  delayed loopback gate. If an established paired control connection ends, its
+  experimental supervisor keeps the current capture/encoder alive, drops queued
+  media from the retired session, and retries a fresh paired media session with
+  bounded backoff. It stops after twelve failed reconnect attempts or when the
+  operator stops capture. This uses the public fixed lab invitation and a
+  keep-listening desktop lab process; it is not production pairing or a
+  production reconnect policy. API 37 loopback verification is recorded in the
+  development guide; physical WLAN behavior remains open.
   Its Android service can cancel an in-progress paired connection before stream
-  startup; after startup, normal shutdown still attempts StopStream. Host tests
-  cover socket cancellation and ownership handoff, not Android device behavior.
+  startup; after startup, normal shutdown attempts StopStream and moves forced
+  TLS socket close off the service main thread. The API 37 loopback reconnect test
+  confirms desktop StopStream, service exit, and capture-admission reset after
+  reconnect. Host tests cover socket cancellation and ownership handoff, not
+  Android device behavior.
   On normal paired shutdown it also attempts a bounded MediaCodec end-of-stream
   drain before finishing the UDP sender. A partial PCM frame is padded with
   silence. An API 37 x86_64 emulator test observes MediaCodec end-of-stream and

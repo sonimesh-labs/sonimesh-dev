@@ -149,7 +149,12 @@ class LabActivity : Activity() {
         layout.addView(Button(this).apply {
             text = "Stop capture"
             setOnClickListener {
-                startService(Intent(this@LabActivity, LabCaptureService::class.java).setAction("stop"))
+                val active = !LabStatus.captureAdmission.canBegin()
+                if (active) {
+                    startService(Intent(this@LabActivity, LabCaptureService::class.java).setAction("stop"))
+                } else {
+                    LabStatus.publish("Capture service is not running.")
+                }
             }
         })
         muteSwitch = Switch(this).apply {

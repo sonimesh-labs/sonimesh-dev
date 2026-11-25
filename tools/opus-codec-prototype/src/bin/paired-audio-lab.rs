@@ -58,6 +58,7 @@ fn main() {
 
 fn run() -> LabResult<()> {
     let options = Options::parse(std::env::args().skip(1))?;
+    let mut disconnect_after = options.disconnect_after_ms.map(Duration::from_millis);
     let mut playback = Playback::prepare(&options)?;
     if options.control {
         playback.start_controls()?;
@@ -95,7 +96,14 @@ fn run() -> LabResult<()> {
             std::thread::sleep(Duration::from_millis(10));
         };
         lab_println!("RESULT client connected");
-        let result = run_session(stream, Arc::clone(&tls), &pin, &options, &mut playback);
+        let result = run_session(
+            stream,
+            Arc::clone(&tls),
+            &pin,
+            &options,
+            &mut playback,
+            &mut disconnect_after,
+        );
         playback.abort();
         if !options.keep_listening {
             return result;
@@ -141,6 +149,7 @@ fn run_session(
     pin: &[u8],
     options: &Options,
     playback: &mut Playback,
+    disconnect_after: &mut Option<Duration>,
 ) -> LabResult<()> {
     let id = PairingId::new(LAB_ID);
     let mut pairing = PairingInvitationController::<4>::new();
@@ -177,7 +186,7 @@ fn run_session(
         },
     )?;
     lab_println!("RESULT pairing verified");
-    negotiate_hello(channel, session, root, options, playback)
+    negotiate_hello(channel, session, root, options, playback, disconnect_after)
 }
 
 #[allow(clippy::struct_excessive_bools)] // Independent command-line switches.
@@ -193,6 +202,7 @@ struct Options {
     signal_status: bool,
     adaptive: bool,
     startup_buffer: Duration,
+    disconnect_after_ms: Option<u64>,
     bind: Ipv4Addr,
     host: Ipv4Addr,
     media_port: u16,
@@ -212,6 +222,7 @@ impl Default for Options {
             signal_status: false,
             adaptive: false,
             startup_buffer: Duration::from_millis(60),
+            disconnect_after_ms: None,
             bind: Ipv4Addr::LOCALHOST,
             host: Ipv4Addr::LOCALHOST,
             media_port: 39093,
@@ -239,6 +250,17 @@ impl Options {
                 "--status" if !result.status => result.status = true,
                 "--signal-status" if !result.signal_status => result.signal_status = true,
                 "--adaptive" if !result.adaptive => result.adaptive = true,
+                "--disconnect-after-ms" if result.disconnect_after_ms.is_none() => {
+                    let value = args
+                        .next()
+                        .ok_or("--disconnect-after-ms requires a value")?
+                        .parse::<u64>()
+                        .map_err(|_| "disconnect delay must be 100 to 120000 ms")?;
+                    if !(100..=120_000).contains(&value) {
+                        return Err("disconnect delay must be 100 to 120000 ms".into());
+                    }
+                    result.disconnect_after_ms = Some(value);
+                }
                 "--media-port" if !media_port_set => {
                     result.media_port =
                         args.next().ok_or("--media-port requires a port")?.parse()?;
@@ -275,7 +297,7 @@ impl Options {
                 }
                 _ => {
                     return Err(
-                        "usage: paired-audio-lab [--require-tone] [--play [--select-output | --output-id-stdin | --output-id-framed] [--control]] [--status] [--signal-status] [--adaptive] [--startup-buffer-ms 20-120] [--keep-listening] [--media-port PORT] [--bind IPv4 --host IPv4]"
+                        "usage: paired-audio-lab [--require-tone] [--play [--select-output | --output-id-stdin | --output-id-framed] [--control]] [--status] [--signal-status] [--adaptive] [--startup-buffer-ms 20-120] [--keep-listening [--disconnect-after-ms 100-120000]] [--media-port PORT] [--bind IPv4 --host IPv4]"
                             .into(),
                     );
                 }
@@ -299,6 +321,9 @@ impl Options {
         if result.control && !result.play {
             return Err("--control requires --play".into());
         }
+        if result.disconnect_after_ms.is_some() && !result.keep_listening {
+            return Err("--disconnect-after-ms requires --keep-listening".into());
+        }
         if bind_set != host_set
             || result.host.is_unspecified()
             || result.host.is_multicast()
@@ -316,6 +341,7 @@ fn negotiate_hello(
     root: SessionSecret,
     options: &Options,
     playback: &mut Playback,
+    disconnect_after: &mut Option<Duration>,
 ) -> LabResult<()> {
     let (channel, _exporter) = channel.into_parts();
     let socket = channel.sock.try_clone()?;
@@ -370,6 +396,7 @@ fn negotiate_hello(
         root,
         options,
         playback,
+        disconnect_after,
     )
 }
 
@@ -934,6 +961,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
     root: SessionSecret,
     options: &Options,
     playback: &mut Playback,
+    disconnect_after: &mut Option<Duration>,
 ) -> LabResult<()> {
     let mut allocator = MediaSessionAllocator::new(root);
     // Keep the bounded audio pipeline off the control thread's stack. The
@@ -957,6 +985,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
     let mut draining_stale = false;
     let mut previous_decision: Option<(Instant, Duration)> = None;
     let mut playing = false;
+    let disconnect_deadline = disconnect_after.take().map(|delay| Instant::now() + delay);
     let decoded_peak = Arc::new(AtomicU32::new(0));
     let interval_peak = Arc::new(AtomicU32::new(0));
     let mut next_signal = None;
@@ -964,6 +993,10 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
     let deadline = Instant::now() + Duration::from_secs(40);
     while receiver.is_some() || Instant::now() < deadline {
         let loop_start = Instant::now();
+        if receiver.is_some() && disconnect_deadline.is_some_and(|due| loop_start >= due) {
+            lab_println!("RESULT injected control disconnect");
+            return Err("test-injected control disconnect".into());
+        }
         let loop_gap = previous_loop.map(|previous| loop_start.duration_since(previous));
         previous_loop = Some(loop_start);
         if !draining_stale && playout_stalled(next_playout.is_some(), loop_gap) {
@@ -2307,6 +2340,26 @@ mod tests {
                 .keep_listening
         );
         assert!(Options::parse(args(&["--keep-listening", "--keep-listening"])).is_err());
+        let disconnect =
+            Options::parse(args(&["--keep-listening", "--disconnect-after-ms", "3000"])).unwrap();
+        assert_eq!(disconnect.disconnect_after_ms, Some(3_000));
+        for value in ["0", "99", "120001", "invalid"] {
+            assert!(
+                Options::parse(args(&["--keep-listening", "--disconnect-after-ms", value,]))
+                    .is_err()
+            );
+        }
+        assert!(Options::parse(args(&["--disconnect-after-ms", "3000"])).is_err());
+        assert!(
+            Options::parse(args(&[
+                "--keep-listening",
+                "--disconnect-after-ms",
+                "3000",
+                "--disconnect-after-ms",
+                "4000",
+            ]))
+            .is_err()
+        );
         let network = Options::parse(args(&["--bind", "0.0.0.0", "--host", "10.0.2.2"])).unwrap();
         assert_eq!(network.bind, Ipv4Addr::UNSPECIFIED);
         assert_eq!(network.host, Ipv4Addr::new(10, 0, 2, 2));
