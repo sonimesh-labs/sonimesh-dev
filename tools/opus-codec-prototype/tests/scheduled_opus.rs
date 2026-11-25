@@ -392,12 +392,39 @@ fn scheduled_protected_opus(buffered: bool) {
 
     let mut stop_at = 521 + 2 * startup_delay;
     if buffered {
+        let identity = sonimesh_app::MediaStreamIdentity {
+            session_id: 7,
+            stream_id: 1,
+            key_epoch: 0,
+        };
+        assert!(
+            scheduler
+                .receiver()
+                .owner()
+                .bridge()
+                .mixer()
+                .queued_output_blocks(identity)
+                .unwrap()
+                > 0
+        );
         sender.send_frame(0, 9 * 960, &[0xff]).unwrap();
         let failed_at = 540 + 2 * startup_delay;
+        let failure = scheduler.tick_scheduled_at(failed_at);
+        assert!(failure.pump.is_ok());
         assert!(matches!(
-            scheduler.tick_scheduled_at(failed_at).playout,
+            failure.playout,
             Err(sonimesh_app::ScheduledPlayoutError::Decode(_))
         ));
+        assert_eq!(
+            scheduler
+                .receiver()
+                .owner()
+                .bridge()
+                .mixer()
+                .queued_output_blocks(identity)
+                .unwrap(),
+            0
+        );
         let len = encoder.encode_float(&pcm, &mut packet).unwrap();
         sender.send_frame(0, 10 * 960, &packet[..len]).unwrap();
         let first_fresh = scheduler.tick_scheduled_at(failed_at + 1);

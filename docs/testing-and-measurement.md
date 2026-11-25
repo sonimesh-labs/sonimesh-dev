@@ -40,7 +40,8 @@ The scheduled receiver's optional startup wait has a software integration test
 using native Opus, protected UDP, a virtual clock, and an in-memory output. It
 checks initial buffering, loss concealment, and buffering again after a long
 interruption or an invalid Opus frame. This does not measure hardware latency or
-audible quality.
+audible quality. The invalid-frame case checks that queued output is retired;
+a separate mixer test verifies that retiring one stream leaves another intact.
 
 ## Latency measurement
 

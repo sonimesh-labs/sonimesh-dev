@@ -1715,7 +1715,7 @@ where
             && due
             && self.scheduled_concealment >= MAX_CONSECUTIVE_EMPTY_PLC
             && self.receiver.pipeline_mut().jitter_len() == 0;
-        let reset = if draining || interrupted {
+        let mut reset = if draining || interrupted {
             if draining {
                 state = ScheduledReceiverState::DrainingStaleMedia;
             }
@@ -1828,6 +1828,13 @@ where
                 if self.scheduled_startup_frames > 0 {
                     self.scheduled_playout = None;
                 }
+                reset = Some(
+                    self.receiver
+                        .owner_mut()
+                        .bridge_mut()
+                        .mixer_mut()
+                        .begin_epoch(identity),
+                );
             }
             Ok(None) | Err(ScheduledPlayoutError::ClockRegression { .. }) => {}
         }

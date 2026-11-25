@@ -60,6 +60,9 @@ enabled, the clock starts only after an encoded frame enters the jitter buffer;
 the wait is reapplied after stream-local recovery, including decoder failure.
 The choice does not enable the adaptive target, guarantee a buffer occupancy, or
 establish physical latency.
+After a decoder failure, the scheduled receiver also retires that stream's
+pending mixer conversion and queued output. Audio already consumed by the output
+callback cannot be recalled; other streams retain their own queued audio.
 
 The scheduled desktop receiver also retires its stream-local decode and mixer
 epochs after three consecutive concealed frames when the jitter buffer is empty.

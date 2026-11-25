@@ -1041,7 +1041,6 @@ mod tests {
         session.start_output(selection(None)).unwrap();
         let mut pipeline = FakePipeline::<SOURCE_SAMPLES>::default();
         started(&mut session, identity(1), &mut pipeline);
-
         assert_eq!(
             session.start_stream(request(identity(1)), 8, None, &mut pipeline),
             Err(MixerStreamSessionError::DuplicateStream(identity(1)))
@@ -1160,17 +1159,29 @@ mod tests {
         session.start_output(selection(None)).unwrap();
         let mut pipeline = FakePipeline::<SOURCE_SAMPLES>::default();
         started(&mut session, identity(1), &mut pipeline);
+        let mut other = FakePipeline::<SOURCE_SAMPLES>::default();
+        started(&mut session, identity(2), &mut other);
 
         let producer = pipeline.producer.as_mut().unwrap();
         assert_eq!(
             producer.push(&[0.5; SOURCE_SAMPLES]),
             RealtimePcmPushOutcome::Inserted
         );
+        assert_eq!(
+            other
+                .producer
+                .as_mut()
+                .unwrap()
+                .push(&[0.25; SOURCE_SAMPLES]),
+            RealtimePcmPushOutcome::Inserted
+        );
         session.pump_all().unwrap();
         assert_eq!(session.queued_output_blocks(identity(1)).unwrap(), 1);
+        assert_eq!(session.queued_output_blocks(identity(2)).unwrap(), 1);
 
         session.begin_epoch(identity(1)).unwrap();
         assert_eq!(session.queued_output_blocks(identity(1)).unwrap(), 0);
+        assert_eq!(session.queued_output_blocks(identity(2)).unwrap(), 1);
         assert_eq!(
             session.begin_epoch(identity(9)),
             Err(MixerStreamSessionError::UnknownStream(identity(9)))
