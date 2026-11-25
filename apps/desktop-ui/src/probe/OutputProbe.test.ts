@@ -525,6 +525,48 @@ describe('desktop output probe', () => {
     wrapper.unmount()
   })
 
+  it('keeps the system default after selecting it and reopening the probe', async () => {
+    const devices = [
+      { label: 'Speakers', sampleRateHz: 48_000, channels: 2, isDefault: true },
+      { label: 'Headphones', sampleRateHz: 48_000, channels: 2, isDefault: false },
+    ]
+    const invoke = vi.fn((command: string) => Promise.resolve(command === 'start_lab'
+      ? { running: true, sessionActive: false, status: 'Starting', invitation: null, metrics: null, volume: null, muted: null }
+      : { generation: 1, devices, selectedIndex: null }))
+    window.__TAURI__ = { core: { invoke } }
+    const wrapper = mountStoppedProbe()
+    await flushPromises()
+    await wrapper.get('#lab-output').setValue('1')
+    expect(JSON.parse(localStorage.getItem('sonimesh.outputProbe.labSettings')!).labOutputDevice.label).toBe('Headphones')
+    await wrapper.get('#lab-output').setValue('')
+    await wrapper.findAll('button').find(button => button.text() === 'Refresh devices')!.trigger('click')
+    await flushPromises()
+    expect(invoke).toHaveBeenLastCalledWith('probe_outputs', { generation: 1, selectedIndex: null })
+    expect(JSON.parse(localStorage.getItem('sonimesh.outputProbe.labSettings')!).labOutputDevice).toBeUndefined()
+    wrapper.unmount()
+
+    const reopened = mountStoppedProbe()
+    await flushPromises()
+    expect((reopened.get('#lab-output').element as HTMLSelectElement).value).toBe('')
+    await reopened.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
+    expect(invoke).toHaveBeenCalledWith('start_lab', expect.objectContaining({ index: null }))
+    reopened.unmount()
+  })
+
+  it('honors a previously saved default even if an old device description remains', async () => {
+    localStorage.setItem('sonimesh.outputProbe.labSettings', JSON.stringify({
+      labOutput: '', labOutputDevice: { label: 'Headphones', sampleRateHz: 48_000, channels: 2 },
+    }))
+    const invoke = vi.fn().mockResolvedValue({ generation: 1, devices: [
+      { label: 'Headphones', sampleRateHz: 48_000, channels: 2, isDefault: false },
+    ] })
+    window.__TAURI__ = { core: { invoke } }
+    const wrapper = mountStoppedProbe()
+    await flushPromises()
+    expect((wrapper.get('#lab-output').element as HTMLSelectElement).value).toBe('')
+    wrapper.unmount()
+  })
+
   it('requires reselection when a saved output description is ambiguous', async () => {
     localStorage.setItem('sonimesh.outputProbe.labSettings', JSON.stringify({
       labOutput: '0',

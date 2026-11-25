@@ -155,7 +155,7 @@ function clearLabSettings() {
 }
 
 const storedLabSettings = readLabSettings()
-const labOutputDevice = ref(storedLabSettings.labOutputDevice ?? null)
+const labOutputDevice = ref(storedLabSettings.labOutput === '' ? null : storedLabSettings.labOutputDevice ?? null)
 
 const labEvidenceMessage = ref<string | null>(null)
 
@@ -254,6 +254,7 @@ let controlTimer: ReturnType<typeof setTimeout> | undefined
 let pendingControl: { volume: number | null; muted: boolean | null; sent: boolean } | null = null
 
 watch([labHost, androidHost, labOutput, startupBufferMs, adaptive, mediaPort], () => {
+  if (labOutput.value === '') labOutputDevice.value = null
   const selected = !loaded.value || labOutput.value === '' || labOutput.value === 'unavailable'
     ? undefined
     : devices.value[Number(labOutput.value)]
