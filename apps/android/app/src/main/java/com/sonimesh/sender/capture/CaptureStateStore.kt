@@ -16,6 +16,7 @@ internal class CaptureEvidence(
     private val captureStartedAtMillis = AtomicLong(NO_CAPTURE_START)
     private val lastReadCompletedAtMillis = AtomicLong(NO_READ_COMPLETION)
     private val peakSampleMagnitude = AtomicInteger(-1)
+    private val recentPeakSampleMagnitude = AtomicInteger(-1)
 
     @Volatile
     private var captureSource: CaptureSource? = null
@@ -28,7 +29,10 @@ internal class CaptureEvidence(
         require(frames > 0) { "completed read must contain at least one frame" }
         require(completedAtMillis >= 0) { "read completion time must be monotonic" }
         require(peakMagnitude == null || peakMagnitude in 0..32768) { "invalid PCM16 peak" }
-        if (peakMagnitude != null) peakSampleMagnitude.getAndUpdate { previous -> maxOf(previous, peakMagnitude) }
+        if (peakMagnitude != null) {
+            peakSampleMagnitude.getAndUpdate { previous -> maxOf(previous, peakMagnitude) }
+            recentPeakSampleMagnitude.getAndUpdate { previous -> maxOf(previous, peakMagnitude) }
+        }
         capturedFrames.add(frames)
         if (silent) {
             silentFrames.add(frames)
@@ -58,6 +62,7 @@ internal class CaptureEvidence(
         captureStartedAtMillis.set(NO_CAPTURE_START)
         lastReadCompletedAtMillis.set(NO_READ_COMPLETION)
         peakSampleMagnitude.set(-1)
+        recentPeakSampleMagnitude.set(-1)
         captureSource = null
         captureFormat = null
         capturedFrames.reset()
@@ -96,6 +101,7 @@ internal class CaptureEvidence(
             silentReads = observedSilentReads,
             readErrors = readErrors.get(),
             peakSampleMagnitude = peakSampleMagnitude.get().takeIf { it >= 0 },
+            recentPeakSampleMagnitude = recentPeakSampleMagnitude.getAndSet(-1).takeIf { it >= 0 },
         )
     }
 

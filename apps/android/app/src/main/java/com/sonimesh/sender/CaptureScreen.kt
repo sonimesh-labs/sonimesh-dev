@@ -205,14 +205,14 @@ private fun CaptureStatusCard(status: CaptureStatus, evidence: CaptureEvidenceSn
                 color = StatusMutedText,
                 style = MaterialTheme.typography.bodyMedium,
             )
-            SessionPeakLevel(evidence = evidence)
+            RecentPeakLevel(status = status, evidence = evidence)
         }
     }
 }
 
 @Composable
-private fun SessionPeakLevel(evidence: CaptureEvidenceSnapshot) {
-    val magnitude = evidence.peakSampleMagnitude?.coerceIn(0, 32_768)
+private fun RecentPeakLevel(status: CaptureStatus, evidence: CaptureEvidenceSnapshot) {
+    val magnitude = evidence.recentPeakSampleMagnitude?.takeIf { status.isActive() }?.coerceIn(0, 32_768)
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),

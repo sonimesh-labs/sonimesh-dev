@@ -111,8 +111,10 @@ uses the current session's capture usage, or media for an all-usage session, and
 is released when the activity leaves the foreground or capture ends. This checks
 only the app's own capturable playback and does not establish another app's policy.
 The capture-only service also summarizes the highest absolute PCM sample in the
-current run as a low-rate peak level for troubleshooting. This local summary
-does not identify the source, measure loudness, or establish audible playback.
+current run and the highest sample since the previous state update. The latter
+provides a low-rate recent signal indicator while capture is active; it is not
+an instantaneous meter. These local summaries do not identify the source,
+measure loudness, or establish audible playback.
 The desktop UDP lab can accept optional console gain and mute commands and
 publish them to its existing per-stream output control. These controls are
 local to the lab and do not implement the desktop UI bridge.

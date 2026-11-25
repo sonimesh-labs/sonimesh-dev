@@ -48,18 +48,13 @@ class AllUsagesCaptureTest {
                     nonSilentFrames() - before >= 2_000
                 }
                 assertTrue("built-in tone was not captured: ${CaptureStateStore.state.value}", detected)
-                val peakMagnitude = CaptureStateStore.state.value.evidence.peakSampleMagnitude ?: 0
-                assertTrue("captured tone peak missing", peakMagnitude > 0)
+                assertTrue("recent tone peak missing", waitUntil(8_000) {
+                    (CaptureStateStore.state.value.evidence.recentPeakSampleMagnitude ?: 0) > 0
+                })
                 assertTrue(
-                    "session peak label missing: $lastScreenSnapshot",
+                    "recent peak label missing: $lastScreenSnapshot",
                     findOnScreen(automation, scroll = true, initialScrollForward = false) {
-                        it.containsText("Run peak level")
-                    },
-                )
-                assertTrue(
-                    "session peak value missing: $lastScreenSnapshot",
-                    findOnScreen(automation, scroll = true, initialScrollForward = false) {
-                        it.containsText(formatCapturePeak(peakMagnitude))
+                        it.containsText("Recent peak level")
                     },
                 )
                 assertTrue(
@@ -69,6 +64,13 @@ class AllUsagesCaptureTest {
                 assertTrue("capture did not return to silence", waitUntil(8_000) {
                     CaptureStateStore.state.value.status is CaptureStatus.NoCapturableAudio
                 })
+                assertTrue("recent peak did not fall to zero", waitUntil(8_000) {
+                    CaptureStateStore.state.value.evidence.recentPeakSampleMagnitude == 0
+                })
+                assertTrue("recent zero level missing: $lastScreenSnapshot", findOnScreen(automation, scroll = true, initialScrollForward = false) {
+                    it.containsText("0.000%")
+                })
+                assertTrue("run peak was lost after silence", (CaptureStateStore.state.value.evidence.peakSampleMagnitude ?: 0) > 0)
                 val beforeRestart = nonSilentFrames()
                 assertTrue(
                     "test tone could not restart: $lastScreenSnapshot",

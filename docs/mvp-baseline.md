@@ -460,9 +460,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   a normal stop after wake. Earlier
   failures coincided with a System UI not-responding dialog and cleared after the
   emulator settled. This is emulator evidence, not physical-device or
-  audible-output evidence. The capture status card now displays the normalized
-  maximum-to-date sample peak; it is not an instantaneous meter or a loudness
-  measurement.
+  audible-output evidence. The capture status card displays the normalized peak
+  since the previous state update, while local observations retain the run peak;
+  neither is an instantaneous meter or a loudness measurement.
 - a buildable Vue/Vite receiver-control UI with a single low-rate bridge
   boundary, session controls, output selection, per-stream volume and mute,
   pairing-invitation state, and diagnostics presentation for packet,

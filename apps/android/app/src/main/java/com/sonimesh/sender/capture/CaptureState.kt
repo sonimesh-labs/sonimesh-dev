@@ -101,6 +101,8 @@ data class CaptureEvidenceSnapshot(
     val readErrors: Long = 0,
     /** Largest absolute PCM16 sample in this run, or null before a completed read. */
     val peakSampleMagnitude: Int? = null,
+    /** Largest sample since the previous state snapshot, or null without a measured read. */
+    val recentPeakSampleMagnitude: Int? = null,
 )
 
 

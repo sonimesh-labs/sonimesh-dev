@@ -16,7 +16,7 @@
     <string name="capture_evidence_copied">Capture evidence copied</string>
     <string name="capture_evidence_format">Capture format</string>
     <string name="capture_evidence_peak">Run peak sample (percent of full scale)</string>
-    <string name="capture_signal_peak">Run peak level</string>
+    <string name="capture_signal_peak">Recent peak level</string>
     <string name="capture_evidence_unavailable">Unavailable</string>
     <string name="capture_source_label">Playback source</string>
     <string name="capture_source_media">Media</string>
