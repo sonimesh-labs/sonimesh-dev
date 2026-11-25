@@ -105,6 +105,26 @@ afterEach(() => {
 })
 
 describe('App', () => {
+  it('saves the currently displayed fallback output when requested', async () => {
+    const initial = {
+      ...previewSnapshot(),
+      previewAdapter: false,
+      output: { ...previewSnapshot().output, followsSystemDefault: false, selectionFallback: true },
+    }
+    const saved = { ...initial, output: { ...initial.output, selectionFallback: false } }
+    desktopBridgeMock.snapshot.mockResolvedValueOnce(initial)
+    desktopBridgeMock.selectOutput.mockResolvedValueOnce(saved)
+    const wrapper = mount(App)
+    await flushPromises()
+    expect(wrapper.text()).toContain('The saved output is unavailable.')
+    await wrapper.findAll('button').find((button) => button.text() === 'Keep this output')!.trigger('click')
+    await flushPromises()
+    expect(desktopBridgeMock.selectOutput).toHaveBeenCalledWith('default')
+    expect(wrapper.text()).not.toContain('The saved output is unavailable.')
+    expect(wrapper.text()).not.toContain('Keep this output')
+    wrapper.unmount()
+  })
+
   it('sends the follow-default request and displays the shell-confirmed output', async () => {
     const initial = {
       ...previewSnapshot(),

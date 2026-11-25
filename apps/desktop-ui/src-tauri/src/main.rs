@@ -636,6 +636,20 @@ mod tests {
         assert_eq!(load_selected_output(&path), None);
         assert_eq!(persist_output_preference(&path, None, &[]).unwrap(), None);
 
+        let devices = [OutputDevice {
+            id: "fallback".into(),
+            label: "Speakers".into(),
+            sample_rate_hz: 48_000,
+            channels: 2,
+            is_default: true,
+        }];
+        assert_eq!(
+            persist_output_preference(&path, Some("fallback"), &devices).unwrap(),
+            Some("fallback".into())
+        );
+        assert!(persist_output_preference(&path, Some("missing"), &devices).is_err());
+        assert_eq!(load_selected_output(&path).as_deref(), Some("fallback"));
+
         std::fs::write(&path, b"{").unwrap();
         assert_eq!(load_selected_output(&path), None);
         std::fs::remove_dir_all(directory).unwrap();

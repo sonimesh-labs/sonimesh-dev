@@ -143,6 +143,7 @@ const displayStatus = computed<DisplayStatus>(() => {
 
     <div v-if="output.followsSystemDefault !== undefined" class="output-test-control">
       <button class="secondary-action" type="button" :disabled="busy || output.followsSystemDefault" @click="emit('select', null)">Follow system default</button>
+      <button v-if="selectedDevice && (output.followsSystemDefault || output.selectionFallback)" class="secondary-action" type="button" :disabled="busy" @click="emit('select', selectedDevice.id)">Keep this output</button>
       <p v-if="output.followsSystemDefault" class="preview-note">Using the system default when available. Refresh devices after it changes.</p>
     </div>
 

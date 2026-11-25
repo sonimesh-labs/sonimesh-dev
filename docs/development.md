@@ -1569,6 +1569,8 @@ the Windows system default. **Follow system default** removes the saved explicit
 selection; refresh the device list to pick up a later system-default change.
 The saved preference remains intact during that fallback. After reconnecting the
 preferred endpoint, use **Refresh output devices** to select it again.
+To keep the currently shown default or fallback device as an explicit preference,
+choose **Keep this output**; the saved choice then remains fixed across refreshes.
 The output inventory is cached between low-rate session snapshots. Use the
 output panel's **Refresh output devices** control to re-enumerate endpoints after
 connecting or removing a device.
