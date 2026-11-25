@@ -24,14 +24,15 @@ mod platform {
         AudioPlaybackConnectionState,
     };
 
-    fn open_error(status: AudioPlaybackConnectionOpenResultStatus) -> &'static str {
-        if status == AudioPlaybackConnectionOpenResultStatus::RequestTimedOut {
+    fn open_error(status: AudioPlaybackConnectionOpenResultStatus, code: i32) -> String {
+        let message = if status == AudioPlaybackConnectionOpenResultStatus::RequestTimedOut {
             "Windows timed out connecting. Check that the source is nearby and try again."
         } else if status == AudioPlaybackConnectionOpenResultStatus::DeniedBySystem {
             "Windows denied the playback connection. Check the device's Bluetooth connection and try again."
         } else {
             "Windows could not open the playback connection. Check the source and try again."
-        }
+        };
+        format!("{message} (Windows error 0x{:08X})", code as u32)
     }
 
     #[derive(Default)]
@@ -101,7 +102,8 @@ mod platform {
                 let result = connection.Open().map_err(|e| e.to_string())?;
                 let status = result.Status().map_err(|e| e.to_string())?;
                 if status != AudioPlaybackConnectionOpenResultStatus::Success {
-                    return Err(open_error(status).into());
+                    let code = result.ExtendedError().map_err(|e| e.to_string())?.0;
+                    return Err(open_error(status, code));
                 }
                 Ok(())
             })();
@@ -156,16 +158,23 @@ mod platform {
         #[test]
         fn open_failures_explain_what_happened() {
             assert!(
-                open_error(AudioPlaybackConnectionOpenResultStatus::RequestTimedOut)
+                open_error(AudioPlaybackConnectionOpenResultStatus::RequestTimedOut, 0)
                     .contains("timed out")
             );
             assert!(
-                open_error(AudioPlaybackConnectionOpenResultStatus::DeniedBySystem)
+                open_error(AudioPlaybackConnectionOpenResultStatus::DeniedBySystem, 0)
                     .contains("denied")
             );
             assert!(
-                open_error(AudioPlaybackConnectionOpenResultStatus::UnknownFailure)
+                open_error(AudioPlaybackConnectionOpenResultStatus::UnknownFailure, 0)
                     .contains("could not open")
+            );
+            assert!(
+                open_error(
+                    AudioPlaybackConnectionOpenResultStatus::UnknownFailure,
+                    0x8007_001F_u32 as i32
+                )
+                .contains("0x8007001F")
             );
         }
 
