@@ -161,7 +161,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   delayed loopback gate. If an established paired control connection ends, its
   experimental supervisor keeps the current capture/encoder alive, drops queued
   media from the retired session, and retries a fresh paired media session with
-  bounded backoff. It stops after twelve failed reconnect attempts or when the
+  bounded, cancellable monotonic backoff, checking the remaining time once per
+  wait so crossing the deadline cannot request a negative sleep. It stops after
+  twelve failed reconnect attempts or when the
   operator stops capture. This uses the public fixed lab invitation and a
   keep-listening desktop lab process; it is not production pairing or a
   production reconnect policy. API 37 loopback verification is recorded in the

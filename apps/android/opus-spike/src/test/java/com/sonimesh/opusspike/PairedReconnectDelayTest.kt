@@ -1,6 +1,8 @@
 package com.sonimesh.opusspike
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PairedReconnectDelayTest {
@@ -30,5 +32,36 @@ class PairedReconnectDelayTest {
         assertEquals(4_000L, pairedReconnectDelayMillis(3))
         assertEquals(4_000L, pairedReconnectDelayMillis(20))
         assertEquals(500L, pairedReconnectDelayMillis(-1))
+    }
+
+    @Test
+    fun reconnectWaitStopsAtDeadlineWithoutNegativeSleep() {
+        val times = ArrayDeque(listOf(1_000L, 1_499L, 1_501L))
+        val sleeps = mutableListOf<Long>()
+        assertTrue(waitForPairedReconnect(500, { true }, { times.removeFirst() }, sleeps::add))
+        assertEquals(listOf(1L), sleeps)
+    }
+
+    @Test
+    fun reconnectWaitChecksStopBetweenBoundedSleeps() {
+        var time = 0L
+        var running = true
+        val sleeps = mutableListOf<Long>()
+        assertFalse(waitForPairedReconnect(500, { running }, { time }) {
+            sleeps.add(it)
+            time += it
+            if (time == 200L) running = false
+        })
+        assertEquals(listOf(100L, 100L), sleeps)
+    }
+
+    @Test
+    fun reconnectWaitPreservesInterrupt() {
+        try {
+            assertFalse(waitForPairedReconnect(500, { true }, { 0L }) { throw InterruptedException() })
+            assertTrue(Thread.currentThread().isInterrupted)
+        } finally {
+            Thread.interrupted()
+        }
     }
 }

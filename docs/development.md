@@ -438,6 +438,14 @@ duration continues and the service remains active without a second projection
 consent. This is emulator loopback evidence, not physical WLAN or audible
 continuity evidence.
 
+On 2026-11-25, two subsequent runs on the API 37 x86_64 emulator failed at the
+initial visible `Capturing audio` assertion, before the test reached its
+reconnect assertions. Android logs recorded an initial media session and a
+second session after the injected disconnect in both runs, but these logs do
+not establish that capture or audio delivery continued. The cause of the missing
+visible status remains unverified; the instrumentation must be rerun and
+investigated rather than counted as a pass.
+
 ~~~powershell
 adb shell am instrument -w -e pairingInvitationHex $invitationHex -e mediaHost 10.0.2.2 -e reconnectTest true -e class 'com.sonimesh.opusspike.PairedCaptureTest#reconnects_after_desktop_disconnect_without_restarting_capture' com.sonimesh.opusspike.test/androidx.test.runner.AndroidJUnitRunner
 ~~~

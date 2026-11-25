@@ -245,17 +245,12 @@ internal class PairedSessionSupervisor(
     }
 
     private fun waitBeforeReconnect(failures: Int): Boolean {
-        val delay = pairedReconnectDelayMillis(failures)
-        val deadline = SystemClock.elapsedRealtime() + delay
-        while (running.get() && SystemClock.elapsedRealtime() < deadline) {
-            try {
-                Thread.sleep(minOf(100L, deadline - SystemClock.elapsedRealtime()))
-            } catch (_: InterruptedException) {
-                Thread.currentThread().interrupt()
-                return false
-            }
-        }
-        return running.get()
+        return waitForPairedReconnect(
+            pairedReconnectDelayMillis(failures),
+            running::get,
+            SystemClock::elapsedRealtime,
+            Thread::sleep,
+        )
     }
 
     private fun nextSessionId(): Long {
@@ -285,6 +280,26 @@ internal class PairedSessionSupervisor(
 
 internal fun pairedReconnectDelayMillis(failures: Int): Long =
     minOf(500L shl failures.coerceIn(0, 3), 4_000L)
+
+internal fun waitForPairedReconnect(
+    delay: Long,
+    running: () -> Boolean,
+    now: () -> Long,
+    sleep: (Long) -> Unit,
+): Boolean {
+    val start = now()
+    while (running()) {
+        val remaining = delay - (now() - start)
+        if (remaining <= 0) return running()
+        try {
+            sleep(minOf(100L, remaining))
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            return false
+        }
+    }
+    return false
+}
 
 internal class PairedReconnectFailures {
     var count = 0
