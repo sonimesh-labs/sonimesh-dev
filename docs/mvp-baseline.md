@@ -104,8 +104,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   receiver resets at the next deadline and resumes from a later packet, while
   buffered future packets still receive their intervening PLC decisions;
   an optional capacity-bounded startup wait begins with a queued frame and is
-  reapplied after interruption or output recovery. A loopback test covers its
-  deadlines and recovery; the live desktop host has not adopted it;
+  reapplied after interruption or output recovery. Loopback tests cover its
+  deadlines and recovery with a test decoder and native Opus; the live desktop
+  host has not adopted it;
   `mark_control_lost` centralizes the follow-up lifecycle transition and arms
   reconnect grace after a closed or failed control poll. `tick_at(now_ms)` then
   services grace and output-health observation in the same low-rate

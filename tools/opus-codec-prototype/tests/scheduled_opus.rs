@@ -105,8 +105,17 @@ fn read_reply(stream: &mut TcpStream) -> Envelope {
 }
 
 #[test]
-#[allow(clippy::too_many_lines)] // Exercises lifecycle, protected UDP, native decode and output together.
 fn scheduled_protected_opus_reaches_memory_output_and_conceals_loss() {
+    scheduled_protected_opus(false);
+}
+
+#[test]
+fn buffered_scheduled_opus_waits_for_startup_and_recovery() {
+    scheduled_protected_opus(true);
+}
+
+#[allow(clippy::too_many_lines)] // Exercises lifecycle, protected UDP, native decode and output together.
+fn scheduled_protected_opus(buffered: bool) {
     // The proof result is supplied by the test; transport pairing is tested separately.
     let mut state = SessionState::IDLE;
     let mut pairing = PairingInvitationController::<1>::new();
@@ -160,6 +169,9 @@ fn scheduled_protected_opus_reaches_memory_output_and_conceals_loss() {
     let owner = DesktopControlOwner::new(bridge).unwrap();
     let mut scheduler: DesktopReceiverScheduler<_, _, 1, 256, 1, SAMPLES, TcpStream> =
         DesktopReceiverScheduler::new(DesktopReceiverOwner::new(owner, pipeline, Some(counters)));
+    if buffered {
+        scheduler.set_scheduled_startup_frames(2).unwrap();
+    }
     let session = scheduler
         .receiver_mut()
         .owner_mut()
@@ -261,21 +273,44 @@ fn scheduled_protected_opus_reaches_memory_output_and_conceals_loss() {
         stereo.fill(value);
     }
     let mut packet = [0_u8; 1_148];
+    if buffered {
+        assert!(matches!(scheduler.tick_scheduled_at(80).playout, Ok(None)));
+    }
     for sequence in 0..3 {
         let len = encoder.encode_float(&pcm, &mut packet).unwrap();
         sender
             .send_frame(0, sequence * 960, &packet[..len])
             .unwrap();
+        if buffered && sequence < 2 {
+            let tick = scheduler.tick_scheduled_at(100 + sequence * 20);
+            assert_eq!(tick.packets.unwrap(), 1);
+            assert!(matches!(tick.playout, Ok(None)));
+            if sequence == 1 {
+                let mut samples = [1.0; 256];
+                scheduler
+                    .receiver_mut()
+                    .owner_mut()
+                    .bridge_mut()
+                    .mixer_mut()
+                    .output_mut()
+                    .source
+                    .as_mut()
+                    .unwrap()
+                    .render(&mut samples);
+                assert!(samples.iter().all(|sample| *sample == 0.0));
+            }
+        }
     }
+    let startup_delay = if buffered { 40 } else { 0 };
     for (now, expected) in [(100, 0), (120, 1), (140, 2)] {
-        let tick = scheduler.tick_scheduled_at(now);
+        let tick = scheduler.tick_scheduled_at(now + startup_delay);
         assert_eq!(tick.state, ScheduledReceiverState::Active);
         assert!(tick.control.is_ok() && tick.packets.is_ok() && tick.pump.is_ok());
         assert!(
             matches!(tick.playout, Ok(Some(DecodeStep::Decoded { sequence, .. })) if sequence == expected)
         );
     }
-    let tick = scheduler.tick_scheduled_at(160);
+    let tick = scheduler.tick_scheduled_at(160 + startup_delay);
     assert!(matches!(
         tick.playout,
         Ok(Some(DecodeStep::Concealed { sequence: 3, .. }))
@@ -301,18 +336,32 @@ fn scheduled_protected_opus_reaches_memory_output_and_conceals_loss() {
 
     for (now, expected) in [(180, 4), (200, 5)] {
         assert!(matches!(
-            scheduler.tick_scheduled_at(now).playout,
+            scheduler.tick_scheduled_at(now + startup_delay).playout,
             Ok(Some(DecodeStep::Concealed { sequence, .. })) if sequence == expected
         ));
     }
     for now in (220..=400).step_by(20) {
-        let tick = scheduler.tick_scheduled_at(now);
+        let tick = scheduler.tick_scheduled_at(now + startup_delay);
         assert!(tick.pump.is_ok());
-        assert!(matches!(tick.playout, Ok(Some(DecodeStep::NotReady))));
+        if buffered {
+            assert!(matches!(tick.playout, Ok(None)));
+        } else {
+            assert!(matches!(tick.playout, Ok(Some(DecodeStep::NotReady))));
+        }
     }
     let len = encoder.encode_float(&pcm, &mut packet).unwrap();
     sender.send_frame(0, 3 * 960, &packet[..len]).unwrap();
-    let resumed = scheduler.tick_scheduled_at(420);
+    let resumed_at = 420 + startup_delay;
+    if buffered {
+        let waiting = scheduler.tick_scheduled_at(resumed_at);
+        assert_eq!(waiting.packets.unwrap(), 1);
+        assert!(matches!(waiting.playout, Ok(None)));
+        assert!(matches!(
+            scheduler.tick_scheduled_at(resumed_at + 39).playout,
+            Ok(None)
+        ));
+    }
+    let resumed = scheduler.tick_scheduled_at(resumed_at + startup_delay);
     assert!(resumed.packets.is_ok() && resumed.pump.is_ok());
     assert!(matches!(
         resumed.playout,
@@ -332,12 +381,12 @@ fn scheduled_protected_opus_reaches_memory_output_and_conceals_loss() {
     sender.send_frame(0, 8 * 960, &packet[..len]).unwrap();
     for (now, expected) in [(440, 4), (460, 5), (480, 6), (500, 7)] {
         assert!(matches!(
-            scheduler.tick_scheduled_at(now).playout,
+            scheduler.tick_scheduled_at(now + 2 * startup_delay).playout,
             Ok(Some(DecodeStep::Concealed { sequence, .. })) if sequence == expected
         ));
     }
     assert!(matches!(
-        scheduler.tick_scheduled_at(520).playout,
+        scheduler.tick_scheduled_at(520 + 2 * startup_delay).playout,
         Ok(Some(DecodeStep::Decoded { sequence: 8, .. }))
     ));
 
@@ -355,7 +404,7 @@ fn scheduled_protected_opus_reaches_memory_output_and_conceals_loss() {
         .unwrap();
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
-        let tick = scheduler.tick_scheduled_at(521);
+        let tick = scheduler.tick_scheduled_at(521 + 2 * startup_delay);
         assert!(tick.packets.is_ok() && tick.pump.is_ok());
         match tick.control.unwrap() {
             Some(ControlSessionPoll::Processed { .. }) => {

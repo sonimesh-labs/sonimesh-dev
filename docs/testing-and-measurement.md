@@ -36,6 +36,11 @@ exercise is useful for software-path behavior under a shaped relay, but host
 scheduling means it is not a deterministic timing test or physical-network
 evidence.
 
+The scheduled receiver's optional startup wait has a software integration test
+using native Opus, protected UDP, a virtual clock, and an in-memory output. It
+checks initial buffering, loss concealment, and buffering again after a long
+interruption. This does not measure hardware latency or audible quality.
+
 ## Latency measurement
 
 ### Software timing
