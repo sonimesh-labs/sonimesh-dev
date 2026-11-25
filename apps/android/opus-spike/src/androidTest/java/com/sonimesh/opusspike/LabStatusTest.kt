@@ -23,6 +23,33 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class LabStatusTest {
     @Test
+    fun changingPinLetterCaseRetainsImportedInvitation() {
+        val invitation = labHex(labInvitation("ab".repeat(32), "127.0.0.1", 47612))
+        val pendingField = LabActivity::class.java.getDeclaredField("pendingInvitation").apply { isAccessible = true }
+        try {
+            ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    val root = activity.window.decorView
+                    requireNotNull(findTextField(root, "Lab invitation payload")).text = invitation
+                    requireNotNull(findButton(root, "Apply invitation payload")).performClick()
+                    requireNotNull(findTextField(root, "Desktop IPv4 address for UDP")).text = "10.0.2.2"
+                    requireNotNull(findTextField(root, "Paired lab desktop SPKI")).text = "AB".repeat(32)
+                    requireNotNull(findButton(root, "Start paired UDP capture")).performClick()
+                    assertEquals(invitation, activity.getPreferences(Activity.MODE_PRIVATE).getString("labInvitation", null))
+                    assertEquals(invitation, labHex(pendingField.get(activity) as ByteArray))
+                    assertTrue(!hasStatus(root, "Connection settings changed; using the manual lab setup"))
+                    LabStatus.captureAdmission.launchFailed()
+                    requireNotNull(findButton(root, "Clear saved lab setup")).performClick()
+                }
+            }
+        } finally {
+            androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().runOnMainSync {
+                LabStatus.captureAdmission.launchFailed()
+            }
+        }
+    }
+
+    @Test
     fun changedControlPortReplacesImportedInvitationAndIsSaved() {
         val invitation = labHex(labInvitation("ab".repeat(32), "127.0.0.1", 47612))
         try {

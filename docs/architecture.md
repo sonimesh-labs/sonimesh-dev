@@ -109,7 +109,8 @@ that same port, independently of the UDP media port. The Android lab also accept
 a manual control port for its public test fixture. Editing the control address,
 port, or pin after importing an invitation selects the manual fixture for the next
 capture. The lab displays that change when capture starts so the operator can
-identify the setup in use.
+identify the setup in use. Hexadecimal letter case alone does not change the pin
+or replace the imported invitation.
 The Android lab can select media, game, unknown, or all three playback usages
 for a capture session; platform and source capture policies still apply.
 The capture-only Android app can play an explicitly requested local test tone

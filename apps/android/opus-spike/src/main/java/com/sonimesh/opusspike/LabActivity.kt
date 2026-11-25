@@ -529,7 +529,7 @@ class LabActivity : Activity() {
                 LabStatus.publish("Paste the desktop listener's complete SPKI_HEX.")
                 return
             }
-            if (importedInvitation != null && (entered != importedPin || parsedHost != importedHost || parsedControlPort != importedControlPort)) {
+            if (importedInvitation != null && (!entered.equals(importedPin, ignoreCase = true) || parsedHost != importedHost || parsedControlPort != importedControlPort)) {
                 importedInvitation?.fill(0)
                 importedInvitation = null
                 labPreferences.edit().remove(PREF_INVITATION).apply()
