@@ -244,6 +244,8 @@ const restoredLab = ref(false)
 const labError = ref<string | null>(null)
 const controlError = ref<string | null>(null)
 const controlBusy = ref(false)
+const volumeSelection = ref<number | null>(null)
+watch(() => lab.value.running, (running) => { if (!running) volumeSelection.value = null })
 let timer: ReturnType<typeof setTimeout> | undefined
 let disposed = false
 let labRequest = 0
@@ -410,6 +412,7 @@ async function controlLab(volume: number | null, muted: boolean | null) {
 function changeLabVolume(event: Event) {
   const input = event.target as HTMLInputElement
   const volume = Number(input.value)
+  volumeSelection.value = null
   input.value = String(lab.value.volume)
   void controlLab(volume, null)
 }
@@ -572,10 +575,11 @@ onBeforeUnmount(() => { disposed = true; labRequest++; suggestRequest++; clearTi
       <p v-if="labError" class="command-error" role="alert">{{ labError }}</p>
       <div v-if="lab.running && lab.volume != null && lab.muted != null">
         <label for="lab-volume">Receiver volume: {{ lab.volume }}%</label>
-        <input id="lab-volume" type="range" min="0" max="100" :value="lab.volume" :disabled="controlBusy || labBusy" @change="changeLabVolume" />
+        <input id="lab-volume" type="range" min="0" max="100" :value="volumeSelection ?? lab.volume" :disabled="controlBusy || labBusy" aria-describedby="lab-volume-selection" @input="volumeSelection = Number(($event.target as HTMLInputElement).value)" @change="changeLabVolume" @blur="volumeSelection = null" />
+        <p id="lab-volume-selection" class="preview-note">{{ volumeSelection === null ? 'Adjust to select a new volume.' : `Selected: ${volumeSelection}%` }}</p>
         <button type="button" class="preview-action" :disabled="controlBusy || labBusy" :aria-pressed="lab.muted" @click="controlLab(null, !lab.muted)">{{ lab.muted ? 'Unmute' : 'Mute' }}</button>
         <p v-if="controlBusy" role="status">Waiting for the listener to confirm the adjustment…</p>
-        <p class="preview-note">The displayed values are confirmed by the listener; system volume is unchanged.</p>
+        <p class="preview-note">Receiver volume and mute are confirmed by the listener; system volume is unchanged.</p>
         <p v-if="controlError" class="command-error" role="alert">{{ controlError }}</p>
       </div>
       <section v-if="lab.sessionActive" aria-labelledby="lab-signal-title">

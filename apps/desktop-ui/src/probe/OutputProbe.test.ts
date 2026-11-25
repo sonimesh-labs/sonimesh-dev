@@ -416,6 +416,33 @@ describe('desktop output probe', () => {
     wrapper.unmount()
   })
 
+  it('shows the selected volume while adjusting without sending it before commit', async () => {
+    vi.useFakeTimers()
+    const running = { running: true, sessionActive: false, status: 'Waiting', invitation: null, metrics: null, volume: 100, muted: false }
+    const invoke = vi.fn((command: string) => {
+      if (command === 'probe_outputs') return Promise.resolve({ generation: 1, devices: [] })
+      if (command === 'control_lab') return Promise.resolve(undefined)
+      return Promise.resolve(running)
+    })
+    window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+    const wrapper = mountStoppedProbe()
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
+    const slider = wrapper.get('#lab-volume')
+    ;(slider.element as HTMLInputElement).value = '35'
+    await slider.trigger('input')
+    expect(wrapper.text()).toContain('Receiver volume: 100%')
+    expect(wrapper.text()).toContain('Selected: 35%')
+    expect(invoke.mock.calls.some(([command]) => command === 'control_lab')).toBe(false)
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(slider.element).toHaveProperty('value', '35')
+    await slider.trigger('change')
+    expect(invoke).toHaveBeenCalledWith('control_lab', { volume: 35, muted: null })
+    expect(slider.element).toHaveProperty('value', '100')
+    expect(wrapper.text()).not.toContain('Selected: 35%')
+    wrapper.unmount()
+  })
+
   it('allows retry after an unconfirmed adjustment without inventing a confirmed value', async () => {
     vi.useFakeTimers()
     const running = { running: true, sessionActive: false, status: 'Waiting', invitation: null, metrics: null, volume: 100, muted: false }

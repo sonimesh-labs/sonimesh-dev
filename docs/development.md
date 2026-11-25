@@ -1292,7 +1292,9 @@ latency, or audio-quality behavior.
 The probe's volume and mute controls apply to the lab receiver, including
 successive sessions and output recovery while the listener remains running.
 They do not change the system volume. The controls wait for the listener's
-reported value before accepting another adjustment. If confirmation does not
+reported value before accepting another adjustment. While adjusting the volume
+slider, the window shows the selected value separately from the confirmed value;
+the selection is sent when the adjustment is committed. If confirmation does not
 arrive within five seconds, the probe allows a retry and reports that the result
 is unknown; the displayed value remains the last one received from the listener.
 On 2026-11-23 the Windows host's real-listener test selected its default output,
