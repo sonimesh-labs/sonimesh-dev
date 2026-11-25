@@ -206,14 +206,13 @@ async function toggle(mode: 'connect' | 'wait' = 'connect', monitorOutput = fals
           directError = cause
           await window.__TAURI__.core.invoke('bluetooth_prepare', { generation: generation.value, index: Number(selected.value) })
           connectionMode = 'wait'
-          error.value = String(cause)
         }
       } else {
         await window.__TAURI__.core.invoke(mode === 'wait' ? 'bluetooth_prepare' : 'bluetooth_connect', { generation: generation.value, index: Number(selected.value) })
       }
       phase.value = connectionMode === 'wait' ? 'waiting' : 'open'
       message.value = connectionMode === 'wait'
-        ? `${directError ? 'Direct connection failed. ' : ''}Waiting for the phone to connect to ${sourceName()} through Bluetooth.${monitorOutput ? ' Windows output monitoring is active.' : ''}`
+        ? `${directError ? `Direct connection failed (${String(directError)}). ` : ''}Waiting for the phone to connect to ${sourceName()} through Bluetooth.${monitorOutput ? ' Windows output monitoring is active.' : ''}`
         : `System playback connection opened for ${sourceName()}.`
       if (loopbackStartedHere) void pollLoopback()
       void poll()
