@@ -114,6 +114,12 @@ class PairedCaptureTest {
     }
 
     @Test
+    fun reconnects_repeatedly_without_exhausting_attempts() {
+        assumeTrue("repeated reconnect test requires 13 injected disconnects", InstrumentationRegistry.getArguments().getString("repeatedReconnectTest") == "true")
+        runCapture(repeatedReconnects = true)
+    }
+
+    @Test
     fun stops_capture_during_reconnect_without_restarting_session() {
         assumeTrue("reconnect test requires --disconnect-after-ms with --keep-listening", InstrumentationRegistry.getArguments().getString("reconnectTest") == "true")
         runCapture(stopDuringReconnect = true)
@@ -131,7 +137,7 @@ class PairedCaptureTest {
     @Test
     fun mutes_and_resumes_sending_during_capture() = runCapture(testMute = true)
 
-    private fun runCapture(expectReconnect: Boolean = false, stopDuringReconnect: Boolean = false, retryAfterReconnectExhaustion: Boolean = false, screenOff: Boolean = false, notificationReturn: Boolean = false, startFromScan: Boolean = false, startFromPaste: Boolean = false, recreate: Boolean = false, changeUsage: Boolean = false, testMute: Boolean = false, expectConnectionRetry: Boolean = false, changeSetupDuringConsent: Boolean = false) {
+    private fun runCapture(expectReconnect: Boolean = false, repeatedReconnects: Boolean = false, stopDuringReconnect: Boolean = false, retryAfterReconnectExhaustion: Boolean = false, screenOff: Boolean = false, notificationReturn: Boolean = false, startFromScan: Boolean = false, startFromPaste: Boolean = false, recreate: Boolean = false, changeUsage: Boolean = false, testMute: Boolean = false, expectConnectionRetry: Boolean = false, changeSetupDuringConsent: Boolean = false) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val args = InstrumentationRegistry.getArguments()
         var stopAcknowledgement = "unavailable"
@@ -274,7 +280,39 @@ class PairedCaptureTest {
                     assertTrue(containsStatus(activity.window.decorView, "Status: Capturing audio"))
                 }
             }
-            if (expectReconnect || stopDuringReconnect || retryAfterReconnectExhaustion) {
+            if (repeatedReconnects) {
+                var recoveries = 0
+                var waitingForRestore = false
+                val recoveryDeadline = SystemClock.elapsedRealtime() + 90_000
+                while (recoveries < 13 && SystemClock.elapsedRealtime() < recoveryDeadline) {
+                    scenario.onActivity { activity ->
+                        val root = activity.window.decorView
+                        assertTrue("capture stopped during repeated reconnects", !LabStatus.captureAdmission.canBegin())
+                        if (!waitingForRestore && containsStatus(root, "Status: Desktop connection lost. Reconnecting")) {
+                            waitingForRestore = true
+                        } else if (waitingForRestore && containsStatus(root, "Status: Desktop connection restored.")) {
+                            recoveries++
+                            waitingForRestore = false
+                        }
+                    }
+                    if (recoveries < 13) SystemClock.sleep(50)
+                }
+                assertEquals("not all disconnected sessions recovered", 13, recoveries)
+                var before = 0L
+                scenario.onActivity { activity ->
+                    val sent = find(activity.window.decorView) {
+                        it is TextView && it.text.toString().matches(Regex("Media packets sent: [0-9]+"))
+                    } as TextView
+                    before = sent.text.toString().substringAfter(": ").toLong()
+                }
+                SystemClock.sleep(3_000)
+                scenario.onActivity { activity ->
+                    val sent = find(activity.window.decorView) {
+                        it is TextView && it.text.toString().matches(Regex("Media packets sent: [0-9]+"))
+                    } as TextView
+                    assertTrue("media did not continue after repeated reconnects", sent.text.toString().substringAfter(": ").toLong() > before)
+                }
+            } else if (expectReconnect || stopDuringReconnect || retryAfterReconnectExhaustion) {
                 instrumentation.sendStatus(1, Bundle().apply { putString("pairedCapture", "ready") })
                 if (expectReconnect) automation.executeShellCommand("input keyevent KEYCODE_HOME").close()
                 var disconnected = false

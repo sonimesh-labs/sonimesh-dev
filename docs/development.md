@@ -426,6 +426,18 @@ continuity evidence.
 adb shell am instrument -w -e pairingInvitationHex $invitationHex -e mediaHost 10.0.2.2 -e reconnectTest true -e class 'com.sonimesh.opusspike.PairedCaptureTest#reconnects_after_desktop_disconnect_without_restarting_capture' com.sonimesh.opusspike.test/androidx.test.runner.AndroidJUnitRunner
 ~~~
 
+For repeated recovery, start the same listener with `--disconnect-after-ms 2000
+--disconnect-count 13` and run
+`PairedCaptureTest#reconnects_repeatedly_without_exhausting_attempts` with
+`-e repeatedReconnectTest true`. The listener injects a disconnect into each of
+the first 13 established sessions; without `--disconnect-count`, it injects one.
+The test checks each recovery and continued media sending without restarting
+capture. The timer starts after control negotiation and disconnects once a
+receiver exists. On 2026-11-25, API 37 x86_64 instrumentation observed all 13
+recoveries; the final session received 154 packets and decoded 146 frames with
+a peak of 0.900. This is emulator loopback evidence, not physical WLAN or audible
+playback evidence, and the fixture is not a product reconnect policy.
+
 To check cancellation during the reconnect window, use the same listener and
 run `PairedCaptureTest#stops_capture_during_reconnect_without_restarting_session`
 with `-e reconnectTest true`. The test presses Stop after the first disconnect

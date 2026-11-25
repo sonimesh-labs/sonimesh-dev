@@ -58,7 +58,9 @@ fn main() {
 
 fn run() -> LabResult<()> {
     let options = Options::parse(std::env::args().skip(1))?;
-    let mut disconnect_after = options.disconnect_after_ms.map(Duration::from_millis);
+    let mut disconnects_remaining = options
+        .disconnect_count
+        .unwrap_or(u8::from(options.disconnect_after_ms.is_some()));
     let mut disconnect_injected = false;
     let mut rejected_starts = options.reject_starts;
     let mut session_number = 0_u64;
@@ -111,7 +113,7 @@ fn run() -> LabResult<()> {
             &pin,
             &options,
             &mut playback,
-            &mut disconnect_after,
+            &mut disconnects_remaining,
             &mut disconnect_injected,
             &mut rejected_starts,
         );
@@ -162,7 +164,7 @@ fn run_session(
     pin: &[u8],
     options: &Options,
     playback: &mut Playback,
-    disconnect_after: &mut Option<Duration>,
+    disconnects_remaining: &mut u8,
     disconnect_injected: &mut bool,
     rejected_starts: &mut u8,
 ) -> LabResult<()> {
@@ -208,7 +210,7 @@ fn run_session(
         root,
         options,
         playback,
-        disconnect_after,
+        disconnects_remaining,
         disconnect_injected,
         rejected_starts,
     )
@@ -228,6 +230,7 @@ struct Options {
     adaptive: bool,
     startup_buffer: Duration,
     disconnect_after_ms: Option<u64>,
+    disconnect_count: Option<u8>,
     reject_starts: u8,
     bind: Ipv4Addr,
     host: Ipv4Addr,
@@ -249,6 +252,7 @@ impl Default for Options {
             adaptive: false,
             startup_buffer: Duration::from_millis(60),
             disconnect_after_ms: None,
+            disconnect_count: None,
             reject_starts: 0,
             bind: Ipv4Addr::LOCALHOST,
             host: Ipv4Addr::LOCALHOST,
@@ -288,6 +292,17 @@ impl Options {
                         return Err("disconnect delay must be 100 to 120000 ms".into());
                     }
                     result.disconnect_after_ms = Some(value);
+                }
+                "--disconnect-count" if result.disconnect_count.is_none() => {
+                    let value = args
+                        .next()
+                        .ok_or("--disconnect-count requires a value")?
+                        .parse::<u8>()
+                        .map_err(|_| "disconnect count must be 1 to 20")?;
+                    if !(1..=20).contains(&value) {
+                        return Err("disconnect count must be 1 to 20".into());
+                    }
+                    result.disconnect_count = Some(value);
                 }
                 "--reject-starts" if result.reject_starts == 0 => {
                     let value = args
@@ -336,7 +351,7 @@ impl Options {
                 }
                 _ => {
                     return Err(
-                        "usage: paired-audio-lab [--require-tone] [--play [--select-output | --output-id-stdin | --output-id-framed] [--control]] [--status] [--signal-status] [--adaptive] [--startup-buffer-ms 20-120] [--keep-listening [--disconnect-after-ms 100-120000] [--reject-starts 1-36]] [--media-port PORT] [--bind IPv4 --host IPv4]"
+                        "usage: paired-audio-lab [--require-tone] [--play [--select-output | --output-id-stdin | --output-id-framed] [--control]] [--status] [--signal-status] [--adaptive] [--startup-buffer-ms 20-120] [--keep-listening [--disconnect-after-ms 100-120000 [--disconnect-count 1-20]] [--reject-starts 1-36]] [--media-port PORT] [--bind IPv4 --host IPv4]"
                             .into(),
                     );
                 }
@@ -363,6 +378,9 @@ impl Options {
         if result.disconnect_after_ms.is_some() && !result.keep_listening {
             return Err("--disconnect-after-ms requires --keep-listening".into());
         }
+        if result.disconnect_count.is_some() && result.disconnect_after_ms.is_none() {
+            return Err("--disconnect-count requires --disconnect-after-ms".into());
+        }
         if result.reject_starts > 0 && !result.keep_listening {
             return Err("--reject-starts requires --keep-listening".into());
         }
@@ -388,7 +406,7 @@ fn negotiate_hello(
     root: SessionSecret,
     options: &Options,
     playback: &mut Playback,
-    disconnect_after: &mut Option<Duration>,
+    disconnects_remaining: &mut u8,
     disconnect_injected: &mut bool,
     rejected_starts: &mut u8,
 ) -> LabResult<()> {
@@ -446,7 +464,7 @@ fn negotiate_hello(
         root,
         options,
         playback,
-        disconnect_after,
+        disconnects_remaining,
         disconnect_injected,
         rejected_starts,
     )
@@ -1015,7 +1033,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
     root: SessionSecret,
     options: &Options,
     playback: &mut Playback,
-    disconnect_after: &mut Option<Duration>,
+    disconnects_remaining: &mut u8,
     disconnect_injected: &mut bool,
     rejected_starts: &mut u8,
 ) -> LabResult<()> {
@@ -1041,7 +1059,13 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
     let mut draining_stale = false;
     let mut previous_decision: Option<(Instant, Duration)> = None;
     let mut playing = false;
-    let disconnect_deadline = disconnect_after.take().map(|delay| Instant::now() + delay);
+    let disconnect_deadline = if *disconnects_remaining > 0 {
+        options
+            .disconnect_after_ms
+            .map(|delay| Instant::now() + Duration::from_millis(delay))
+    } else {
+        None
+    };
     let decoded_peak = Arc::new(AtomicU32::new(0));
     let interval_peak = Arc::new(AtomicU32::new(0));
     let mut next_signal = None;
@@ -1051,6 +1075,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
         let loop_start = Instant::now();
         if receiver.is_some() && disconnect_deadline.is_some_and(|due| loop_start >= due) {
             lab_println!("RESULT injected control disconnect");
+            *disconnects_remaining -= 1;
             *disconnect_injected = true;
             return Err("test-injected control disconnect".into());
         }
@@ -2416,6 +2441,41 @@ mod tests {
         let disconnect =
             Options::parse(args(&["--keep-listening", "--disconnect-after-ms", "3000"])).unwrap();
         assert_eq!(disconnect.disconnect_after_ms, Some(3_000));
+        assert_eq!(disconnect.disconnect_count, None);
+        let repeated = Options::parse(args(&[
+            "--keep-listening",
+            "--disconnect-after-ms",
+            "3000",
+            "--disconnect-count",
+            "13",
+        ]))
+        .unwrap();
+        assert_eq!(repeated.disconnect_count, Some(13));
+        for value in ["0", "21", "invalid"] {
+            assert!(
+                Options::parse(args(&[
+                    "--keep-listening",
+                    "--disconnect-after-ms",
+                    "3000",
+                    "--disconnect-count",
+                    value,
+                ]))
+                .is_err()
+            );
+        }
+        assert!(Options::parse(args(&["--keep-listening", "--disconnect-count", "2"])).is_err());
+        assert!(
+            Options::parse(args(&[
+                "--keep-listening",
+                "--disconnect-after-ms",
+                "3000",
+                "--disconnect-count",
+                "2",
+                "--disconnect-count",
+                "3",
+            ]))
+            .is_err()
+        );
         for value in ["0", "99", "120001", "invalid"] {
             assert!(
                 Options::parse(args(&["--keep-listening", "--disconnect-after-ms", value,]))
