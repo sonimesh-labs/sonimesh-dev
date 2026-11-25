@@ -19,6 +19,8 @@ pub struct Endpoint {
     id: String,
     name: String,
     is_default: bool,
+    sample_rate: Option<u32>,
+    channels: Option<u16>,
 }
 
 #[cfg(windows)]
@@ -110,10 +112,13 @@ mod platform {
                     .map_err(|error| error.to_string())?
                     .name()
                     .to_owned();
+                let format = device.default_output_config().ok();
                 Ok(Endpoint {
                     is_default: default_id.as_ref() == Some(&id),
                     id: id.to_string(),
                     name,
+                    sample_rate: format.as_ref().map(|config| config.sample_rate()),
+                    channels: format.map(|config| config.channels()),
                 })
             })
             .collect()

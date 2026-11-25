@@ -676,6 +676,26 @@ it('starts and stops the Windows system-output PCM check', async () => {
   wrapper.unmount()
 })
 
+it('shows output endpoint format when Windows provides it', async () => {
+  const invoke = vi.fn((command: string) => {
+    if (command === 'bluetooth_status') return Promise.resolve('idle')
+    if (command === 'loopback_endpoints') return Promise.resolve([
+      { id: 'bt-endpoint', name: 'Bluetooth headphones', isDefault: true, sampleRate: 44100, channels: 2 },
+      { id: 'unknown-endpoint', name: 'Unavailable format', isDefault: false, sampleRate: null, channels: null },
+    ])
+    if (command === 'bluetooth_candidates') return Promise.resolve({ generation: 1, names: [] })
+    if (command === 'loopback_status') return Promise.resolve({ running: false, endpointName: '', sampleRate: 0, channels: 0, samples: 0, peak: 0, error: null })
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  const options = wrapper.findAll('#loopback-endpoint option').map(option => option.text())
+  expect(options).toContain('Bluetooth headphones (default, 44.1 kHz, 2 ch)')
+  expect(options).toContain('Unavailable format')
+  wrapper.unmount()
+})
+
 it('restarts a failed PCM monitor on the refreshed default endpoint', async () => {
   let endpointRefreshes = 0
   let recovered = false

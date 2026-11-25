@@ -2,7 +2,7 @@
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 
 type LoopbackSnapshot = { running: boolean; endpointName: string; sampleRate: number; channels: number; samples: number; peak: number; runPeak: number; error: string | null }
-type LoopbackEndpoint = { id: string; name: string; isDefault: boolean }
+type LoopbackEndpoint = { id: string; name: string; isDefault: boolean; sampleRate?: number | null; channels?: number | null }
 
 const names = ref<string[]>([])
 const LOOPBACK_NO_SAMPLES_DELAY_MS = 5000
@@ -55,6 +55,12 @@ let recoverBluetoothWait = false
 
 function sourceName() {
   return names.value[Number(selected.value)] ?? 'selected source'
+}
+
+function loopbackEndpointLabel(endpoint: LoopbackEndpoint) {
+  const details = [endpoint.isDefault ? 'default' : '', endpoint.sampleRate ? `${endpoint.sampleRate / 1000} kHz` : '', endpoint.channels ? `${endpoint.channels} ch` : '']
+    .filter(Boolean)
+  return details.length ? `${endpoint.name} (${details.join(', ')})` : endpoint.name
 }
 
 function selectAvailableLoopbackEndpoint(endpoints: LoopbackEndpoint[]) {
@@ -470,7 +476,7 @@ onBeforeUnmount(() => {
     <label for="loopback-endpoint">Output endpoint</label>
     <select id="loopback-endpoint" v-model="loopbackEndpointId" :disabled="loopbackBusy || loopback?.running" @change="rememberLoopbackEndpoint">
       <option value="" disabled>Select an output endpoint</option>
-      <option v-for="endpoint in loopbackEndpoints" :key="endpoint.id" :value="endpoint.id">{{ endpoint.name }}{{ endpoint.isDefault ? ' (default)' : '' }}</option>
+      <option v-for="endpoint in loopbackEndpoints" :key="endpoint.id" :value="endpoint.id">{{ loopbackEndpointLabel(endpoint) }}</option>
     </select>
     <p v-if="loopbackEndpointMessage" role="status">{{ loopbackEndpointMessage }}</p>
     <button type="button" class="preview-action" :disabled="loopbackBusy || loopbackToneBusy || (!loopback?.running && !loopbackEndpointId)" @click="toggleLoopback">{{ loopbackBusy ? 'Working...' : loopback?.running ? 'Stop PCM check' : 'Start PCM check' }}</button>
