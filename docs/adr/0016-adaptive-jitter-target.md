@@ -54,6 +54,12 @@ already handed to an output callback or device cannot be withdrawn. Stopped, unm
 output-unavailable streams reset their cadence. This is software scheduling
 behavior, not a latency or physical playback measurement.
 
+The scheduled desktop receiver also permits an optional fixed startup wait in
+frame durations, strictly below its jitter capacity. The default is zero. When
+enabled, the clock starts only after an encoded frame enters the jitter buffer;
+the wait is reapplied after stream-local recovery. The choice does not enable the
+adaptive target, guarantee a buffer occupancy, or establish physical latency.
+
 The scheduled desktop receiver also retires its stream-local decode and mixer
 epochs after three consecutive concealed frames when the jitter buffer is empty.
 It does so at the next playout deadline before polling new packets, allowing the

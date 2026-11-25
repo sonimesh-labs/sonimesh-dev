@@ -59,6 +59,11 @@ stall it retires queued audio and drains accumulated UDP in bounded batches
 before resuming from fresh packets. It resets its cadence when
 the matching stream or output is unavailable. The host must drive it more often
 than the frame interval; a live platform host still needs to adopt this path.
+The host may opt into a fixed startup wait measured in negotiated frame durations.
+The wait begins when an encoded frame is buffered and is bounded below the jitter
+capacity. It applies again after an interruption or output recovery; the default
+remains immediate drain. This is a software scheduling option, not a latency or
+audio-quality measurement.
 The scheduling result distinguishes idle, mismatched media identity, output
 failure, pending stream re-admission, and a ready media path. The preconfigured
 pipeline is not yet built from Start. Known pipeline contexts are checked

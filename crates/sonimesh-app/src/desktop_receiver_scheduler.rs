@@ -255,6 +255,7 @@ pub struct DesktopReceiverScheduler<
     scheduled_playout: Option<(crate::StreamStartRequest, u128, u128)>,
     scheduled_drain: Option<crate::StreamStartRequest>,
     scheduled_concealment: u8,
+    scheduled_startup_frames: u16,
 }
 
 impl<
@@ -299,6 +300,7 @@ where
             scheduled_playout: None,
             scheduled_drain: None,
             scheduled_concealment: 0,
+            scheduled_startup_frames: 0,
         }
     }
 
@@ -1317,6 +1319,93 @@ mod tests {
             .receiver_mut()
             .accept_and_execute(session, &start)
             .unwrap();
+        scheduler.set_scheduled_startup_frames(2).unwrap();
+        assert!(scheduler.set_scheduled_startup_frames(32).is_err());
+        assert!(matches!(
+            scheduler.tick_scheduled_at(1282).playout,
+            Ok(None)
+        ));
+        sender.send_frame(0, 45 * 480, &[1]).unwrap();
+        let buffering = scheduler.tick_scheduled_at(1283);
+        assert_eq!(buffering.packets.unwrap(), 1);
+        assert!(matches!(buffering.playout, Ok(None)));
+        scheduler.set_scheduled_startup_frames(1).unwrap();
+        assert!(matches!(
+            scheduler.tick_scheduled_at(1302).playout,
+            Ok(None)
+        ));
+        assert!(matches!(
+            scheduler.tick_scheduled_at(1303).playout,
+            Ok(Some(DecodeStep::Decoded { .. }))
+        ));
+        for now in [1313, 1323, 1333] {
+            assert!(matches!(
+                scheduler.tick_scheduled_at(now).playout,
+                Ok(Some(DecodeStep::Concealed { .. }))
+            ));
+        }
+        assert!(matches!(
+            scheduler.tick_scheduled_at(1343).playout,
+            Ok(None)
+        ));
+        sender.send_frame(0, 46 * 480, &[1]).unwrap();
+        assert!(matches!(
+            scheduler.tick_scheduled_at(1344).playout,
+            Ok(None)
+        ));
+        assert!(matches!(
+            scheduler.tick_scheduled_at(1353).playout,
+            Ok(None)
+        ));
+        assert!(matches!(
+            scheduler.tick_scheduled_at(1354).playout,
+            Ok(Some(DecodeStep::Decoded { .. }))
+        ));
+        scheduler
+            .receiver_mut()
+            .owner_mut()
+            .bridge_mut()
+            .mixer_mut()
+            .output_mut()
+            .health = OutputHealth::StreamError;
+        assert_eq!(
+            scheduler.tick_scheduled_at(1355).state,
+            super::ScheduledReceiverState::OutputUnavailable
+        );
+        scheduler
+            .receiver_mut()
+            .owner_mut()
+            .bridge_mut()
+            .mixer_mut()
+            .output_mut()
+            .health = OutputHealth::Healthy;
+        let identities = scheduler
+            .receiver_mut()
+            .owner_mut()
+            .bridge_mut()
+            .recover_output()
+            .unwrap();
+        scheduler
+            .receiver_mut()
+            .recover_stream(identities[0])
+            .unwrap();
+        assert!(matches!(
+            scheduler.tick_scheduled_at(1356).playout,
+            Ok(None)
+        ));
+        sender.send_frame(0, 47 * 480, &[1]).unwrap();
+        assert!(matches!(
+            scheduler.tick_scheduled_at(1357).playout,
+            Ok(None)
+        ));
+        assert!(matches!(
+            scheduler.tick_scheduled_at(1366).playout,
+            Ok(None)
+        ));
+        assert!(matches!(
+            scheduler.tick_scheduled_at(1367).playout,
+            Ok(Some(DecodeStep::Decoded { .. }))
+        ));
     }
 
     #[test]
@@ -1471,6 +1560,22 @@ where
     D: FrameDecoder,
     S: Read + Write,
 {
+    /// Sets the fixed wait before a newly buffered stream starts scheduled playout.
+    ///
+    /// Zero retains immediate playout. Changes apply at the next playout epoch;
+    /// they do not shift a deadline already in progress.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a nonzero wait is not strictly below jitter capacity.
+    pub fn set_scheduled_startup_frames(&mut self, frames: u16) -> Result<(), &'static str> {
+        if frames != 0 && usize::from(frames) >= JITTER_CAPACITY {
+            return Err("startup wait must be smaller than jitter capacity");
+        }
+        self.scheduled_startup_frames = frames;
+        Ok(())
+    }
+
     /// Runs one control and UDP media scheduler tick outside the output callback.
     ///
     /// Control, media and PCM conversion results are independent; inspect each
@@ -1559,7 +1664,11 @@ where
         } else {
             None
         };
-        if request.is_none() {
+        if request.is_none()
+            || self
+                .scheduled_playout
+                .is_some_and(|(previous, _, _)| Some(previous) != request)
+        {
             self.scheduled_playout = None;
             self.scheduled_concealment = 0;
         }
@@ -1674,20 +1783,33 @@ where
                 Ok(None)
             } else if let Some(request) = request {
                 let now = u128::from(now_ms);
-                let (deadline, earliest) = self
-                    .scheduled_playout
-                    .filter(|(previous, _, _)| *previous == request)
-                    .map_or((now, now), |(_, deadline, earliest)| (deadline, earliest));
-                if now < deadline || now < earliest {
+                if self.scheduled_startup_frames > 0
+                    && self.scheduled_playout.is_none()
+                    && self.receiver.pipeline_mut().jitter_len() > 0
+                {
+                    let due = now
+                        + u128::from(self.scheduled_startup_frames)
+                            * u128::from(request.frame_duration_ms);
+                    self.scheduled_playout = Some((request, due, due));
+                }
+                if self.scheduled_startup_frames > 0 && self.scheduled_playout.is_none() {
                     Ok(None)
                 } else {
-                    let interval = u128::from(request.frame_duration_ms);
-                    let next = deadline + ((now - deadline) / interval + 1) * interval;
-                    self.scheduled_playout = Some((request, next, now + interval / 2));
-                    self.receiver
-                        .decode_media(false)
-                        .map(Some)
-                        .map_err(ScheduledPlayoutError::Decode)
+                    let (deadline, earliest) = self
+                        .scheduled_playout
+                        .filter(|(previous, _, _)| *previous == request)
+                        .map_or((now, now), |(_, deadline, earliest)| (deadline, earliest));
+                    if now < deadline || now < earliest {
+                        Ok(None)
+                    } else {
+                        let interval = u128::from(request.frame_duration_ms);
+                        let next = deadline + ((now - deadline) / interval + 1) * interval;
+                        self.scheduled_playout = Some((request, next, now + interval / 2));
+                        self.receiver
+                            .decode_media(false)
+                            .map(Some)
+                            .map_err(ScheduledPlayoutError::Decode)
+                    }
                 }
             } else {
                 self.scheduled_playout = None;
