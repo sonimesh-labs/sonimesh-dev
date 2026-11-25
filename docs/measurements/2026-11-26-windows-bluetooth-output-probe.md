@@ -40,6 +40,12 @@
   operator disconnected. This exercises the direct-open failure fallback through
   the desktop command path and verifies cleanup. No phone playback was started,
   so it does not verify audible playback or a Bluetooth PCM source.
+- The combined **Connect + monitor (auto wait fallback)** action entered the
+  phone-wait state and started loopback on the selected default output. While no
+  phone playback was active, loopback reported zero samples and zero peak. The
+  operator disconnected; the UI returned to `Disconnected.` and offered **Start
+  PCM check**, confirming the combined monitor stopped. This verifies concurrent
+  startup and cleanup, not audio delivery to the endpoint.
 
 Commands run from the repository root:
 
