@@ -420,6 +420,14 @@ continuity evidence.
 ~~~powershell
 adb shell am instrument -w -e pairingInvitationHex $invitationHex -e mediaHost 10.0.2.2 -e reconnectTest true -e class 'com.sonimesh.opusspike.PairedCaptureTest#reconnects_after_desktop_disconnect_without_restarting_capture' com.sonimesh.opusspike.test/androidx.test.runner.AndroidJUnitRunner
 ~~~
+
+To check cancellation during the reconnect window, use the same listener and
+run `PairedCaptureTest#stops_capture_during_reconnect_without_restarting_session`
+with `-e reconnectTest true`. The test presses Stop after the first disconnect
+is reported and checks service/admission cleanup and paired worker termination.
+On 2026-11-25 this passed on an API 37 x86_64 emulator in 16 seconds. This is
+loopback lifecycle evidence only.
+
 On a normal paired stop, the capture worker is interrupted and the supervisor
 gets time to drain media and request a desktop StopStream confirmation. If it is
 still blocked, a background task closes the TLS socket after 3.5 seconds; TLS

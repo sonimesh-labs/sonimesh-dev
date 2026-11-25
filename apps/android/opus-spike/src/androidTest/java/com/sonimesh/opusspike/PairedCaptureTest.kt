@@ -111,12 +111,18 @@ class PairedCaptureTest {
     }
 
     @Test
+    fun stops_capture_during_reconnect_without_restarting_session() {
+        assumeTrue("reconnect test requires --disconnect-after-ms with --keep-listening", InstrumentationRegistry.getArguments().getString("reconnectTest") == "true")
+        runCapture(stopDuringReconnect = true)
+    }
+
+    @Test
     fun returns_to_active_capture_from_notification() = runCapture(notificationReturn = true)
 
     @Test
     fun mutes_and_resumes_sending_during_capture() = runCapture(testMute = true)
 
-    private fun runCapture(expectReconnect: Boolean = false, screenOff: Boolean = false, notificationReturn: Boolean = false, startFromScan: Boolean = false, startFromPaste: Boolean = false, recreate: Boolean = false, changeUsage: Boolean = false, testMute: Boolean = false, expectConnectionRetry: Boolean = false) {
+    private fun runCapture(expectReconnect: Boolean = false, stopDuringReconnect: Boolean = false, screenOff: Boolean = false, notificationReturn: Boolean = false, startFromScan: Boolean = false, startFromPaste: Boolean = false, recreate: Boolean = false, changeUsage: Boolean = false, testMute: Boolean = false, expectConnectionRetry: Boolean = false) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val args = InstrumentationRegistry.getArguments()
         var stopAcknowledgement = "unavailable"
@@ -238,7 +244,7 @@ class PairedCaptureTest {
                     assertTrue(containsStatus(activity.window.decorView, "Status: Capturing audio"))
                 }
             }
-            if (expectReconnect) {
+            if (expectReconnect || stopDuringReconnect) {
                 instrumentation.sendStatus(1, Bundle().apply { putString("pairedCapture", "ready") })
                 var disconnected = false
                 val disconnectDeadline = SystemClock.elapsedRealtime() + 20_000
@@ -249,6 +255,16 @@ class PairedCaptureTest {
                     if (!disconnected) SystemClock.sleep(100)
                 }
                 assertTrue("desktop disconnect was not reported", disconnected)
+                if (stopDuringReconnect) {
+                    scenario.onActivity { activity ->
+                        val stop = find(activity.window.decorView) {
+                            it is Button && it.text.toString() == "Stop capture"
+                        } as Button
+                        assertTrue("stop control is unavailable during reconnect", stop.isEnabled)
+                        assertTrue("stop control rejected reconnect cancellation", stop.performClick())
+                    }
+                }
+                if (!stopDuringReconnect) {
                 var observedDuration: Long? = null
                 val durationObserver: (Long?) -> Unit = { observedDuration = it }
                 scenario.onActivity { LabStatus.observeCaptureDuration(durationObserver) }
@@ -293,6 +309,7 @@ class PairedCaptureTest {
                         "media packets did not continue after desktop reconnect",
                         packetsAfterReconnectDrain > packetsBeforeReconnectDrain,
                     )
+                }
                 }
             } else {
                 if (testMute) {
@@ -501,6 +518,7 @@ class PairedCaptureTest {
                 assertTrue("stop capture control did not accept click", stopButton.performClick())
             }
             var stopAccepted = false
+            var stopAlreadyCompleted = false
             val stopAcceptedDeadline = SystemClock.elapsedRealtime() + 3_000
             while (!stopAccepted && SystemClock.elapsedRealtime() < stopAcceptedDeadline) {
                 scenario.onActivity { activity ->
@@ -508,16 +526,20 @@ class PairedCaptureTest {
                         it is TextView && it.text.toString().startsWith("Status:")
                     } as TextView
                     stopAcknowledgement = status.text.toString()
-                    stopAccepted = stopAcknowledgement.contains("Stopping capture")
+                    stopAlreadyCompleted = stopAcknowledgement.contains("Capture stopped") &&
+                        LabStatus.captureAdmission.canBegin()
+                    stopAccepted = stopAcknowledgement.contains("Stopping capture") || stopAlreadyCompleted
                 }
                 if (!stopAccepted) SystemClock.sleep(50)
             }
             assertTrue("service did not acknowledge stop", stopAccepted)
-            scenario.onActivity { activity ->
-                val stopButton = find(activity.window.decorView) {
-                    it is Button && it.text.toString() == "Stop capture"
-                } as Button
-                assertTrue("repeat stop capture control did not accept click", stopButton.performClick())
+            if (!stopAlreadyCompleted) {
+                scenario.onActivity { activity ->
+                    val stopButton = find(activity.window.decorView) {
+                        it is Button && it.text.toString() == "Stop capture"
+                    } as Button
+                    assertTrue("repeat stop capture control did not accept click", stopButton.performClick())
+                }
             }
             var stopped = false
             var statusAtStopDeadline = "unavailable"
