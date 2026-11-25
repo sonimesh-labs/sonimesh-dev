@@ -159,6 +159,11 @@ it('starts output monitoring before waiting for a phone connection', async () =>
       return Promise.resolve({ running: true, endpointName: 'Default speakers', sampleRate: 48000, channels: 2, samples: 0, peak: 0, error: null })
     }
     if (command === 'bluetooth_prepare') waiting = true
+    if (command === 'bluetooth_disconnect') waiting = false
+    if (command === 'loopback_stop') {
+      monitoring = false
+      return Promise.resolve({ running: false, endpointName: 'Default speakers', sampleRate: 48000, channels: 2, samples: 0, peak: 0, error: null })
+    }
     return Promise.resolve()
   })
   window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
@@ -173,6 +178,78 @@ it('starts output monitoring before waiting for a phone connection', async () =>
   expect(calls.indexOf('loopback_start')).toBeLessThan(calls.indexOf('bluetooth_prepare'))
   expect(wrapper.text()).toContain('Windows output monitoring is active.')
   expect(wrapper.text()).toContain('Waiting for Windows audio samples.')
+  await wrapper.findAll('button').find(button => button.text() === 'Disconnect Bluetooth')!.trigger('click')
+  await flushPromises()
+  expect(invoke).toHaveBeenCalledWith('loopback_stop')
+  expect(wrapper.text()).toContain('Disconnected.')
+  expect(wrapper.text()).not.toContain('Waiting for Windows audio samples.')
+  wrapper.unmount()
+})
+
+it('stops combined output monitoring when Windows closes an opened connection', async () => {
+  vi.useFakeTimers()
+  let phase = 'idle'
+  let monitoring = false
+  const invoke = vi.fn((command: string) => {
+    if (command === 'bluetooth_status') return Promise.resolve(phase)
+    if (command === 'bluetooth_candidates') return Promise.resolve({ generation: 8, names: ['Phone'] })
+    if (command === 'loopback_endpoints') return Promise.resolve([{ id: 'default-endpoint', name: 'Default speakers', isDefault: true }])
+    if (command === 'loopback_status') return Promise.resolve({ running: monitoring, endpointName: 'Default speakers', sampleRate: monitoring ? 48000 : 0, channels: monitoring ? 2 : 0, samples: 0, peak: 0, error: null })
+    if (command === 'loopback_start') {
+      monitoring = true
+      return Promise.resolve({ running: true, endpointName: 'Default speakers', sampleRate: 48000, channels: 2, samples: 0, peak: 0, error: null })
+    }
+    if (command === 'bluetooth_prepare') phase = 'waiting'
+    if (command === 'loopback_stop') {
+      monitoring = false
+      return Promise.resolve({ running: false, endpointName: 'Default speakers', sampleRate: 48000, channels: 2, samples: 0, peak: 0, error: null })
+    }
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  await wrapper.findAll('button').find(button => button.text() === 'Refresh Bluetooth sources')!.trigger('click')
+  await flushPromises()
+  await wrapper.get('#bluetooth-source').setValue('0')
+  await wrapper.findAll('button').find(button => button.text() === 'Wait + monitor system output')!.trigger('click')
+  await flushPromises()
+  phase = 'open'
+  await vi.advanceTimersByTimeAsync(1000)
+  expect(wrapper.text()).toContain('System playback connection opened for Phone.')
+  phase = 'idle'
+  await vi.advanceTimersByTimeAsync(1000)
+  await flushPromises()
+  expect(invoke).toHaveBeenCalledWith('loopback_stop')
+  expect(wrapper.text()).toContain('Windows closed the playback connection.')
+  expect(wrapper.text()).not.toContain('Waiting for Windows audio samples.')
+  wrapper.unmount()
+})
+
+it('keeps a pre-existing output monitor running after Bluetooth disconnects', async () => {
+  let phase = 'idle'
+  const invoke = vi.fn((command: string) => {
+    if (command === 'bluetooth_status') return Promise.resolve(phase)
+    if (command === 'bluetooth_candidates') return Promise.resolve({ generation: 9, names: ['Phone'] })
+    if (command === 'loopback_endpoints') return Promise.resolve([{ id: 'default-endpoint', name: 'Default speakers', isDefault: true }])
+    if (command === 'loopback_status') return Promise.resolve({ running: true, endpointName: 'Default speakers', sampleRate: 48000, channels: 2, samples: 10, peak: 0, error: null })
+    if (command === 'bluetooth_prepare') phase = 'waiting'
+    if (command === 'bluetooth_disconnect') phase = 'idle'
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  await wrapper.findAll('button').find(button => button.text() === 'Refresh Bluetooth sources')!.trigger('click')
+  await flushPromises()
+  await wrapper.get('#bluetooth-source').setValue('0')
+  await wrapper.findAll('button').find(button => button.text() === 'Wait + monitor system output')!.trigger('click')
+  await flushPromises()
+  await wrapper.findAll('button').find(button => button.text() === 'Disconnect Bluetooth')!.trigger('click')
+  await flushPromises()
+  expect(invoke).not.toHaveBeenCalledWith('loopback_start', expect.anything())
+  expect(invoke).not.toHaveBeenCalledWith('loopback_stop')
+  expect(wrapper.text()).toContain('Disconnected.')
   wrapper.unmount()
 })
 

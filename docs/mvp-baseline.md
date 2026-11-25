@@ -94,8 +94,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   system mix and does not establish
   source-specific Bluetooth capture. The probe also offers an explicit combined
   wait-and-monitor action that starts endpoint monitoring before preparing the
-  phone connection and stops a newly started monitor if preparation fails. On
-  2026-11-26, a Windows endpoint ID could
+  phone connection and stops its newly started monitor on Bluetooth disconnect,
+  system closure, or preparation failure, while leaving a pre-existing monitor
+  alone. On 2026-11-26, a Windows endpoint ID could
   be re-resolved and selected default and non-default endpoint loopback streams
   started and stopped. A combined Bluetooth-wait and default-output-loopback
   check also started and closed both successfully without playing audio. The

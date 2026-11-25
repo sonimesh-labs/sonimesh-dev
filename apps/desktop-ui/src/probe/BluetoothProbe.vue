@@ -18,10 +18,12 @@ const loopbackEndpoints = ref<LoopbackEndpoint[]>([])
 const loopbackEndpointId = ref('')
 const loopbackBusy = ref(false)
 const loopbackError = ref<string | null>(null)
+const combinedMonitorOwned = ref(false)
 let timer: ReturnType<typeof setTimeout> | undefined
 let loopbackTimer: ReturnType<typeof setTimeout> | undefined
 let disposed = false
 let statusRequest = 0
+let loopbackRequest = 0
 
 function sourceName() {
   return names.value[Number(selected.value)] ?? 'selected source'
@@ -54,6 +56,7 @@ async function poll() {
     if (state === 'idle') {
       phase.value = 'idle'
       message.value = 'Windows closed the playback connection.'
+      await stopCombinedMonitor()
       return
     }
     if (state === 'open' && phase.value === 'waiting') message.value = `System playback connection opened for ${sourceName()}.`
@@ -66,12 +69,17 @@ async function poll() {
 
 async function pollLoopback() {
   if (disposed || !loopback.value?.running) return
+  const request = loopbackRequest
   try {
-    loopback.value = await window.__TAURI__!.core.invoke<LoopbackSnapshot>('loopback_status')
+    const snapshot = await window.__TAURI__!.core.invoke<LoopbackSnapshot>('loopback_status')
+    if (disposed || request !== loopbackRequest) return
+    loopback.value = snapshot
   } catch (cause) {
-    if (loopback.value) loopback.value = { ...loopback.value, error: String(cause) }
+    if (!disposed && request === loopbackRequest && loopback.value) {
+      loopback.value = { ...loopback.value, error: String(cause) }
+    }
   }
-  if (!disposed && loopback.value?.running) loopbackTimer = setTimeout(pollLoopback, 1000)
+  if (!disposed && request === loopbackRequest && loopback.value?.running) loopbackTimer = setTimeout(pollLoopback, 1000)
 }
 
 async function refreshLoopbackEndpoints() {
@@ -94,15 +102,39 @@ async function toggleLoopback() {
   if (!window.__TAURI__ || (!loopback.value?.running && !loopbackEndpointId.value)) return
   loopbackBusy.value = true
   loopbackError.value = null
+  if (loopback.value?.running) {
+    loopbackRequest++
+    clearTimeout(loopbackTimer)
+  }
   try {
     const result = loopback.value?.running
       ? await window.__TAURI__.core.invoke<LoopbackSnapshot>('loopback_stop')
       : await window.__TAURI__.core.invoke<LoopbackSnapshot>('loopback_start', { endpointId: loopbackEndpointId.value })
     loopback.value = result
     if (result.running) void pollLoopback()
-    else clearTimeout(loopbackTimer)
+    else {
+      loopbackRequest++
+      clearTimeout(loopbackTimer)
+      combinedMonitorOwned.value = false
+    }
   } catch (cause) {
     loopbackError.value = String(cause)
+  } finally {
+    loopbackBusy.value = false
+  }
+}
+
+async function stopCombinedMonitor() {
+  if (!combinedMonitorOwned.value || !window.__TAURI__) return
+  loopbackRequest++
+  clearTimeout(loopbackTimer)
+  loopbackBusy.value = true
+  try {
+    loopback.value = await window.__TAURI__.core.invoke<LoopbackSnapshot>('loopback_stop')
+    combinedMonitorOwned.value = false
+  } catch (cause) {
+    loopbackError.value = String(cause)
+    if (loopback.value?.running) void pollLoopback()
   } finally {
     loopbackBusy.value = false
   }
@@ -124,6 +156,7 @@ async function toggle(mode: 'connect' | 'wait' = 'connect', monitorOutput = fals
       await window.__TAURI__.core.invoke('bluetooth_disconnect')
       phase.value = 'idle'
       clearTimeout(timer)
+      await stopCombinedMonitor()
       message.value = 'Disconnected.'
     } else {
       if (monitorOutput && !loopback.value?.running) {
@@ -132,6 +165,7 @@ async function toggle(mode: 'connect' | 'wait' = 'connect', monitorOutput = fals
           loopback.value = await window.__TAURI__.core.invoke<LoopbackSnapshot>('loopback_start', { endpointId: loopbackEndpointId.value })
           if (!loopback.value.running) throw new Error('Windows output monitoring did not start.')
           loopbackStartedHere = true
+          combinedMonitorOwned.value = true
         } catch (cause) {
           loopbackError.value = String(cause)
           throw cause
@@ -148,12 +182,7 @@ async function toggle(mode: 'connect' | 'wait' = 'connect', monitorOutput = fals
     }
   } catch (cause) {
     if (loopbackStartedHere) {
-      clearTimeout(loopbackTimer)
-      try {
-        loopback.value = await window.__TAURI__!.core.invoke<LoopbackSnapshot>('loopback_stop')
-      } catch (stopCause) {
-        loopbackError.value = String(stopCause)
-      }
+      await stopCombinedMonitor()
     }
     if (monitorOutput && !bluetoothAttempted) {
       loopbackError.value ||= String(cause)
@@ -192,7 +221,7 @@ onMounted(async () => {
   }
 })
 
-onBeforeUnmount(() => { disposed = true; statusRequest++; clearTimeout(timer); clearTimeout(loopbackTimer) })
+onBeforeUnmount(() => { disposed = true; statusRequest++; loopbackRequest++; clearTimeout(timer); clearTimeout(loopbackTimer) })
 </script>
 
 <template>
