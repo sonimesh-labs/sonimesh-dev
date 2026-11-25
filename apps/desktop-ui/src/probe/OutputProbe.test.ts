@@ -29,6 +29,44 @@ function mountStoppedProbe() {
 }
 
 describe('desktop output probe', () => {
+  it('restores and resets the saved control port', async () => {
+    localStorage.setItem('sonimesh.outputProbe.labSettings', JSON.stringify({ controlPort: 47612 }))
+    const invoke = vi.fn((command: string) => command === 'probe_outputs'
+      ? Promise.resolve({ generation: 1, devices: [] }) : Promise.resolve({ running: false }))
+    window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+    const wrapper = mountStoppedProbe()
+    await flushPromises()
+    expect((wrapper.get('#lab-control-port').element as HTMLInputElement).value).toBe('47612')
+    await wrapper.findAll('button').find(button => button.text() === 'Reset lab settings')!.trigger('click')
+    expect((wrapper.get('#lab-control-port').element as HTMLInputElement).value).toBe('47610')
+    wrapper.unmount()
+  })
+
+  it('validates, saves, and starts with the selected control port', async () => {
+    const running = { running: true, sessionActive: false, status: 'Waiting', invitation: null, metrics: null, volume: null, muted: null, controlPort: 47611 }
+    const invoke = vi.fn((command: string) => command === 'probe_outputs'
+      ? Promise.resolve({ generation: 1, devices: [] }) : Promise.resolve(running))
+    window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+    const wrapper = mountStoppedProbe()
+    await flushPromises()
+    const port = wrapper.get('#lab-control-port')
+    const start = wrapper.findAll('button').find(button => button.text() === 'Start listener')!
+    for (const invalid of ['', '0', '65536', '12x']) {
+      await port.setValue(invalid)
+      expect(start.attributes('disabled')).toBeDefined()
+      expect(port.attributes('aria-invalid')).toBe('true')
+    }
+    await port.setValue('47611')
+    expect(JSON.parse(localStorage.getItem('sonimesh.outputProbe.labSettings')!).controlPort).toBe(47611)
+    await start.trigger('click')
+    await flushPromises()
+    expect(invoke).toHaveBeenCalledWith('start_lab', expect.objectContaining({ controlPort: 47611 }))
+    expect(port.attributes('disabled')).toBeDefined()
+    expect(wrapper.get('#lab-control-port-help').text()).toContain('Running listener port: 47611')
+    expect(wrapper.findAll('button').find(button => button.text() === 'Stop listener')!.attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+
   it('validates and passes the receiver port while keeping stop available', async () => {
     const running = { running: true, sessionActive: false, status: 'Waiting', invitation: null, metrics: null, volume: null, muted: null }
     const invoke = vi.fn((command: string) => {
@@ -337,7 +375,7 @@ describe('desktop output probe', () => {
     expect((wrapper.get('#lab-host').element as HTMLInputElement).value).toBe('127.0.0.1')
     await wrapper.findAll('button').find(button => button.text() === 'Use address')!.trigger('click')
     await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
-    expect(invoke).toHaveBeenCalledWith('start_lab', { host: '192.168.1.10', generation: 1, index: null, startupBufferMs: 60, adaptive: false, mediaPort: 39093 })
+    expect(invoke).toHaveBeenCalledWith('start_lab', { host: '192.168.1.10', generation: 1, index: null, startupBufferMs: 60, adaptive: false, mediaPort: 39093, controlPort: 47610 })
     wrapper.unmount()
   })
 
@@ -530,7 +568,7 @@ describe('desktop output probe', () => {
     await wrapper.get('#lab-playout').setValue(true)
     await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
     await flushPromises()
-    expect(invoke).toHaveBeenCalledWith('start_lab', { host: '127.0.0.1', generation: 4, index: 1, startupBufferMs: 40, adaptive: true, mediaPort: 39093 })
+    expect(invoke).toHaveBeenCalledWith('start_lab', { host: '127.0.0.1', generation: 4, index: 1, startupBufferMs: 40, adaptive: true, mediaPort: 39093, controlPort: 47610 })
     expect(wrapper.get('#lab-buffer').attributes('disabled')).toBeDefined()
     expect(wrapper.get('#lab-output').attributes('disabled')).toBeDefined()
     expect(wrapper.get('button').attributes('disabled')).toBeDefined()
@@ -560,7 +598,7 @@ describe('desktop output probe', () => {
     expect(invoke).toHaveBeenCalledWith('probe_outputs', { generation: 4, selectedIndex: 1 })
     expect((wrapper.get('#lab-output').element as HTMLSelectElement).value).toBe('0')
     await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
-    expect(invoke).toHaveBeenCalledWith('start_lab', { host: '127.0.0.1', generation: 5, index: 0, startupBufferMs: 60, adaptive: false, mediaPort: 39093 })
+    expect(invoke).toHaveBeenCalledWith('start_lab', { host: '127.0.0.1', generation: 5, index: 0, startupBufferMs: 60, adaptive: false, mediaPort: 39093, controlPort: 47610 })
     wrapper.unmount()
   })
 
@@ -704,7 +742,7 @@ describe('desktop output probe', () => {
     await wrapper.get('#lab-host').setValue('10.0.2.2')
     await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
     await flushPromises()
-    expect(invoke).toHaveBeenCalledWith('start_lab', { host: '10.0.2.2', generation: 1, index: null, startupBufferMs: 60, adaptive: false, mediaPort: 39093 })
+    expect(invoke).toHaveBeenCalledWith('start_lab', { host: '10.0.2.2', generation: 1, index: null, startupBufferMs: 60, adaptive: false, mediaPort: 39093, controlPort: 47610 })
     expect(wrapper.text()).toContain('Starting listener')
     await wrapper.findAll('button').find(button => button.text() === 'Stop listener')!.trigger('click')
     await flushPromises()

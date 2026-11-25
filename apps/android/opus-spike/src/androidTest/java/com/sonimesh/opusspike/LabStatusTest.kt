@@ -23,6 +23,25 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class LabStatusTest {
     @Test
+    fun customControlPortInvitationSurvivesActivityRecreation() {
+        val invitation = labHex(labInvitation("ab".repeat(32), "127.0.0.1", 47612))
+        ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                val root = activity.window.decorView
+                requireNotNull(findTextField(root, "Lab invitation payload")).text = invitation
+                requireNotNull(findButton(root, "Apply invitation payload")).performClick()
+                assertTrue(hasStatus(root, "Status: Invitation applied. Check the desktop IPv4 for UDP separately. Control TCP port 47612."))
+            }
+            scenario.recreate()
+            scenario.onActivity { activity ->
+                val field = LabActivity::class.java.getDeclaredField("importedInvitation").apply { isAccessible = true }
+                assertEquals(invitation, labHex(field.get(activity) as ByteArray))
+                requireNotNull(findButton(activity.window.decorView, "Clear saved lab setup")).performClick()
+            }
+        }
+    }
+
+    @Test
     fun pairedCaptureStartIsVisibleAndValidatesTheCurrentSetup() {
         ActivityScenario.launch(LabActivity::class.java).use { scenario ->
             androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().waitForIdleSync()

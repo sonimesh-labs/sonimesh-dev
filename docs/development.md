@@ -1209,13 +1209,22 @@ capturing a test tone. The active signal status remained after recreation and
 the software listener decoded 309 frames with a 0.095 peak and no decode errors.
 This checks emulator loopback rather than continuous physical playback or WLAN.
 The control address defaults to `127.0.0.1` for ADB reverse; for a controlled LAN use an address Android can
-reach. The listener binds TCP 47610 on all IPv4 interfaces and uses UDP 39093;
-it plays through the selected output, or the default output when no device is
+reach. The listener defaults to TCP 47610 on all IPv4 interfaces and UDP 39093.
+The probe can select a different TCP control port before starting; its invitation
+contains that port so Android connects to the selected listener. For an emulator,
+configure the matching `adb reverse` mapping for the selected TCP port. Manual
+SPKI entry uses the default port; use the invitation for a different port. The lab
+plays through the selected output, or the default output when no device is
 selected. Refreshing the device list retains an explicitly selected output when
 the same endpoint remains available. If it disappears or its format is unavailable,
 choose another output or the system default before starting the listener. This
 reselection requirement persists when the probe view is reopened if local storage
 is available; an unavailable selection does not silently become the system default.
+On 2026-11-25, an API 37 x86_64 emulator used a port 47612 invitation and ADB
+reverse to pair, capture a test tone, send UDP audio, and stop; the software
+listener verified the decoded signal. The desktop probe separately started and
+stopped a listener on that port. These checks do not establish physical WLAN or
+audible playback.
 Choosing the system default clears any previously saved explicit device selection.
 The probe also honors a saved default when older settings retain a device description. On
 2026-11-23, an explicitly selected endpoint remained selected after a refresh in

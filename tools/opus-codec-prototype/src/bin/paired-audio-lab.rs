@@ -69,7 +69,7 @@ fn run() -> LabResult<()> {
     if options.control {
         playback.start_controls()?;
     }
-    let listener = PairingListener::bind(SocketAddrV4::new(options.bind, 47610))?;
+    let listener = PairingListener::bind(SocketAddrV4::new(options.bind, options.control_port))?;
     let address = listener.local_addr()?;
     let key = generate_simple_self_signed(vec!["localhost".to_owned()])?;
     let pin = key.key_pair.public_key_der();
@@ -83,7 +83,7 @@ fn run() -> LabResult<()> {
     for byte in &pin {
         write!(pin_hex, "{byte:02x}")?;
     }
-    let invitation = render_lab_invitation(pin.as_ref(), options.host)?;
+    let invitation = render_lab_invitation(pin.as_ref(), options.host, options.control_port)?;
     lab_println!("SPKI_HEX {pin_hex}");
     lab_println!("INVITATION_HEX {}", bytes_to_hex(&invitation));
     lab_println!("LISTENING {address}");
@@ -132,14 +132,14 @@ fn run() -> LabResult<()> {
     }
 }
 
-fn render_lab_invitation(pin: &[u8], host: Ipv4Addr) -> LabResult<Vec<u8>> {
+fn render_lab_invitation(pin: &[u8], host: Ipv4Addr, control_port: u16) -> LabResult<Vec<u8>> {
     let host = host.to_string();
     let payload = PairingQrPayload {
         protocol_version: u8::try_from(sonimesh_protocol::CONTROL_PROTOCOL_VERSION)?,
         pairing_id: LAB_ID,
         pairing_secret: LAB_SECRET,
         control_host: &host,
-        control_port: 47610,
+        control_port,
         desktop_tls_spki: pin,
         expires_at_ms: 120_100,
     };
@@ -183,7 +183,7 @@ fn run_session(
             id,
             pairing_secret: LAB_SECRET,
             control_host: &options.host.to_string(),
-            control_port: 47610,
+            control_port: options.control_port,
             desktop_tls_spki: pin,
             expires_at_ms: 120_100,
         },
@@ -236,6 +236,7 @@ struct Options {
     reject_starts: u8,
     bind: Ipv4Addr,
     host: Ipv4Addr,
+    control_port: u16,
     media_port: u16,
 }
 
@@ -259,6 +260,7 @@ impl Default for Options {
             reject_starts: 0,
             bind: Ipv4Addr::LOCALHOST,
             host: Ipv4Addr::LOCALHOST,
+            control_port: 47610,
             media_port: 39093,
         }
     }
@@ -272,6 +274,7 @@ impl Options {
         let mut bind_set = false;
         let mut host_set = false;
         let mut startup_buffer_set = false;
+        let mut control_port_set = false;
         let mut media_port_set = false;
         while let Some(arg) = args.next() {
             match arg.as_str() {
@@ -319,6 +322,16 @@ impl Options {
                     }
                     result.reject_starts = value;
                 }
+                "--control-port" if !control_port_set => {
+                    result.control_port = args
+                        .next()
+                        .ok_or("--control-port requires a port")?
+                        .parse()?;
+                    if result.control_port == 0 {
+                        return Err("control port must be nonzero".into());
+                    }
+                    control_port_set = true;
+                }
                 "--media-port" if !media_port_set => {
                     result.media_port =
                         args.next().ok_or("--media-port requires a port")?.parse()?;
@@ -355,7 +368,7 @@ impl Options {
                 }
                 _ => {
                     return Err(
-                        "usage: paired-audio-lab [--require-tone] [--check-probe] [--play [--select-output | --output-id-stdin | --output-id-framed] [--control]] [--status] [--signal-status] [--adaptive] [--startup-buffer-ms 20-120] [--keep-listening [--disconnect-after-ms 100-120000 [--disconnect-count 1-20]] [--reject-starts 1-36]] [--media-port PORT] [--bind IPv4 --host IPv4]"
+                        "usage: paired-audio-lab [--require-tone] [--check-probe] [--play [--select-output | --output-id-stdin | --output-id-framed] [--control]] [--status] [--signal-status] [--adaptive] [--startup-buffer-ms 20-120] [--keep-listening [--disconnect-after-ms 100-120000 [--disconnect-count 1-20]] [--reject-starts 1-36]] [--control-port PORT] [--media-port PORT] [--bind IPv4 --host IPv4]"
                             .into(),
                     );
                 }
@@ -2462,6 +2475,18 @@ mod tests {
         assert!(Options::parse(args(&["--signal-status", "--signal-status"])).is_err());
         assert!(Options::parse(args(&["--adaptive"])).unwrap().adaptive);
         assert!(Options::parse(args(&["--adaptive", "--adaptive"])).is_err());
+        assert_eq!(Options::parse(args(&[])).unwrap().control_port, 47610);
+        assert_eq!(
+            Options::parse(args(&["--control-port", "47611"]))
+                .unwrap()
+                .control_port,
+            47611
+        );
+        for value in ["0", "65536", "invalid"] {
+            assert!(Options::parse(args(&["--control-port", value])).is_err());
+        }
+        assert!(Options::parse(args(&["--control-port"])).is_err());
+        assert!(Options::parse(args(&["--control-port", "1", "--control-port", "2"])).is_err());
         assert_eq!(Options::parse(args(&[])).unwrap().media_port, 39093);
         assert_eq!(
             Options::parse(args(&["--media-port", "39094"]))
@@ -2623,13 +2648,14 @@ mod tests {
 
     #[test]
     fn rendered_lab_invitation_is_bounded_and_decodes_to_the_listener_host() {
-        let payload = render_lab_invitation(&[0xAB; 32], Ipv4Addr::new(10, 0, 2, 2)).unwrap();
+        let payload =
+            render_lab_invitation(&[0xAB; 32], Ipv4Addr::new(10, 0, 2, 2), 47611).unwrap();
         assert_eq!(payload.len(), 67 + "10.0.2.2".len() + 32);
         let decoded = sonimesh_protocol::parse_pairing_qr_payload(&payload).unwrap();
         assert_eq!(decoded.pairing_id, LAB_ID);
         assert_eq!(decoded.pairing_secret, LAB_SECRET);
         assert_eq!(decoded.control_host, "10.0.2.2");
-        assert_eq!(decoded.control_port, 47610);
+        assert_eq!(decoded.control_port, 47611);
         assert_eq!(decoded.desktop_tls_spki, &[0xAB; 32]);
         assert_eq!(bytes_to_hex(&payload).len(), payload.len() * 2);
     }

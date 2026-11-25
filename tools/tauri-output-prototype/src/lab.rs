@@ -27,6 +27,7 @@ pub struct LabSnapshot {
     pub muted: Option<bool>,
     pub session_active: bool,
     pub media_port: Option<u16>,
+    pub control_port: Option<u16>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -81,6 +82,7 @@ impl Default for LabSnapshot {
             muted: None,
             session_active: false,
             media_port: None,
+            control_port: None,
         }
     }
 }
@@ -130,6 +132,7 @@ impl Lab {
         startup_buffer_ms: u16,
         adaptive: bool,
         media_port: u16,
+        control_port: u16,
     ) -> Result<LabSnapshot, String> {
         self.refresh();
         if self.child.is_some() {
@@ -140,6 +143,9 @@ impl Lab {
         }
         if media_port == 0 {
             return Err("Receiver UDP port must be between 1 and 65535.".into());
+        }
+        if control_port == 0 {
+            return Err("Control TCP port must be between 1 and 65535.".into());
         }
         let host: Ipv4Addr = host.parse().map_err(|_| "Enter a valid IPv4 address.")?;
         if host.is_unspecified() || host.is_multicast() || host.is_broadcast() {
@@ -163,6 +169,8 @@ impl Lab {
                 &startup_buffer_ms.to_string(),
                 "--media-port",
                 &media_port.to_string(),
+                "--control-port",
+                &control_port.to_string(),
             ])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -218,6 +226,7 @@ impl Lab {
             muted: None,
             session_active: false,
             media_port: Some(media_port),
+            control_port: Some(control_port),
         };
         Ok(self.snapshot.clone())
     }
@@ -238,9 +247,10 @@ impl Lab {
                     self.snapshot.muted = None;
                     self.snapshot.session_active = false;
                     self.snapshot.media_port = None;
+                    self.snapshot.control_port = None;
                     self.snapshot.signal = None;
                     self.signal_received_at = None;
-                    self.snapshot.status = "Listener exited. Rebuild it and check the selected output device and whether port 47610 is in use.".into();
+                    self.snapshot.status = "Listener exited. Rebuild it and check the selected output device and whether the control TCP port is in use.".into();
                     self.child = None;
                     self.events = None;
                 }
@@ -271,6 +281,7 @@ impl Lab {
         self.snapshot.muted = None;
         self.snapshot.session_active = false;
         self.snapshot.media_port = None;
+        self.snapshot.control_port = None;
         self.snapshot.signal = None;
         self.snapshot.signal_stale = false;
         self.snapshot.clone()
@@ -758,12 +769,16 @@ mod tests {
     fn rejects_invalid_host_before_launch() {
         let mut lab = Lab::default();
         for host in ["invalid", "0.0.0.0", "224.0.0.1", "255.255.255.255"] {
-            assert!(lab.start(host, None, 60, false, 39093).is_err());
+            assert!(lab.start(host, None, 60, false, 39093, 47610).is_err());
         }
         for value in [0, 19, 30, 121, 140] {
-            assert!(lab.start("127.0.0.1", None, value, false, 39093).is_err());
+            assert!(
+                lab.start("127.0.0.1", None, value, false, 39093, 47610)
+                    .is_err()
+            );
         }
-        assert!(lab.start("127.0.0.1", None, 60, false, 0).is_err());
+        assert!(lab.start("127.0.0.1", None, 60, false, 0, 47610).is_err());
+        assert!(lab.start("127.0.0.1", None, 60, false, 39093, 0).is_err());
         assert!(!lab.refresh().running);
         assert!(lab.control(Some(101), None).is_err());
         assert!(lab.control(None, None).is_err());
@@ -1227,9 +1242,10 @@ mod tests {
         let device = output.default_device_probe().unwrap().device.id;
         let mut lab = Lab::default();
         let started = lab
-            .start("127.0.0.1", Some(device.as_str()), 40, false, 39094)
+            .start("127.0.0.1", Some(device.as_str()), 40, false, 39094, 47612)
             .unwrap();
         assert_eq!(started.media_port, Some(39094));
+        assert_eq!(started.control_port, Some(47612));
         let deadline = Instant::now() + Duration::from_secs(10);
         let snapshot = loop {
             let snapshot = lab.refresh();
@@ -1240,11 +1256,12 @@ mod tests {
         };
         assert!(snapshot.running, "{}", snapshot.status);
         assert_eq!(snapshot.media_port, Some(39094));
+        assert_eq!(snapshot.control_port, Some(47612));
         assert!(
             snapshot.invitation.is_some(),
             "listener did not publish an invitation"
         );
-        drop(std::net::TcpStream::connect("127.0.0.1:47610").unwrap());
+        drop(std::net::TcpStream::connect("127.0.0.1:47612").unwrap());
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
             let state = lab.refresh();
@@ -1279,7 +1296,10 @@ mod tests {
             );
             std::thread::sleep(Duration::from_millis(25));
         }
-        assert!(lab.start("127.0.0.1", None, 60, false, 39093).is_err());
+        assert!(
+            lab.start("127.0.0.1", None, 60, false, 39093, 47610)
+                .is_err()
+        );
         let stopped = lab.stop();
         assert!(!stopped.running);
         assert_eq!(stopped.media_port, None);
@@ -1293,7 +1313,14 @@ mod tests {
         assert!(lab.child.is_none());
 
         let restarted = lab
-            .start("127.0.0.1", Some("unavailable-output-id"), 60, false, 39093)
+            .start(
+                "127.0.0.1",
+                Some("unavailable-output-id"),
+                60,
+                false,
+                39093,
+                47610,
+            )
             .unwrap();
         assert!(restarted.events.is_empty());
         assert!(restarted.metrics.is_none());
@@ -1310,7 +1337,8 @@ mod tests {
     #[ignore = "requires the playback lab binary, Windows output and an installed API 37 emulator test"]
     fn emulator_capture_updates_real_listener_snapshot() {
         let mut lab = Lab::default();
-        lab.start("10.0.2.2", None, 60, false, 39094).unwrap();
+        lab.start("10.0.2.2", None, 60, false, 39094, 47610)
+            .unwrap();
         let deadline = Instant::now() + Duration::from_secs(10);
         let invitation = loop {
             let snapshot = lab.refresh();

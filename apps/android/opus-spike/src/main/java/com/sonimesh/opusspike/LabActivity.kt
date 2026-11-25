@@ -673,7 +673,6 @@ class LabActivity : Activity() {
             raw = parsed.payload
             val decoded = PairingQr.decode(requireNotNull(raw))
             try {
-                require(decoded.controlPort == 47610)
                 val udpAddress = parseLabAddress(decoded.controlHost)
                 require(decoded.controlHost == "127.0.0.1" || udpAddress != null)
                 val decodedPin = labHex(decoded.desktopTlsSpki)
@@ -701,7 +700,8 @@ class LabActivity : Activity() {
                 val portMessage = parsed.mediaPort?.let { " UDP port set to $it." } ?: ""
                 val addressMessage = if (useAddressForUdp && udpAddress != null) " UDP uses the same address."
                     else " Check the desktop IPv4 for UDP separately."
-                showSetupFeedback("Invitation applied.$portMessage$addressMessage")
+                val controlMessage = if (decoded.controlPort != 47610) " Control TCP port ${decoded.controlPort}." else ""
+                showSetupFeedback("Invitation applied.$portMessage$addressMessage$controlMessage")
             } finally {
                 decoded.pairingId.fill(0)
                 decoded.pairingSecret.fill(0)

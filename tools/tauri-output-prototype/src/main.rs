@@ -86,7 +86,7 @@ mod route_tests {
 
         let state = ProbeState::default();
         state
-            .start_listener(|lab| lab.start("127.0.0.1", None, 60, false, 39094))
+            .start_listener(|lab| lab.start("127.0.0.1", None, 60, false, 39094, 47610))
             .unwrap();
         let monitor = spawn_lab_monitor(&state.lab);
         let mut stdin = state.lab.lock().unwrap().test_take_stdin();
@@ -168,6 +168,7 @@ mod route_tests {
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // Independent listener and output selections from the probe.
 fn start_lab(
     state: tauri::State<'_, ProbeState>,
     host: String,
@@ -176,6 +177,7 @@ fn start_lab(
     startup_buffer_ms: u16,
     adaptive: bool,
     media_port: u16,
+    control_port: u16,
 ) -> Result<lab::LabSnapshot, String> {
     let output = match index {
         Some(index) => Some(
@@ -194,6 +196,7 @@ fn start_lab(
             startup_buffer_ms,
             adaptive,
             media_port,
+            control_port,
         )
     })
 }
