@@ -140,7 +140,7 @@ async function stopCombinedMonitor() {
   }
 }
 
-async function toggle(mode: 'connect' | 'wait' = 'connect', monitorOutput = false) {
+async function toggle(mode: 'connect' | 'wait' = 'connect', monitorOutput = false, fallbackToWait = false) {
   if (!window.__TAURI__) return
   busy.value = true
   if (monitorOutput) loopbackBusy.value = true
@@ -151,6 +151,7 @@ async function toggle(mode: 'connect' | 'wait' = 'connect', monitorOutput = fals
   clearTimeout(timer)
   let loopbackStartedHere = false
   let bluetoothAttempted = false
+  let directError: unknown
   try {
     if (phase.value !== 'idle') {
       await window.__TAURI__.core.invoke('bluetooth_disconnect')
@@ -172,10 +173,22 @@ async function toggle(mode: 'connect' | 'wait' = 'connect', monitorOutput = fals
         }
       }
       bluetoothAttempted = true
-      await window.__TAURI__.core.invoke(mode === 'wait' ? 'bluetooth_prepare' : 'bluetooth_connect', { generation: generation.value, index: Number(selected.value) })
-      phase.value = mode === 'wait' ? 'waiting' : 'open'
-      message.value = mode === 'wait'
-        ? `Waiting for the phone to connect to ${sourceName()} through Bluetooth.${monitorOutput ? ' Windows output monitoring is active.' : ''}`
+      let connectionMode = mode
+      if (fallbackToWait && mode === 'connect') {
+        try {
+          await window.__TAURI__.core.invoke('bluetooth_connect', { generation: generation.value, index: Number(selected.value) })
+        } catch (cause) {
+          directError = cause
+          await window.__TAURI__.core.invoke('bluetooth_prepare', { generation: generation.value, index: Number(selected.value) })
+          connectionMode = 'wait'
+          error.value = String(cause)
+        }
+      } else {
+        await window.__TAURI__.core.invoke(mode === 'wait' ? 'bluetooth_prepare' : 'bluetooth_connect', { generation: generation.value, index: Number(selected.value) })
+      }
+      phase.value = connectionMode === 'wait' ? 'waiting' : 'open'
+      message.value = connectionMode === 'wait'
+        ? `${directError ? 'Direct connection failed. ' : ''}Waiting for the phone to connect to ${sourceName()} through Bluetooth.${monitorOutput ? ' Windows output monitoring is active.' : ''}`
         : `System playback connection opened for ${sourceName()}.`
       if (loopbackStartedHere) void pollLoopback()
       void poll()
@@ -184,12 +197,14 @@ async function toggle(mode: 'connect' | 'wait' = 'connect', monitorOutput = fals
     if (loopbackStartedHere) {
       await stopCombinedMonitor()
     }
-    if (monitorOutput && !bluetoothAttempted) {
+    if (fallbackToWait && directError) {
+      error.value = `Direct connection failed: ${String(directError)} Phone-initiated wait also failed: ${String(cause)}`
+    } else if (monitorOutput && !bluetoothAttempted) {
       loopbackError.value ||= String(cause)
     } else {
       error.value = String(cause)
     }
-    suggestPhoneInitiated.value = mode === 'connect' && phase.value === 'idle'
+    suggestPhoneInitiated.value = !fallbackToWait && mode === 'connect' && phase.value === 'idle'
     if (phase.value !== 'idle') void poll()
   } finally {
     busy.value = false
@@ -241,6 +256,7 @@ onBeforeUnmount(() => { disposed = true; statusRequest++; loopbackRequest++; cle
     <button v-if="names.length || phase !== 'idle'" type="button" class="preview-action" :disabled="busy || (phase === 'idle' && selected === '')" @click="toggle('connect')">{{ phase === 'idle' ? 'Connect Bluetooth' : 'Disconnect Bluetooth' }}</button>
     <button v-if="names.length && phase === 'idle'" type="button" class="preview-action" :disabled="busy || selected === ''" @click="toggle('wait')">Wait for phone to connect</button>
     <button v-if="names.length && phase === 'idle'" type="button" class="preview-action" :disabled="busy || loopbackBusy || selected === '' || !loopbackEndpointId" @click="toggle('wait', true)">Wait + monitor system output</button>
+    <button v-if="names.length && phase === 'idle'" type="button" class="preview-action" :disabled="busy || loopbackBusy || selected === '' || !loopbackEndpointId" @click="toggle('connect', true, true)">Connect + monitor (auto wait fallback)</button>
     <p v-if="message" role="status">{{ message }}</p>
     <p v-if="error" class="command-error" role="alert">{{ error }}</p>
     <p v-if="suggestPhoneInitiated" role="status">Try waiting for the phone to connect, then start playback from the phone.</p>
