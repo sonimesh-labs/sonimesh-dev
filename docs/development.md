@@ -396,8 +396,9 @@ reported without this startup retry. After an established paired session drops,
 the experimental sender keeps its current projection, AudioRecord, and encoder
 running while it retries a new paired media session with a 500 ms to 4 s bounded
 backoff. Encoded packets from the retired session are discarded before sending
-under the new session. Twelve unsuccessful reconnect attempts end capture with
-an actionable status; Stop cancels an in-progress retry. Automatic recovery
+under the new session. Twelve consecutive unsuccessful reconnect attempts end
+capture with an actionable status; a successfully started media session resets
+that count. Stop cancels an in-progress retry. Automatic recovery
 requires the desktop lab to stay running with `--keep-listening`; otherwise the
 retry eventually ends. This behavior uses the public fixed lab fixture and is
 not the product pairing or reconnect policy.
@@ -464,16 +465,20 @@ received and decoded 172 packets. The established-session reconnect and mute
 notification tests passed separately. These are emulator loopback checks.
 
 To verify recovery after automatic reconnect exhaustion, run the listener with
-`--keep-listening --disconnect-after-ms 1000 --reject-starts 33` and invoke
+`--keep-listening --disconnect-after-ms 1000 --reject-starts 36` and invoke
 `PairedCaptureTest#retries_capture_after_reconnect_attempts_are_exhausted` with
-`-e recoveryTest true`. The initial disconnect counts as the first of the 12
-failures, leaving 11 paired reconnect sessions to exercise the listener's three
-StreamStart retries each. The test then selects fresh screen-capture consent
+`-e recoveryTest true`. The 12 paired reconnect sessions each exercise the
+listener's three StreamStart retries. The test then selects fresh screen-capture consent
 through Android's system dialog and checks that manual Retry starts a new
-capture. On 2026-11-25 this passed on an API 37 x86_64 emulator; the desktop
+capture. On 2026-11-25 this passed on an API 37 x86_64 emulator under the previous
+11-attempt counting behavior; the desktop
 listener accepted the manual session, received nine media packets, and decoded
 nine frames with a cumulative peak of 0.094. This is loopback recovery and
 decoder evidence, not audible playback or physical WLAN evidence.
+After changing the limit to 12 actual reconnect attempts, the same test passed
+with 36 injected rejections on 2026-11-25. The manual session started, but the
+listener received only two silent frames and failed its tone requirement; this
+run verifies the retry lifecycle, not resumed audible or non-silent media.
 On the same emulator, a later run stopped and restarted the test tone during
 reconnect, observed both signal transitions while the reconnect status remained
 visible, and then successfully retried after exhaustion. Separate normal-signal

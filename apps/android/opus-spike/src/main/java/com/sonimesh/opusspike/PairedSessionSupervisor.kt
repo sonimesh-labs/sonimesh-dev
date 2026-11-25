@@ -75,17 +75,17 @@ internal class PairedSessionSupervisor(
     }
 
     override fun run() {
-        var reconnectFailures = 0
+        val reconnectFailures = PairedReconnectFailures()
         try {
             while (running.get()) {
                 if (hasStartedSession) {
                     onStatus("Desktop connection lost. Reconnecting while capture continues…")
-                    if (!waitBeforeReconnect((reconnectFailures - 1).coerceAtLeast(0))) break
+                    if (!waitBeforeReconnect(reconnectFailures.count)) break
                 }
 
+                var sessionEstablished = false
                 try {
-                    runSession()
-                    reconnectFailures = 0
+                    runSession { sessionEstablished = true }
                 } catch (error: Exception) {
                     Log.i(TAG, "paired[$traceId] session ended (${error.javaClass.simpleName})")
                     if (!hasStartedSession) {
@@ -98,8 +98,8 @@ internal class PairedSessionSupervisor(
                         }
                         break
                     }
-                    reconnectFailures += 1
-                    if (reconnectFailures >= MAX_RECONNECT_ATTEMPTS) {
+                    reconnectFailures.sessionEnded(sessionEstablished)
+                    if (reconnectFailures.count >= MAX_RECONNECT_ATTEMPTS) {
                         onReconnectFailure("Desktop connection was not restored after $MAX_RECONNECT_ATTEMPTS attempts. Stop and start capture to try again.")
                         break
                     }
@@ -114,7 +114,7 @@ internal class PairedSessionSupervisor(
         }
     }
 
-    private fun runSession() {
+    private fun runSession(onEstablished: () -> Unit) {
         val connection = connect()
         activeSocket = connection.socket
         if (!running.get()) {
@@ -163,6 +163,7 @@ internal class PairedSessionSupervisor(
                 sendMedia(sessionActive, sealer)
             }, "audio-lab-paired-sender").also { it.start() }
             connection.socket.soTimeout = CONTROL_POLL_TIMEOUT_MS
+            onEstablished()
             if (hasStartedSession) {
                 onStatus("Desktop connection restored. Sending captured audio again.")
             } else {
@@ -284,3 +285,12 @@ internal class PairedSessionSupervisor(
 
 internal fun pairedReconnectDelayMillis(failures: Int): Long =
     minOf(500L shl failures.coerceIn(0, 3), 4_000L)
+
+internal class PairedReconnectFailures {
+    var count = 0
+        private set
+
+    fun sessionEnded(established: Boolean) {
+        count = if (established) 0 else count + 1
+    }
+}
