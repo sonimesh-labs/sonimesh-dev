@@ -86,8 +86,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   system closure status for the same experiment. Candidate discovery and
   connection setup run on Tauri's blocking task pool so WinRT waits do not occupy
   the UI runtime. An opt-in CPAL/WASAPI loopback meter reports the default
-  render endpoint name, format, sample count, and recent peak without retaining PCM; it observes the
-  system mix and does not establish source-specific Bluetooth capture. Two short Windows checks
+  render endpoint name, format, sample count, and recent peak for standard integer
+  and floating-point PCM formats without retaining PCM; it observes the system mix
+  and does not establish source-specific Bluetooth capture. Two short Windows checks
   accepted and closed the inbound-wait state, but phone-initiated playback and an
   application PCM source remain unverified
   (see `tools/windows-bluetooth-prototype/README.md`);

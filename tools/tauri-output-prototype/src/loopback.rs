@@ -16,7 +16,7 @@ pub struct Snapshot {
 mod platform {
     use super::Snapshot;
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-    use cpal::{SampleFormat, SizedSample, Stream, StreamConfig};
+    use cpal::{FromSample, SampleFormat, SizedSample, Stream, StreamConfig};
     use std::sync::{
         Arc,
         atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
@@ -54,8 +54,10 @@ mod platform {
         device: &cpal::Device,
         config: &StreamConfig,
         meter: Arc<Meter>,
-        convert: fn(T) -> f32,
-    ) -> Result<Stream, String> {
+    ) -> Result<Stream, String>
+    where
+        f32: FromSample<T>,
+    {
         let callback_meter = Arc::clone(&meter);
         device
             .build_input_stream(
@@ -63,7 +65,7 @@ mod platform {
                 move |data: &[T], _| {
                     let mut peak = 0.0_f32;
                     for sample in data {
-                        peak = peak.max(convert(*sample).abs());
+                        peak = peak.max(sample.to_sample::<f32>().abs());
                     }
                     callback_meter
                         .samples
@@ -101,19 +103,22 @@ mod platform {
             let config: StreamConfig = supported.config();
             let meter = Arc::new(Meter::default());
             let stream = match supported.sample_format() {
-                SampleFormat::F32 => {
-                    build_stream::<f32>(&device, &config, Arc::clone(&meter), |sample| sample)
+                SampleFormat::I8 => build_stream::<i8>(&device, &config, Arc::clone(&meter)),
+                SampleFormat::I16 => build_stream::<i16>(&device, &config, Arc::clone(&meter)),
+                SampleFormat::I24 => {
+                    build_stream::<cpal::I24>(&device, &config, Arc::clone(&meter))
                 }
-                SampleFormat::I16 => {
-                    build_stream::<i16>(&device, &config, Arc::clone(&meter), |sample| {
-                        sample as f32 / i16::MAX as f32
-                    })
+                SampleFormat::I32 => build_stream::<i32>(&device, &config, Arc::clone(&meter)),
+                SampleFormat::I64 => build_stream::<i64>(&device, &config, Arc::clone(&meter)),
+                SampleFormat::U8 => build_stream::<u8>(&device, &config, Arc::clone(&meter)),
+                SampleFormat::U16 => build_stream::<u16>(&device, &config, Arc::clone(&meter)),
+                SampleFormat::U24 => {
+                    build_stream::<cpal::U24>(&device, &config, Arc::clone(&meter))
                 }
-                SampleFormat::U16 => {
-                    build_stream::<u16>(&device, &config, Arc::clone(&meter), |sample| {
-                        (sample as f32 - 32768.0) / 32768.0
-                    })
-                }
+                SampleFormat::U32 => build_stream::<u32>(&device, &config, Arc::clone(&meter)),
+                SampleFormat::U64 => build_stream::<u64>(&device, &config, Arc::clone(&meter)),
+                SampleFormat::F32 => build_stream::<f32>(&device, &config, Arc::clone(&meter)),
+                SampleFormat::F64 => build_stream::<f64>(&device, &config, Arc::clone(&meter)),
                 format => Err(format!("Unsupported loopback sample format: {format:?}")),
             }?;
             stream.play().map_err(|error| error.to_string())?;
@@ -151,7 +156,23 @@ mod platform {
     #[cfg(test)]
     mod tests {
         use super::Meter;
+        use cpal::{FromSample, Sample};
         use std::sync::atomic::Ordering;
+
+        fn normalized<T: Sample>(sample: T) -> f32
+        where
+            f32: FromSample<T>,
+        {
+            sample.to_sample::<f32>()
+        }
+
+        #[test]
+        fn sample_formats_normalize_to_float_peak_range() {
+            assert_eq!(normalized(i8::MAX), 127.0 / 128.0);
+            assert_eq!(normalized(u8::MAX), 127.0 / 128.0);
+            assert_eq!(normalized(0_u16), -1.0);
+            assert_eq!(normalized(0.5_f64), 0.5);
+        }
 
         #[test]
         fn peak_is_reset_after_each_snapshot() {
