@@ -444,7 +444,13 @@ reconnect assertions. Android logs recorded an initial media session and a
 second session after the injected disconnect in both runs, but these logs do
 not establish that capture or audio delivery continued. The cause of the missing
 visible status remains unverified; the instrumentation must be rerun and
-investigated rather than counted as a pass.
+investigated rather than counted as a pass. A further diagnostic run observed
+`Connecting` with no capture duration or sent count at the startup assertion;
+its log showed slow codec initialization and an `AudioRecord.start` binder call.
+One earlier retry logged a MediaCodec configuration failure. A longer run timed
+out at 240 seconds, although the second listener session reported 167 decoded
+frames with nonzero peak. This is partial loopback evidence, not a passing
+instrumentation result or audible-playback evidence.
 
 ~~~powershell
 adb shell am instrument -w -e pairingInvitationHex $invitationHex -e mediaHost 10.0.2.2 -e reconnectTest true -e class 'com.sonimesh.opusspike.PairedCaptureTest#reconnects_after_desktop_disconnect_without_restarting_capture' com.sonimesh.opusspike.test/androidx.test.runner.AndroidJUnitRunner

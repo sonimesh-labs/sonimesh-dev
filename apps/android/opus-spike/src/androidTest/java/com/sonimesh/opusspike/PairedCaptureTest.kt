@@ -267,7 +267,16 @@ class PairedCaptureTest {
                 }
                 if (!capturing) SystemClock.sleep(100)
             }
-            assertTrue("capture did not start", capturing)
+            if (!capturing) {
+                var observation = "unavailable"
+                scenario.onActivity { activity ->
+                    val root = activity.window.decorView
+                    observation = listOf("Status:", "Capture signal:", "Capture duration:", "Media packets sent:").joinToString("; ") { prefix ->
+                        (find(root) { it is TextView && it.text.toString().startsWith(prefix) } as TextView).text.toString()
+                    } + "; test tone playing: ${activity.isTestTonePlaying()}"
+                }
+                throw AssertionError("capture did not start: $observation")
+            }
             if (testNotificationSignal) {
                 val manager = instrumentation.targetContext.getSystemService(NotificationManager::class.java)
                 fun notification() = manager.activeNotifications.firstOrNull { it.id == 1 }?.notification
