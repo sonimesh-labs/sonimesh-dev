@@ -46,6 +46,8 @@
   operator disconnected; the UI returned to `Disconnected.` and offered **Start
   PCM check**, confirming the combined monitor stopped. This verifies concurrent
   startup and cleanup, not audio delivery to the endpoint.
+- The local mobile-device tool exposes only an Android 9 x86_64 emulator, not a
+  physical Bluetooth source, so it cannot initiate the phone-side playback test.
 
 Commands run from the repository root:
 
