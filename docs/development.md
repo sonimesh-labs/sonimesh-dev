@@ -404,6 +404,8 @@ retry eventually ends. This behavior uses the public fixed lab fixture and is
 not the product pairing or reconnect policy.
 While reconnecting, the connection status remains visible even if the capture
 signal changes; the separate capture-signal indicator continues to update.
+The indicator reports signal on the first non-silent capture read, including
+when a new capture starts with audio already playing.
 
 To verify one established-session interruption on an API 37 emulator, start the
 listener with a one-time control disconnect after five seconds:
@@ -479,6 +481,10 @@ After changing the limit to 12 actual reconnect attempts, the same test passed
 with 36 injected rejections on 2026-11-25. The manual session started, but the
 listener received only two silent frames and failed its tone requirement; this
 run verifies the retry lifecycle, not resumed audible or non-silent media.
+After extending the test to wait for signal and media, another run on the same
+day passed and the listener decoded 207 frames with a peak of 0.093 before the
+session completed. This is emulator loopback evidence, not physical WLAN or
+audible playback evidence.
 On the same emulator, a later run stopped and restarted the test tone during
 reconnect, observed both signal transitions while the reconnect status remained
 visible, and then successfully retried after exhaustion. Separate normal-signal

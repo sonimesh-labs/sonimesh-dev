@@ -25,6 +25,7 @@ class LabSignalMonitorTest {
         val silence = ShortArray(1_920)
         val signal = ShortArray(1_920).apply { this[lastIndex] = -1 }
         repeat(99) { assertNull(monitor.observe(silence, 0, silence.size)) }
+        assertEquals(LabSignalTransition.SignalDetected, monitor.observe(signal, 0, signal.size))
         assertNull(monitor.observe(signal, 0, signal.size))
         repeat(99) { assertNull(monitor.observe(silence, 0, silence.size)) }
         assertEquals(LabSignalTransition.NoCapturableAudio, monitor.observe(silence, 0, silence.size))

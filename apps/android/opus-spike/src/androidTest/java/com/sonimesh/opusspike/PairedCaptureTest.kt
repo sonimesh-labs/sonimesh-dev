@@ -380,6 +380,21 @@ class PairedCaptureTest {
                         "manual retry did not start a new paired capture (status=$retryStatus, admissionCanBegin=$retryAdmissionCanBegin)",
                         capturingAgain,
                     )
+                    var resumedMedia = false
+                    val mediaDeadline = SystemClock.elapsedRealtime() + 10_000
+                    while (!resumedMedia && SystemClock.elapsedRealtime() < mediaDeadline) {
+                        scenario.onActivity { activity ->
+                            val root = activity.window.decorView
+                            val sent = find(root) {
+                                it is TextView && it.text.toString().matches(Regex("Media packets sent: [0-9]+"))
+                            } as TextView
+                            resumedMedia = sent.text.toString().substringAfter(": ").toLong() >= 25 &&
+                                containsStatus(root, "Capture signal: signal detected")
+                        }
+                        if (!resumedMedia) SystemClock.sleep(100)
+                    }
+                    assertTrue("manual retry did not resume sending captured signal", resumedMedia)
+                    SystemClock.sleep(3_000)
                 }
                 if (stopDuringReconnect) {
                     scenario.onActivity { activity ->
