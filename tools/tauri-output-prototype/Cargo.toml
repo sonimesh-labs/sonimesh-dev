@@ -12,6 +12,7 @@ tauri-build = "=2.6.3"
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 sonimesh-platform = { path = "../../crates/sonimesh-platform", features = ["cpal-output"] }
+cpal = "0.18.1"
 tauri = "=2.11.6"
 
 [target.'cfg(windows)'.dependencies]

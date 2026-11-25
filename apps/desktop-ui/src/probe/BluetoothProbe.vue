@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 
+type LoopbackSnapshot = { running: boolean; sampleRate: number; channels: number; samples: number; peak: number; error: string | null }
+
 const names = ref<string[]>([])
 const generation = ref(0)
 const selected = ref('')
@@ -9,7 +11,10 @@ const busy = ref(false)
 const phase = ref<'idle' | 'waiting' | 'open'>('idle')
 const error = ref<string | null>(null)
 const message = ref<string | null>(null)
+const loopback = ref<LoopbackSnapshot | null>(null)
+const loopbackBusy = ref(false)
 let timer: ReturnType<typeof setTimeout> | undefined
+let loopbackTimer: ReturnType<typeof setTimeout> | undefined
 let disposed = false
 let statusRequest = 0
 
@@ -51,6 +56,31 @@ async function poll() {
     if (!disposed && request === statusRequest) error.value = String(cause)
   }
   if (!disposed && request === statusRequest && phase.value !== 'idle') timer = setTimeout(poll, 1000)
+}
+
+async function pollLoopback() {
+  if (disposed || !loopback.value?.running) return
+  try {
+    loopback.value = await window.__TAURI__!.core.invoke<LoopbackSnapshot>('loopback_status')
+  } catch (cause) {
+    if (loopback.value) loopback.value = { ...loopback.value, error: String(cause) }
+  }
+  if (!disposed && loopback.value?.running) loopbackTimer = setTimeout(pollLoopback, 1000)
+}
+
+async function toggleLoopback() {
+  if (!window.__TAURI__) return
+  loopbackBusy.value = true
+  try {
+    const result = await window.__TAURI__.core.invoke<LoopbackSnapshot>(loopback.value?.running ? 'loopback_stop' : 'loopback_start')
+    loopback.value = result
+    if (result.running) void pollLoopback()
+    else clearTimeout(loopbackTimer)
+  } catch (cause) {
+    loopback.value = { running: false, sampleRate: 0, channels: 0, samples: 0, peak: 0, error: String(cause) }
+  } finally {
+    loopbackBusy.value = false
+  }
 }
 
 async function toggle(mode: 'connect' | 'wait' = 'connect') {
@@ -95,6 +125,9 @@ onMounted(async () => {
         : 'System playback connection is open.'
       void poll()
     }
+    const loopbackState = await window.__TAURI__.core.invoke<LoopbackSnapshot>('loopback_status')
+    loopback.value = loopbackState
+    if (loopbackState.running) void pollLoopback()
   } catch (cause) {
     if (!disposed && request === statusRequest) error.value = String(cause)
   } finally {
@@ -102,7 +135,7 @@ onMounted(async () => {
   }
 })
 
-onBeforeUnmount(() => { disposed = true; statusRequest++; clearTimeout(timer) })
+onBeforeUnmount(() => { disposed = true; statusRequest++; clearTimeout(timer); clearTimeout(loopbackTimer) })
 </script>
 
 <template>
@@ -123,5 +156,10 @@ onBeforeUnmount(() => { disposed = true; statusRequest++; clearTimeout(timer) })
     <button v-if="names.length && phase === 'idle'" type="button" class="preview-action" :disabled="busy || selected === ''" @click="toggle('wait')">Wait for phone to connect</button>
     <p v-if="message" role="status">{{ message }}</p>
     <p v-if="error" class="command-error" role="alert">{{ error }}</p>
+    <h3>System output PCM check</h3>
+    <p class="preview-note">Measures the default Windows playback mix; other apps' audio may also appear here.</p>
+    <button type="button" class="preview-action" :disabled="loopbackBusy" @click="toggleLoopback">{{ loopbackBusy ? 'Starting...' : loopback?.running ? 'Stop PCM check' : 'Start PCM check' }}</button>
+    <p v-if="loopback && (loopback.running || loopback.sampleRate > 0)" role="status">{{ loopback.sampleRate }} Hz, {{ loopback.channels }} channels; {{ loopback.samples }} samples; peak {{ (loopback.peak * 100).toFixed(1) }}%.</p>
+    <p v-if="loopback?.error" class="command-error" role="alert">{{ loopback.error }}</p>
   </section>
 </template>

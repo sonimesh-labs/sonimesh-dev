@@ -2,7 +2,7 @@
 
 > Status: architecture draft for feasibility validation
 > Version: 1.0.0
-> Updated: 2026-11-25
+> Updated: 2026-11-26
 
 This document describes the intended product boundary and engineering constraints
 for SoniMesh. It deliberately separates verified platform facts, implementation
@@ -300,8 +300,10 @@ A separate WASAPI loopback experiment may check whether system-routed Bluetooth
 audio can be observed as PCM at the selected render endpoint. Loopback captures
 the endpoint's rendered mix, not a source-isolated Bluetooth stream, so a positive
 result would need to be evaluated against the product's mixing requirements.
-This remains an experiment; it does not change the Bluetooth capability result
-until validated on Windows hardware.
+The desktop probe now has an opt-in meter for the default Windows render endpoint,
+implemented through CPAL's WASAPI loopback input. It reports format, sample count,
+and peak without storing PCM. This checks endpoint activity only; Bluetooth
+source capture remains unverified and the capability result stays unchanged.
 The operator may instead leave the selected connection started while waiting for
 the remote source to initiate it; the waiting state does not claim playback.
 

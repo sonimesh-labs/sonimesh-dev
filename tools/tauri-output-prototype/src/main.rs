@@ -1,6 +1,7 @@
 use serde::Serialize;
 mod bluetooth;
 mod lab;
+mod loopback;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
@@ -12,6 +13,39 @@ struct ProbeState {
     playing: Arc<AtomicBool>,
     lab: Arc<Mutex<lab::Lab>>,
     bluetooth: Arc<Mutex<bluetooth::Bluetooth>>,
+    loopback: Arc<Mutex<loopback::Monitor>>,
+}
+
+#[tauri::command]
+async fn loopback_start(state: tauri::State<'_, ProbeState>) -> Result<loopback::Snapshot, String> {
+    let loopback = Arc::clone(&state.loopback);
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        loopback
+            .lock()
+            .map_err(|_| "Loopback state unavailable.")?
+            .start()
+    })
+    .await
+    .map_err(|error| error.to_string())??;
+    Ok(result)
+}
+
+#[tauri::command]
+fn loopback_status(state: tauri::State<'_, ProbeState>) -> Result<loopback::Snapshot, String> {
+    Ok(state
+        .loopback
+        .lock()
+        .map_err(|_| "Loopback state unavailable.")?
+        .snapshot())
+}
+
+#[tauri::command]
+fn loopback_stop(state: tauri::State<'_, ProbeState>) -> Result<loopback::Snapshot, String> {
+    Ok(state
+        .loopback
+        .lock()
+        .map_err(|_| "Loopback state unavailable.")?
+        .stop())
 }
 
 #[tauri::command]
@@ -722,6 +756,9 @@ fn main() {
             bluetooth_prepare,
             bluetooth_status,
             bluetooth_disconnect,
+            loopback_start,
+            loopback_status,
+            loopback_stop,
             stop_lab,
             control_lab
         ])
@@ -735,6 +772,9 @@ fn main() {
                 }
                 if let Ok(mut bluetooth) = state.bluetooth.lock() {
                     let _ = bluetooth.disconnect();
+                }
+                if let Ok(mut loopback) = state.loopback.lock() {
+                    loopback.stop();
                 }
             }
         });
