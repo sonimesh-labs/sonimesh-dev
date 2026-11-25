@@ -52,6 +52,13 @@ accepts PCM 16/24/32-bit and IEEE float 32/64-bit WAVE files, including
 WAVE_FORMAT_EXTENSIBLE variants. Each run is printed as `offset_ms=...`, and
 with more than one recording a `min/p50/p95/p99/max` summary is printed.
 
+Multichannel files are averaged by default, including the reference. To use a
+known microphone channel instead, pass `--recording-channel N`, where `N` is
+one-based and must exist in every recording. For example, use
+`measure --recording-channel 2 reference.wav capture.wav` for the second
+channel. The tool does not automatically choose a channel; record the choice in
+the measurement report. Opposite-polarity channels can cancel when averaged.
+
 Pass `--offsets-only` to print just the per-run offset numbers, one per line.
 This composes with `summary` so offsets from separate measurement sessions can
 be accumulated and aggregated:

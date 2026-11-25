@@ -13,8 +13,8 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use sonimesh_latency_measurement::{
-    OffsetConfig, SampleFormat, estimate_offset_ms, read_info, read_mono, summarize_ms,
-    test_signal, write_mono,
+    OffsetConfig, SampleFormat, estimate_offset_ms, read_channel, read_info, read_mono,
+    summarize_ms, test_signal, write_mono,
 };
 
 /// SoniMesh control-plane sample-rate bounds the `generate` command accepts.
@@ -60,6 +60,7 @@ struct MeasureArgs {
     coarse_factor: usize,
     distinctness_ratio: f64,
     probe_ms: Option<f64>,
+    recording_channel: Option<usize>,
     reference: PathBuf,
     recordings: Vec<PathBuf>,
     /// Print only the per-run offset numbers, one per line, for piping into
@@ -123,8 +124,11 @@ fn run_measure(args: &MeasureArgs) -> Result<(), Box<dyn Error>> {
         .map_err(|error| format!("reference {}: {error}", args.reference.display()))?;
     let mut offsets_ms = Vec::with_capacity(args.recordings.len());
     for (index, path) in args.recordings.iter().enumerate() {
-        let recording =
-            read_mono(path).map_err(|error| format!("recording {}: {error}", path.display()))?;
+        let recording = match args.recording_channel {
+            Some(channel) => read_channel(path, channel),
+            None => read_mono(path),
+        }
+        .map_err(|error| format!("recording {}: {error}", path.display()))?;
         if recording.sample_rate_hz != reference.sample_rate_hz {
             return Err(format!(
                 "sample rate mismatch: reference {} Hz, {} is {} Hz",
@@ -369,6 +373,7 @@ fn parse_measure(rest: &[String]) -> Result<Option<MeasureArgs>, String> {
     let mut coarse_factor = 16_usize;
     let mut distinctness_ratio = 3.0_f64;
     let mut probe_ms: Option<f64> = None;
+    let mut recording_channel = None;
     let mut offsets_only = false;
     let mut paths: Vec<PathBuf> = Vec::new();
     let mut index = 0;
@@ -376,6 +381,14 @@ fn parse_measure(rest: &[String]) -> Result<Option<MeasureArgs>, String> {
         let arg = &rest[index];
         match arg.as_str() {
             "--offsets-only" => offsets_only = true,
+            "--recording-channel" => {
+                index += 1;
+                let channel = parse_usize(rest.get(index), "--recording-channel")?;
+                if channel == 0 {
+                    return Err("--recording-channel must be at least 1".into());
+                }
+                recording_channel = Some(channel);
+            }
             "--max-search-ms" => {
                 index += 1;
                 max_search_ms = parse_f64(rest.get(index), "--max-search-ms")?;
@@ -424,6 +437,7 @@ fn parse_measure(rest: &[String]) -> Result<Option<MeasureArgs>, String> {
         coarse_factor,
         distinctness_ratio,
         probe_ms,
+        recording_channel,
         reference,
         recordings,
         offsets_only,
@@ -484,7 +498,7 @@ fn print_usage() {
 
 Usage:
   sonimesh-latency-measurement generate [--sample-rate N] [--seconds N] [--seed N] [--bits FMT] <output.wav>
-  sonimesh-latency-measurement measure [--max-search-ms N] [--coarse-factor N] [--distinctness-ratio R] [--probe-ms N] [--offsets-only] <reference.wav> <recording.wav>...
+  sonimesh-latency-measurement measure [--max-search-ms N] [--coarse-factor N] [--distinctness-ratio R] [--probe-ms N] [--recording-channel N] [--offsets-only] <reference.wav> <recording.wav>...
   sonimesh-latency-measurement info [--check] <wave.wav>...
   sonimesh-latency-measurement summary
   sonimesh-latency-measurement --help
@@ -505,6 +519,7 @@ Options:
   --coarse-factor N       Coarse-search downsampling factor (default: 16).
   --distinctness-ratio R  Minimum best/second-best peak ratio (default: 3.0).
   --probe-ms N            Correlation probe duration in ms (default: 32768 samples, about 683 ms at 48 kHz).
+  --recording-channel N   Use one-based channel N in every recording (default: average).
   --offsets-only          Print only per-run offsets (one per line) for summary.
   --check                 Fail unless all files share the same sample rate (info).
 

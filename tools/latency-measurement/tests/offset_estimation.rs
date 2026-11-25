@@ -166,6 +166,77 @@ fn empty_search_window_is_rejected() {
 }
 
 #[test]
+fn cli_selects_recording_channel_and_checks_each_file() {
+    let bin = env!("CARGO_BIN_EXE_sonimesh-latency-measurement");
+    let dir = test_dir("recording_channel");
+    std::fs::create_dir_all(&dir).expect("create temp dir");
+    let reference_path = dir.join("reference.wav");
+    let stereo_path = dir.join("stereo.wav");
+    let mono_path = dir.join("mono.wav");
+    let reference = test_signal(SAMPLE_RATE, 3, 7);
+    let recording = delayed_recording(12_000, &reference);
+    write_mono(
+        &reference_path,
+        SAMPLE_RATE,
+        &reference,
+        SampleFormat::Float32,
+    )
+    .unwrap();
+    write_mono(&mono_path, SAMPLE_RATE, &recording, SampleFormat::Float32).unwrap();
+    // Build interleaved float channels with equal and opposite polarity.
+    let mut bytes =
+        sonimesh_latency_measurement::encode_mono(SAMPLE_RATE, &[], SampleFormat::Float32);
+    let data_size = u32::try_from(recording.len() * 8).unwrap();
+    bytes[4..8].copy_from_slice(&(36 + data_size).to_le_bytes());
+    bytes[22..24].copy_from_slice(&2_u16.to_le_bytes());
+    bytes[28..32].copy_from_slice(&(SAMPLE_RATE * 8).to_le_bytes());
+    bytes[32..34].copy_from_slice(&8_u16.to_le_bytes());
+    bytes[40..44].copy_from_slice(&data_size.to_le_bytes());
+    for sample in recording {
+        bytes.extend_from_slice(&(-sample).to_le_bytes());
+        bytes.extend_from_slice(&sample.to_le_bytes());
+    }
+    std::fs::write(&stereo_path, bytes).unwrap();
+    let run = |options: &[&str], recordings: &[&std::path::Path]| {
+        Command::new(bin)
+            .arg("measure")
+            .args(options)
+            .arg(&reference_path)
+            .args(recordings)
+            .output()
+            .expect("measure runs")
+    };
+    let averaged = run(&[], &[&stereo_path]);
+    assert!(!averaged.status.success(), "opposite channels cancel");
+    let selected = run(
+        &["--recording-channel", "2", "--offsets-only"],
+        &[&stereo_path],
+    );
+    assert!(
+        selected.status.success(),
+        "{}",
+        String::from_utf8_lossy(&selected.stderr)
+    );
+    let offset: f64 = String::from_utf8(selected.stdout)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    assert!((offset - 250.0).abs() < 0.1);
+    let invalid = run(&["--recording-channel", "2"], &[&stereo_path, &mono_path]);
+    let error = String::from_utf8_lossy(&invalid.stderr);
+    assert!(!invalid.status.success());
+    assert!(
+        error.contains("mono.wav") && error.contains("channel 2") && error.contains("1 channel"),
+        "{error}"
+    );
+    let zero = run(&["--recording-channel", "0"], &[&stereo_path]);
+    assert!(!zero.status.success());
+    assert!(String::from_utf8_lossy(&zero.stderr).contains("must be at least 1"));
+    std::fs::remove_dir_all(&dir).expect("cleanup temp dir");
+}
+
+#[test]
 fn cli_generate_and_measure_round_trip() {
     for format in [
         SampleFormat::Pcm16,

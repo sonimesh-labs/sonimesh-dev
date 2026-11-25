@@ -16,5 +16,5 @@ pub use signal::{MLS_PERIOD, mls_sequence, test_signal};
 pub use stats::{LatencySummary, percentile, summarize_ms};
 pub use wav::{
     MonoWav, SampleFormat, WavError, WavInfo, encode_mono, encode_mono_16bit, inspect_mono,
-    parse_mono, read_info, read_mono, write_mono, write_mono_16bit,
+    parse_channel, parse_mono, read_channel, read_info, read_mono, write_mono, write_mono_16bit,
 };

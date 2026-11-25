@@ -3,7 +3,7 @@
 //! Only the subset needed by the latency tool is supported: PCM 16/24/32-bit and
 //! IEEE-float 32/64-bit mono or multi-channel WAVE files, including their
 //! WAVE_FORMAT_EXTENSIBLE variants. Multi-channel input is down-mixed to mono
-//! by averaging frames.
+//! by averaging frames unless a channel is selected explicitly.
 
 use std::fmt;
 use std::path::Path;
@@ -30,6 +30,13 @@ pub enum WavError {
     },
     /// The format chunk declares zero channels.
     ZeroChannels,
+    /// The requested one-based channel does not exist in the file.
+    InvalidChannel {
+        /// Requested one-based channel number.
+        channel: usize,
+        /// Number of channels declared by the file.
+        channels: u16,
+    },
     /// The format chunk declares a zero sample rate.
     ZeroSampleRate,
     /// The file contains no audio frames.
@@ -53,6 +60,10 @@ impl fmt::Display for WavError {
                 )
             }
             Self::ZeroChannels => formatter.write_str("wave format declares zero channels"),
+            Self::InvalidChannel { channel, channels } => write!(
+                formatter,
+                "channel {channel} is out of range; wave file has {channels} channel(s)"
+            ),
             Self::ZeroSampleRate => formatter.write_str("wave format declares a zero sample rate"),
             Self::Empty => formatter.write_str("wave file contains no audio frames"),
         }
@@ -69,6 +80,7 @@ impl std::error::Error for WavError {
             | Self::Truncated
             | Self::UnsupportedFormat { .. }
             | Self::ZeroChannels
+            | Self::InvalidChannel { .. }
             | Self::ZeroSampleRate
             | Self::Empty => None,
         }
@@ -93,6 +105,16 @@ pub struct MonoWav {
 pub fn read_mono(path: &Path) -> Result<MonoWav, WavError> {
     let bytes = std::fs::read(path).map_err(WavError::Io)?;
     parse_mono(&bytes)
+}
+
+/// Reads one channel of a WAVE file, numbered from 1.
+///
+/// # Errors
+///
+/// Returns [`WavError`] if the file cannot be read or the channel is invalid.
+pub fn read_channel(path: &Path, channel: usize) -> Result<MonoWav, WavError> {
+    let bytes = std::fs::read(path).map_err(WavError::Io)?;
+    parse_channel(&bytes, channel)
 }
 
 /// Reads a WAVE file and reports its declared properties.
@@ -310,8 +332,29 @@ pub fn inspect_mono(bytes: &[u8]) -> Result<WavInfo, WavError> {
 /// Panics only on an internal fixed-slice conversion that the length checks in
 /// this function prevent from failing.
 pub fn parse_mono(bytes: &[u8]) -> Result<MonoWav, WavError> {
+    parse_selected(bytes, None)
+}
+
+/// Parses one channel of WAVE bytes, numbered from 1.
+///
+/// # Errors
+///
+/// Returns [`WavError`] if the WAVE file or selected channel is invalid.
+pub fn parse_channel(bytes: &[u8], channel: usize) -> Result<MonoWav, WavError> {
+    parse_selected(bytes, Some(channel))
+}
+
+fn parse_selected(bytes: &[u8], channel: Option<usize>) -> Result<MonoWav, WavError> {
     let (format, data) = parse_wave(bytes)?;
-    let samples = decode_frames(&format, data)?;
+    if let Some(channel) = channel {
+        if channel == 0 || channel > usize::from(format.channels) {
+            return Err(WavError::InvalidChannel {
+                channel,
+                channels: format.channels,
+            });
+        }
+    }
+    let samples = decode_frames(&format, data, channel)?;
     if samples.is_empty() {
         return Err(WavError::Empty);
     }
@@ -450,7 +493,11 @@ fn bytes_per_sample(format: &FormatInfo) -> Result<usize, WavError> {
 }
 
 #[allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
-fn decode_frames(format: &FormatInfo, data: &[u8]) -> Result<Vec<f32>, WavError> {
+fn decode_frames(
+    format: &FormatInfo,
+    data: &[u8],
+    selected: Option<usize>,
+) -> Result<Vec<f32>, WavError> {
     let bytes_per_sample = bytes_per_sample(format)?;
     let channels = usize::from(format.channels);
     let frame_bytes = channels * bytes_per_sample;
@@ -462,7 +509,8 @@ fn decode_frames(format: &FormatInfo, data: &[u8]) -> Result<Vec<f32>, WavError>
     for frame in 0..frame_count {
         let base = frame * frame_bytes;
         let mut sum = 0.0_f64;
-        for channel in 0..channels {
+        let range = selected.map_or(0..channels, |channel| channel - 1..channel);
+        for channel in range {
             let sample_offset = base + channel * bytes_per_sample;
             let value = match (format.audio_format, format.bits_per_sample) {
                 (1, 16) => {
@@ -509,7 +557,13 @@ fn decode_frames(format: &FormatInfo, data: &[u8]) -> Result<Vec<f32>, WavError>
             };
             sum += value;
         }
-        mono.push((sum / channels as f64) as f32);
+        mono.push(
+            (sum / if selected.is_some() {
+                1.0
+            } else {
+                channels as f64
+            }) as f32,
+        );
     }
     Ok(mono)
 }
@@ -703,6 +757,28 @@ mod tests {
         assert_eq!(parsed.samples.len(), 2);
         assert!((parsed.samples[0] - 1_024.0 / 32_768.0).abs() < 1e-6);
         assert!(parsed.samples[1].abs() < 1e-6);
+        assert_eq!(
+            parse_channel(&bytes, 1).unwrap().samples,
+            vec![0.0, -0.0625]
+        );
+        assert_eq!(
+            parse_channel(&bytes, 2).unwrap().samples,
+            vec![0.0625, 0.0625]
+        );
+        assert!(matches!(
+            parse_channel(&bytes, 0),
+            Err(WavError::InvalidChannel {
+                channel: 0,
+                channels: 2
+            })
+        ));
+        assert!(matches!(
+            parse_channel(&bytes, 3),
+            Err(WavError::InvalidChannel {
+                channel: 3,
+                channels: 2
+            })
+        ));
     }
 
     #[test]
