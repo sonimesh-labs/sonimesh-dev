@@ -96,6 +96,10 @@
   is retried when present, otherwise the refreshed default is selected; no
   available endpoint leaves the error visible. These are mocked state-flow tests,
   not physical output-device removal evidence.
+- A repeated hardware fallback check again returned Windows error `0x8007001F`
+  for direct open, then entered inbound wait and closed back to idle. This
+  confirms the host's existing direct-open limitation and fallback cleanup; no
+  phone-initiated playback occurred.
 
 Commands run from the repository root:
 
