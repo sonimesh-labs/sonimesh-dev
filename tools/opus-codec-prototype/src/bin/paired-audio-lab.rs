@@ -584,12 +584,15 @@ struct ResyncObservation {
     dropped: usize,
     loop_gap: Option<Duration>,
     previous_decision: Option<(Duration, Duration)>,
+    batch_packet: usize,
+    previous_packet_gap: Option<Duration>,
 }
 
 #[derive(Default)]
 struct ResyncObservations {
     total: u64,
     first: [Option<ResyncObservation>; 8],
+    last_packet: Option<Instant>,
 }
 
 impl ResyncObservations {
@@ -598,14 +601,21 @@ impl ResyncObservations {
         admission: InsertOutcome,
         loop_gap: Option<Duration>,
         previous_decision: Option<(Instant, Duration)>,
+        batch_packet: usize,
         now: Instant,
     ) {
+        let previous_packet_gap = self
+            .last_packet
+            .replace(now)
+            .map(|previous| now.duration_since(previous));
         if let InsertOutcome::Resynchronized { dropped_frames } = admission {
             self.record(ResyncObservation {
                 dropped: dropped_frames,
                 loop_gap,
                 previous_decision: previous_decision
                     .map(|(when, lateness)| (now.duration_since(when), lateness)),
+                batch_packet,
+                previous_packet_gap,
             });
         }
     }
@@ -635,10 +645,14 @@ impl ResyncObservations {
                     )
                 },
             );
+            let packet_gap = event
+                .previous_packet_gap
+                .map_or_else(|| "none".to_owned(), |gap| gap.as_micros().to_string());
             lab_println!(
-                "RESULT resync event {} dropped {} loop_gap_us {loop_gap} decision_age_us {age} decision_lateness_us {lateness}",
+                "RESULT resync event {} dropped {} loop_gap_us {loop_gap} decision_age_us {age} decision_lateness_us {lateness} batch_packet {} previous_packet_gap_us {packet_gap}",
                 index + 1,
                 event.dropped,
+                event.batch_packet,
             );
         }
     }
@@ -1237,6 +1251,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                             retry_at = None;
                             last_output_state = None;
                             receiver = Some(Box::new(pipeline));
+                            resyncs.last_packet = None;
                             consumer = if playing { None } else { Some(next_consumer) };
                             counters = Some(metrics);
                             coordinator.complete_start(token, request)?;
@@ -1361,19 +1376,20 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
             if draining_stale {
                 draining_stale = !drain_stale_media(pipeline)?;
             } else {
+                let mut batch_packet = 0;
                 for _ in 0..MAX_MEDIA_POLLS {
                     match poll_media(pipeline)? {
                         None => continue,
                         Some(UdpPollOutcome::Empty) => break,
                         Some(UdpPollOutcome::Processed { admission, .. }) => {
-                            if matches!(admission, InsertOutcome::Resynchronized { .. }) {
-                                resyncs.observe_admission(
-                                    admission,
-                                    loop_gap,
-                                    previous_decision,
-                                    Instant::now(),
-                                );
-                            }
+                            batch_packet += 1;
+                            resyncs.observe_admission(
+                                admission,
+                                loop_gap,
+                                previous_decision,
+                                batch_packet,
+                                Instant::now(),
+                            );
                             if next_playout.is_none() && retry_at.is_none() {
                                 next_playout = Some(Instant::now() + options.startup_buffer);
                             }
@@ -2261,6 +2277,8 @@ mod tests {
                 loop_gap: Some(Duration::from_millis(dropped as u64)),
                 previous_decision: (dropped != 0)
                     .then_some((Duration::from_millis(5), Duration::from_millis(2))),
+                batch_packet: 1,
+                previous_packet_gap: None,
             });
         }
         assert_eq!(observations.total, 12);
@@ -2323,7 +2341,8 @@ mod tests {
                         admission,
                         Some(Duration::from_millis(3)),
                         Some((now, Duration::from_millis(1))),
-                        now + Duration::from_millis(5),
+                        usize::try_from(sequence + 1).unwrap(),
+                        now + Duration::from_millis(5 + sequence),
                     );
                     break;
                 }
@@ -2338,8 +2357,10 @@ mod tests {
         assert_eq!(event.loop_gap, Some(Duration::from_millis(3)));
         assert_eq!(
             event.previous_decision,
-            Some((Duration::from_millis(5), Duration::from_millis(1)))
+            Some((Duration::from_millis(13), Duration::from_millis(1)))
         );
+        assert_eq!(event.batch_packet, 9);
+        assert_eq!(event.previous_packet_gap, Some(Duration::from_millis(1)));
     }
 
     #[test]

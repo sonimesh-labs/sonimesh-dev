@@ -718,10 +718,21 @@ On normal stop, `RESULT resync` reports up to the first eight live jitter-buffer
 resynchronizations: the number of buffered frames discarded, the interval since
 the preceding receive-loop iteration, and the age and lateness of the most recent
 playout decision when available. A total event count indicates omitted events.
+For each event the report also includes its packet number within the current
+receive-loop batch and the interval since the previous admitted packet was
+observed by that loop. These are application polling observations, not kernel
+arrival timestamps or proof of the sender's pacing.
 These observations are captured in memory and printed after the stop drain; they
 exclude resynchronizations during that drain. Loop intervals are not packet
 arrival times, and a nearby delay does not establish why a resynchronization
 occurred.
+On 2026-11-25, an API 37 x86_64 emulator paired-probe run decoded 391 frames,
+detected the probe, and reported 16 late packets and 32 resynchronization drops.
+All four recorded resynchronizations occurred on the first admitted packet in
+their receive-loop batch, with previous observed packet gaps of 1,465–9,903 µs.
+The loop had no decisions at least one frame late. This single run demonstrates
+the new observations but does not locate the source of the short intervals or
+establish a physical-network result.
 On 2026-11-23, two separate API 37 x86_64 emulator sessions exercised the new
 report with ADB-reversed control and software output. The notification-return
 test decoded 192 frames, with zero resynchronizations and no frame-late
