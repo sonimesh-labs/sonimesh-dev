@@ -348,7 +348,16 @@ jitter, duplication, reorder delay, byte-counted bandwidth serialization,
 queue-capacity pressure, and bounded sender-side socket-buffer backpressure.
 Its audio scenario accepts an explicit complete media datagram size bounded by
 the protocol limit and uses the negotiated 10/20 ms frame timing model. A
-seeded property walk (`scenario_property.rs`) drives that audio scenario
+single-stream scheduler experiment can also release frames in fixed batches of
+up to eight, at the capture time of each batch's final frame. This idealized
+model compares burst release with per-frame release over the same virtual link;
+it does not model encoder or sender queues, pacing, reconnects, or stop drain.
+Its adaptive jitter input remains the simulated link-delay deviation, so it does
+not measure arrival-spacing jitter caused by the batched sender. In the built-in
+51-frame lossless comparison, batches of four add three gated ticks (60 ms)
+relative to individual release; both play all frames without PLC or resync.
+This is a model result, not a physical latency measurement.
+A seeded property walk (`scenario_property.rs`) drives that audio scenario
 under random bounded profiles, first with loss, reorder, duplication, and
 jitter alone and then with a finite serial link and a bounded sender-side
 socket buffer, and asserts determinism, playout-or-PLC accounting,

@@ -114,6 +114,8 @@ pub enum JitterSchedulerScenarioError {
     InvalidInitialPlayout,
     /// Gate deadline must be between one and the explicit hard bound.
     InvalidMaxGateTicks,
+    /// Sender batch must contain between one and eight frames.
+    InvalidSenderBatch,
     /// Complete media datagram size must fit the version-one packet limit.
     InvalidMediaDatagramBytes,
     /// Controller frame duration must match the scheduling frame duration.
@@ -143,6 +145,9 @@ impl fmt::Display for JitterSchedulerScenarioError {
                 .write_str("invalid scheduler scenario: initial scheduler tick exceeds one second"),
             Self::InvalidMaxGateTicks => formatter.write_str(
                 "invalid scheduler scenario: gate deadline is outside the explicit bound",
+            ),
+            Self::InvalidSenderBatch => formatter.write_str(
+                "invalid scheduler scenario: sender batch must be between one and eight frames",
             ),
             Self::InvalidMediaDatagramBytes => formatter.write_str(
                 "invalid scheduler scenario: media datagram size is outside the protocol bound",
@@ -179,6 +184,7 @@ impl std::error::Error for JitterSchedulerScenarioError {
             | Self::InvalidFrameDuration
             | Self::InvalidInitialPlayout
             | Self::InvalidMaxGateTicks
+            | Self::InvalidSenderBatch
             | Self::InvalidMediaDatagramBytes
             | Self::TargetFrameDurationMismatch
             | Self::TargetBufferCapacityMismatch
@@ -209,6 +215,26 @@ impl std::error::Error for JitterSchedulerScenarioError {
 pub fn simulate_jitter_scheduler(
     config: JitterSchedulerScenarioConfig,
 ) -> Result<JitterSchedulerSimulationReport, JitterSchedulerScenarioError> {
+    simulate_jitter_scheduler_batched(config, 1)
+}
+
+/// Runs the scheduler with frames released in batches at the final frame's capture time.
+///
+/// This models burst release only, not a sender queue or a pacing policy. The
+/// final partial batch is released at its final frame's capture time.
+///
+/// # Errors
+///
+/// Returns the same errors as [`simulate_jitter_scheduler`], or
+/// [`JitterSchedulerScenarioError::InvalidSenderBatch`] for a batch outside 1..=8.
+#[allow(clippy::too_many_lines)]
+pub fn simulate_jitter_scheduler_batched(
+    config: JitterSchedulerScenarioConfig,
+    batch_frames: u32,
+) -> Result<JitterSchedulerSimulationReport, JitterSchedulerScenarioError> {
+    if !(1..=8).contains(&batch_frames) {
+        return Err(JitterSchedulerScenarioError::InvalidSenderBatch);
+    }
     let frame = validate(config)?;
     let mut target =
         AdaptiveJitterTarget::new(config.target).map_err(JitterSchedulerScenarioError::Target)?;
@@ -242,7 +268,8 @@ pub fn simulate_jitter_scheduler(
     };
     let mut last_arrival_jitter_ms = 0_u32;
     let mut next_send_sequence = 0_u32;
-    let mut next_send_ms = 0_u64;
+    let mut next_send_ms =
+        u64::from(batch_frames.min(config.frames) - 1) * config.frame_duration_ms;
     let mut next_playout_ms = config.initial_playout_ms;
     let nominal_completion_ms = config.initial_playout_ms.saturating_add(
         u64::from(config.frames.saturating_sub(1)).saturating_mul(config.frame_duration_ms),
@@ -263,13 +290,24 @@ pub fn simulate_jitter_scheduler(
     while state.consumed_frames < config.frames && clock.now_ms() <= hard_end_ms {
         let now_ms = clock.now_ms();
         if next_send_sequence < config.frames && now_ms == next_send_ms {
-            network.send(
-                now_ms,
-                next_send_sequence,
-                u64::from(config.media_datagram_bytes),
-            );
-            next_send_sequence += 1;
-            next_send_ms = next_send_ms.saturating_add(config.frame_duration_ms);
+            let batch_end = next_send_sequence
+                .saturating_add(batch_frames)
+                .min(config.frames);
+            while next_send_sequence < batch_end {
+                network.send(
+                    now_ms,
+                    next_send_sequence,
+                    u64::from(config.media_datagram_bytes),
+                );
+                next_send_sequence += 1;
+            }
+            if next_send_sequence < config.frames {
+                let final_sequence = next_send_sequence
+                    .saturating_add(batch_frames)
+                    .min(config.frames)
+                    - 1;
+                next_send_ms = u64::from(final_sequence) * config.frame_duration_ms;
+            }
         }
 
         for delivery in network.drain_ready(now_ms) {

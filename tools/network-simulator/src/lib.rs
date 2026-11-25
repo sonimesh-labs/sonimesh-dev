@@ -26,7 +26,7 @@ pub use drift_scenario::{
 };
 pub use jitter_scheduler_scenario::{
     JitterSchedulerScenarioConfig, JitterSchedulerScenarioError, JitterSchedulerSimulationReport,
-    simulate_jitter_scheduler,
+    simulate_jitter_scheduler, simulate_jitter_scheduler_batched,
 };
 pub use jitter_target_scenario::{
     JitterTargetScenarioConfig, JitterTargetScenarioError, JitterTargetSimulationReport,

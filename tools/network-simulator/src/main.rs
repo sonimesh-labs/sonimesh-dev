@@ -10,11 +10,36 @@ use sonimesh_network_simulator::{
     MixerJitterSchedulerScenarioConfig, MixerMembershipScenarioConfig,
     MultiStreamJitterTargetScenarioConfig, MultiStreamScenarioConfig, NetworkProfile,
     ScenarioConfig, opus_experiment_cases, simulate, simulate_control_reconnect, simulate_drift,
-    simulate_jitter_scheduler, simulate_jitter_target, simulate_mixer_controller_membership,
-    simulate_mixer_drift, simulate_mixer_jitter_scheduler, simulate_mixer_membership,
-    simulate_multi_stream, simulate_multi_stream_jitter_target, simulate_opus_experiment,
-    simulate_opus_worker_experiment,
+    simulate_jitter_scheduler, simulate_jitter_scheduler_batched, simulate_jitter_target,
+    simulate_mixer_controller_membership, simulate_mixer_drift, simulate_mixer_jitter_scheduler,
+    simulate_mixer_membership, simulate_multi_stream, simulate_multi_stream_jitter_target,
+    simulate_opus_experiment, simulate_opus_worker_experiment,
 };
+
+fn run_sender_burst_comparison() {
+    let mut burst_link = NetworkProfile::stable(0x5A17_2026);
+    burst_link.jitter_ms = 0;
+    burst_link.reorder_delay_ms = 0;
+    let burst_config = JitterSchedulerScenarioConfig {
+        frames: 51,
+        network: burst_link,
+        ..JitterSchedulerScenarioConfig::default()
+    };
+    for batch in [1, 4] {
+        let report = simulate_jitter_scheduler_batched(burst_config, batch)
+            .expect("built-in sender burst experiment is valid");
+        println!(
+            "sender_batch={batch} submitted={} playout={} plc={} late={} resyncs={} gated={} excess_latency_ms={}",
+            report.network.submitted_packets,
+            report.playout.playout_frames,
+            report.playout.plc_frames,
+            report.playout.late_frames,
+            report.playout.resynchronizations,
+            report.gated_ticks,
+            report.excess_latency_ms,
+        );
+    }
+}
 
 fn main() {
     println!("SoniMesh deterministic virtual-network profiles");
@@ -44,6 +69,8 @@ fn main() {
     }
 
     run_shaped_profile();
+
+    run_sender_burst_comparison();
 
     println!("SoniMesh codec-neutral Opus experiment suite");
     for case_ in opus_experiment_cases() {

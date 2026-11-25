@@ -10,7 +10,7 @@
 use sonimesh_audio::{JitterMode, JitterTargetConfig};
 use sonimesh_network_simulator::{
     JitterSchedulerScenarioConfig, JitterSchedulerScenarioError, NetworkProfile, ProfileError,
-    simulate_jitter_scheduler,
+    simulate_jitter_scheduler, simulate_jitter_scheduler_batched,
 };
 
 /// Deterministic lossless link with fixed 20 ms base delay and no jitter.
@@ -19,6 +19,39 @@ fn lossless(seed: u64) -> NetworkProfile {
     network.jitter_ms = 0;
     network.reorder_delay_ms = 0;
     network
+}
+
+#[test]
+fn batched_sender_releases_a_partial_last_batch_and_is_deterministic() {
+    let config = JitterSchedulerScenarioConfig {
+        frames: 51,
+        network: lossless(0x0A0C_2030),
+        ..JitterSchedulerScenarioConfig::default()
+    };
+    let normal = simulate_jitter_scheduler(config).unwrap();
+    assert_eq!(
+        normal,
+        simulate_jitter_scheduler_batched(config, 1).unwrap()
+    );
+    let batched = simulate_jitter_scheduler_batched(config, 4).unwrap();
+    assert_eq!(
+        batched,
+        simulate_jitter_scheduler_batched(config, 4).unwrap()
+    );
+    assert_eq!(batched.network.submitted_packets, u64::from(config.frames));
+    assert_eq!(
+        batched.playout.playout_frames + batched.playout.plc_frames,
+        config.frames
+    );
+    assert!(batched.gated_ticks > normal.gated_ticks);
+    assert_eq!(
+        simulate_jitter_scheduler_batched(config, 0),
+        Err(JitterSchedulerScenarioError::InvalidSenderBatch)
+    );
+    assert_eq!(
+        simulate_jitter_scheduler_batched(config, 9),
+        Err(JitterSchedulerScenarioError::InvalidSenderBatch)
+    );
 }
 
 #[test]
