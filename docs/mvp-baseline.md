@@ -98,7 +98,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   source-specific Bluetooth capture. If the running endpoint has not delivered
   samples after five seconds, the probe suggests starting playback and checking
   the selected endpoint; the prompt clears when samples arrive or monitoring
-  stops. The probe also offers an explicit combined
+  stops. While monitoring, an integrated low-level test tone can be played on
+  the selected endpoint to check that the meter responds. The probe also offers
+  an explicit combined
   wait-and-monitor action that starts endpoint monitoring before preparing the
   phone connection and stops its newly started monitor on Bluetooth disconnect,
   system closure, or preparation failure, while leaving a pre-existing monitor

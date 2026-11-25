@@ -536,6 +536,29 @@ async fn play_test_tone(
     }
 }
 
+#[tauri::command]
+async fn loopback_test_tone(
+    state: tauri::State<'_, ProbeState>,
+    endpoint_id: String,
+) -> Result<(), &'static str> {
+    #[cfg(windows)]
+    {
+        let id = sonimesh_platform::OutputDeviceId::new(endpoint_id);
+        let guard = state.reserve_tone()?;
+        tauri::async_runtime::spawn_blocking(move || {
+            let _guard = guard;
+            play_tone(&id)
+        })
+        .await
+        .map_err(|_| "Could not play output test tone.")?
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (state, endpoint_id);
+        Err("Output testing is available only on Windows.")
+    }
+}
+
 #[cfg(windows)]
 fn play_tone(id: &sonimesh_platform::OutputDeviceId) -> Result<(), &'static str> {
     use sonimesh_platform::{AudioOutput, CpalOutput, MAX_CALLBACK_FRAMES};
@@ -782,6 +805,7 @@ fn main() {
             bluetooth_disconnect,
             loopback_endpoints,
             loopback_start,
+            loopback_test_tone,
             loopback_status,
             loopback_stop,
             stop_lab,

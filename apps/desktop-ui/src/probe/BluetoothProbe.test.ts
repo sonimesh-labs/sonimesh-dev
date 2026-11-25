@@ -499,6 +499,30 @@ it('starts and stops the Windows system-output PCM check', async () => {
   wrapper.unmount()
 })
 
+it('plays a short tone on the monitored endpoint and refreshes its meter', async () => {
+  let running = false
+  let samples = 0
+  const invoke = vi.fn((command: string) => {
+    if (command === 'bluetooth_status') return Promise.resolve('idle')
+    if (command === 'loopback_endpoints') return Promise.resolve([{ id: 'default-endpoint', name: 'Default speakers', isDefault: true }])
+    if (command === 'loopback_status') return Promise.resolve({ running, endpointName: 'Default speakers', sampleRate: running ? 48000 : 0, channels: running ? 2 : 0, samples, peak: samples ? 0.04 : 0, error: null })
+    if (command === 'loopback_start') { running = true; return Promise.resolve({ running, endpointName: 'Default speakers', sampleRate: 48000, channels: 2, samples, peak: 0, error: null }) }
+    if (command === 'loopback_test_tone') { samples = 192000; return Promise.resolve() }
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  await wrapper.findAll('button').find(button => button.text() === 'Start PCM check')!.trigger('click')
+  await flushPromises()
+  await wrapper.findAll('button').find(button => button.text() === 'Play test tone')!.trigger('click')
+  await flushPromises()
+  expect(invoke).toHaveBeenCalledWith('loopback_test_tone', { endpointId: 'default-endpoint' })
+  expect(wrapper.text()).toContain('Test tone finished.')
+  expect(wrapper.text()).toContain('192000 samples; recent peak 4.0%')
+  wrapper.unmount()
+})
+
 it('distinguishes an open PCM stream with no recent signal', async () => {
   const invoke = vi.fn((command: string) => {
     if (command === 'bluetooth_status') return Promise.resolve('idle')

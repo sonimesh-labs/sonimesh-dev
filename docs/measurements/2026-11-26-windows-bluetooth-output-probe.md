@@ -65,6 +65,11 @@
   endpoint's Windows output mix is observable and that its recent-peak display
   updates; it does not identify which application produced audio or establish a
   Bluetooth-specific PCM source.
+- The Bluetooth panel's integrated **Play test tone** action was exercised while
+  the selected default endpoint monitor was active. During playback, the UI
+  displayed 153,600 samples, a 4.0% recent peak, and PCM activity. The monitor
+  was stopped and the temporary probe closed. This verifies the integrated
+  playback-to-meter path, not audible quality or Bluetooth-specific capture.
 - The local mobile-device tool exposes only an Android 9 x86_64 emulator, not a
   physical Bluetooth source, so it cannot initiate the phone-side playback test.
 
