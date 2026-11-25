@@ -82,6 +82,24 @@ it('restores the selected PCM endpoint when reopening the Bluetooth probe', asyn
   reopened.unmount()
 })
 
+it('reports the fallback when the remembered PCM endpoint is unavailable', async () => {
+  localStorage.setItem('sonimesh.bluetoothProbe.loopbackEndpoint', 'removed-output')
+  const invoke = vi.fn((command: string) => {
+    if (command === 'bluetooth_status') return Promise.resolve('idle')
+    if (command === 'bluetooth_candidates') return Promise.resolve({ generation: 1, names: [] })
+    if (command === 'loopback_status') return Promise.resolve({ running: false, endpointName: '', sampleRate: 0, channels: 0, samples: 0, peak: 0, error: null })
+    if (command === 'loopback_endpoints') return Promise.resolve([{ id: 'default-output', name: 'Speakers', isDefault: true }])
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  expect((wrapper.get('#loopback-endpoint').element as HTMLSelectElement).value).toBe('default-output')
+  expect(wrapper.text()).toContain('Saved output endpoint is unavailable. Using Speakers.')
+  expect(localStorage.getItem('sonimesh.bluetoothProbe.loopbackEndpoint')).toBe('removed-output')
+  wrapper.unmount()
+})
+
 it('preserves the selected source by name when discovery order changes', async () => {
   let generation = 0
   const invoke = vi.fn((command: string) => {
@@ -657,6 +675,7 @@ it('restarts a failed PCM monitor on the refreshed default endpoint', async () =
   expect(invoke).toHaveBeenCalledWith('loopback_start', { endpointId: 'default-output' })
   expect((wrapper.get('#loopback-endpoint').element as HTMLSelectElement).value).toBe('default-output')
   expect(wrapper.text()).toContain('Default speakers')
+  expect(wrapper.text()).toContain('Removed output is unavailable. Using Default speakers.')
   expect(wrapper.findAll('.command-error')).toHaveLength(0)
   wrapper.unmount()
 })
