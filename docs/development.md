@@ -1168,6 +1168,13 @@ Pop-Location
 cargo +1.98.1 run --manifest-path tools/tauri-output-prototype/Cargo.toml --locked
 ~~~
 
+For the **Bluetooth system playback** experiment, pair a compatible source in
+Windows, choose **Refresh Bluetooth sources**, select it, and choose **Connect
+Bluetooth**. Use **Disconnect Bluetooth** to stop. A connection shown as open
+does not confirm sound is audible; this system-routed path does not supply PCM
+to the SoniMesh mixer. Playback and disconnect behavior still need real-device
+validation.
+
 This separate prototype uses Rust 1.98.1 for its locked Tauri dependencies; the
 shared workspace remains on Rust 1.85.0. Windows WebView2 is required. To use
 its **Paired audio lab**, first build the child listener from the repository root:

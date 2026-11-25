@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 
 const names = ref<string[]>([])
 const generation = ref(0)
@@ -11,6 +11,7 @@ const error = ref<string | null>(null)
 const message = ref<string | null>(null)
 let timer: ReturnType<typeof setTimeout> | undefined
 let disposed = false
+let statusRequest = 0
 
 async function refresh() {
   busy.value = true
@@ -31,18 +32,19 @@ async function refresh() {
 
 async function poll() {
   if (disposed || !connected.value) return
+  const request = statusRequest
   try {
     const open = await window.__TAURI__!.core.invoke<boolean>('bluetooth_status')
-    if (disposed) return
+    if (disposed || request !== statusRequest) return
     if (!open) {
       connected.value = false
       message.value = 'Windows closed the playback connection.'
       return
     }
   } catch (cause) {
-    if (!disposed) error.value = String(cause)
+    if (!disposed && request === statusRequest) error.value = String(cause)
   }
-  if (!disposed && connected.value) timer = setTimeout(poll, 1000)
+  if (!disposed && request === statusRequest && connected.value) timer = setTimeout(poll, 1000)
 }
 
 async function toggle() {
@@ -50,6 +52,8 @@ async function toggle() {
   busy.value = true
   error.value = null
   message.value = null
+  statusRequest++
+  clearTimeout(timer)
   try {
     if (connected.value) {
       await window.__TAURI__.core.invoke('bluetooth_disconnect')
@@ -64,12 +68,31 @@ async function toggle() {
     }
   } catch (cause) {
     error.value = String(cause)
+    if (connected.value) void poll()
   } finally {
     busy.value = false
   }
 }
 
-onBeforeUnmount(() => { disposed = true; clearTimeout(timer) })
+onMounted(async () => {
+  if (!window.__TAURI__) return
+  busy.value = true
+  const request = statusRequest
+  try {
+    const open = await window.__TAURI__.core.invoke<boolean>('bluetooth_status')
+    if (!disposed && request === statusRequest && open === true) {
+      connected.value = true
+      message.value = 'System playback connection is open.'
+      void poll()
+    }
+  } catch (cause) {
+    if (!disposed && request === statusRequest) error.value = String(cause)
+  } finally {
+    if (!disposed && request === statusRequest) busy.value = false
+  }
+})
+
+onBeforeUnmount(() => { disposed = true; statusRequest++; clearTimeout(timer) })
 </script>
 
 <template>
@@ -85,8 +108,8 @@ onBeforeUnmount(() => { disposed = true; clearTimeout(timer) })
         <option value="" disabled>Select a source</option>
         <option v-for="(name, index) in names" :key="index" :value="String(index)">{{ name }}</option>
       </select>
-      <button type="button" class="preview-action" :disabled="busy || (!connected && selected === '')" @click="toggle">{{ connected ? 'Disconnect Bluetooth' : 'Connect Bluetooth' }}</button>
     </template>
+    <button v-if="names.length || connected" type="button" class="preview-action" :disabled="busy || (!connected && selected === '')" @click="toggle">{{ connected ? 'Disconnect Bluetooth' : 'Connect Bluetooth' }}</button>
     <p v-if="message" role="status">{{ message }}</p>
     <p v-if="error" class="command-error" role="alert">{{ error }}</p>
   </section>

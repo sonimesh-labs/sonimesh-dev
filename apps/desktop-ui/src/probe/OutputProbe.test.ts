@@ -3,6 +3,8 @@ import { flushPromises, mount } from '@vue/test-utils'
 import type { DesktopBridgeInvoke } from '../bridge'
 import OutputProbe from './OutputProbe.vue'
 
+vi.mock('./BluetoothProbe.vue', () => ({ default: { template: '<div />' } }))
+
 const originalClipboard = navigator.clipboard
 const originalShare = navigator.share
 

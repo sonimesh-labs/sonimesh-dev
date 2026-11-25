@@ -289,7 +289,9 @@ connection state outside any audio callback and reports a system closure before
 cleaning up; it does not automatically reconnect.
 The separate desktop output probe may offer the same system-routed connection
 experiment with explicit selection and stop controls. It does not route this
-audio through the WLAN receiver or claim a supported PCM input.
+audio through the WLAN receiver or claim a supported PCM input. Its interface
+restores the current connection state when the view opens, so a connection can
+still be stopped after the view reloads.
 
 ## 4. Quality targets and latency budget
 
