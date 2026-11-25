@@ -4,6 +4,7 @@ use serde::Serialize;
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
     running: bool,
+    endpoint_name: String,
     sample_rate: u32,
     channels: u16,
     samples: u64,
@@ -32,6 +33,7 @@ mod platform {
     pub struct Monitor {
         stream: Option<Stream>,
         meter: Arc<Meter>,
+        endpoint_name: String,
         sample_rate: u32,
         channels: u16,
     }
@@ -41,6 +43,7 @@ mod platform {
             Self {
                 stream: None,
                 meter: Arc::new(Meter::default()),
+                endpoint_name: String::new(),
                 sample_rate: 0,
                 channels: 0,
             }
@@ -85,6 +88,11 @@ mod platform {
             let device = cpal::default_host()
                 .default_output_device()
                 .ok_or("No default Windows playback device is available.")?;
+            let endpoint_name = device
+                .description()
+                .map_err(|error| error.to_string())?
+                .name()
+                .to_owned();
             let supported = device
                 .default_output_config()
                 .map_err(|error| error.to_string())?;
@@ -111,6 +119,7 @@ mod platform {
             stream.play().map_err(|error| error.to_string())?;
             self.stream = Some(stream);
             self.meter = meter;
+            self.endpoint_name = endpoint_name;
             self.sample_rate = sample_rate;
             self.channels = channels;
             Ok(self.snapshot())
@@ -129,6 +138,7 @@ mod platform {
                 .then(|| "The Windows loopback stream reported an error.".to_owned());
             Snapshot {
                 running: self.stream.is_some(),
+                endpoint_name: self.endpoint_name.clone(),
                 sample_rate: self.sample_rate,
                 channels: self.channels,
                 samples: self.meter.samples.load(Ordering::Relaxed),
@@ -180,6 +190,7 @@ mod platform {
         pub fn stop(&mut self) -> Snapshot {
             Snapshot {
                 running: false,
+                endpoint_name: String::new(),
                 sample_rate: 0,
                 channels: 0,
                 samples: 0,
@@ -191,6 +202,7 @@ mod platform {
         pub fn snapshot(&self) -> Snapshot {
             Snapshot {
                 running: false,
+                endpoint_name: String::new(),
                 sample_rate: 0,
                 channels: 0,
                 samples: 0,

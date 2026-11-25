@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 
-type LoopbackSnapshot = { running: boolean; sampleRate: number; channels: number; samples: number; peak: number; error: string | null }
+type LoopbackSnapshot = { running: boolean; endpointName: string; sampleRate: number; channels: number; samples: number; peak: number; error: string | null }
 
 const names = ref<string[]>([])
 const generation = ref(0)
@@ -77,7 +77,7 @@ async function toggleLoopback() {
     if (result.running) void pollLoopback()
     else clearTimeout(loopbackTimer)
   } catch (cause) {
-    loopback.value = { running: false, sampleRate: 0, channels: 0, samples: 0, peak: 0, error: String(cause) }
+    loopback.value = { running: false, endpointName: '', sampleRate: 0, channels: 0, samples: 0, peak: 0, error: String(cause) }
   } finally {
     loopbackBusy.value = false
   }
@@ -159,7 +159,7 @@ onBeforeUnmount(() => { disposed = true; statusRequest++; clearTimeout(timer); c
     <h3>System output PCM check</h3>
     <p class="preview-note">Measures the default Windows playback mix; other apps' audio may also appear here.</p>
     <button type="button" class="preview-action" :disabled="loopbackBusy" @click="toggleLoopback">{{ loopbackBusy ? 'Starting...' : loopback?.running ? 'Stop PCM check' : 'Start PCM check' }}</button>
-    <p v-if="loopback && (loopback.running || loopback.sampleRate > 0)" role="status">{{ loopback.sampleRate }} Hz, {{ loopback.channels }} channels; {{ loopback.samples }} samples; recent peak {{ (loopback.peak * 100).toFixed(1) }}%.</p>
+    <p v-if="loopback && (loopback.running || loopback.sampleRate > 0)" role="status">{{ loopback.endpointName }} · {{ loopback.sampleRate }} Hz, {{ loopback.channels }} channels; {{ loopback.samples }} samples; recent peak {{ (loopback.peak * 100).toFixed(1) }}%.</p>
     <p v-if="loopback?.error" class="command-error" role="alert">{{ loopback.error }}</p>
   </section>
 </template>
