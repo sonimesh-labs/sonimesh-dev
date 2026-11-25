@@ -278,6 +278,10 @@ Bluetooth is represented as a capability result, not a promise:
 - Unsupported — no supported path is available.
 
 The WLAN engine must not pretend that SystemRouted is an input source.
+The Windows Bluetooth discovery prototype may query the system playback
+connection selector and report a candidate count. Enumeration alone does not
+establish that opening a connection succeeds, that audio is audible, or that
+PCM is available to the application. It does not enter the WLAN MVP.
 
 ## 4. Quality targets and latency budget
 

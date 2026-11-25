@@ -12,6 +12,7 @@ members = [
     "tools/windows-credential-prototype",
     "tools/windows-tls-provider-prototype",
     "tools/windows-wasapi-prototype",
+    "tools/windows-bluetooth-prototype",
 ]
 resolver = "3"
 

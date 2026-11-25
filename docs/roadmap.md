@@ -89,7 +89,9 @@ support, and an automatic updater if signing infrastructure is not ready.
 
 ## Phase 4 — Bluetooth research track
 
-Only enter this phase after platform prototypes demonstrate a supported PCM
-source. Each platform reports ApplicationPcmSource, SystemRouted, or Unsupported;
+Before entering this phase, platform prototypes may investigate system-routed
+playback and search for a supported PCM source independently of the WLAN MVP.
+Only enter this phase after prototypes demonstrate a supported PCM source.
+Each platform reports ApplicationPcmSource, SystemRouted, or Unsupported;
 no cross-platform Bluetooth guarantee is implied.
 
