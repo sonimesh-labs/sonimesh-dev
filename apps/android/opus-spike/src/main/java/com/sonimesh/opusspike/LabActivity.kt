@@ -496,6 +496,7 @@ class LabActivity : Activity() {
             showCaptureBusy()
             return
         }
+        var replacedInvitation = false
         if (udp) {
             val parsed = parseLabAddress(address.text.toString())
             if (parsed == null) {
@@ -532,6 +533,7 @@ class LabActivity : Activity() {
                 importedInvitation?.fill(0)
                 importedInvitation = null
                 labPreferences.edit().remove(PREF_INVITATION).apply()
+                replacedInvitation = true
             }
             pendingPin = entered
             pendingHost = parsedHost
@@ -555,7 +557,9 @@ class LabActivity : Activity() {
         }
         clearPendingInvitation()
         pendingInvitation = if (paired) importedInvitation?.copyOf() else null
-        setupFeedback.text = ""
+        setupFeedback.text = if (replacedInvitation) {
+            "Connection settings changed; using the manual lab setup instead of the imported invitation."
+        } else ""
         retryButton.visibility = View.GONE
         retryHint.visibility = View.GONE
         if (needsPermission) {

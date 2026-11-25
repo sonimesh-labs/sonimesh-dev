@@ -106,8 +106,10 @@ ADB-reversed connection for its temporary session secret. This is a development
 path rather than discovery, pairing, or the production control plane.
 The paired lab listener can select a TCP control port; the lab invitation carries
 that same port, independently of the UDP media port. The Android lab also accepts
-a manual control port for its public test fixture. Editing the port after importing
-an invitation selects the manual fixture for the next capture.
+a manual control port for its public test fixture. Editing the control address,
+port, or pin after importing an invitation selects the manual fixture for the next
+capture. The lab displays that change when capture starts so the operator can
+identify the setup in use.
 The Android lab can select media, game, unknown, or all three playback usages
 for a capture session; platform and source capture policies still apply.
 The capture-only Android app can play an explicitly requested local test tone

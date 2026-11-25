@@ -41,6 +41,7 @@ class LabStatusTest {
                     requireNotNull(findButton(root, "Start paired UDP capture")).performClick()
                     assertTrue(!activity.getPreferences(Activity.MODE_PRIVATE).contains("labInvitation"))
                     assertEquals(47613, activity.getPreferences(Activity.MODE_PRIVATE).getInt("labControlPort", 0))
+                    assertTrue(hasStatus(root, "Connection settings changed; using the manual lab setup instead of the imported invitation."))
                     LabStatus.captureAdmission.launchFailed()
                 }
             }
