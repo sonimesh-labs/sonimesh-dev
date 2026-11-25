@@ -87,6 +87,9 @@ class PairedCaptureTest {
     fun captures_after_scanned_invitation() = runCapture(startFromScan = true)
 
     @Test
+    fun captures_when_next_invitation_changes_during_consent() = runCapture(startFromScan = true, changeSetupDuringConsent = true)
+
+    @Test
     fun captures_after_pasted_invitation() = runCapture(startFromPaste = true)
 
     @Test
@@ -128,7 +131,7 @@ class PairedCaptureTest {
     @Test
     fun mutes_and_resumes_sending_during_capture() = runCapture(testMute = true)
 
-    private fun runCapture(expectReconnect: Boolean = false, stopDuringReconnect: Boolean = false, retryAfterReconnectExhaustion: Boolean = false, screenOff: Boolean = false, notificationReturn: Boolean = false, startFromScan: Boolean = false, startFromPaste: Boolean = false, recreate: Boolean = false, changeUsage: Boolean = false, testMute: Boolean = false, expectConnectionRetry: Boolean = false) {
+    private fun runCapture(expectReconnect: Boolean = false, stopDuringReconnect: Boolean = false, retryAfterReconnectExhaustion: Boolean = false, screenOff: Boolean = false, notificationReturn: Boolean = false, startFromScan: Boolean = false, startFromPaste: Boolean = false, recreate: Boolean = false, changeUsage: Boolean = false, testMute: Boolean = false, expectConnectionRetry: Boolean = false, changeSetupDuringConsent: Boolean = false) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val args = InstrumentationRegistry.getArguments()
         var stopAcknowledgement = "unavailable"
@@ -198,6 +201,13 @@ class PairedCaptureTest {
                 }
             }
             val automation = instrumentation.uiAutomation
+            if (changeSetupDuringConsent) {
+                scenario.onActivity { activity ->
+                    activity.applyScannedInvitation("SONIMESH-LAB1:39095:${labHex(labInvitation("ab".repeat(32)))}")
+                    val port = find(activity.window.decorView) { it is EditText && it.contentDescription == "Desktop UDP port" } as EditText
+                    assertEquals("39095", port.text.toString())
+                }
+            }
             if (android.os.Build.VERSION.SDK_INT >= 33 &&
                 instrumentation.targetContext.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
             ) {

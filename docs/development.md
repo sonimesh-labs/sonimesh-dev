@@ -1055,6 +1055,9 @@ unwrapped hexadecimal invitation remains available, including for a relay whose
 listen port differs from the receiver's.
 During capture, setup feedback is shown separately so it does not replace the
 active capture status. The updated fields apply to a later capture.
+The paired request also snapshots its invitation before requesting permissions
+and screen-capture consent, so changing the next setup during that flow does not
+replace the invitation used by the pending request.
 This wrapper is a lab convenience, not the production pairing QR format.
 The probe recognizes numbered listener session events and keeps connection
 endpoints out of its event history. To exercise the listener-to-snapshot path

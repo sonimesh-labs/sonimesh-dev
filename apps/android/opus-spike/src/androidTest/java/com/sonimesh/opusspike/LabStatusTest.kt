@@ -22,6 +22,35 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class LabStatusTest {
     @Test
+    fun pending_invitation_survives_recreation_and_is_cleared_on_denial() {
+        val instrumentation = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
+        val original = labHex(labInvitation("ab".repeat(32)))
+        val replacement = labHex(labInvitation("cd".repeat(32)))
+        val pendingField = LabActivity::class.java.getDeclaredField("pendingInvitation").apply { isAccessible = true }
+        try {
+            ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    activity.applyScannedInvitation(original)
+                    assertTrue(LabStatus.captureAdmission.begin(false))
+                    pendingField.set(activity, labHexToBytes(original))
+                    assertEquals(original, labHex(pendingField.get(activity) as ByteArray))
+                    activity.applyScannedInvitation(replacement)
+                    assertEquals(original, labHex(pendingField.get(activity) as ByteArray))
+                }
+                scenario.recreate()
+                scenario.onActivity { activity ->
+                    assertEquals(original, labHex(pendingField.get(activity) as ByteArray))
+                    deliverScannerResult(activity, 2, Activity.RESULT_CANCELED, null)
+                    assertEquals(null, pendingField.get(activity))
+                    assertTrue(LabStatus.captureAdmission.canBegin())
+                }
+            }
+        } finally {
+            instrumentation.runOnMainSync { LabStatus.captureAdmission.launchFailed() }
+        }
+    }
+
+    @Test
     fun setup_feedback_does_not_replace_active_capture_status() {
         val instrumentation = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
         try {

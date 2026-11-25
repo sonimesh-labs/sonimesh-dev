@@ -50,6 +50,7 @@ class LabActivity : Activity() {
     private var pendingUsage = LabCaptureUsage.All
     private var pendingBitrate = OpusBitrate.STANDARD
     private var importedInvitation: ByteArray? = null
+    private var pendingInvitation: ByteArray? = null
     private var importedPin = ""
     private var importedHost = ""
     private lateinit var address: EditText
@@ -113,6 +114,8 @@ class LabActivity : Activity() {
         pendingMediaPort = savedInstanceState?.getInt("pendingMediaPort", DEFAULT_LAB_MEDIA_PORT) ?: DEFAULT_LAB_MEDIA_PORT
         pendingPin = savedInstanceState?.getString("pendingPin") ?: ""
         pendingHost = savedInstanceState?.getString("pendingHost") ?: "127.0.0.1"
+        pendingInvitation = if (LabStatus.captureAdmission.canBegin()) null
+            else savedInstanceState?.getByteArray("pendingInvitation")?.copyOf()
         pendingUsage = LabCaptureUsage.fromValue(savedInstanceState?.getString("pendingUsage"))
         val defaultBitrate = OpusBitrate.STANDARD.bitsPerSecond
         pendingBitrate = OpusBitrate.fromBitsPerSecond(savedInstanceState?.getInt("pendingBitrate", defaultBitrate) ?: defaultBitrate)
@@ -432,6 +435,7 @@ class LabActivity : Activity() {
         outState.putInt("pendingBitrate", pendingBitrate.bitsPerSecond)
         outState.putInt("selectedBitrate", selectedBitrate().bitsPerSecond)
         importedInvitation?.let { outState.putString("importedInvitation", labHex(it)) }
+        pendingInvitation?.let { outState.putByteArray("pendingInvitation", it.copyOf()) }
         outState.putString("address", address.text.toString())
         outState.putString("mediaPort", mediaPort.text.toString())
         outState.putString("invitation", invitation.text.toString())
@@ -496,6 +500,8 @@ class LabActivity : Activity() {
             showCaptureBusy()
             return
         }
+        clearPendingInvitation()
+        pendingInvitation = if (paired) importedInvitation?.copyOf() else null
         setupFeedback.text = ""
         retryButton.visibility = View.GONE
         if (needsPermission) {
@@ -503,6 +509,7 @@ class LabActivity : Activity() {
                 requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 1)
             } catch (_: RuntimeException) {
                 LabStatus.captureAdmission.launchFailed()
+                clearPendingInvitation()
                 LabStatus.publish("Unable to request microphone permission. Try again.")
             }
         } else if (needsNotification) requestNotificationPermission() else requestProjection()
@@ -516,6 +523,11 @@ class LabActivity : Activity() {
 
     private fun showCaptureBusy() {
         Toast.makeText(this, "Capture is already starting, running, or stopping.", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun clearPendingInvitation() {
+        pendingInvitation?.fill(0)
+        pendingInvitation = null
     }
 
     private fun showSetupFeedback(message: String) {
@@ -711,12 +723,18 @@ class LabActivity : Activity() {
             if (granted) {
                 if (LabStatus.captureAdmission.awaitingNotification()) requestNotificationPermission() else requestProjection()
             }
-            else LabStatus.publish("Microphone permission is required for playback capture.")
+            else {
+                clearPendingInvitation()
+                LabStatus.publish("Microphone permission is required for playback capture.")
+            }
         } else if (requestCode == 5) {
             val granted = grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED
             if (!LabStatus.captureAdmission.notificationResult(granted)) return
             if (granted) requestProjection()
-            else LabStatus.publish("Notification permission is required to show capture controls. Enable it in app settings and try again.")
+            else {
+                clearPendingInvitation()
+                LabStatus.publish("Notification permission is required to show capture controls. Enable it in app settings and try again.")
+            }
         }
     }
 
@@ -726,6 +744,7 @@ class LabActivity : Activity() {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 5)
         } catch (_: RuntimeException) {
             LabStatus.captureAdmission.launchFailed()
+            clearPendingInvitation()
             LabStatus.publish("Unable to request notification permission. Try again.")
         }
     }
@@ -736,6 +755,7 @@ class LabActivity : Activity() {
             startActivityForResult(manager.createScreenCaptureIntent(), 2)
         } catch (_: RuntimeException) {
             LabStatus.captureAdmission.launchFailed()
+            clearPendingInvitation()
             LabStatus.publish("Unable to request screen capture. Try again.")
         }
     }
@@ -750,6 +770,7 @@ class LabActivity : Activity() {
             val granted = resultCode == RESULT_OK && data != null
             if (!LabStatus.captureAdmission.projectionResult(granted)) return
             if (!granted) {
+                clearPendingInvitation()
                 LabStatus.publish("Screen capture consent was not granted.")
                 return
             }
@@ -766,12 +787,14 @@ class LabActivity : Activity() {
                     if (pairedMode) {
                         putExtra("pairedPin", pendingPin)
                         putExtra("pairedHost", pendingHost)
-                        importedInvitation?.let { putExtra("pairedInvitation", it.copyOf()) }
+                        pendingInvitation?.let { putExtra("pairedInvitation", it.copyOf()) }
                     }
                 })
             } catch (_: RuntimeException) {
                 LabStatus.captureAdmission.launchFailed()
                 LabStatus.publish("Unable to start capture. Try again.")
+            } finally {
+                clearPendingInvitation()
             }
         }
     }
@@ -811,6 +834,7 @@ class LabActivity : Activity() {
     override fun onDestroy() {
         importedInvitation?.fill(0)
         importedInvitation = null
+        clearPendingInvitation()
         if (!isChangingConfigurations) tone?.let { it.stop(); it.release() }
         tone = null
         super.onDestroy()

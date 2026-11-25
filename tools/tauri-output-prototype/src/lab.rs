@@ -1347,7 +1347,7 @@ mod tests {
                 "96",
                 "-e",
                 "class",
-                "com.sonimesh.opusspike.PairedCaptureTest#captures_after_scanned_invitation",
+                "com.sonimesh.opusspike.PairedCaptureTest#captures_when_next_invitation_changes_during_consent",
                 "com.sonimesh.opusspike.test/androidx.test.runner.AndroidJUnitRunner",
             ])
             .stdout(Stdio::piped())
