@@ -36,13 +36,28 @@ fn run_connection(
 }
 
 #[cfg(any(windows, test))]
-fn selection(input: &str, count: u32) -> Option<u32> {
+#[derive(Debug, PartialEq, Eq)]
+enum Selection {
+    Device(u32),
+    Refresh,
+    Quit,
+    Invalid,
+}
+
+#[cfg(any(windows, test))]
+fn selection(input: &str, count: u32) -> Selection {
+    let input = input.trim();
+    if input.eq_ignore_ascii_case("r") {
+        return Selection::Refresh;
+    }
+    if input.eq_ignore_ascii_case("q") {
+        return Selection::Quit;
+    }
     input
-        .trim()
         .parse::<u32>()
         .ok()
         .filter(|index| *index > 0 && *index <= count)
-        .map(|index| index - 1)
+        .map_or(Selection::Invalid, |index| Selection::Device(index - 1))
 }
 
 #[cfg(any(windows, test))]
@@ -108,30 +123,40 @@ fn main() -> Result<()> {
         _ => return Err("Usage: windows-bluetooth-prototype [--connect]".into()),
     };
     let selector = AudioPlaybackConnection::GetDeviceSelector()?;
-    let devices = DeviceInformation::FindAllAsyncAqsFilter(&selector)?.join()?;
-    let count = devices.Size()?;
-    println!("System playback connection candidates: {count}");
-    let shown = count.min(64);
-    for index in 0..shown {
-        let device = devices.GetAt(index)?;
-        println!("{}: {}", index + 1, device.Name()?);
-    }
-    if count > shown {
-        println!("Only the first {shown} candidates are shown.");
-    }
-    if !connect || shown == 0 {
-        println!(
-            "No connection was opened. Discovery does not establish application PCM availability."
-        );
-        return Ok(());
-    }
-
-    print!("Choose a candidate number: ");
-    io::stdout().flush()?;
-    let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
-    let index = selection(&input, shown).ok_or("Invalid candidate number")?;
-    let device = devices.GetAt(index)?;
+    let device = 'discovery: loop {
+        let devices = DeviceInformation::FindAllAsyncAqsFilter(&selector)?.join()?;
+        let count = devices.Size()?;
+        println!("System playback connection candidates: {count}");
+        let shown = count.min(64);
+        for index in 0..shown {
+            let device = devices.GetAt(index)?;
+            println!("{}: {}", index + 1, device.Name()?);
+        }
+        if count > shown {
+            println!("Only the first {shown} candidates are shown.");
+        }
+        if !connect {
+            println!(
+                "No connection was opened. Discovery does not establish application PCM availability."
+            );
+            return Ok(());
+        }
+        loop {
+            print!("Choose a candidate number, r to refresh, or q to quit: ");
+            io::stdout().flush()?;
+            let mut input = String::new();
+            if io::stdin().read_line(&mut input)? == 0 {
+                println!("No connection was opened.");
+                return Ok(());
+            }
+            match selection(&input, shown) {
+                Selection::Device(index) => break 'discovery devices.GetAt(index)?,
+                Selection::Refresh => continue 'discovery,
+                Selection::Quit => return Ok(()),
+                Selection::Invalid => println!("Invalid selection."),
+            }
+        }
+    };
     let connection = AudioPlaybackConnection::TryCreateFromId(&device.Id()?)?;
     run_connection(&connection, || {
         use std::sync::mpsc::{self, RecvTimeoutError};
@@ -217,11 +242,13 @@ mod tests {
 
     #[test]
     fn selection_requires_an_existing_one_based_index() {
-        assert_eq!(selection(" 2\n", 2), Some(1));
+        assert_eq!(selection(" 2\n", 2), Selection::Device(1));
         for input in ["0", "3", "-1", "", "x"] {
-            assert_eq!(selection(input, 2), None);
+            assert_eq!(selection(input, 2), Selection::Invalid);
         }
-        assert_eq!(selection("1", 0), None);
+        assert_eq!(selection("1", 0), Selection::Invalid);
+        assert_eq!(selection(" R ", 0), Selection::Refresh);
+        assert_eq!(selection("Q", 2), Selection::Quit);
     }
 
     #[test]

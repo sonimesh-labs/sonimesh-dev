@@ -280,8 +280,10 @@ Bluetooth is represented as a capability result, not a promise:
 The WLAN engine must not pretend that SystemRouted is an input source.
 The Windows Bluetooth prototype may enumerate system playback candidates and,
 after an explicit operator selection, start, open, and close a system-routed
-connection. Enumeration or a successful open does not establish that audio is
-audible or that PCM is available to the application. The prototype does not
+connection. The operator can refresh the candidate list before selection; a
+selection always refers to the last displayed enumeration. Enumeration or a
+successful open does not establish that audio is audible or that PCM is
+available to the application. The prototype does not
 enter the WLAN MVP. While the experiment is open, it checks the system
 connection state outside any audio callback and reports a system closure before
 cleaning up; it does not automatically reconnect.

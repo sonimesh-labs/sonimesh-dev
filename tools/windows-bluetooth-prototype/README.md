@@ -8,8 +8,10 @@ that the adapter or operating system cannot support a connection.
 
 To try system-routed playback, run
 `cargo run -p windows-bluetooth-prototype -- --connect`, choose a listed
-number, and press Enter again to close the connection. The selection refers to
-the list from the same run. The tool checks connection state while waiting and
+number, and press Enter again to close the connection. Enter `r` to refresh the
+list or `q` to quit without connecting; refresh is available even when no
+candidates are found. Numbers refer to the most recently displayed list. The
+tool checks connection state while waiting and
 reports if the system closes it; it does not automatically reconnect. It
 attempts to close the connection even if start, open, monitoring, or waiting
 fails. This does not capture audio or provide a PCM
