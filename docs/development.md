@@ -1180,7 +1180,8 @@ shows whether Windows is waiting or has opened the connection.
 The inbound-wait hardware check below requires exactly one listed playback
 candidate, prepares Windows to accept a remote connection for two seconds, and
 then closes it. It does not initiate a connection from the phone. On
-2026-11-25, Windows accepted this waiting state and closed it cleanly. The
+2026-11-25, two runs showed Windows accepting this waiting state and closing it
+cleanly. The
 separate direct-open attempt failed with Windows status 3 and HRESULT
 `0x8007001F`; its cause remains unknown.
 
