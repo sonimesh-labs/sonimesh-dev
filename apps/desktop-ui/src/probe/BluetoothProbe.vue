@@ -17,7 +17,25 @@ const suggestPhoneInitiated = ref(false)
 const message = ref<string | null>(null)
 const loopback = ref<LoopbackSnapshot | null>(null)
 const loopbackEndpoints = ref<LoopbackEndpoint[]>([])
-const loopbackEndpointId = ref('')
+const LOOPBACK_ENDPOINT_KEY = 'sonimesh.bluetoothProbe.loopbackEndpoint'
+
+function readLoopbackEndpointId() {
+  try {
+    return localStorage.getItem(LOOPBACK_ENDPOINT_KEY) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+function rememberLoopbackEndpoint(event: Event) {
+  try {
+    localStorage.setItem(LOOPBACK_ENDPOINT_KEY, (event.target as HTMLSelectElement).value)
+  } catch {
+    // Endpoint preference is optional; the current selection still works.
+  }
+}
+
+const loopbackEndpointId = ref(readLoopbackEndpointId())
 const loopbackBusy = ref(false)
 const loopbackError = ref<string | null>(null)
 const loopbackToneBusy = ref(false)
@@ -423,7 +441,7 @@ onBeforeUnmount(() => {
     <p class="preview-note">Measures the selected Windows playback mix; other apps' audio may also appear here.</p>
     <button type="button" class="preview-action" :disabled="loopbackBusy || loopback?.running" @click="refreshLoopbackEndpoints">Refresh output devices</button>
     <label for="loopback-endpoint">Output endpoint</label>
-    <select id="loopback-endpoint" v-model="loopbackEndpointId" :disabled="loopbackBusy || loopback?.running">
+    <select id="loopback-endpoint" v-model="loopbackEndpointId" :disabled="loopbackBusy || loopback?.running" @change="rememberLoopbackEndpoint">
       <option value="" disabled>Select an output endpoint</option>
       <option v-for="endpoint in loopbackEndpoints" :key="endpoint.id" :value="endpoint.id">{{ endpoint.name }}{{ endpoint.isDefault ? ' (default)' : '' }}</option>
     </select>

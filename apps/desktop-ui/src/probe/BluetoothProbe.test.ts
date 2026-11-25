@@ -3,7 +3,11 @@ import { flushPromises, mount } from '@vue/test-utils'
 import type { DesktopBridgeInvoke } from '../bridge'
 import BluetoothProbe from './BluetoothProbe.vue'
 
-afterEach(() => { delete window.__TAURI__; vi.useRealTimers() })
+afterEach(() => {
+  delete window.__TAURI__
+  vi.useRealTimers()
+  localStorage.removeItem('sonimesh.bluetoothProbe.loopbackEndpoint')
+})
 
 it('opens Windows Bluetooth settings from the probe', async () => {
   let endpointRefreshes = 0
@@ -52,6 +56,30 @@ it('shows discovery progress until Bluetooth candidates return', async () => {
   expect(wrapper.text()).not.toContain('Searching for Bluetooth sources...')
   expect(wrapper.get('#bluetooth-source').text()).toContain('Phone')
   wrapper.unmount()
+})
+
+it('restores the selected PCM endpoint when reopening the Bluetooth probe', async () => {
+  const invoke = vi.fn((command: string) => {
+    if (command === 'bluetooth_status') return Promise.resolve('idle')
+    if (command === 'bluetooth_candidates') return Promise.resolve({ generation: 1, names: [] })
+    if (command === 'loopback_status') return Promise.resolve({ running: false, endpointName: '', sampleRate: 0, channels: 0, samples: 0, peak: 0, error: null })
+    if (command === 'loopback_endpoints') return Promise.resolve([
+      { id: 'default-output', name: 'Speakers', isDefault: true },
+      { id: 'bluetooth-output', name: 'Bluetooth headphones', isDefault: false },
+    ])
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const first = mount(BluetoothProbe)
+  await flushPromises()
+  await first.get('#loopback-endpoint').setValue('bluetooth-output')
+  expect(localStorage.getItem('sonimesh.bluetoothProbe.loopbackEndpoint')).toBe('bluetooth-output')
+  first.unmount()
+
+  const reopened = mount(BluetoothProbe)
+  await flushPromises()
+  expect((reopened.get('#loopback-endpoint').element as HTMLSelectElement).value).toBe('bluetooth-output')
+  reopened.unmount()
 })
 
 it('preserves the selected source by name when discovery order changes', async () => {
