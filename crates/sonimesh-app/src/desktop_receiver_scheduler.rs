@@ -1144,6 +1144,9 @@ mod tests {
         );
         assert!(matches!(fault.output, Ok(Some(OutputHealth::StreamError))));
         assert!(matches!(fault.playout, Ok(None)));
+        for index in 24..42 {
+            sender.send_frame(0, index * 480, &[1]).unwrap();
+        }
         scheduler
             .receiver_mut()
             .owner_mut()
@@ -1170,14 +1173,30 @@ mod tests {
             .receiver_mut()
             .recover_stream(identities[0])
             .unwrap();
+        let drained = scheduler.tick_scheduled_at(171);
+        assert_eq!(
+            drained.state,
+            super::ScheduledReceiverState::DrainingStaleMedia
+        );
+        assert_eq!(drained.packets.unwrap(), 16);
+        assert!(matches!(drained.playout, Ok(None)));
+        let drained = scheduler.tick_scheduled_at(171);
+        assert_eq!(
+            drained.state,
+            super::ScheduledReceiverState::DrainingStaleMedia
+        );
+        assert_eq!(drained.packets.unwrap(), 2);
+        assert!(matches!(drained.playout, Ok(None)));
+        sender.send_frame(0, 42 * 480, &[1]).unwrap();
         assert!(matches!(
             scheduler.tick_scheduled_at(171).playout,
-            Ok(Some(_))
+            Ok(Some(DecodeStep::Decoded { sequence: 41, .. }))
         ));
         // Alternating one-millisecond wakeup jitter must not shift the frame
         // clock permanently after every late call.
         for frame in 1..=100_u64 {
             let now = 171 + frame * 10 + frame % 2;
+            sender.send_frame(0, (42 + frame) * 480, &[1]).unwrap();
             assert!(matches!(
                 scheduler.tick_scheduled_at(now).playout,
                 Ok(Some(_))
@@ -1186,7 +1205,7 @@ mod tests {
 
         // A long scheduling pause retires queued audio and drains the socket
         // across bounded calls before admitting fresh playout.
-        for index in 24..42 {
+        for index in 143..161 {
             sender.send_frame(0, index * 480, &[1]).unwrap();
         }
         let stalled = scheduler.tick_scheduled_at(1271);
@@ -1226,7 +1245,7 @@ mod tests {
         for _ in 0..2 {
             invalid_sender.send_to(&[0], address).unwrap();
         }
-        sender.send_frame(0, 42 * 480, &[1]).unwrap();
+        sender.send_frame(0, 161 * 480, &[1]).unwrap();
         let rejected = scheduler.tick_scheduled_at(1201);
         assert!(rejected.packets.is_err());
         assert!(matches!(
@@ -1244,7 +1263,7 @@ mod tests {
             scheduler.tick_scheduled_at(1271).state,
             super::ScheduledReceiverState::OutputUnavailable
         );
-        sender.send_frame(0, 43 * 480, &[1]).unwrap();
+        sender.send_frame(0, 162 * 480, &[1]).unwrap();
         scheduler
             .receiver_mut()
             .owner_mut()
@@ -1269,13 +1288,13 @@ mod tests {
         );
         assert_eq!(resumed.packets.unwrap(), 1);
         assert!(matches!(resumed.playout, Ok(None)));
-        sender.send_frame(0, 44 * 480, &[1]).unwrap();
+        sender.send_frame(0, 163 * 480, &[1]).unwrap();
         let fresh = scheduler.tick_scheduled_at(1272);
         assert_eq!(fresh.state, super::ScheduledReceiverState::Active);
         assert!(
             matches!(
                 fresh.playout,
-                Ok(Some(DecodeStep::Decoded { sequence: 43, .. }))
+                Ok(Some(DecodeStep::Decoded { sequence: 162, .. }))
             ),
             "fresh playout: {:?}; packets: {:?}",
             fresh.playout,
@@ -1325,7 +1344,7 @@ mod tests {
             scheduler.tick_scheduled_at(1282).playout,
             Ok(None)
         ));
-        sender.send_frame(0, 45 * 480, &[1]).unwrap();
+        sender.send_frame(0, 164 * 480, &[1]).unwrap();
         let buffering = scheduler.tick_scheduled_at(1283);
         assert_eq!(buffering.packets.unwrap(), 1);
         assert!(matches!(buffering.playout, Ok(None)));
@@ -1674,6 +1693,16 @@ where
         }
         if self.scheduled_drain.is_some() && self.scheduled_drain != matching {
             self.scheduled_drain = None;
+        }
+        if matches!(
+            state,
+            ScheduledReceiverState::OutputUnavailable
+                | ScheduledReceiverState::AwaitingStreamRecovery
+        ) && matching.is_some()
+            && self.scheduled_drain != matching
+        {
+            self.receiver.pipeline_mut().hard_resynchronize();
+            self.scheduled_drain = matching;
         }
 
         let clock_error = self

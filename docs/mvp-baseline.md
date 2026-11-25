@@ -106,7 +106,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   an optional capacity-bounded startup wait begins with a queued frame and is
   reapplied after interruption or output recovery. Loopback tests cover its
   deadlines and recovery with a test decoder and native Opus; the live desktop
-  host has not adopted it;
+  host has not adopted it. On output loss, the scheduler retires buffered media
+  and drains accumulated UDP in bounded batches after stream re-admission before
+  resuming with fresh packets; this is verified in a loopback software test;
   `mark_control_lost` centralizes the follow-up lifecycle transition and arms
   reconnect grace after a closed or failed control poll. `tick_at(now_ms)` then
   services grace and output-health observation in the same low-rate

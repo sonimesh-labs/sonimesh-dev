@@ -59,6 +59,9 @@ stall it retires queued audio and drains accumulated UDP in bounded batches
 before resuming from fresh packets. It resets its cadence when
 the matching stream or output is unavailable. The host must drive it more often
 than the frame interval; a live platform host still needs to adopt this path.
+When an active stream loses its output or awaits re-admission after output
+recovery, the scheduler discards its old buffered media and drains accumulated
+UDP in bounded batches after re-admission before accepting fresh playout.
 The host may opt into a fixed startup wait measured in negotiated frame durations.
 The wait begins when an encoded frame is buffered and is bounded below the jitter
 capacity. It applies again after an interruption, decoder failure, or output

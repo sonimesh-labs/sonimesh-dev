@@ -51,7 +51,11 @@ stall to avoid retaining the accumulated delay. A regressing clock suppresses
 decode until time catches up, and an ongoing drain waits for that point before
 finishing. Other admitted streams continue to be pumped during the drain. Audio
 already handed to an output callback or device cannot be withdrawn. Stopped, unmatched, or
-output-unavailable streams reset their cadence. This is software scheduling
+output-unavailable streams reset their cadence. If the matching output becomes
+unavailable or awaits stream re-admission, its buffered media is retired and the
+socket is drained in bounded batches after re-admission. Packets arriving during
+the drain are discarded too; fresh playout resumes after an empty socket is
+observed. This is software scheduling
 behavior, not a latency or physical playback measurement.
 
 The scheduled desktop receiver also permits an optional fixed startup wait in
