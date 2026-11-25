@@ -129,6 +129,8 @@ button:focus-visible, select:focus-visible, a:focus-visible { outline: 3px solid
 .panel-heading { display: flex; align-items: center; gap: 12px; }
 .panel-heading h2 { margin-top: 4px; color: var(--ink); font-size: 17px; line-height: 1.25; font-weight: 720; letter-spacing: -0.02em; }
 .preview-note { margin-top: 7px; color: var(--muted); font-size: 10.5px; line-height: 1.45; }
+.pcm-level { height: 8px; margin-top: 12px; overflow: hidden; border-radius: 4px; background: var(--surface-strong); }
+.pcm-level span { display: block; height: 100%; border-radius: inherit; background: var(--signal); transition: width 120ms linear; }
 .panel-icon { width: 40px; height: 40px; display: grid; place-items: center; flex: 0 0 auto; border-radius: 13px; color: var(--signal-ink); background: var(--signal-soft); }
 
 .session-panel {

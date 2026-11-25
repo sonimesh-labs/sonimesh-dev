@@ -515,6 +515,8 @@ it('starts and stops the Windows system-output PCM check', async () => {
   expect(invoke).toHaveBeenCalledWith('loopback_start', { endpointId: 'bt-endpoint' })
   expect(wrapper.text()).toContain('48000 Hz, 2 channels')
   expect(wrapper.text()).toContain('Default speakers')
+  expect(wrapper.get('.pcm-level').attributes('aria-valuenow')).toBe('50.0')
+  expect(wrapper.get('.pcm-level span').attributes('style')).toContain('width: 50%')
   await wrapper.findAll('button').find(button => button.text() === 'Stop PCM check')!.trigger('click')
   await flushPromises()
   expect(invoke).toHaveBeenCalledWith('loopback_stop')

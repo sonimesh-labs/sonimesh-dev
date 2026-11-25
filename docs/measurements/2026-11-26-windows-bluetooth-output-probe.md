@@ -77,8 +77,8 @@
   playback-to-meter path, not audible quality or Bluetooth-specific capture.
 - The output meter now retains a session peak alongside its resettable recent
   peak. This allows a short signal to remain visible after a later poll clears
-  recent activity; it still reports the selected system mix and cannot identify
-  the producing app.
+  recent activity; a live level bar follows the recent peak. It still reports
+  the selected system mix and cannot identify the producing app.
 - The local mobile-device tool exposes only an Android 9 x86_64 emulator, not a
   physical Bluetooth source, so it cannot initiate the phone-side playback test.
 
