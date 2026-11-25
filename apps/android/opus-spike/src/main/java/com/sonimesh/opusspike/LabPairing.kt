@@ -28,6 +28,23 @@ internal fun labHexToBytes(text: String): ByteArray {
     }
 }
 
+internal const val LAB_INVITATION_PREFIX = "SONIMESH-LAB1:"
+internal const val MAX_LAB_INVITATION_TEXT = PairingQr.MAX_PAYLOAD_BYTES * 2 + LAB_INVITATION_PREFIX.length + 6
+
+internal data class LabInvitationText(val payload: ByteArray, val mediaPort: Int?)
+
+internal fun parseLabInvitationText(text: String): LabInvitationText {
+    val normalized = text.trim()
+    require(normalized.length <= MAX_LAB_INVITATION_TEXT)
+    if (!normalized.startsWith(LAB_INVITATION_PREFIX)) {
+        return LabInvitationText(labHexToBytes(normalized), null)
+    }
+    val separator = normalized.indexOf(':', LAB_INVITATION_PREFIX.length)
+    require(separator >= 0)
+    val port = requireNotNull(parseLabMediaPort(normalized.substring(LAB_INVITATION_PREFIX.length, separator)))
+    return LabInvitationText(labHexToBytes(normalized.substring(separator + 1)), port)
+}
+
 internal fun labHex(bytes: ByteArray): String = buildString(bytes.size * 2) {
     bytes.forEach { append("%02x".format(it.toInt() and 0xff)) }
 }

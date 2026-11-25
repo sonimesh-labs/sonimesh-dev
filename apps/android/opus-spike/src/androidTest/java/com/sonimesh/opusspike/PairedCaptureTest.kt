@@ -243,7 +243,7 @@ class PairedCaptureTest {
                 val usage = if (changeUsage) "Media" else "All supported usages"
                 val bitrate = args.getString("bitrateKbps") ?: "96"
                 assertTrue(containsStatus(activity.window.decorView, "Session request: $usage, $bitrate kbps target"))
-                val port = args.getString("mediaPort") ?: DEFAULT_LAB_MEDIA_PORT.toString()
+                val port = args.getString("expectedMediaPort") ?: args.getString("mediaPort") ?: DEFAULT_LAB_MEDIA_PORT.toString()
                 find(activity.window.decorView) { it is TextView && it.text.toString().lineSequence().any { line -> line == "Requested UDP port: $port" } }
                 find(activity.window.decorView) {
                     it is TextView && it.text.toString().matches(Regex("Sender queue drops: [0-9]+"))

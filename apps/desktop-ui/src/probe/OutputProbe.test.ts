@@ -648,6 +648,32 @@ describe('desktop output probe', () => {
     wrapper.unmount()
   })
 
+  it('uses the running direct port consistently for display, copy and share', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    const share = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    Object.defineProperty(navigator, 'share', { configurable: true, value: share })
+    const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [] })
+      .mockResolvedValueOnce({ running: true, status: 'Starting listener…', invitation: null })
+      .mockResolvedValueOnce({ running: true, status: 'Waiting for Android', invitation: '01ab', mediaPort: 39094 })
+    window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+    const wrapper = mountStoppedProbe()
+    await flushPromises()
+    vi.useFakeTimers()
+    await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect((wrapper.get('#lab-invitation').element as HTMLTextAreaElement).value).toBe('01ab')
+    await wrapper.get('#lab-direct-port').setValue(true)
+    await flushPromises()
+    expect((wrapper.get('#lab-invitation').element as HTMLTextAreaElement).value).toBe('SONIMESH-LAB1:39094:01ab')
+    await wrapper.findAll('button').find(button => button.text() === 'Copy invitation')!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text() === 'Share invitation')!.trigger('click')
+    expect(writeText).toHaveBeenCalledWith('SONIMESH-LAB1:39094:01ab')
+    expect(share).toHaveBeenCalledWith({ title: 'SoniMesh lab invitation', text: 'SONIMESH-LAB1:39094:01ab' })
+    expect(wrapper.get('.lab-invitation-qr').attributes('src')).toMatch(/^data:image\/svg\+xml,/)
+    wrapper.unmount()
+  })
+
   it('copies the displayed invitation for Android setup', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })

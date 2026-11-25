@@ -43,6 +43,12 @@ existing boundaries: the SPKI pin goes to the TLS provider spike verifier, the
 ID/secret go to the pure pairing binding, and the expiry seeds the pairing
 record. A future manual-code path must not reuse this format (ADR 0008).
 
+The controlled audio lab may wrap its hexadecimal payload as
+`SONIMESH-LAB1:<udp-port>:<hex>` when the operator explicitly chooses a direct
+connection. The port is a lab transport hint, not part of the binary QR format
+or an authenticated negotiation. The original hexadecimal text remains usable
+for relays and older lab tools; neither representation changes product pairing.
+
 The Android `pairing-protocol` library exposes the same wire codec for future
 runtime integration. Unlike the Rust decoder, its Kotlin decoder copies the
 ID, secret, and SPKI into mutable arrays; the caller owns those copies and the

@@ -35,7 +35,15 @@ const lab = ref<LabSnapshot>({ running: false, sessionActive: false, status: 'Ch
 const invitationQr = ref<string | null>(null)
 const invitationQrError = ref(false)
 const invitationCopyMessage = ref<string | null>(null)
-watch(() => lab.value.invitation, async (invitation, _previous, onCleanup) => {
+const includeDirectPort = ref(false)
+watch(() => lab.value.running, (running) => { if (!running) includeDirectPort.value = false })
+const displayedInvitation = computed(() => {
+  const invitation = lab.value.invitation
+  if (!invitation) return null
+  return includeDirectPort.value && lab.value.running && lab.value.mediaPort != null
+    ? `SONIMESH-LAB1:${lab.value.mediaPort}:${invitation}` : invitation
+})
+watch(displayedInvitation, async (invitation, _previous, onCleanup) => {
   let cancelled = false
   onCleanup(() => { cancelled = true })
   invitationQr.value = null
@@ -51,7 +59,7 @@ watch(() => lab.value.invitation, async (invitation, _previous, onCleanup) => {
 })
 
 async function copyInvitation() {
-  const invitation = lab.value.invitation
+  const invitation = displayedInvitation.value
   if (!invitation) return
   try {
     if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable')
@@ -63,7 +71,7 @@ async function copyInvitation() {
 }
 
 async function shareInvitation() {
-  const invitation = lab.value.invitation
+  const invitation = displayedInvitation.value
   if (!invitation) return
   try {
     if (navigator.share) {
@@ -607,10 +615,12 @@ onBeforeUnmount(() => { disposed = true; labRequest++; clearTimeout(timer); clea
         <p class="preview-note">The probe retains the latest 32 lifecycle transitions in arrival order.</p>
       </section>
       <template v-if="lab.invitation">
+        <label v-if="lab.running && lab.mediaPort != null"><input id="lab-direct-port" v-model="includeDirectPort" type="checkbox" /> Include UDP port for direct connection</label>
+        <p class="preview-note">For a relay, leave the port out and configure the Android UDP destination separately.</p>
         <img v-if="invitationQr" class="lab-invitation-qr" :src="invitationQr" alt="QR code for the public lab invitation" />
         <p v-if="invitationQrError" class="command-error" role="alert">Could not display the QR code. Copy the invitation below instead.</p>
         <label for="lab-invitation">Lab invitation payload</label>
-        <textarea id="lab-invitation" :value="lab.invitation" readonly rows="4" @focus="($event.target as HTMLTextAreaElement).select()" />
+        <textarea id="lab-invitation" :value="displayedInvitation" readonly rows="4" @focus="($event.target as HTMLTextAreaElement).select()" />
         <button type="button" class="preview-action" @click="copyInvitation">Copy invitation</button>
         <button type="button" class="preview-action" @click="shareInvitation">Share invitation</button>
         <p v-if="invitationCopyMessage" role="status">{{ invitationCopyMessage }}</p>

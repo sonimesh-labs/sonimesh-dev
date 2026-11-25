@@ -1310,7 +1310,7 @@ mod tests {
     #[ignore = "requires the playback lab binary, Windows output and an installed API 37 emulator test"]
     fn emulator_capture_updates_real_listener_snapshot() {
         let mut lab = Lab::default();
-        lab.start("10.0.2.2", None, 60, false, 39093).unwrap();
+        lab.start("10.0.2.2", None, 60, false, 39094).unwrap();
         let deadline = Instant::now() + Duration::from_secs(10);
         let invitation = loop {
             let snapshot = lab.refresh();
@@ -1324,6 +1324,7 @@ mod tests {
             );
             std::thread::sleep(Duration::from_millis(50));
         };
+        let direct_invitation = format!("SONIMESH-LAB1:39094:{invitation}");
         let mut instrumentation = Command::new("adb")
             .args([
                 "-s",
@@ -1334,16 +1335,19 @@ mod tests {
                 "-w",
                 "-e",
                 "pairingInvitationHex",
-                &invitation,
+                &direct_invitation,
                 "-e",
                 "mediaHost",
                 "10.0.2.2",
+                "-e",
+                "expectedMediaPort",
+                "39094",
                 "-e",
                 "bitrateKbps",
                 "96",
                 "-e",
                 "class",
-                "com.sonimesh.opusspike.PairedCaptureTest#captures_tone_after_pairing_and_stops",
+                "com.sonimesh.opusspike.PairedCaptureTest#captures_after_scanned_invitation",
                 "com.sonimesh.opusspike.test/androidx.test.runner.AndroidJUnitRunner",
             ])
             .stdout(Stdio::piped())

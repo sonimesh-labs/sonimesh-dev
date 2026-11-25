@@ -2,6 +2,8 @@ package com.sonimesh.opusspike
 
 import android.app.Activity
 import android.app.Instrumentation
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.view.View
 import android.view.ViewGroup
@@ -17,6 +19,61 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LabPairingTest {
+    @Test
+    fun direct_invitation_can_be_pasted_and_shared() {
+        val payload = "SONIMESH-LAB1:39094:${labHex(labInvitation("AB".repeat(32)))}"
+        ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                val root = activity.window.decorView
+                activity.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("invitation", payload))
+                requireNotNull(findButton(root, "Paste lab invitation")).performClick()
+                assertEquals(payload, requireNotNull(findField(root, "Lab invitation payload")).text.toString())
+                requireNotNull(findButton(root, "Apply invitation payload")).performClick()
+                assertEquals("39094", requireNotNull(findField(root, "Desktop UDP port")).text.toString())
+            }
+        }
+        val intent = Intent(InstrumentationRegistry.getInstrumentation().targetContext, LabActivity::class.java).apply {
+            action = Intent.ACTION_SEND
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, payload)
+        }
+        ActivityScenario.launch<LabActivity>(intent).use { scenario ->
+            scenario.onActivity { activity ->
+                val root = activity.window.decorView
+                assertEquals(payload, requireNotNull(findField(root, "Lab invitation payload")).text.toString())
+                requireNotNull(findButton(root, "Apply invitation payload")).performClick()
+                assertEquals("39094", requireNotNull(findField(root, "Desktop UDP port")).text.toString())
+            }
+        }
+    }
+
+    @Test
+    fun direct_invitation_applies_port_only_after_payload_validation() {
+        val payload = labHex(labInvitation("AB".repeat(32)))
+        ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                val root = activity.window.decorView
+                val port = requireNotNull(findField(root, "Desktop UDP port"))
+                val host = requireNotNull(findField(root, "Paired control IPv4 address"))
+                port.setText("39093")
+                activity.applyScannedInvitation("SONIMESH-LAB1:39094:$payload")
+                assertEquals("39094", port.text.toString())
+                assertEquals("127.0.0.1", host.text.toString())
+                activity.applyScannedInvitation(payload)
+                assertEquals("39094", port.text.toString())
+                for (invalid in listOf("SONIMESH-LAB1:0:$payload", "SONIMESH-LAB1:65536:$payload", "SONIMESH-LAB1:39095:00", "SONIMESH-LAB2:39095:$payload")) {
+                    activity.applyScannedInvitation(invalid)
+                    assertEquals("39094", port.text.toString())
+                    assertEquals("127.0.0.1", host.text.toString())
+                }
+            }
+            scenario.recreate()
+            scenario.onActivity { activity ->
+                assertEquals("39094", requireNotNull(findField(activity.window.decorView, "Desktop UDP port")).text.toString())
+            }
+        }
+    }
+
     @Test
     fun test_tone_continues_across_activity_recreation_and_can_be_stopped() {
         ActivityScenario.launch(LabActivity::class.java).use { scenario ->

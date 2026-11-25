@@ -2,8 +2,8 @@ import { expect, it } from 'vitest'
 import QRCode from 'qrcode'
 import jsQR from 'jsqr'
 
-it('encodes a full-size lab payload as scannable hexadecimal text', () => {
-  const invitation = 'aBcD'.repeat(417)
+it.each(['', 'SONIMESH-LAB1:65535:'])('encodes a full-size lab payload with prefix %s', (prefix) => {
+  const invitation = prefix + 'aBcD'.repeat(417)
   const text = invitation.toUpperCase()
   const qr = QRCode.create(text, { errorCorrectionLevel: 'M' })
   const scale = 4

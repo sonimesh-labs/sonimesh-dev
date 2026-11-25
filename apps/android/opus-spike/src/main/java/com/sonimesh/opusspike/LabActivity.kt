@@ -280,10 +280,10 @@ class LabActivity : Activity() {
         }
         layout.addView(mediaPort)
         layout.addView(TextView(this).apply {
-            text = "Lab invitation payload hex (optional; from the desktop listener)"
+            text = "Lab invitation (optional; from the desktop listener)"
         })
         invitation = EditText(this).apply {
-            hint = "Paste INVITATION_HEX"
+            hint = "Paste lab invitation"
             contentDescription = "Lab invitation payload"
             setSingleLine(true)
             setText(savedInstanceState?.getString("invitation") ?: "")
@@ -569,12 +569,14 @@ class LabActivity : Activity() {
         val text = value?.trim()
         when {
             text.isNullOrEmpty() -> LabStatus.publish(emptyMessage)
-            text.length > PairingQr.MAX_PAYLOAD_BYTES * 2 -> LabStatus.publish("The lab invitation is too long.")
-            text.length % 2 != 0 || text.any { it.digitToIntOrNull(16) == null } ->
-                LabStatus.publish("The lab invitation must be hexadecimal text.")
             else -> {
-                invitation.setText(text)
-                LabStatus.publish(successMessage)
+                try {
+                    parseLabInvitationText(text).payload.fill(0)
+                    invitation.setText(text)
+                    LabStatus.publish(successMessage)
+                } catch (_: IllegalArgumentException) {
+                    LabStatus.publish("Paste a valid lab invitation payload.")
+                }
             }
         }
     }
@@ -603,7 +605,8 @@ class LabActivity : Activity() {
         var raw: ByteArray? = null
         var retained = false
         try {
-            raw = labHexToBytes(invitation.text.toString())
+            val parsed = parseLabInvitationText(invitation.text.toString())
+            raw = parsed.payload
             val decoded = PairingQr.decode(requireNotNull(raw))
             try {
                 require(decoded.controlPort == 47610)
@@ -612,6 +615,10 @@ class LabActivity : Activity() {
                 val decodedPin = labHex(decoded.desktopTlsSpki)
                 pin.setText(decodedPin)
                 host.setText(decoded.controlHost)
+                parsed.mediaPort?.let { port ->
+                    mediaPort.setText(port.toString())
+                    labPreferences.edit().putInt(PREF_MEDIA_PORT, port).apply()
+                }
                 if (useAddressForUdp && udpAddress != null) {
                     address.setText(udpAddress.hostAddress)
                     labPreferences.edit().putString("desktopAddress", udpAddress.hostAddress).apply()
@@ -665,7 +672,7 @@ class LabActivity : Activity() {
     }
 
     internal fun applyScannedInvitation(contents: String?, startAfterScan: Boolean = false) {
-        if (contents == null || contents.length > PairingQr.MAX_PAYLOAD_BYTES * 2) {
+        if (contents == null || contents.length > MAX_LAB_INVITATION_TEXT) {
             LabStatus.publish("Scan a valid lab invitation, or paste its payload.")
             return
         }
