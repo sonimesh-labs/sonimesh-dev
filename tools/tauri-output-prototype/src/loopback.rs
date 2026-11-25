@@ -132,7 +132,7 @@ mod platform {
                 sample_rate: self.sample_rate,
                 channels: self.channels,
                 samples: self.meter.samples.load(Ordering::Relaxed),
-                peak: f32::from_bits(self.meter.peak_bits.load(Ordering::Relaxed)),
+                peak: f32::from_bits(self.meter.peak_bits.swap(0, Ordering::Relaxed)),
                 error,
             }
         }

@@ -136,6 +136,6 @@ it('starts and stops the Windows system-output PCM check', async () => {
   await wrapper.findAll('button').find(button => button.text() === 'Stop PCM check')!.trigger('click')
   await flushPromises()
   expect(invoke).toHaveBeenCalledWith('loopback_stop')
-  expect(wrapper.text()).toContain('4096 samples; peak 50.0%.')
+  expect(wrapper.text()).toContain('4096 samples; recent peak 50.0%.')
   wrapper.unmount()
 })
