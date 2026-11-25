@@ -1121,6 +1121,8 @@ remain while waiting and after stopping the listener, and clear on the next
 listener start or client attempt. Stopping the listener terminates an active
 session immediately, so its retained counters are only the last available update,
 not a final post-drain report.
+Media arrival transitions received before the first cumulative status are kept
+for that session and included when its first counters arrive.
 On 2026-11-24, the Windows probe's ignored real-listener test sent 513 volume
 commands without UI status polling and observed the last acknowledgement through
 the background drain. Reproduce it after building the playback-enabled listener,

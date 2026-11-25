@@ -19,6 +19,8 @@ pub struct LabSnapshot {
     pub invitation: Option<String>,
     pub events: Vec<String>,
     pub metrics: Option<LabMetrics>,
+    #[serde(skip)]
+    pending_media: Option<String>,
     pub signal: Option<LabSignal>,
     pub signal_stale: bool,
     pub volume: Option<u8>,
@@ -72,6 +74,7 @@ impl Default for LabSnapshot {
             invitation: None,
             events: Vec::new(),
             metrics: None,
+            pending_media: None,
             signal: None,
             signal_stale: false,
             volume: None,
@@ -208,6 +211,7 @@ impl Lab {
             invitation: None,
             events: Vec::new(),
             metrics: None,
+            pending_media: None,
             signal: None,
             signal_stale: false,
             volume: None,
@@ -390,6 +394,7 @@ fn update_snapshot(snapshot: &mut LabSnapshot, line: &str) {
     } else if session_event(line, "RESULT client connected") {
         snapshot.status = "Android connecting".into();
         snapshot.metrics = None;
+        snapshot.pending_media = None;
         snapshot.signal = None;
         snapshot.session_active = false;
     } else if line == "RESULT pairing verified" {
@@ -397,6 +402,7 @@ fn update_snapshot(snapshot: &mut LabSnapshot, line: &str) {
     } else if session_event(line, "RESULT receiver started") {
         snapshot.status = "Session active".into();
         snapshot.metrics = None;
+        snapshot.pending_media = None;
         snapshot.signal = None;
         snapshot.session_active = true;
     } else if snapshot.session_active
@@ -405,9 +411,11 @@ fn update_snapshot(snapshot: &mut LabSnapshot, line: &str) {
         snapshot.signal = Some(signal);
     } else if snapshot.session_active
         && let Some(state @ ("waiting" | "receiving" | "interrupted")) = line.strip_prefix("MEDIA ")
-        && let Some(metrics) = &mut snapshot.metrics
     {
-        metrics.media = Some(state.into());
+        snapshot.pending_media = Some(state.into());
+        if let Some(metrics) = &mut snapshot.metrics {
+            metrics.media = snapshot.pending_media.clone();
+        }
     } else if snapshot.session_active
         && let Some(state @ ("active" | "recovering" | "software-check")) =
             line.strip_prefix("OUTPUT ")
@@ -417,10 +425,7 @@ fn update_snapshot(snapshot: &mut LabSnapshot, line: &str) {
     } else if snapshot.session_active
         && let Some(mut metrics) = parse_metrics(line)
     {
-        metrics.media = snapshot
-            .metrics
-            .as_ref()
-            .and_then(|previous| previous.media.clone());
+        metrics.media = snapshot.pending_media.clone();
         snapshot.metrics = Some(metrics);
     } else if line == "RESULT session complete" {
         snapshot.status = "Session ended; waiting for Android".into();
@@ -970,6 +975,26 @@ mod tests {
     }
 
     #[test]
+    fn media_before_first_metrics_is_retained_only_for_its_session() {
+        let mut snapshot = LabSnapshot::default();
+        let status = "STATUS packets 1 rejected 0 decoded 1 peak 0.100 plc 0 decode_errors 0 buffered 0 output active playout fixed";
+        update_snapshot(&mut snapshot, "RESULT receiver started session 1");
+        update_snapshot(&mut snapshot, "MEDIA waiting");
+        update_snapshot(&mut snapshot, "MEDIA receiving");
+        assert!(snapshot.metrics.is_none());
+        update_snapshot(&mut snapshot, status);
+        assert_eq!(
+            snapshot.metrics.as_ref().unwrap().media.as_deref(),
+            Some("receiving")
+        );
+        update_snapshot(&mut snapshot, "RESULT session complete");
+        update_snapshot(&mut snapshot, "RESULT client connected session 2");
+        update_snapshot(&mut snapshot, "RESULT receiver started session 2");
+        update_snapshot(&mut snapshot, status);
+        assert_eq!(snapshot.metrics.as_ref().unwrap().media, None);
+    }
+
+    #[test]
     fn output_observation_updates_promptly_without_accepting_invalid_states() {
         let mut snapshot = LabSnapshot::default();
         let status = "STATUS packets 1 rejected 0 decoded 1 peak 0.100 plc 0 decode_errors 0 buffered 0 output active playout fixed";
@@ -1376,6 +1401,14 @@ mod tests {
                 metrics.decoded.parse::<u64>().is_ok_and(|count| count > 0)
             }),
             "listener snapshot did not retain decoded frames: {last_observation}"
+        );
+        assert_eq!(
+            final_snapshot
+                .metrics
+                .as_ref()
+                .and_then(|metrics| metrics.media.as_deref()),
+            Some("receiving"),
+            "listener snapshot did not retain media arrival: {last_observation}"
         );
         lab.stop();
     }
