@@ -83,8 +83,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   open and close a selected system-routed connection. Local enumeration found
   one candidate, but Windows failed to open it in a later test. The separate desktop output
   probe exposes refresh, connect, wait for phone connection, disconnect, and
-  system closure status for the same experiment. Playback and an application PCM
-  source remain unverified
+  system closure status for the same experiment. Windows accepted a short
+  inbound-wait state and closed cleanly, but phone-initiated playback and an
+  application PCM source remain unverified
   (see `tools/windows-bluetooth-prototype/README.md`);
 - a shell-neutral `DesktopControlSession` that attaches the existing bounded
   framed transport to `DesktopReceiverOwner`, executes one authenticated

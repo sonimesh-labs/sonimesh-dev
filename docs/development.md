@@ -1177,14 +1177,15 @@ validation. If connecting from the desktop fails, choose **Wait for phone to
 connect** and initiate the Bluetooth connection from the paired phone. The panel
 shows whether Windows is waiting or has opened the connection.
 
-The opt-in backend hardware check below requires exactly one listed playback
-candidate and attempts to open and close it. It may change the source's audio
-route. On 2026-11-25 the candidate enumerated on the development host could not
-be opened; the equivalent command-line experiment reported Windows status 3 and
-HRESULT `0x8007001F`, without establishing the cause.
+The inbound-wait hardware check below requires exactly one listed playback
+candidate, prepares Windows to accept a remote connection for two seconds, and
+then closes it. It does not initiate a connection from the phone. On
+2026-11-25, Windows accepted this waiting state and closed it cleanly. The
+separate direct-open attempt failed with Windows status 3 and HRESULT
+`0x8007001F`; its cause remains unknown.
 
 ~~~powershell
-cargo +1.98.1 test --manifest-path tools/tauri-output-prototype/Cargo.toml real_connection_opens_reports_state_and_closes -- --ignored
+cargo +1.98.1 test --manifest-path tools/tauri-output-prototype/Cargo.toml real_windows_inbound_wait_reports_state_and_closes -- --ignored
 ~~~
 
 This separate prototype uses Rust 1.98.1 for its locked Tauri dependencies; the

@@ -210,6 +210,36 @@ mod platform {
                 .expect("closing the system playback connection failed");
             assert_eq!(bluetooth.status().unwrap(), PlaybackState::Idle);
         }
+
+        #[test]
+        #[ignore = "starts a short Windows playback wait; requires exactly one candidate"]
+        fn real_windows_inbound_wait_reports_state_and_closes() {
+            let mut bluetooth = Bluetooth::default();
+            let snapshot = bluetooth.refresh().unwrap();
+            assert_eq!(
+                snapshot.names.len(),
+                1,
+                "the test requires exactly one candidate"
+            );
+            bluetooth
+                .prepare(snapshot.generation, 0)
+                .expect("could not prepare Windows playback");
+            let state = bluetooth
+                .status()
+                .expect("could not read Windows playback state");
+            assert!(matches!(
+                state,
+                PlaybackState::Waiting | PlaybackState::Open
+            ));
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            let _ = bluetooth
+                .status()
+                .expect("could not poll Windows playback state");
+            bluetooth
+                .disconnect()
+                .expect("could not close Windows playback wait");
+            assert_eq!(bluetooth.status().unwrap(), PlaybackState::Idle);
+        }
     }
 }
 
