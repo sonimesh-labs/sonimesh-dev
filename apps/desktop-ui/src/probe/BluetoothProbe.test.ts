@@ -228,6 +228,34 @@ it('falls back to phone-initiated wait when direct connect fails with monitoring
   wrapper.unmount()
 })
 
+it('falls back to phone wait without requiring an output endpoint', async () => {
+  let phase = 'idle'
+  const invoke = vi.fn((command: string) => {
+    if (command === 'bluetooth_status') return Promise.resolve(phase)
+    if (command === 'bluetooth_candidates') return Promise.resolve({ generation: 12, names: ['Phone'] })
+    if (command === 'loopback_endpoints') return Promise.resolve([])
+    if (command === 'bluetooth_connect') return Promise.reject(new Error('Direct open failed.'))
+    if (command === 'bluetooth_prepare') phase = 'waiting'
+    return Promise.resolve({ running: false, endpointName: '', sampleRate: 0, channels: 0, samples: 0, peak: 0, error: null })
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  await wrapper.findAll('button').find(button => button.text() === 'Refresh Bluetooth sources')!.trigger('click')
+  await flushPromises()
+  await wrapper.get('#bluetooth-source').setValue('0')
+  const action = wrapper.findAll('button').find(button => button.text() === 'Connect or wait for phone')!
+  expect(action.attributes('disabled')).toBeUndefined()
+  await action.trigger('click')
+  await flushPromises()
+  expect(invoke).toHaveBeenCalledWith('bluetooth_connect', { generation: 12, index: 0 })
+  expect(invoke).toHaveBeenCalledWith('bluetooth_prepare', { generation: 12, index: 0 })
+  expect(invoke).not.toHaveBeenCalledWith('loopback_start', expect.anything())
+  expect(wrapper.text()).toContain('Waiting for the phone to connect to Phone through Bluetooth.')
+  expect(wrapper.text()).not.toContain('Windows output monitoring is active.')
+  wrapper.unmount()
+})
+
 it('stops newly started monitoring and reports both errors when automatic wait also fails', async () => {
   let monitoring = false
   const invoke = vi.fn((command: string) => {
