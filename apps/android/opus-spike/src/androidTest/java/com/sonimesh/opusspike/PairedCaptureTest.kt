@@ -137,7 +137,10 @@ class PairedCaptureTest {
     @Test
     fun mutes_and_resumes_sending_during_capture() = runCapture(testMute = true)
 
-    private fun runCapture(expectReconnect: Boolean = false, repeatedReconnects: Boolean = false, stopDuringReconnect: Boolean = false, retryAfterReconnectExhaustion: Boolean = false, screenOff: Boolean = false, notificationReturn: Boolean = false, startFromScan: Boolean = false, startFromPaste: Boolean = false, recreate: Boolean = false, changeUsage: Boolean = false, testMute: Boolean = false, expectConnectionRetry: Boolean = false, changeSetupDuringConsent: Boolean = false) {
+    @Test
+    fun notification_reports_local_capture_signal() = runCapture(testNotificationSignal = true)
+
+    private fun runCapture(expectReconnect: Boolean = false, repeatedReconnects: Boolean = false, stopDuringReconnect: Boolean = false, retryAfterReconnectExhaustion: Boolean = false, screenOff: Boolean = false, notificationReturn: Boolean = false, startFromScan: Boolean = false, startFromPaste: Boolean = false, recreate: Boolean = false, changeUsage: Boolean = false, testMute: Boolean = false, expectConnectionRetry: Boolean = false, changeSetupDuringConsent: Boolean = false, testNotificationSignal: Boolean = false) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val args = InstrumentationRegistry.getArguments()
         var stopAcknowledgement = "unavailable"
@@ -250,6 +253,29 @@ class PairedCaptureTest {
                 if (!capturing) SystemClock.sleep(100)
             }
             assertTrue("capture did not start", capturing)
+            if (testNotificationSignal) {
+                val manager = instrumentation.targetContext.getSystemService(NotificationManager::class.java)
+                fun notification() = manager.activeNotifications.firstOrNull { it.id == 1 }?.notification
+                fun awaitSignal(label: String) {
+                    val signalDeadline = SystemClock.elapsedRealtime() + 10_000
+                    while (SystemClock.elapsedRealtime() < signalDeadline) {
+                        if (notification()?.extras?.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()?.contains(label) == true) return
+                        SystemClock.sleep(100)
+                    }
+                    error("capture notification did not report $label")
+                }
+                awaitSignal("Capture signal detected")
+                automation.executeShellCommand("input keyevent KEYCODE_HOME").close()
+                awaitSignal("No capturable audio detected")
+                requireNotNull(notification()?.contentIntent).send()
+                val returnDeadline = SystemClock.elapsedRealtime() + 10_000
+                while (automation.rootInActiveWindow?.packageName?.toString() != instrumentation.targetContext.packageName &&
+                    SystemClock.elapsedRealtime() < returnDeadline) SystemClock.sleep(100)
+                scenario.onActivity { activity ->
+                    find(activity.window.decorView) { it is Button && it.text.toString().equals("Start test tone", true) }.performClick()
+                }
+                awaitSignal("Capture signal detected")
+            }
             if (expectConnectionRetry) {
                 val notification = instrumentation.targetContext.getSystemService(NotificationManager::class.java)
                     .activeNotifications.firstOrNull { it.id == 1 }?.notification

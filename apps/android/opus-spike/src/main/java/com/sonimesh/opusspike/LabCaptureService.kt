@@ -40,6 +40,15 @@ internal fun incrementSaturated(value: Long): Long =
 internal fun encoderInput(pcm: ShortArray, silence: ShortArray, muted: Boolean): ShortArray =
     if (muted) silence else pcm
 
+internal fun foregroundNotificationText(transport: String, connection: String?, muted: Boolean, signal: String): Pair<String, String> {
+    val compact = buildList {
+        add("Transport: $transport")
+        connection?.let { add(it) }
+        if (muted) add("Sending muted")
+    }.joinToString(" · ")
+    return compact to "$compact\n$signal"
+}
+
 private enum class ForegroundConnectionStatus(val label: String) {
     Connecting("Connecting to desktop"),
     Reconnecting("Reconnecting to desktop"),
@@ -63,6 +72,7 @@ class LabCaptureService : Service() {
     private var unmuteAction: Notification.Action? = null
     private var foregroundTransportLabel: String? = null
     private var foregroundConnectionStatus: ForegroundConnectionStatus? = null
+    private var foregroundSignalLabel = "Waiting for capture signal"
     private val handler = Handler(Looper.getMainLooper())
     private var terminalStatus = false
     private var started = false
@@ -131,6 +141,7 @@ class LabCaptureService : Service() {
                 .setActions(stopAction, muteAction)
             foregroundNotificationManager = manager
             foregroundNotificationBuilder = notification
+            updateForegroundContentText(notification)
             startForeground(1, notification.build())
             wakeLock = getSystemService(PowerManager::class.java)
                 .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "SoniMesh:LabCapture").also { it.acquire() }
@@ -350,10 +361,12 @@ class LabCaptureService : Service() {
                                 publishCaptureStatus(when (transition) {
                                     LabSignalTransition.NoCapturableAudio -> {
                                         LabStatus.publishSignal(LabSignalState.Silent)
+                                        updateForegroundSignal("No capturable audio detected")
                                         "No capturable audio detected. The source may be silent or capture-limited."
                                     }
                                     LabSignalTransition.SignalDetected -> {
                                         LabStatus.publishSignal(LabSignalState.Detected)
+                                        updateForegroundSignal("Capture signal detected")
                                         "Capturing audio and sending to desktop."
                                     }
                                 })
@@ -544,14 +557,21 @@ class LabCaptureService : Service() {
         manager.notify(1, builder.build())
     }
 
+    private fun updateForegroundSignal(label: String) {
+        foregroundSignalLabel = label
+        val builder = foregroundNotificationBuilder ?: return
+        val manager = foregroundNotificationManager ?: return
+        updateForegroundContentText(builder)
+        manager.notify(1, builder.build())
+    }
+
     private fun updateForegroundContentText(builder: Notification.Builder) {
         val transport = foregroundTransportLabel ?: return
-        val content = buildList {
-            add("Transport: $transport")
-            foregroundConnectionStatus?.let { add(it.label) }
-            if (senderMuted.get()) add("Sending muted")
-        }.joinToString(" · ")
+        val (content, expanded) = foregroundNotificationText(
+            transport, foregroundConnectionStatus?.label, senderMuted.get(), foregroundSignalLabel,
+        )
         builder.setContentText(content)
+        builder.setStyle(Notification.BigTextStyle().bigText(expanded))
     }
 
     private fun requestStop() {

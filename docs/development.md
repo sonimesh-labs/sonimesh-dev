@@ -465,9 +465,15 @@ service exited, capture admission reset, and paired control/media worker threads
 terminated. The ordinary paired-stop control test also passed. This verifies
 emulator loopback service lifecycle, not physical WLAN recovery or audible
 continuity.
-During paired reconnects, the foreground notification now reports connecting,
-reconnecting, and restored states alongside transport and mute state. On
-2026-11-25, API 37 x86_64 instrumentation moved the activity to the background
+During paired reconnects, the foreground notification reports connecting,
+reconnecting, and restored states alongside transport and mute state.
+The expanded capture notification also reports whether the local capture has
+detected signal or two seconds of silence; this does not confirm delivery to
+the desktop. Transport, connection, and sender mute remain visible alongside it.
+On 2026-11-25, an API 37 x86_64 emulator paired-capture test observed signal,
+silence after backgrounding the test tone, and signal again after restarting it;
+the software listener completed successfully. This is local loopback evidence.
+On 2026-11-25, API 37 x86_64 instrumentation moved the activity to the background
 before the injected disconnect, observed the reconnecting notification, returned
 through its open action, and verified the restored notification while capture
 continued. The loopback listener received 188 packets and decoded 178 frames
