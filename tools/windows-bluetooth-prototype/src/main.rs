@@ -45,6 +45,28 @@ fn selection(input: &str, count: u32) -> Option<u32> {
         .map(|index| index - 1)
 }
 
+#[cfg(any(windows, test))]
+#[derive(Debug, PartialEq, Eq)]
+enum MonitorExit {
+    User,
+    SystemClosed,
+}
+
+#[cfg(any(windows, test))]
+fn monitor_connection(
+    mut is_open: impl FnMut() -> Result<bool>,
+    mut wait_for_input: impl FnMut() -> Result<bool>,
+) -> Result<MonitorExit> {
+    loop {
+        if !is_open()? {
+            return Ok(MonitorExit::SystemClosed);
+        }
+        if wait_for_input()? {
+            return Ok(MonitorExit::User);
+        }
+    }
+}
+
 #[cfg(windows)]
 impl PlaybackConnection for windows::Media::Audio::AudioPlaybackConnection {
     fn start(&self) -> Result<()> {
@@ -112,10 +134,42 @@ fn main() -> Result<()> {
     let device = devices.GetAt(index)?;
     let connection = AudioPlaybackConnection::TryCreateFromId(&device.Id()?)?;
     run_connection(&connection, || {
+        use std::sync::mpsc::{self, RecvTimeoutError};
+        use std::time::Duration;
+        use windows::Media::Audio::AudioPlaybackConnectionState;
+
         println!("System playback connection opened. Press Enter to close it.");
         println!("An open connection does not confirm audible playback or application PCM.");
-        let mut input = String::new();
-        io::stdin().read_line(&mut input)?;
+        let (sender, receiver) = mpsc::sync_channel(1);
+        std::thread::spawn(move || {
+            let mut input = String::new();
+            let _ = sender.send(io::stdin().read_line(&mut input));
+        });
+        let outcome = monitor_connection(
+            || {
+                let state = connection.State()?;
+                if state == AudioPlaybackConnectionState::Opened {
+                    Ok(true)
+                } else if state == AudioPlaybackConnectionState::Closed {
+                    Ok(false)
+                } else {
+                    Err(format!("Unknown system playback connection state: {}", state.0).into())
+                }
+            },
+            || match receiver.recv_timeout(Duration::from_millis(250)) {
+                Ok(result) => {
+                    result?;
+                    Ok(true)
+                }
+                Err(RecvTimeoutError::Timeout) => Ok(false),
+                Err(RecvTimeoutError::Disconnected) => {
+                    Err("Console input stopped unexpectedly".into())
+                }
+            },
+        )?;
+        if outcome == MonitorExit::SystemClosed {
+            println!("The system closed the playback connection.");
+        }
         Ok(())
     })?;
     println!("System playback connection closed.");
@@ -187,5 +241,41 @@ mod tests {
             assert_eq!(result.is_err(), failure.is_some());
             assert_eq!(*connection.calls.borrow(), expected);
         }
+    }
+
+    #[test]
+    fn monitoring_reports_user_or_system_closure_and_propagates_errors() {
+        let mut states = [true, true, false].into_iter();
+        let mut waits = 0;
+        assert_eq!(
+            monitor_connection(
+                || Ok(states.next().unwrap()),
+                || {
+                    waits += 1;
+                    Ok(false)
+                },
+            )
+            .unwrap(),
+            MonitorExit::SystemClosed
+        );
+        assert_eq!(waits, 2);
+        assert_eq!(
+            monitor_connection(|| Ok(true), || Ok(true)).unwrap(),
+            MonitorExit::User
+        );
+        assert!(monitor_connection(|| Err("state failed".into()), || Ok(true)).is_err());
+        assert!(monitor_connection(|| Ok(true), || Err("input failed".into())).is_err());
+
+        let connection = FakeConnection {
+            calls: RefCell::new(Vec::new()),
+            fail: None,
+        };
+        assert!(
+            run_connection(&connection, || {
+                monitor_connection(|| Err("state failed".into()), || Ok(true)).map(|_| ())
+            })
+            .is_err()
+        );
+        assert_eq!(*connection.calls.borrow(), ["start", "open", "close"]);
     }
 }

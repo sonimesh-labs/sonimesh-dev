@@ -282,7 +282,9 @@ The Windows Bluetooth prototype may enumerate system playback candidates and,
 after an explicit operator selection, start, open, and close a system-routed
 connection. Enumeration or a successful open does not establish that audio is
 audible or that PCM is available to the application. The prototype does not
-enter the WLAN MVP.
+enter the WLAN MVP. While the experiment is open, it checks the system
+connection state outside any audio callback and reports a system closure before
+cleaning up; it does not automatically reconnect.
 
 ## 4. Quality targets and latency budget
 

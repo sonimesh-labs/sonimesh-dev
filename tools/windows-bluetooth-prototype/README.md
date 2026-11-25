@@ -9,8 +9,10 @@ that the adapter or operating system cannot support a connection.
 To try system-routed playback, run
 `cargo run -p windows-bluetooth-prototype -- --connect`, choose a listed
 number, and press Enter again to close the connection. The selection refers to
-the list from the same run. The tool attempts to close the connection even if
-start, open, or waiting fails. This does not capture audio or provide a PCM
+the list from the same run. The tool checks connection state while waiting and
+reports if the system closes it; it does not automatically reconnect. It
+attempts to close the connection even if start, open, monitoring, or waiting
+fails. This does not capture audio or provide a PCM
 source to SoniMesh, and an open connection alone does not establish that sound
 is audible. Device names may be personal; review output before sharing it.
 
