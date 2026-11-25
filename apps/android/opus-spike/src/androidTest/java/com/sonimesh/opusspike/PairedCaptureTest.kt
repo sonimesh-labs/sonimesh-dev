@@ -697,21 +697,40 @@ class PairedCaptureTest {
                         currentDuration = duration()
                     }
                     assertTrue("capture notification duration did not advance", currentDuration != null && currentDuration > requireNotNull(initialDuration))
+                    val silenceDeadline = SystemClock.elapsedRealtime() + 10_000
+                    var silent = false
+                    while (!silent && SystemClock.elapsedRealtime() < silenceDeadline) {
+                        silent = manager.activeNotifications.firstOrNull { it.id == 1 }?.notification
+                            ?.extras?.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
+                            ?.contains("No capturable audio detected") == true
+                        if (!silent) SystemClock.sleep(100)
+                    }
+                    assertTrue("background capture did not report silence", silent)
                     requireNotNull(notification?.contentIntent) { "capture notification has no open action" }.send()
                     val returnDeadline = SystemClock.elapsedRealtime() + 10_000
                     var returned = false
                     while (!returned && SystemClock.elapsedRealtime() < returnDeadline) {
                         val root = automation.rootInActiveWindow
                         returned = root?.packageName?.toString() == instrumentation.targetContext.packageName &&
-                            root.findAccessibilityNodeInfosByText("Status: Capturing audio").isNotEmpty()
+                            root.findAccessibilityNodeInfosByText("Status: No capturable audio detected").isNotEmpty()
                         if (!returned) SystemClock.sleep(100)
                     }
                     assertTrue("notification did not return to active capture", returned)
                     scenario.onActivity { activity ->
                         assertTrue("returning from notification lost capture status",
-                            containsStatus(activity.window.decorView, "Status: Capturing audio"))
+                            containsStatus(activity.window.decorView, "Status: No capturable audio detected"))
+                        assertTrue("capture stopped while backgrounded", !LabStatus.captureAdmission.canBegin())
+                        find(activity.window.decorView) { it is Button && it.text.toString().equals("Start test tone", true) }.performClick()
                     }
-                    SystemClock.sleep(3_000)
+                    val signalDeadline = SystemClock.elapsedRealtime() + 10_000
+                    var signalRestored = false
+                    while (!signalRestored && SystemClock.elapsedRealtime() < signalDeadline) {
+                        scenario.onActivity { activity ->
+                            signalRestored = containsStatus(activity.window.decorView, "Status: Capturing audio")
+                        }
+                        if (!signalRestored) SystemClock.sleep(100)
+                    }
+                    assertTrue("capture did not detect the restarted tone", signalRestored)
                 } else if (screenOff) {
                     val power = instrumentation.targetContext.getSystemService(PowerManager::class.java)
                     try {
