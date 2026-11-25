@@ -189,7 +189,7 @@ mod platform {
 
     #[cfg(test)]
     mod tests {
-        use super::{Meter, endpoints};
+        use super::{Meter, Monitor, endpoints};
         use cpal::traits::HostTrait;
         use cpal::{FromSample, Sample};
         use std::str::FromStr;
@@ -220,6 +220,23 @@ mod platform {
                 let id = cpal::DeviceId::from_str(&endpoint.id).unwrap();
                 assert!(host.device_by_id(&id).is_some(), "{}", endpoint.name);
             }
+        }
+
+        #[test]
+        #[ignore = "starts WASAPI loopback on a Windows playback endpoint"]
+        fn selected_default_endpoint_loopback_starts_and_stops() {
+            let endpoint = endpoints()
+                .unwrap()
+                .into_iter()
+                .find(|endpoint| endpoint.is_default)
+                .expect("no default Windows playback endpoint is available");
+            let mut monitor = Monitor::default();
+            let started = monitor
+                .start(&endpoint.id)
+                .expect("could not start selected endpoint loopback");
+            assert!(started.running);
+            assert_eq!(started.endpoint_name, endpoint.name);
+            assert!(!monitor.stop().running);
         }
 
         #[test]

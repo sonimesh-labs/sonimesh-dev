@@ -19,10 +19,12 @@ source to SoniMesh, and an open connection alone does not establish that sound
 is audible. Device names may be personal; review output before sharing it.
 
 On the development machine, Windows build 26200 with an Intel Bluetooth
-adapter initially returned zero candidates on 2026-11-25; a later run returned
-one. On a later attempt that day, both the desktop probe backend and the command
-line experiment failed to open the sole candidate; the latter reported Windows
-status 3 and HRESULT `0x8007001F`. The source's state was not established, so
-the cause is unknown. These observations do not verify playback, latency, or an
-application-readable PCM path. A successful open, close, and listening
-experiment with a compatible source is still needed.
+adapter initially returned zero candidates on 2026-11-25; later enumeration
+returned one. On 2026-11-26 the desktop probe again found one candidate and its
+inbound-wait state opened and closed cleanly. A direct open returned
+`UnknownFailure` with HRESULT `0x8007001F`. The source's state was not
+established, so the cause remains unknown. The dated run is recorded in
+[`docs/measurements`](../../docs/measurements/2026-11-26-windows-bluetooth-output-probe.md).
+These observations do not verify playback, latency, or an application-readable
+PCM path. A successful open, close, and listening experiment with a compatible
+source is still needed.

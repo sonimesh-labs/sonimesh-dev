@@ -28,6 +28,7 @@ runs. Read the environment and limitations in each record before generalizing.
 
 ## Windows output
 
+- [2026-11-26 Bluetooth and selected output probe](./2026-11-26-windows-bluetooth-output-probe.md) — selected endpoint ID and WASAPI loopback startup/stop passed; Bluetooth direct-open remains an unknown failure.
 - [Backend comparison protocol](./windows-output-backend-comparison.md), [comparison](./2026-07-20-windows-output-backend-comparison.md), and [recheck](./2026-07-20-windows-output-backend-recheck.md).
 - CPAL [2026-07-17 smoke](./2026-07-17-windows-cpal-smoke.md), [2026-07-18 probe](./2026-07-18-windows-cpal-probe.md), and [2026-07-18 smoke](./2026-07-18-windows-cpal-smoke.md).
 - [2026-08-13 output recheck](./2026-08-13-windows-output-recheck.md).

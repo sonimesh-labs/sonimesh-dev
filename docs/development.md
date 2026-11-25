@@ -1184,17 +1184,16 @@ Windows audio devices. Play audio through the selected endpoint and watch its na
 sample count, and recent peak. Stop the check when finished. It reports only aggregate activity;
 the endpoint mix can include audio from other applications and does not identify
 the Bluetooth source. No PCM is retained by the probe.
-On 2026-11-26, a two-second start with no audio being played returned zero samples
-and a zero peak. This verifies status and stop behavior only; signal capture still
-needs a playback source.
+On 2026-11-26, a hardware check started and stopped loopback on the selected
+default endpoint. The run did not establish audio-signal capture. Full Bluetooth
+and output-probe results are recorded in
+[`docs/measurements/2026-11-26-windows-bluetooth-output-probe.md`](./measurements/2026-11-26-windows-bluetooth-output-probe.md).
 
 The inbound-wait hardware check below requires exactly one listed playback
 candidate, prepares Windows to accept a remote connection for two seconds, and
 then closes it. It does not initiate a connection from the phone. On
-2026-11-25, two runs showed Windows accepting this waiting state and closing it
-cleanly. The
-separate direct-open attempt failed with Windows status 3 and HRESULT
-`0x8007001F`; its cause remains unknown.
+2026-11-26, the check passed. A direct-open retry returned `UnknownFailure` and
+HRESULT `0x8007001F`; its cause remains unknown.
 
 ~~~powershell
 cargo +1.98.1 test --manifest-path tools/tauri-output-prototype/Cargo.toml real_windows_inbound_wait_reports_state_and_closes -- --ignored

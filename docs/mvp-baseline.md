@@ -89,8 +89,10 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   selects the default initially, and reports the selected endpoint name, format,
   sample count, and recent peak for standard integer and floating-point PCM formats
   without retaining PCM; it observes the system mix and does not establish
-  source-specific Bluetooth capture. Two short Windows checks
-  accepted and closed the inbound-wait state, but phone-initiated playback and an
+  source-specific Bluetooth capture. On 2026-11-26, a Windows endpoint ID could
+  be re-resolved and the selected default endpoint loopback stream started and
+  stopped. The Bluetooth inbound-wait check passed, while direct open again
+  returned `UnknownFailure` / `0x8007001F`; phone-initiated playback and an
   application PCM source remain unverified
   (see `tools/windows-bluetooth-prototype/README.md`);
 - a shell-neutral `DesktopControlSession` that attaches the existing bounded
