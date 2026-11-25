@@ -27,6 +27,7 @@ let loopbackStartedAt: number | undefined
 let disposed = false
 let statusRequest = 0
 let loopbackRequest = 0
+let refreshOnFocus = false
 
 function sourceName() {
   return names.value[Number(selected.value)] ?? 'selected source'
@@ -73,11 +74,19 @@ async function refresh() {
 async function openBluetoothSettings() {
   if (!window.__TAURI__) return
   error.value = null
+  refreshOnFocus = true
   try {
     await window.__TAURI__.core.invoke('open_bluetooth_settings')
   } catch (cause) {
+    refreshOnFocus = false
     error.value = String(cause)
   }
+}
+
+function refreshCandidatesOnFocus() {
+  if (disposed || !refreshOnFocus) return
+  refreshOnFocus = false
+  if (phase.value === 'idle') void refresh()
 }
 
 async function poll() {
@@ -258,6 +267,7 @@ async function toggle(mode: 'connect' | 'wait' = 'connect', monitorOutput = fals
 
 onMounted(async () => {
   if (!window.__TAURI__) return
+  window.addEventListener('focus', refreshCandidatesOnFocus)
   busy.value = true
   const request = statusRequest
   try {
@@ -284,7 +294,15 @@ onMounted(async () => {
   }
 })
 
-onBeforeUnmount(() => { disposed = true; statusRequest++; loopbackRequest++; clearTimeout(timer); clearTimeout(loopbackTimer) })
+onBeforeUnmount(() => {
+  disposed = true
+  statusRequest++
+  loopbackRequest++
+  refreshOnFocus = false
+  window.removeEventListener('focus', refreshCandidatesOnFocus)
+  clearTimeout(timer)
+  clearTimeout(loopbackTimer)
+})
 </script>
 
 <template>
