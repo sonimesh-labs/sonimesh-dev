@@ -115,6 +115,54 @@ afterEach(() => {
 })
 
 describe('useDesktopState', () => {
+  it('refreshes real output devices on focus and retains the updated selection', async () => {
+    const initial = { ...receiverSnapshot('idle'), previewAdapter: false, selectedOutputId: 'old' }
+    const updated = { ...initial, selectedOutputId: 'new' }
+    desktopBridgeMock.snapshot.mockResolvedValue(initial)
+    desktopBridgeMock.refreshOutputDevices.mockResolvedValue(updated)
+    const wrapper = mount(StateHarness)
+    await flushPromises()
+
+    window.dispatchEvent(new Event('focus'))
+    window.dispatchEvent(new Event('focus'))
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    await flushPromises()
+    expect(desktopBridgeMock.refreshOutputDevices).toHaveBeenCalledTimes(1)
+    expect(wrapper.vm.snapshot?.selectedOutputId).toBe('new')
+    wrapper.unmount()
+    window.dispatchEvent(new Event('focus'))
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(desktopBridgeMock.refreshOutputDevices).toHaveBeenCalledTimes(1)
+  })
+
+  it('defers focus refresh until an ongoing command finishes', async () => {
+    const initial = { ...receiverSnapshot('idle'), previewAdapter: false }
+    desktopBridgeMock.snapshot.mockResolvedValue(initial)
+    desktopBridgeMock.refreshOutputDevices.mockResolvedValue(initial)
+    const wrapper = mount(StateHarness)
+    await flushPromises()
+    const pending = deferred<DesktopSnapshot>()
+    desktopBridgeMock.selectOutput.mockReturnValueOnce(pending.promise)
+    const selection = wrapper.vm.selectOutput('device-b')
+    window.dispatchEvent(new Event('focus'))
+    window.dispatchEvent(new Event('focus'))
+    expect(desktopBridgeMock.refreshOutputDevices).not.toHaveBeenCalled()
+    pending.resolve(initial)
+    await selection
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    await flushPromises()
+    expect(desktopBridgeMock.refreshOutputDevices).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not refresh synthetic devices when the preview gains focus', async () => {
+    desktopBridgeMock.snapshot.mockResolvedValue(receiverSnapshot('ready'))
+    mount(StateHarness)
+    await flushPromises()
+    window.dispatchEvent(new Event('focus'))
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    expect(desktopBridgeMock.refreshOutputDevices).not.toHaveBeenCalled()
+  })
+
   it('keeps a startup error visible while the next snapshot is pending', async () => {
     desktopBridgeMock.snapshot.mockRejectedValueOnce(new Error('enumeration failed'))
     const wrapper = mount(StateHarness)

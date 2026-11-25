@@ -1589,7 +1589,8 @@ directory and restores it at launch when it is still present. Missing or invalid
 settings use the default endpoint; a missing selected endpoint falls back to the
 current default or first available endpoint. This preference does not change
 the Windows system default. **Follow system default** removes the saved explicit
-selection; refresh the device list to pick up a later system-default change.
+selection; returning focus to the window or refreshing the device list picks up
+a later system-default change.
 The saved preference remains intact during that fallback. After reconnecting the
 preferred endpoint, use **Refresh output devices** to select it again.
 To keep the currently shown default or fallback device as an explicit preference,

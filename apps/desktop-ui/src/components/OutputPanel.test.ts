@@ -54,7 +54,7 @@ describe('OutputPanel', () => {
     expect(wrapper.emitted('select')).toEqual([[null]])
     await wrapper.setProps({ output: outputSnapshot({ followsSystemDefault: true }) })
     expect((button.element as HTMLButtonElement).disabled).toBe(true)
-    expect(wrapper.text()).toContain('Refresh devices after it changes.')
+    expect(wrapper.text()).toContain('Devices refresh when you return to this window.')
   })
 
   it('labels synthetic devices as preview output', () => {

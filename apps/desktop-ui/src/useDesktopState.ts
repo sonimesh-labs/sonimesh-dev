@@ -14,7 +14,24 @@ export function useDesktopState() {
   const outputTestStatus = ref<string | null>(null)
   const refreshingDevices = ref(false)
   let snapshotPollTimer: ReturnType<typeof setInterval> | undefined
+  let outputRefreshTimer: ReturnType<typeof setTimeout> | undefined
+  let outputRefreshPending = false
+  let mounted = false
   let snapshotRevision = 0
+
+  function scheduleOutputRefresh() {
+    if (!mounted || !outputRefreshPending || busy.value || outputRefreshTimer !== undefined) return
+    outputRefreshTimer = setTimeout(() => {
+      outputRefreshTimer = undefined
+      if (mounted && outputRefreshPending && !busy.value) void refreshOutputDevices()
+    }, 0)
+  }
+
+  function onWindowFocus() {
+    if (!snapshot.value || snapshot.value.previewAdapter) return
+    outputRefreshPending = true
+    scheduleOutputRefresh()
+  }
 
   async function run(
     command: () => Promise<DesktopSnapshot | void>,
@@ -34,6 +51,7 @@ export function useDesktopState() {
       error.value = failureMessage
     } finally {
       busy.value = false
+      scheduleOutputRefresh()
     }
   }
 
@@ -68,6 +86,7 @@ export function useDesktopState() {
   async function refreshOutputDevices() {
     if (busy.value) return
 
+    outputRefreshPending = false
     const previousSelectedOutputId = snapshot.value?.selectedOutputId ?? null
     refreshingDevices.value = true
     try {
@@ -110,6 +129,8 @@ export function useDesktopState() {
   const resetPreview = () => run(() => desktopBridge.resetPreview())
 
   onMounted(() => {
+    mounted = true
+    window.addEventListener('focus', onWindowFocus)
     void refresh()
     snapshotPollTimer = setInterval(() => {
       void refresh()
@@ -117,6 +138,12 @@ export function useDesktopState() {
   })
 
   onBeforeUnmount(() => {
+    mounted = false
+    window.removeEventListener('focus', onWindowFocus)
+    if (outputRefreshTimer !== undefined) {
+      clearTimeout(outputRefreshTimer)
+      outputRefreshTimer = undefined
+    }
     if (snapshotPollTimer !== undefined) {
       clearInterval(snapshotPollTimer)
       snapshotPollTimer = undefined
