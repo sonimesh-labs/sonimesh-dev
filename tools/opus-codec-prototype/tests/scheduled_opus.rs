@@ -390,6 +390,30 @@ fn scheduled_protected_opus(buffered: bool) {
         Ok(Some(DecodeStep::Decoded { sequence: 8, .. }))
     ));
 
+    let mut stop_at = 521 + 2 * startup_delay;
+    if buffered {
+        sender.send_frame(0, 9 * 960, &[0xff]).unwrap();
+        let failed_at = 540 + 2 * startup_delay;
+        assert!(matches!(
+            scheduler.tick_scheduled_at(failed_at).playout,
+            Err(sonimesh_app::ScheduledPlayoutError::Decode(_))
+        ));
+        let len = encoder.encode_float(&pcm, &mut packet).unwrap();
+        sender.send_frame(0, 10 * 960, &packet[..len]).unwrap();
+        let first_fresh = scheduler.tick_scheduled_at(failed_at + 1);
+        assert_eq!(first_fresh.packets.unwrap(), 1);
+        assert!(matches!(first_fresh.playout, Ok(None)));
+        assert!(matches!(
+            scheduler.tick_scheduled_at(failed_at + 40).playout,
+            Ok(None)
+        ));
+        assert!(matches!(
+            scheduler.tick_scheduled_at(failed_at + 41).playout,
+            Ok(Some(DecodeStep::Decoded { sequence: 10, .. }))
+        ));
+        stop_at = failed_at + 42;
+    }
+
     let stop = Envelope {
         protocol_version: CONTROL_PROTOCOL_VERSION,
         request_id: 3,
@@ -404,7 +428,7 @@ fn scheduled_protected_opus(buffered: bool) {
         .unwrap();
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
-        let tick = scheduler.tick_scheduled_at(521 + 2 * startup_delay);
+        let tick = scheduler.tick_scheduled_at(stop_at);
         assert!(tick.packets.is_ok() && tick.pump.is_ok());
         match tick.control.unwrap() {
             Some(ControlSessionPoll::Processed { .. }) => {

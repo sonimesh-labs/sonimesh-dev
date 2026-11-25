@@ -1820,9 +1820,14 @@ where
             Ok(Some(DecodeStep::Concealed { .. })) => {
                 self.scheduled_concealment = self.scheduled_concealment.saturating_add(1);
             }
-            Ok(Some(DecodeStep::Decoded { .. } | DecodeStep::NotReady))
-            | Err(ScheduledPlayoutError::Decode(_)) => {
+            Ok(Some(DecodeStep::Decoded { .. } | DecodeStep::NotReady)) => {
                 self.scheduled_concealment = 0;
+            }
+            Err(ScheduledPlayoutError::Decode(_)) => {
+                self.scheduled_concealment = 0;
+                if self.scheduled_startup_frames > 0 {
+                    self.scheduled_playout = None;
+                }
             }
             Ok(None) | Err(ScheduledPlayoutError::ClockRegression { .. }) => {}
         }

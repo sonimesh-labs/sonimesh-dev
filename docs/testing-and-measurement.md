@@ -39,7 +39,8 @@ evidence.
 The scheduled receiver's optional startup wait has a software integration test
 using native Opus, protected UDP, a virtual clock, and an in-memory output. It
 checks initial buffering, loss concealment, and buffering again after a long
-interruption. This does not measure hardware latency or audible quality.
+interruption or an invalid Opus frame. This does not measure hardware latency or
+audible quality.
 
 ## Latency measurement
 
