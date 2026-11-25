@@ -132,6 +132,9 @@ is silent.
 An explicit single-session probe check may retain up to 30 seconds of decoded
 mono samples in memory and correlate them after the receiver stops. It writes no
 audio file and reports detection only; it does not measure end-to-end latency.
+The Android lab's copyable evidence can summarize send-call intervals shorter
+than 10 ms. It is a bounded, process-local counter and does not record audio or
+network arrival timestamps.
 An isolated Tauri desktop probe can display Windows output devices and their
 default formats and play an explicitly requested short test tone through one
 selected endpoint. It is a platform experiment, separate from the synthetic

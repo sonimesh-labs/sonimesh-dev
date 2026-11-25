@@ -722,6 +722,15 @@ For each event the report also includes its packet number within the current
 receive-loop batch and the interval since the previous admitted packet was
 observed by that loop. These are application polling observations, not kernel
 arrival timestamps or proof of the sender's pacing.
+The Android lab's copied evidence separately counts intervals under 10 ms between
+completed packet sends and all observed send intervals in the capture run. This
+can help compare sender-side bursts with the desktop's poll observations, but
+does not measure when the receiver or network obtained each packet.
+On 2026-11-25 an API 37 x86_64 emulator paired-probe run reported 88 intervals
+under 10 ms out of 438 at the sender. The desktop saw one resynchronization,
+with a 4,985 µs previous packet observation gap, eight dropped frames, and three
+late packets. The probe was detected. This single run does not establish that
+the observed sender intervals caused that particular resynchronization.
 These observations are captured in memory and printed after the stop drain; they
 exclude resynchronizations during that drain. Loop intervals are not packet
 arrival times, and a nearby delay does not establish why a resynchronization

@@ -907,6 +907,12 @@ class PairedCaptureTest {
                     }
                 } as TextView
                 instrumentation.sendStatus(1, Bundle().apply { putString("encodedPayload", rate.text.toString()) })
+                if (testLatencyProbe) {
+                    val timing = LabStatus.copyableEvidence().lineSequence()
+                        .first { it.startsWith("Send intervals under 10 ms:") }
+                    assertTrue("send timing was not retained", timing.matches(Regex("Send intervals under 10 ms: [0-9]+ of [0-9]+")))
+                    instrumentation.sendStatus(1, Bundle().apply { putString("sendTiming", timing) })
+                }
             }
         }
     }

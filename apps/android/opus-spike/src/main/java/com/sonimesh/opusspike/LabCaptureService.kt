@@ -200,12 +200,17 @@ class LabCaptureService : Service() {
         var lastRatePublication = 0L
         val sentPackets = AtomicLong(0)
         val lastSentPublication = AtomicLong(0)
+        val senderTiming = SenderTiming()
         val packetSent: () -> Unit = {
             val count = sentPackets.updateAndGet(::incrementSaturated)
+            val timing = senderTiming.record(SystemClock.elapsedRealtimeNanos())
             val now = SystemClock.elapsedRealtime()
             val previous = lastSentPublication.get()
             if (now - previous >= 1_000 && lastSentPublication.compareAndSet(previous, now)) {
-                handler.post { LabStatus.publishSentPackets(count) }
+                handler.post {
+                    LabStatus.publishSentPackets(count)
+                    LabStatus.publishSenderTiming(timing)
+                }
             }
         }
         try {
@@ -439,7 +444,11 @@ class LabCaptureService : Service() {
                 if (activePairedSupervisor === pairedSupervisor) activePairedSupervisor = null
             }
             if (captureStarted) {
-                handler.post { LabStatus.publishSentPackets(sentPackets.get()) }
+                val timing = senderTiming.snapshot()
+                handler.post {
+                    LabStatus.publishSentPackets(sentPackets.get())
+                    LabStatus.publishSenderTiming(timing)
+                }
             }
             handler.post {
                 workerFinished = true

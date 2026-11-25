@@ -45,6 +45,7 @@ internal object LabStatus {
     private var encoderRate: Long? = null
     private val rateObservers = mutableSetOf<(Long?) -> Unit>()
     private var sentPackets: Long? = null
+    private var senderTiming: SenderTimingSnapshot? = null
     private val sentPacketObservers = mutableSetOf<(Long?) -> Unit>()
     private var sessionConfig: LabSessionConfig? = null
     val retryTransport: LabTransport?
@@ -66,6 +67,7 @@ internal object LabStatus {
         sessionConfig = LabSessionConfig(usage, bitrate, transport, udpPort)
         signalState = null
         captureDurationSeconds = null
+        senderTiming = null
         publishSenderMuted(false)
         sessionObservers.toList().forEach { it(sessionConfig) }
         signalObservers.toList().forEach { it(null) }
@@ -200,6 +202,10 @@ internal object LabStatus {
         sentPacketObservers.toList().forEach { it(value) }
     }
 
+    fun publishSenderTiming(value: SenderTimingSnapshot?) {
+        senderTiming = value
+    }
+
     /** Returns a bounded operator summary without invitation or audio payloads. */
     fun copyableEvidence(): String = buildString {
         appendLine("SoniMesh paired audio lab")
@@ -214,6 +220,7 @@ internal object LabStatus {
         appendLine("Sending mute (last known): ${lastSenderMuted?.let { if (it) "on" else "off" } ?: "—"}")
         appendLine("Sender queue drops: ${senderQueueDrops ?: "—"}")
         appendLine("Media packets sent: ${sentPackets ?: "—"}")
+        appendLine("Send intervals under 10 ms: ${senderTiming?.let { "${it.underTenMillis} of ${it.intervals}" } ?: "—"}")
         appendLine("Encoded payload average: ${encoderRate?.let { "$it kbps" } ?: "—"}")
     }.trimEnd()
 }
