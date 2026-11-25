@@ -97,9 +97,10 @@
   available endpoint leaves the error visible. These are mocked state-flow tests,
   not physical output-device removal evidence.
 - A repeated hardware fallback check again returned Windows error `0x8007001F`
-  for direct open, then entered inbound wait and closed back to idle. This
-  confirms the host's existing direct-open limitation and fallback cleanup; no
-  phone-initiated playback occurred.
+  for direct open, then reported the exact inbound state as `Waiting` and closed
+  back to `Idle`. The ignored hardware test now prints this state for future
+  runs. This confirms the host's existing direct-open limitation and fallback
+  cleanup; no phone-initiated playback occurred.
 
 Commands run from the repository root:
 

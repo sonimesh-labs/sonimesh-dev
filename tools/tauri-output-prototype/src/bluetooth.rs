@@ -252,8 +252,10 @@ mod platform {
             bluetooth
                 .prepare(refreshed.generation, 0)
                 .expect("inbound wait should remain available after direct open");
+            let state = bluetooth.status().unwrap();
+            eprintln!("inbound wait state: {state:?}");
             assert!(matches!(
-                bluetooth.status().unwrap(),
+                state,
                 PlaybackState::Waiting | PlaybackState::Open
             ));
             bluetooth.disconnect().unwrap();
