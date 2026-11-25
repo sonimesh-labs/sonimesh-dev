@@ -122,7 +122,10 @@ export class PreviewDesktopBridge implements DesktopBridge {
     return this.copy()
   }
 
-  async selectOutput(deviceId: string): Promise<DesktopSnapshot> {
+  async selectOutput(deviceId: string | null): Promise<DesktopSnapshot> {
+    if (deviceId === null) {
+      deviceId = this.snapshotState.outputDevices.find((device) => device.isDefault)?.id ?? null
+    }
     if (this.snapshotState.outputDevices.some((device) => device.id === deviceId)) {
       this.snapshotState.selectedOutputId = deviceId
       this.snapshotState.output.selectionRetained = true

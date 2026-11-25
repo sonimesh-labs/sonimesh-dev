@@ -15,6 +15,25 @@ function outputSnapshot(overrides: Partial<OutputSnapshot> = {}): OutputSnapshot
 }
 
 describe('OutputPanel', () => {
+  it('lets the shell return to following the system default', async () => {
+    const wrapper = mount(OutputPanel, {
+      props: {
+        devices: [{ id: 'headphones', label: 'Headphones', sampleRateHz: 48_000, channels: 2, isDefault: false }],
+        selectedId: 'headphones',
+        output: outputSnapshot({ followsSystemDefault: false }),
+        gain: 1,
+        muted: false,
+        busy: false,
+      },
+    })
+    const button = wrapper.findAll('button').find((item) => item.text() === 'Follow system default')!
+    await button.trigger('click')
+    expect(wrapper.emitted('select')).toEqual([[null]])
+    await wrapper.setProps({ output: outputSnapshot({ followsSystemDefault: true }) })
+    expect((button.element as HTMLButtonElement).disabled).toBe(true)
+    expect(wrapper.text()).toContain('Refresh devices after it changes.')
+  })
+
   it('labels synthetic devices as preview output', () => {
     const wrapper = mount(OutputPanel, {
       props: {

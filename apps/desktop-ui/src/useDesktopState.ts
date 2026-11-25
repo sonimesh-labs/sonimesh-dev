@@ -58,7 +58,7 @@ export function useDesktopState() {
   }
   const start = () => run(() => desktopBridge.startStream())
   const stop = () => run(() => desktopBridge.stopStream())
-  const selectOutput = (id: string) => {
+  const selectOutput = (id: string | null) => {
     outputTestStatus.value = null
     return run(
       () => desktopBridge.selectOutput(id),

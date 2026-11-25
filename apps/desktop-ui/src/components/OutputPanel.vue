@@ -27,7 +27,7 @@ const props = withDefaults(defineProps<{
 })
 
 const emit = defineEmits<{
-  select: [id: string]
+  select: [id: string | null]
   refreshDevices: []
   gain: [gain: number]
   mute: [muted: boolean]
@@ -139,6 +139,11 @@ const displayStatus = computed<DisplayStatus>(() => {
       >
         <RefreshCw :size="16" :class="{ spinning: refreshingDevices }" aria-hidden="true" />
       </button>
+    </div>
+
+    <div v-if="output.followsSystemDefault !== undefined" class="output-test-control">
+      <button class="secondary-action" type="button" :disabled="busy || output.followsSystemDefault" @click="emit('select', null)">Follow system default</button>
+      <p v-if="output.followsSystemDefault" class="preview-note">Using the system default when available. Refresh devices after it changes.</p>
     </div>
 
     <div v-if="testToneAvailable" class="output-test-control">

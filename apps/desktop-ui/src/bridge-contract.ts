@@ -4,7 +4,7 @@ export interface DesktopBridge {
   snapshot(): Promise<DesktopSnapshot>
   startStream(): Promise<DesktopSnapshot>
   stopStream(): Promise<DesktopSnapshot>
-  selectOutput(deviceId: string): Promise<DesktopSnapshot>
+  selectOutput(deviceId: string | null): Promise<DesktopSnapshot>
   /** Re-enumerates desktop output devices and returns the updated snapshot. */
   refreshOutputDevices(): Promise<DesktopSnapshot>
   /** Plays a short test tone through the currently selected desktop output. */

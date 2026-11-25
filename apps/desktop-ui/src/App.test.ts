@@ -105,6 +105,24 @@ afterEach(() => {
 })
 
 describe('App', () => {
+  it('sends the follow-default request and displays the shell-confirmed output', async () => {
+    const initial = {
+      ...previewSnapshot(),
+      previewAdapter: false,
+      output: { ...previewSnapshot().output, followsSystemDefault: false },
+    }
+    const following = { ...initial, output: { ...initial.output, followsSystemDefault: true } }
+    desktopBridgeMock.snapshot.mockResolvedValueOnce(initial)
+    desktopBridgeMock.selectOutput.mockResolvedValueOnce(following)
+    const wrapper = mount(App)
+    await flushPromises()
+    await wrapper.findAll('button').find((button) => button.text() === 'Follow system default')!.trigger('click')
+    await flushPromises()
+    expect(desktopBridgeMock.selectOutput).toHaveBeenCalledWith(null)
+    expect(wrapper.text()).toContain('Using the system default when available.')
+    wrapper.unmount()
+  })
+
   it('offers device retry after an initial snapshot failure and displays recovered output', async () => {
     desktopBridgeMock.snapshot.mockRejectedValue(new Error('enumeration failed'))
     const wrapper = mount(App)

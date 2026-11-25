@@ -27,6 +27,8 @@ export interface OutputSnapshot {
   selectionRetained: boolean
   /** Whether the saved output is missing and another available endpoint is active. */
   selectionFallback?: boolean
+  /** Whether this shell resolves output from the current system default. */
+  followsSystemDefault?: boolean
   /** Whether the controller currently owns an active output stream. */
   streamActive: boolean
   /** Whether a non-healthy output fault has already been reported. */

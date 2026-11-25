@@ -26,7 +26,7 @@ export class TauriDesktopBridge implements DesktopBridge {
     return this.call('desktop_stop_stream')
   }
 
-  selectOutput(deviceId: string): Promise<DesktopSnapshot> {
+  selectOutput(deviceId: string | null): Promise<DesktopSnapshot> {
     return this.call('desktop_select_output', { deviceId })
   }
 

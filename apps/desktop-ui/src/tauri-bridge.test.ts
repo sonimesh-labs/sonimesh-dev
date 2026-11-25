@@ -98,6 +98,7 @@ describe('TauriDesktopBridge', () => {
     await bridge.snapshot()
     await bridge.startStream()
     await bridge.selectOutput('speakers')
+    await bridge.selectOutput(null)
     await bridge.refreshOutputDevices()
     await bridge.testOutput()
     await bridge.setGain(0.5)
@@ -112,6 +113,7 @@ describe('TauriDesktopBridge', () => {
       ['desktop_snapshot', undefined],
       ['desktop_start_stream', undefined],
       ['desktop_select_output', { deviceId: 'speakers' }],
+      ['desktop_select_output', { deviceId: null }],
       ['desktop_refresh_output_devices', undefined],
       ['desktop_test_output', undefined],
       ['desktop_set_gain', { gain: 0.5 }],

@@ -125,6 +125,7 @@ struct OutputDevice {
 struct OutputState {
     selection_retained: bool,
     selection_fallback: bool,
+    follows_system_default: bool,
     stream_active: bool,
     fault_reported: bool,
     health: &'static str,
@@ -206,6 +207,7 @@ impl DesktopSnapshot {
             output: OutputState {
                 selection_retained: state.selected_output_id.is_some(),
                 selection_fallback,
+                follows_system_default: state.preferred_output_id.is_none(),
                 stream_active: false,
                 fault_reported: false,
                 health: "healthy",
@@ -277,15 +279,16 @@ fn desktop_snapshot(state: tauri::State<'_, Mutex<ShellState>>) -> Result<Deskto
 #[tauri::command]
 fn desktop_select_output(
     state: tauri::State<'_, Mutex<ShellState>>,
-    device_id: String,
+    device_id: Option<String>,
 ) -> Result<DesktopSnapshot, String> {
     let mut state = state.lock().map_err(|_| "Desktop state is unavailable.")?;
     let devices = probe_output_devices(&state.output)?;
     state.output_inventory.refresh(|| Ok(devices))?;
-    let selected_output_id = select_available_output(&device_id, &state.output_inventory.devices)?;
-    save_selected_output(&state.selection_path, &selected_output_id)?;
-    state.preferred_output_id = Some(selected_output_id.clone());
-    state.selected_output_id = Some(selected_output_id);
+    state.preferred_output_id = persist_output_preference(
+        &state.selection_path,
+        device_id.as_deref(),
+        &state.output_inventory.devices,
+    )?;
     DesktopSnapshot::from_state(&mut state)
 }
 
@@ -473,6 +476,24 @@ fn save_selected_output(path: &Path, device_id: &str) -> Result<(), String> {
     fs::write(path, bytes).map_err(|error| format!("Could not save output settings: {error}"))
 }
 
+fn persist_output_preference(
+    path: &Path,
+    device_id: Option<&str>,
+    devices: &[OutputDevice],
+) -> Result<Option<String>, String> {
+    if let Some(device_id) = device_id {
+        let selected = select_available_output(device_id, devices)?;
+        save_selected_output(path, &selected)?;
+        Ok(Some(selected))
+    } else {
+        match fs::remove_file(path) {
+            Ok(()) => Ok(None),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(format!("Could not clear output settings: {error}")),
+        }
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
@@ -504,8 +525,8 @@ fn main() {
 mod tests {
     use super::{
         DesktopCapabilities, DesktopSnapshot, OutputDevice, OutputInventory, OutputTestTone,
-        load_selected_output, resolve_output_selection, save_selected_output,
-        select_available_output,
+        load_selected_output, persist_output_preference, resolve_output_selection,
+        save_selected_output, select_available_output,
     };
     use sonimesh_platform::RenderSource;
     use std::sync::{
@@ -611,6 +632,10 @@ mod tests {
         save_selected_output(&path, "device-a").unwrap();
         assert_eq!(load_selected_output(&path).as_deref(), Some("device-a"));
 
+        assert_eq!(persist_output_preference(&path, None, &[]).unwrap(), None);
+        assert_eq!(load_selected_output(&path), None);
+        assert_eq!(persist_output_preference(&path, None, &[]).unwrap(), None);
+
         std::fs::write(&path, b"{").unwrap();
         assert_eq!(load_selected_output(&path), None);
         std::fs::remove_dir_all(directory).unwrap();
@@ -661,6 +686,17 @@ mod tests {
             (Some("other-device".into()), false)
         );
         assert_eq!(resolve_output_selection(None, &[]), (None, false));
+        assert_eq!(
+            resolve_output_selection(None, &devices),
+            (Some("default-device".into()), false)
+        );
+        let mut changed_default = devices.clone();
+        changed_default[0].is_default = false;
+        changed_default[1].is_default = true;
+        assert_eq!(
+            resolve_output_selection(None, &changed_default),
+            (Some("other-device".into()), false)
+        );
         assert_eq!(
             resolve_output_selection(
                 Some("removed-device"),
@@ -726,6 +762,7 @@ mod tests {
             output: super::OutputState {
                 selection_retained: false,
                 selection_fallback: false,
+                follows_system_default: true,
                 stream_active: false,
                 fault_reported: false,
                 health: "healthy",
@@ -752,6 +789,7 @@ mod tests {
         assert_eq!(encoded["outputDevices"].as_array().unwrap().len(), 0);
         assert_eq!(encoded["selectedOutputId"], serde_json::Value::Null);
         assert_eq!(encoded["output"]["selectionFallback"], false);
+        assert_eq!(encoded["output"]["followsSystemDefault"], true);
         assert_eq!(encoded["previewAdapter"], false);
         assert!(encoded.get("output_devices").is_none());
         assert_eq!(encoded["metrics"]["authenticatedPackets"], "0");
