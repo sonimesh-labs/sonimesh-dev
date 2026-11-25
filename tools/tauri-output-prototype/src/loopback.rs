@@ -23,9 +23,54 @@ pub struct Endpoint {
     channels: Option<u16>,
 }
 
+fn sort_endpoints(endpoints: &mut [Endpoint]) {
+    endpoints.sort_by_key(|endpoint| {
+        (
+            !endpoint.is_default,
+            endpoint.name.to_lowercase(),
+            endpoint.id.clone(),
+        )
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Endpoint, sort_endpoints};
+
+    fn endpoint(id: &str, name: &str, is_default: bool) -> Endpoint {
+        Endpoint {
+            id: id.into(),
+            name: name.into(),
+            is_default,
+            sample_rate: None,
+            channels: None,
+        }
+    }
+
+    #[test]
+    fn output_endpoints_sort_default_first_then_by_name() {
+        let mut endpoints = [
+            endpoint("z", "Speakers", false),
+            endpoint("b", "Bluetooth Headphones", false),
+            endpoint("a", "Aux", true),
+            endpoint("c", "bluetooth headphones", false),
+        ];
+
+        sort_endpoints(&mut endpoints);
+
+        assert_eq!(
+            endpoints
+                .iter()
+                .map(|endpoint| endpoint.id.as_str())
+                .collect::<Vec<_>>(),
+            ["a", "b", "c", "z"]
+        );
+    }
+}
+
 #[cfg(windows)]
 mod platform {
-    use super::{Endpoint, Snapshot};
+    use super::{Endpoint, Snapshot, sort_endpoints};
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
     use cpal::{DeviceId, FromSample, SampleFormat, SizedSample, Stream, StreamConfig};
     use std::str::FromStr;
@@ -103,7 +148,8 @@ mod platform {
         let default_id = host
             .default_output_device()
             .and_then(|device| device.id().ok());
-        host.output_devices()
+        let mut endpoints: Vec<_> = host
+            .output_devices()
             .map_err(|error| error.to_string())?
             .map(|device| {
                 let id = device.id().map_err(|error| error.to_string())?;
@@ -121,7 +167,9 @@ mod platform {
                     channels: format.map(|config| config.channels()),
                 })
             })
-            .collect()
+            .collect::<Result<_, String>>()?;
+        sort_endpoints(&mut endpoints);
+        Ok(endpoints)
     }
 
     impl Monitor {
