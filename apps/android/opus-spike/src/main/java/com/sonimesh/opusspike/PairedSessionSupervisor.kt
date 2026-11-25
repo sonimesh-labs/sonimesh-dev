@@ -16,6 +16,8 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import android.os.SystemClock
+import android.util.Log
+import java.util.concurrent.atomic.AtomicInteger
 
 internal data class EncodedPacket(val sequence: Long, val bytes: ByteArray)
 
@@ -31,6 +33,7 @@ internal class PairedSessionSupervisor(
     private val onReconnectFailure: (String) -> Unit,
     private val onPacketSent: () -> Unit,
 ) : Thread("audio-lab-paired-session") {
+    private val traceId = nextTraceId.incrementAndGet()
     private val startupComplete = CountDownLatch(1)
 
     @Volatile
@@ -83,6 +86,7 @@ internal class PairedSessionSupervisor(
                     runSession()
                     reconnectFailures = 0
                 } catch (error: Exception) {
+                    Log.i(TAG, "paired[$traceId] session ended (${error.javaClass.simpleName})")
                     if (!hasStartedSession) {
                         startupError = error
                         return
@@ -121,13 +125,32 @@ internal class PairedSessionSupervisor(
         val sessionActive = AtomicBoolean(true)
         var sender: Thread? = null
         try {
+            Log.i(TAG, "paired[$traceId] control connected")
             connection.negotiateHello("android audio lab", listOf(2))
+            Log.i(TAG, "paired[$traceId] hello complete")
             val session = nextSessionId()
             val streamIdentity = StreamIdentity(session, 1, 0)
             identity = streamIdentity
+            var startAttempt = 0
             requirePairedStart(
-                startPairedWithRetry(running::get, Thread::sleep) {
-                    connection.startStream(StreamParameters(streamIdentity, 48_000, 2, 20))
+                startPairedWithRetry(
+                    running::get,
+                    Thread::sleep,
+                    onRetry = { Log.i(TAG, "paired[$traceId] retrying StreamStart") },
+                ) {
+                    startAttempt += 1
+                    val result = connection.startStream(StreamParameters(streamIdentity, 48_000, 2, 20))
+                    when (result) {
+                        is StreamControlResult.Rejected -> Log.i(
+                            TAG,
+                            "paired[$traceId] StreamStart[$startAttempt] rejected code=${result.code} retryable=${result.retryable} reason=${rejectionReason(result.detail)}",
+                        )
+                        is StreamControlResult.Status -> Log.i(
+                            TAG,
+                            "paired[$traceId] StreamStart[$startAttempt] status=${result.state}",
+                        )
+                    }
+                    result
                 },
             )
             check(setupSocket.handoff()) { "capture stopped while starting stream" }
@@ -145,6 +168,7 @@ internal class PairedSessionSupervisor(
                 hasStartedSession = true
                 startupComplete.countDown()
             }
+            Log.i(TAG, "paired[$traceId] media session started")
 
             while (running.get() && sessionActive.get()) {
                 try {
@@ -176,12 +200,18 @@ internal class PairedSessionSupervisor(
     }
 
     private fun connect(): PairedConnection {
+        var connectAttempt = 0
         val connection = connectPairedWithRetry(running::get, Thread::sleep, onRetry = {
+            Log.i(TAG, "paired[$traceId] retrying control connection")
             onStatus("Desktop listener is not ready. Retrying connection…")
         }) {
+            connectAttempt += 1
+            Log.i(TAG, "paired[$traceId] control connection attempt $connectAttempt")
             val raw = java.net.Socket()
             check(setupSocket.track(raw)) { "capture stopped before pairing" }
-            PairingClient.connect(invitation, raw)
+            PairingClient.connect(invitation, raw).also {
+                Log.i(TAG, "paired[$traceId] connected remote=${it.socket.remoteSocketAddress}")
+            }
         }
         try {
             check(running.get()) { "capture stopped during pairing" }
@@ -233,12 +263,20 @@ internal class PairedSessionSupervisor(
     }
 
     private companion object {
+        const val TAG = "SoniMeshLab"
+        val nextTraceId = AtomicInteger()
         const val MAX_RECONNECT_ATTEMPTS = 12
         const val MAX_RECONNECT_DELAY_MS = 4_000L
         const val CONTROL_POLL_TIMEOUT_MS = 250
         const val SENDER_DRAIN_TIMEOUT_MS = 2_500L
         const val SENDER_EXIT_TIMEOUT_MS = 500L
         const val STOP_SOCKET_CLOSE_GRACE_MS = 3_500L
+    }
+
+    private fun rejectionReason(detail: String): String = when (detail) {
+        "test-injected receiver unavailable" -> "test-injected"
+        "output unavailable" -> "output-unavailable"
+        else -> "other"
     }
 }
 

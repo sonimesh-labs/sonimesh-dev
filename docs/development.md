@@ -449,8 +449,21 @@ terminated. The ordinary paired-stop control test also passed. This verifies
 emulator loopback service lifecycle, not physical WLAN recovery or audible
 continuity.
 
-To repeat that controlled test, start these commands in separate terminals
-from the repository root (leave ADB reverse for port 47610 disabled):
+To verify recovery after automatic reconnect exhaustion, run the listener with
+`--keep-listening --disconnect-after-ms 1000 --reject-starts 33` and invoke
+`PairedCaptureTest#retries_capture_after_reconnect_attempts_are_exhausted` with
+`-e recoveryTest true`. The initial disconnect counts as the first of the 12
+failures, leaving 11 paired reconnect sessions to exercise the listener's three
+StreamStart retries each. The test then selects fresh screen-capture consent
+through Android's system dialog and checks that manual Retry starts a new
+capture. On 2026-11-25 this passed on an API 37 x86_64 emulator; the desktop
+listener accepted the manual session, received nine media packets, and decoded
+nine frames with a cumulative peak of 0.094. This is loopback recovery and
+decoder evidence, not audible playback or physical WLAN evidence.
+
+To repeat the earlier reconnect-through-gate test, start these commands in
+separate terminals from the repository root (leave ADB reverse for port 47610
+disabled):
 
 ~~~powershell
 cargo run -p opus-codec-prototype --bin paired-audio-lab -- --bind 127.0.0.2 --host 10.0.2.2 --media-port 39094 --require-tone --status

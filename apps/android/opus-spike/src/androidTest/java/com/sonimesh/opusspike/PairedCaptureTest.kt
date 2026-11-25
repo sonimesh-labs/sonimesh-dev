@@ -117,12 +117,18 @@ class PairedCaptureTest {
     }
 
     @Test
+    fun retries_capture_after_reconnect_attempts_are_exhausted() {
+        assumeTrue("recovery test requires --disconnect-after-ms and --reject-starts with --keep-listening", InstrumentationRegistry.getArguments().getString("recoveryTest") == "true")
+        runCapture(retryAfterReconnectExhaustion = true)
+    }
+
+    @Test
     fun returns_to_active_capture_from_notification() = runCapture(notificationReturn = true)
 
     @Test
     fun mutes_and_resumes_sending_during_capture() = runCapture(testMute = true)
 
-    private fun runCapture(expectReconnect: Boolean = false, stopDuringReconnect: Boolean = false, screenOff: Boolean = false, notificationReturn: Boolean = false, startFromScan: Boolean = false, startFromPaste: Boolean = false, recreate: Boolean = false, changeUsage: Boolean = false, testMute: Boolean = false, expectConnectionRetry: Boolean = false) {
+    private fun runCapture(expectReconnect: Boolean = false, stopDuringReconnect: Boolean = false, retryAfterReconnectExhaustion: Boolean = false, screenOff: Boolean = false, notificationReturn: Boolean = false, startFromScan: Boolean = false, startFromPaste: Boolean = false, recreate: Boolean = false, changeUsage: Boolean = false, testMute: Boolean = false, expectConnectionRetry: Boolean = false) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val args = InstrumentationRegistry.getArguments()
         var stopAcknowledgement = "unavailable"
@@ -244,7 +250,7 @@ class PairedCaptureTest {
                     assertTrue(containsStatus(activity.window.decorView, "Status: Capturing audio"))
                 }
             }
-            if (expectReconnect || stopDuringReconnect) {
+            if (expectReconnect || stopDuringReconnect || retryAfterReconnectExhaustion) {
                 instrumentation.sendStatus(1, Bundle().apply { putString("pairedCapture", "ready") })
                 var disconnected = false
                 val disconnectDeadline = SystemClock.elapsedRealtime() + 20_000
@@ -255,6 +261,50 @@ class PairedCaptureTest {
                     if (!disconnected) SystemClock.sleep(100)
                 }
                 assertTrue("desktop disconnect was not reported", disconnected)
+                if (retryAfterReconnectExhaustion) {
+                    var retryAvailable = false
+                    val retryDeadline = SystemClock.elapsedRealtime() + 60_000
+                    while (!retryAvailable && SystemClock.elapsedRealtime() < retryDeadline) {
+                        scenario.onActivity { activity ->
+                            val root = activity.window.decorView
+                            retryAvailable = LabStatus.captureAdmission.canBegin() &&
+                                containsStatus(root, "Status: Desktop connection was not restored after 12 attempts") &&
+                                runCatching {
+                                    find(root) { it is Button && it.text.toString() == "Retry last capture" && it.visibility == View.VISIBLE }
+                                }.isSuccess
+                        }
+                        if (!retryAvailable) SystemClock.sleep(100)
+                    }
+                    assertTrue("retry did not become available after reconnect attempts were exhausted", retryAvailable)
+                    scenario.onActivity { activity ->
+                        find(activity.window.decorView) {
+                            it is Button && it.text.toString() == "Retry last capture"
+                        }.performClick()
+                    }
+                    assertTrue("screen-capture selector missing after retry", clickNode(automation, "Share one app"))
+                    assertTrue("entire-screen option missing after retry", clickNode(automation, "Share entire screen"))
+                    assertTrue("screen-capture consent missing after retry", clickNode(automation, "Share screen"))
+                    var capturingAgain = false
+                    var retryStatus = "unavailable"
+                    var retryAdmissionCanBegin = true
+                    val captureDeadline = SystemClock.elapsedRealtime() + 20_000
+                    while (!capturingAgain && SystemClock.elapsedRealtime() < captureDeadline) {
+                        scenario.onActivity { activity ->
+                            val root = activity.window.decorView
+                            retryStatus = runCatching {
+                                find(root) { it is TextView && it.text.toString().startsWith("Status:") }
+                                    .let { (it as TextView).text.toString() }
+                            }.getOrDefault("status unavailable")
+                            retryAdmissionCanBegin = LabStatus.captureAdmission.canBegin()
+                            capturingAgain = retryStatus.startsWith("Status: Capturing audio") && !retryAdmissionCanBegin
+                        }
+                        if (!capturingAgain) SystemClock.sleep(100)
+                    }
+                    assertTrue(
+                        "manual retry did not start a new paired capture (status=$retryStatus, admissionCanBegin=$retryAdmissionCanBegin)",
+                        capturingAgain,
+                    )
+                }
                 if (stopDuringReconnect) {
                     scenario.onActivity { activity ->
                         val stop = find(activity.window.decorView) {
@@ -264,7 +314,7 @@ class PairedCaptureTest {
                         assertTrue("stop control rejected reconnect cancellation", stop.performClick())
                     }
                 }
-                if (!stopDuringReconnect) {
+                if (!stopDuringReconnect && !retryAfterReconnectExhaustion) {
                     var observedDuration: Long? = null
                     val durationObserver: (Long?) -> Unit = { observedDuration = it }
                     scenario.onActivity { LabStatus.observeCaptureDuration(durationObserver) }
@@ -621,7 +671,11 @@ class PairedCaptureTest {
             scenario.onActivity { activity ->
                 assertTrue("capture did not publish completion", containsStatus(activity.window.decorView, "Status: Capture stopped."))
                 val rate = find(activity.window.decorView) {
-                    it is TextView && it.text.toString().matches(Regex("Encoded payload average: [0-9]+ kbps"))
+                    it is TextView && if (retryAfterReconnectExhaustion) {
+                        it.text.toString().startsWith("Encoded payload average: ")
+                    } else {
+                        it.text.toString().matches(Regex("Encoded payload average: [0-9]+ kbps"))
+                    }
                 } as TextView
                 instrumentation.sendStatus(1, Bundle().apply { putString("encodedPayload", rate.text.toString()) })
             }

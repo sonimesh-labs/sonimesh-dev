@@ -59,6 +59,9 @@ fn main() {
 fn run() -> LabResult<()> {
     let options = Options::parse(std::env::args().skip(1))?;
     let mut disconnect_after = options.disconnect_after_ms.map(Duration::from_millis);
+    let mut disconnect_injected = false;
+    let mut rejected_starts = options.reject_starts;
+    let mut session_number = 0_u64;
     let mut playback = Playback::prepare(&options)?;
     if options.control {
         playback.start_controls()?;
@@ -95,14 +98,22 @@ fn run() -> LabResult<()> {
             }
             std::thread::sleep(Duration::from_millis(10));
         };
-        lab_println!("RESULT client connected");
+        session_number = session_number.saturating_add(1);
+        lab_println!(
+            "RESULT client connected session {session_number} local={} peer={}",
+            stream.local_addr()?,
+            stream.peer_addr()?
+        );
         let result = run_session(
+            session_number,
             stream,
             Arc::clone(&tls),
             &pin,
             &options,
             &mut playback,
             &mut disconnect_after,
+            &mut disconnect_injected,
+            &mut rejected_starts,
         );
         playback.abort();
         if !options.keep_listening {
@@ -144,12 +155,15 @@ fn bytes_to_hex(bytes: &[u8]) -> String {
 }
 
 fn run_session(
+    session_number: u64,
     stream: std::net::TcpStream,
     tls: Arc<rustls::ServerConfig>,
     pin: &[u8],
     options: &Options,
     playback: &mut Playback,
     disconnect_after: &mut Option<Duration>,
+    disconnect_injected: &mut bool,
+    rejected_starts: &mut u8,
 ) -> LabResult<()> {
     let id = PairingId::new(LAB_ID);
     let mut pairing = PairingInvitationController::<4>::new();
@@ -186,7 +200,17 @@ fn run_session(
         },
     )?;
     lab_println!("RESULT pairing verified");
-    negotiate_hello(channel, session, root, options, playback, disconnect_after)
+    negotiate_hello(
+        session_number,
+        channel,
+        session,
+        root,
+        options,
+        playback,
+        disconnect_after,
+        disconnect_injected,
+        rejected_starts,
+    )
 }
 
 #[allow(clippy::struct_excessive_bools)] // Independent command-line switches.
@@ -203,6 +227,7 @@ struct Options {
     adaptive: bool,
     startup_buffer: Duration,
     disconnect_after_ms: Option<u64>,
+    reject_starts: u8,
     bind: Ipv4Addr,
     host: Ipv4Addr,
     media_port: u16,
@@ -223,6 +248,7 @@ impl Default for Options {
             adaptive: false,
             startup_buffer: Duration::from_millis(60),
             disconnect_after_ms: None,
+            reject_starts: 0,
             bind: Ipv4Addr::LOCALHOST,
             host: Ipv4Addr::LOCALHOST,
             media_port: 39093,
@@ -261,6 +287,17 @@ impl Options {
                     }
                     result.disconnect_after_ms = Some(value);
                 }
+                "--reject-starts" if result.reject_starts == 0 => {
+                    let value = args
+                        .next()
+                        .ok_or("--reject-starts requires a value")?
+                        .parse::<u8>()
+                        .map_err(|_| "rejected start count must be 1 to 36")?;
+                    if !(1..=36).contains(&value) {
+                        return Err("rejected start count must be 1 to 36".into());
+                    }
+                    result.reject_starts = value;
+                }
                 "--media-port" if !media_port_set => {
                     result.media_port =
                         args.next().ok_or("--media-port requires a port")?.parse()?;
@@ -297,7 +334,7 @@ impl Options {
                 }
                 _ => {
                     return Err(
-                        "usage: paired-audio-lab [--require-tone] [--play [--select-output | --output-id-stdin | --output-id-framed] [--control]] [--status] [--signal-status] [--adaptive] [--startup-buffer-ms 20-120] [--keep-listening [--disconnect-after-ms 100-120000]] [--media-port PORT] [--bind IPv4 --host IPv4]"
+                        "usage: paired-audio-lab [--require-tone] [--play [--select-output | --output-id-stdin | --output-id-framed] [--control]] [--status] [--signal-status] [--adaptive] [--startup-buffer-ms 20-120] [--keep-listening [--disconnect-after-ms 100-120000] [--reject-starts 1-36]] [--media-port PORT] [--bind IPv4 --host IPv4]"
                             .into(),
                     );
                 }
@@ -324,6 +361,12 @@ impl Options {
         if result.disconnect_after_ms.is_some() && !result.keep_listening {
             return Err("--disconnect-after-ms requires --keep-listening".into());
         }
+        if result.reject_starts > 0 && !result.keep_listening {
+            return Err("--reject-starts requires --keep-listening".into());
+        }
+        if result.reject_starts > 0 && result.disconnect_after_ms.is_none() {
+            return Err("--reject-starts requires --disconnect-after-ms".into());
+        }
         if bind_set != host_set
             || result.host.is_unspecified()
             || result.host.is_multicast()
@@ -336,12 +379,15 @@ impl Options {
 }
 
 fn negotiate_hello(
+    session_number: u64,
     channel: sonimesh_app::TrustedControlChannel,
     session: SessionState,
     root: SessionSecret,
     options: &Options,
     playback: &mut Playback,
     disconnect_after: &mut Option<Duration>,
+    disconnect_injected: &mut bool,
+    rejected_starts: &mut u8,
 ) -> LabResult<()> {
     let (channel, _exporter) = channel.into_parts();
     let socket = channel.sock.try_clone()?;
@@ -390,6 +436,7 @@ fn negotiate_hello(
     socket.set_write_timeout(None)?;
     socket.set_nonblocking(true)?;
     receive_audio(
+        session_number,
         &mut framed,
         &mut coordinator,
         token,
@@ -397,6 +444,8 @@ fn negotiate_hello(
         options,
         playback,
         disconnect_after,
+        disconnect_injected,
+        rejected_starts,
     )
 }
 
@@ -955,6 +1004,7 @@ fn stop_output(retry_at: Option<Instant>, stop: impl FnOnce() -> LabResult<()>) 
 
 #[allow(clippy::too_many_lines)] // This one-shot lab owns the control and media lifetimes together.
 fn receive_audio<S: std::io::Read + std::io::Write>(
+    session_number: u64,
     framed: &mut UntrustedControlStream<S>,
     coordinator: &mut ControlStreamCoordinator,
     control_token: sonimesh_app::ControlSessionToken,
@@ -962,6 +1012,8 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
     options: &Options,
     playback: &mut Playback,
     disconnect_after: &mut Option<Duration>,
+    disconnect_injected: &mut bool,
+    rejected_starts: &mut u8,
 ) -> LabResult<()> {
     let mut allocator = MediaSessionAllocator::new(root);
     // Keep the bounded audio pipeline off the control thread's stack. The
@@ -995,6 +1047,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
         let loop_start = Instant::now();
         if receiver.is_some() && disconnect_deadline.is_some_and(|due| loop_start >= due) {
             lab_println!("RESULT injected control disconnect");
+            *disconnect_injected = true;
             return Err("test-injected control disconnect".into());
         }
         let loop_gap = previous_loop.map(|previous| loop_start.duration_since(previous));
@@ -1021,7 +1074,22 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                 };
                 let reply = match action {
                     ControlStreamAction::Start { token, request } => {
-                        if receiver.is_some()
+                        lab_println!(
+                            "RESULT StreamStart session {session_number} injection_remaining {}",
+                            *rejected_starts
+                        );
+                        if *disconnect_injected && *rejected_starts > 0 {
+                            *rejected_starts -= 1;
+                            coordinator.abort_pending(token)?;
+                            lab_println!(
+                                "RESULT injected start rejection remaining {rejected_starts}"
+                            );
+                            ControlReply::error(
+                                sonimesh_protocol::ErrorCode::RetryLater,
+                                true,
+                                "test-injected receiver unavailable",
+                            )?
+                        } else if receiver.is_some()
                             || (
                                 request.sample_rate_hz,
                                 request.channels,
@@ -1122,7 +1190,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                             next_signal = options
                                 .signal_status
                                 .then(|| Instant::now() + Duration::from_secs(1));
-                            lab_println!("RESULT receiver started");
+                            lab_println!("RESULT receiver started session {session_number}");
                             ControlReply::stream_status(
                                 request.identity,
                                 StreamState::Streaming,
@@ -2357,6 +2425,58 @@ mod tests {
                 "3000",
                 "--disconnect-after-ms",
                 "4000",
+            ]))
+            .is_err()
+        );
+        let reject_starts = Options::parse(args(&[
+            "--keep-listening",
+            "--disconnect-after-ms",
+            "1000",
+            "--reject-starts",
+            "36",
+        ]))
+        .unwrap();
+        assert_eq!(reject_starts.reject_starts, 36);
+        for value in ["0", "37", "invalid"] {
+            assert!(
+                Options::parse(args(&[
+                    "--keep-listening",
+                    "--disconnect-after-ms",
+                    "1000",
+                    "--reject-starts",
+                    value,
+                ]))
+                .is_err()
+            );
+        }
+        assert!(Options::parse(args(&["--keep-listening", "--reject-starts", "1"])).is_err());
+        assert!(
+            Options::parse(args(&[
+                "--keep-listening",
+                "--disconnect-after-ms",
+                "1000",
+                "--reject-starts"
+            ]))
+            .is_err()
+        );
+        assert!(
+            Options::parse(args(&[
+                "--keep-listening",
+                "--disconnect-after-ms",
+                "1000",
+                "--reject-starts",
+                "1",
+                "--reject-starts",
+                "2",
+            ]))
+            .is_err()
+        );
+        assert!(
+            Options::parse(args(&[
+                "--disconnect-after-ms",
+                "1000",
+                "--reject-starts",
+                "1",
             ]))
             .is_err()
         );
