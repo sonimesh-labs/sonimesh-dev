@@ -265,51 +265,51 @@ class PairedCaptureTest {
                     }
                 }
                 if (!stopDuringReconnect) {
-                var observedDuration: Long? = null
-                val durationObserver: (Long?) -> Unit = { observedDuration = it }
-                scenario.onActivity { LabStatus.observeCaptureDuration(durationObserver) }
-                val durationBeforeReconnect = observedDuration ?: 0L
-                scenario.onActivity {
-                    assertTrue("capture service stopped while reconnecting", !LabStatus.captureAdmission.canBegin())
-                }
-                var restored = false
-                val reconnectDeadline = SystemClock.elapsedRealtime() + 20_000
-                while (!restored && SystemClock.elapsedRealtime() < reconnectDeadline) {
+                    var observedDuration: Long? = null
+                    val durationObserver: (Long?) -> Unit = { observedDuration = it }
+                    scenario.onActivity { LabStatus.observeCaptureDuration(durationObserver) }
+                    val durationBeforeReconnect = observedDuration ?: 0L
                     scenario.onActivity { activity ->
-                        restored = containsStatus(activity.window.decorView, "Status: Desktop connection restored.")
+                        assertTrue("capture service stopped while reconnecting", !LabStatus.captureAdmission.canBegin())
                     }
-                    if (!restored) SystemClock.sleep(100)
-                }
-                assertTrue("desktop session did not recover", restored)
-                var durationAdvanced = false
-                val durationDeadline = SystemClock.elapsedRealtime() + 3_000
-                while (!durationAdvanced && SystemClock.elapsedRealtime() < durationDeadline) {
-                    scenario.onActivity {
-                        durationAdvanced = (observedDuration ?: 0L) > durationBeforeReconnect
-                        assertTrue("capture service stopped after reconnect", !LabStatus.captureAdmission.canBegin())
+                    var restored = false
+                    val reconnectDeadline = SystemClock.elapsedRealtime() + 20_000
+                    while (!restored && SystemClock.elapsedRealtime() < reconnectDeadline) {
+                        scenario.onActivity { activity ->
+                            restored = containsStatus(activity.window.decorView, "Status: Desktop connection restored.")
+                        }
+                        if (!restored) SystemClock.sleep(100)
                     }
-                    if (!durationAdvanced) SystemClock.sleep(100)
-                }
-                scenario.onActivity { LabStatus.removeCaptureDuration(durationObserver) }
-                assertTrue("capture duration did not continue across reconnect", durationAdvanced)
-                var packetsBeforeReconnectDrain = 0L
-                scenario.onActivity { activity ->
-                    val sent = find(activity.window.decorView) {
-                        it is TextView && it.text.toString().matches(Regex("Media packets sent: [0-9]+"))
-                    } as TextView
-                    packetsBeforeReconnectDrain = sent.text.toString().substringAfter(": ").toLong()
-                }
-                SystemClock.sleep(3_000)
-                scenario.onActivity { activity ->
-                    val sent = find(activity.window.decorView) {
-                        it is TextView && it.text.toString().matches(Regex("Media packets sent: [0-9]+"))
-                    } as TextView
-                    val packetsAfterReconnectDrain = sent.text.toString().substringAfter(": ").toLong()
-                    assertTrue(
-                        "media packets did not continue after desktop reconnect",
-                        packetsAfterReconnectDrain > packetsBeforeReconnectDrain,
-                    )
-                }
+                    assertTrue("desktop session did not recover", restored)
+                    var durationAdvanced = false
+                    val durationDeadline = SystemClock.elapsedRealtime() + 3_000
+                    while (!durationAdvanced && SystemClock.elapsedRealtime() < durationDeadline) {
+                        scenario.onActivity {
+                            durationAdvanced = (observedDuration ?: 0L) > durationBeforeReconnect
+                            assertTrue("capture service stopped after reconnect", !LabStatus.captureAdmission.canBegin())
+                        }
+                        if (!durationAdvanced) SystemClock.sleep(100)
+                    }
+                    scenario.onActivity { LabStatus.removeCaptureDuration(durationObserver) }
+                    assertTrue("capture duration did not continue across reconnect", durationAdvanced)
+                    var packetsBeforeReconnectDrain = 0L
+                    scenario.onActivity { activity ->
+                        val sent = find(activity.window.decorView) {
+                            it is TextView && it.text.toString().matches(Regex("Media packets sent: [0-9]+"))
+                        } as TextView
+                        packetsBeforeReconnectDrain = sent.text.toString().substringAfter(": ").toLong()
+                    }
+                    SystemClock.sleep(3_000)
+                    scenario.onActivity { activity ->
+                        val sent = find(activity.window.decorView) {
+                            it is TextView && it.text.toString().matches(Regex("Media packets sent: [0-9]+"))
+                        } as TextView
+                        val packetsAfterReconnectDrain = sent.text.toString().substringAfter(": ").toLong()
+                        assertTrue(
+                            "media packets did not continue after desktop reconnect",
+                            packetsAfterReconnectDrain > packetsBeforeReconnectDrain,
+                        )
+                    }
                 }
             } else {
                 if (testMute) {
