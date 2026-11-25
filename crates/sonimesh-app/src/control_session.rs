@@ -5,6 +5,7 @@
 //! lifecycle replies. It deliberately does not own pairing, media polling, or
 //! a UI runtime.
 
+use crate::desktop_receiver_owner::MediaPrepare;
 use std::io::{Read, Write};
 
 use sonimesh_network::{
@@ -17,9 +18,9 @@ use sonimesh_protocol::{
 };
 
 use crate::{
-    ControlReply, ControlSessionToken, ControlStreamAction, ControlToMixerError,
-    DesktopControlOwnerError, DesktopReceiverOwner, MediaStreamIdentity,
-    ReceiverPcmProducerInstaller, TrustedControlChannel,
+    ControlReply, ControlSessionToken, ControlStreamAction, ControlStreamCoordinator,
+    ControlToMixerError, DesktopControlOwnerError, DesktopReceiverOwner, MediaStreamIdentity,
+    ReceiverPcmProducerInstaller, StreamStartRequest, TrustedControlChannel,
 };
 use sonimesh_platform::AudioOutput;
 
@@ -220,10 +221,37 @@ where
     /// Returns [`ControlSessionError`] when framing, owner execution, or reply
     /// encoding cannot progress.
     pub fn poll_once(&mut self) -> Result<ControlSessionPoll, ControlSessionError> {
+        self.poll_once_inner(None)
+    }
+
+    /// Polls one envelope with host preparation for a newly accepted Start.
+    ///
+    /// The callback follows [`DesktopReceiverOwner::accept_and_execute_with_prepare`]
+    /// and runs outside the realtime output callback.
+    ///
+    /// # Errors
+    ///
+    /// Returns a framing or reply error; preparation errors produce a control reply.
+    pub fn poll_once_with_prepare(
+        &mut self,
+        prepare: &mut impl FnMut(
+            ControlSessionToken,
+            StreamStartRequest,
+            &ControlStreamCoordinator,
+            &mut P,
+        ) -> Result<(), DesktopControlOwnerError>,
+    ) -> Result<ControlSessionPoll, ControlSessionError> {
+        self.poll_once_inner(Some(prepare))
+    }
+
+    pub(crate) fn poll_once_inner(
+        &mut self,
+        prepare: Option<&mut MediaPrepare<'_, P>>,
+    ) -> Result<ControlSessionPoll, ControlSessionError> {
         match self.framed.poll().map_err(ControlSessionError::Transport)? {
             UntrustedControlPoll::Empty => Ok(ControlSessionPoll::Empty),
             UntrustedControlPoll::Closed => Ok(ControlSessionPoll::Closed),
-            UntrustedControlPoll::Frame(envelope) => self.process(&envelope),
+            UntrustedControlPoll::Frame(envelope) => self.process(&envelope, prepare),
         }
     }
 
@@ -251,9 +279,16 @@ where
         self.framed
     }
 
-    fn process(&mut self, envelope: &Envelope) -> Result<ControlSessionPoll, ControlSessionError> {
+    fn process(
+        &mut self,
+        envelope: &Envelope,
+        prepare: Option<&mut MediaPrepare<'_, P>>,
+    ) -> Result<ControlSessionPoll, ControlSessionError> {
         let request_id = envelope.request_id;
-        match self.receiver.accept_and_execute(self.session, envelope) {
+        match self
+            .receiver
+            .accept_and_execute_inner(self.session, envelope, prepare)
+        {
             Ok(action) => {
                 let reply = if matches!(action, ControlStreamAction::Noop) {
                     let bridge = self.receiver.owner().bridge();

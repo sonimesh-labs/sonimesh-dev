@@ -68,8 +68,11 @@ capacity. It applies again after an interruption, decoder failure, or output
 recovery; the default remains immediate drain. This is a software scheduling
 option, not a latency or audio-quality measurement.
 The scheduling result distinguishes idle, mismatched media identity, output
-failure, pending stream re-admission, and a ready media path. The preconfigured
-pipeline is not yet built from Start. Known pipeline contexts are checked
+failure, pending stream re-admission, and a ready media path. An opt-in control
+path can prepare the existing pipeline after a new Start has been accepted and
+before stream admission; a preparation failure aborts the pending operation.
+The application still owns pipeline construction and pairing-root lifetime.
+Known pipeline contexts are checked
 against the requested media identity and direction before admission and a
 streaming reply. A pipeline configured with the initial Opus frame policy also
 checks the requested sample rate, channels, and frame duration; generic adapters

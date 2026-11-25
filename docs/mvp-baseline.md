@@ -84,6 +84,10 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   envelope per poll, and returns a correlated Hello response and lifecycle
   status/error envelopes, including replies for duplicate stream requests;
   the receiver owner can re-admit its pipeline after output recreation;
+  an opt-in host callback can prepare a fresh media context after accepting a
+  new start and before admission. Software tests cover preparation failure and
+  retry, duplicate requests, and protected UDP with native Opus; the host still
+  owns allocator lifetime and already-installed context recovery;
   a live Tauri shell and platform output evidence remain
   open;
 - a bounded `DesktopReceiverOwner::tick_media` operation that couples one UDP

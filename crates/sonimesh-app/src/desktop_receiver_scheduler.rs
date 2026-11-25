@@ -4,6 +4,7 @@
 //! and low-rate media ticks together without introducing a UI or async runtime.
 //! The caller still chooses the thread, timer, and platform output backend.
 
+use crate::desktop_receiver_owner::MediaPrepare;
 use std::io::{Read, Write};
 
 use sonimesh_audio::{DecodeStep, DecodeWorkerError, FrameDecoder};
@@ -12,10 +13,10 @@ use sonimesh_network::{UntrustedControlStream, UntrustedControlWrite};
 use sonimesh_platform::{AudioOutput, OutputHealth};
 
 use crate::{
-    ControlSessionError, ControlSessionPoll, ControlSessionToken, DesktopControlOwnerError,
-    DesktopControlSession, DesktopReceiverOwner, ReceiverPcmProducerInstaller,
-    ReconnectGraceObservation, SessionEvent, TrustedControlChannel, UdpMediaTick, UdpPollOutcome,
-    UdpReceiverError, UdpReceiverPipeline,
+    ControlSessionError, ControlSessionPoll, ControlSessionToken, ControlStreamCoordinator,
+    DesktopControlOwnerError, DesktopControlSession, DesktopReceiverOwner,
+    ReceiverPcmProducerInstaller, ReconnectGraceObservation, SessionEvent, StreamStartRequest,
+    TrustedControlChannel, UdpMediaTick, UdpPollOutcome, UdpReceiverError, UdpReceiverPipeline,
 };
 
 /// Maximum UDP polls performed by one clock-driven scheduler call.
@@ -416,6 +417,31 @@ where
     ///
     /// Returns [`ControlSessionError`] when the attached session cannot progress.
     pub fn poll_control_once(&mut self) -> Result<Option<ControlSessionPoll>, ControlSessionError> {
+        self.poll_control_once_inner(None)
+    }
+
+    /// Polls one control envelope with host preparation for a new stream.
+    ///
+    /// # Errors
+    ///
+    /// Returns a control transport or reply error; preparation failures are
+    /// returned to the peer as a correlated control error.
+    pub fn poll_control_once_with_prepare(
+        &mut self,
+        prepare: &mut impl FnMut(
+            ControlSessionToken,
+            StreamStartRequest,
+            &ControlStreamCoordinator,
+            &mut P,
+        ) -> Result<(), DesktopControlOwnerError>,
+    ) -> Result<Option<ControlSessionPoll>, ControlSessionError> {
+        self.poll_control_once_inner(Some(prepare))
+    }
+
+    fn poll_control_once_inner(
+        &mut self,
+        prepare: Option<&mut MediaPrepare<'_, P>>,
+    ) -> Result<Option<ControlSessionPoll>, ControlSessionError> {
         let Some((session, framed)) = self.control.take() else {
             return Ok(None);
         };
@@ -433,7 +459,7 @@ where
             UntrustedControlWrite::Closed => return Ok(Some(ControlSessionPoll::Closed)),
         }
 
-        let result = control.poll_once();
+        let result = control.poll_once_inner(prepare);
         let framed = control.into_framed();
         match result {
             Ok(ControlSessionPoll::Closed) => Ok(Some(ControlSessionPoll::Closed)),
@@ -1653,9 +1679,41 @@ where
     /// All results must be inspected separately.
     #[allow(clippy::too_many_lines)] // Keeps the ordered recovery and scheduling decisions together.
     pub fn tick_scheduled_at(&mut self, now_ms: u64) -> ScheduledReceiverTick<D::Error> {
+        self.tick_scheduled_at_inner(now_ms, None)
+    }
+
+    /// Runs a clock-driven tick with host preparation for newly accepted starts.
+    ///
+    /// The callback obeys [`DesktopReceiverOwner::accept_and_execute_with_prepare`].
+    /// Every returned result must be inspected independently.
+    #[allow(clippy::too_many_lines)] // Keeps the ordered recovery and scheduling decisions together.
+    pub fn tick_scheduled_at_with_prepare(
+        &mut self,
+        now_ms: u64,
+        prepare: &mut impl FnMut(
+            ControlSessionToken,
+            StreamStartRequest,
+            &ControlStreamCoordinator,
+            &mut UdpReceiverPipeline<D, JITTER_CAPACITY, MAX_ENCODED_BYTES, PCM_SAMPLES_PER_BLOCK>,
+        ) -> Result<(), DesktopControlOwnerError>,
+    ) -> ScheduledReceiverTick<D::Error> {
+        self.tick_scheduled_at_inner(now_ms, Some(prepare))
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn tick_scheduled_at_inner(
+        &mut self,
+        now_ms: u64,
+        prepare: Option<
+            &mut MediaPrepare<
+                '_,
+                UdpReceiverPipeline<D, JITTER_CAPACITY, MAX_ENCODED_BYTES, PCM_SAMPLES_PER_BLOCK>,
+            >,
+        >,
+    ) -> ScheduledReceiverTick<D::Error> {
         let reconnect = self.receiver.owner_mut().observe_reconnect_grace(now_ms);
         let output = self.receiver.owner_mut().monitor();
-        let control = self.poll_control_once();
+        let control = self.poll_control_once_inner(prepare);
 
         let context = self.receiver.pipeline_mut().context();
         let identity = crate::MediaStreamIdentity {

@@ -63,6 +63,17 @@ lifetime.
   that owner reports an expired window or a fail-closed clock regression; an
   in-grace or idle observation retains the allocator.
 
+An opt-in receiver control path may prepare an existing pipeline for a newly
+accepted Start before admission. The host receives the validated request and the
+current coordinator and transport token, so it can request a fresh allocator
+grant and install it on the existing UDP socket. The preparation path rejects a
+new start while another stream is active. The host must preserve pipeline state
+on preparation failure, retain or retire the allocator with pairing lifecycle,
+and avoid reissuing a context already installed during an earlier failed output
+start. A failure aborts the pending start; duplicate commands and rotations do
+not invoke this preparation path. This boundary does not construct a platform
+host or claim production interoperability.
+
 ## Security implications
 
 Rejecting any previously issued key context within a pairing lifetime means a
@@ -109,6 +120,12 @@ than silently weakening the guarantee.
   it. It also verifies that the coordinator-gated allocator rejects a retired
   control token before consuming no-reuse capacity.
 - A control-domain integration test drives the same reconnection through `ControlStreamCoordinator`: connection loss arms a bounded reconnect window while the live UDP path keeps admitting packets, the reconnected transport installs a fresh token and repeats hello negotiation, the retired token fails before it can reserve the reconnection identity, the fresh token supplies a new context for the re-admitted stream, `install_fresh_session` keeps the socket, packets sealed under the retired session are rejected, and the fresh session's packets rebind and decode; the no-reuse record then rejects both issued contexts.
+- An opt-in preparation test aborts a failed start and retries it, while a
+  duplicate and a competing active start do not invoke preparation. A native
+  Opus software integration exercises the callback with a fresh allocator grant,
+  local TCP control, protected UDP, and memory output. It does not exercise a
+  real pairing transport or platform host; recovery after output-start failure
+  remains the host's responsibility.
 - A seeded property walk drives randomized identity/direction supply scripts
   against an independent append-only set model, asserting the exact outcome
   after every step: no re-issue, no record growth past the bound, no recording

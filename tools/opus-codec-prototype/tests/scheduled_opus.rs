@@ -10,9 +10,9 @@ use std::time::{Duration, Instant};
 
 use sonimesh_app::{
     ControlSessionPoll, ControlToMixerBridge, DesktopControlOwner, DesktopReceiverOwner,
-    DesktopReceiverScheduler, OutputSelection, PairingAttemptOutcome, PairingId,
-    PairingInvitationController, PairingProofVerification, PairingSource, ScheduledReceiverState,
-    SessionState, UdpReceiverPipeline,
+    DesktopReceiverScheduler, MediaSessionAllocator, OutputSelection, PairingAttemptOutcome,
+    PairingId, PairingInvitationController, PairingProofVerification, PairingSource,
+    ScheduledReceiverState, SessionState, UdpReceiverPipeline,
 };
 use sonimesh_audio::{DecodeStep, OpusFrameConfig, StreamDecodeWorker, realtime_pcm_queue};
 use sonimesh_diagnostics::StreamCounters;
@@ -106,16 +106,21 @@ fn read_reply(stream: &mut TcpStream) -> Envelope {
 
 #[test]
 fn scheduled_protected_opus_reaches_memory_output_and_conceals_loss() {
-    scheduled_protected_opus(false);
+    scheduled_protected_opus(false, false);
 }
 
 #[test]
 fn buffered_scheduled_opus_waits_for_startup_and_recovery() {
-    scheduled_protected_opus(true);
+    scheduled_protected_opus(true, false);
+}
+
+#[test]
+fn scheduled_start_prepares_a_fresh_session_and_retries_after_failure() {
+    scheduled_protected_opus(false, true);
 }
 
 #[allow(clippy::too_many_lines)] // Exercises lifecycle, protected UDP, native decode and output together.
-fn scheduled_protected_opus(buffered: bool) {
+fn scheduled_protected_opus(buffered: bool, dynamic: bool) {
     // The proof result is supplied by the test; transport pairing is tested separately.
     let mut state = SessionState::IDLE;
     let mut pairing = PairingInvitationController::<1>::new();
@@ -142,7 +147,11 @@ fn scheduled_protected_opus(buffered: bool) {
     let pipeline = UdpReceiverPipeline::bind_with_worker(
         "127.0.0.1:0".parse().unwrap(),
         &secret,
-        context,
+        if dynamic {
+            MediaKeyContext::new(8, 1, 0, MediaDirection::AndroidToDesktop).unwrap()
+        } else {
+            context
+        },
         worker,
         Arc::clone(&counters),
     )
@@ -235,18 +244,73 @@ fn scheduled_protected_opus(buffered: bool) {
         request.channels = channels;
         request.frame_duration_ms = duration;
         assert!(matches!(
-            scheduler
-                .receiver_mut()
-                .accept_and_execute(session, &mismatch),
+            scheduler.receiver_mut().accept_and_execute_with_prepare(
+                session,
+                &mismatch,
+                &mut |_, _, _, _| { panic!("unsupported format must not prepare media") }
+            ),
             Err(sonimesh_app::DesktopControlOwnerError::MediaFormatMismatch)
         ));
+    }
+    let mut allocator = MediaSessionAllocator::new(SessionSecret::new([7; 32]));
+    let mut preparation_calls = 0;
+    let mut prepare =
+        |token,
+         request: sonimesh_app::StreamStartRequest,
+         coordinator: &sonimesh_app::ControlStreamCoordinator,
+         pipeline: &mut UdpReceiverPipeline<lab_decoder::Decoder, 8, 1_148, SAMPLES>| {
+            preparation_calls += 1;
+            if preparation_calls == 1 {
+                return Err(sonimesh_app::DesktopControlOwnerError::MediaContextMismatch);
+            }
+            let grant = allocator
+                .supply_for_authenticated_control_session(
+                    coordinator,
+                    token,
+                    request.identity,
+                    MediaDirection::AndroidToDesktop,
+                )
+                .map_err(|_| sonimesh_app::DesktopControlOwnerError::MediaContextMismatch)?;
+            pipeline
+                .install_fresh_session(grant.root(), grant.context(), 0)
+                .map_err(|_| sonimesh_app::DesktopControlOwnerError::MediaContextMismatch)
+        };
+    if dynamic {
+        client
+            .write_all(&encode_control_frame(&start).unwrap())
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let tick = scheduler.tick_scheduled_at_with_prepare(0, &mut prepare);
+            match tick.control.unwrap() {
+                Some(ControlSessionPoll::Rejected { .. }) => break,
+                Some(ControlSessionPoll::Empty) if Instant::now() < deadline => {
+                    std::thread::yield_now();
+                }
+                result => panic!("failed preparation was not rejected: {result:?}"),
+            }
+        }
+        let reply = read_reply(&mut client);
+        assert!(matches!(reply.payload, Some(envelope::Payload::Error(error)) if error.retryable));
+        assert_eq!(
+            scheduler.receiver_mut().pipeline_mut().context().session_id,
+            8
+        );
     }
     client
         .write_all(&encode_control_frame(&start).unwrap())
         .unwrap();
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
-        match scheduler.poll_control_once().unwrap() {
+        let result = if dynamic {
+            scheduler
+                .tick_scheduled_at_with_prepare(80, &mut prepare)
+                .control
+                .unwrap()
+        } else {
+            scheduler.poll_control_once().unwrap()
+        };
+        match result {
             Some(ControlSessionPoll::Processed { .. }) => break,
             Some(ControlSessionPoll::Empty) if Instant::now() < deadline => {
                 std::thread::yield_now();
@@ -260,6 +324,11 @@ fn scheduled_protected_opus(buffered: bool) {
         matches!(reply.payload, Some(envelope::Payload::StreamStatus(status))
         if status.state == StreamState::Streaming as i32)
     );
+    if dynamic {
+        assert_eq!(preparation_calls, 2);
+        assert_eq!(allocator.issued_count(), 1);
+        assert_eq!(scheduler.receiver_mut().pipeline_mut().context(), context);
+    }
 
     let mut sender =
         MediaSessionSender::bind("127.0.0.1:0".parse().unwrap(), &secret, context, address)

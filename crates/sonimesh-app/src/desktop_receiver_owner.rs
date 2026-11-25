@@ -14,10 +14,19 @@ use sonimesh_platform::AudioOutput;
 use sonimesh_protocol::{Envelope, MediaDirection, envelope};
 
 use crate::{
-    ControlSessionToken, ControlStreamAction, DesktopControlOwner, DesktopControlOwnerError,
-    MediaStreamIdentity, ReceiverPcmProducerInstaller, ReceiverPipelineError, StartedMixerStream,
-    UdpPollOutcome, UdpReceiverError, UdpReceiverPipeline,
+    ControlSessionToken, ControlStreamAction, ControlStreamCoordinator, DesktopControlOwner,
+    DesktopControlOwnerError, MediaStreamIdentity, ReceiverPcmProducerInstaller,
+    ReceiverPipelineError, StartedMixerStream, StreamStartRequest, UdpPollOutcome,
+    UdpReceiverError, UdpReceiverPipeline,
 };
+
+pub(crate) type MediaPrepare<'a, P> = dyn FnMut(
+        ControlSessionToken,
+        StreamStartRequest,
+        &ControlStreamCoordinator,
+        &mut P,
+    ) -> Result<(), DesktopControlOwnerError>
+    + 'a;
 
 /// Result of one UDP media scheduler tick.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -133,7 +142,81 @@ where
         session: ControlSessionToken,
         envelope: &Envelope,
     ) -> Result<ControlStreamAction, DesktopControlOwnerError> {
+        self.accept_and_execute_inner(session, envelope, None)
+    }
+
+    /// Executes a control envelope with host-provided preparation for a new stream.
+    ///
+    /// Preparation runs only after a new start is accepted, before media context
+    /// checks and mixer admission. It must leave the pipeline unchanged on error.
+    /// Preparation is rejected while another stream is active.
+    /// A previously installed context may be reused by the host for a retry of
+    /// the same pending start; it must not issue the same allocator grant twice.
+    /// Duplicate commands and rotations never invoke this callback.
+    ///
+    /// # Errors
+    ///
+    /// Returns the preparation error after aborting its pending start, or an
+    /// existing control, format, context, or mixer error.
+    pub fn accept_and_execute_with_prepare(
+        &mut self,
+        session: ControlSessionToken,
+        envelope: &Envelope,
+        prepare: &mut impl FnMut(
+            ControlSessionToken,
+            StreamStartRequest,
+            &ControlStreamCoordinator,
+            &mut P,
+        ) -> Result<(), DesktopControlOwnerError>,
+    ) -> Result<ControlStreamAction, DesktopControlOwnerError> {
+        self.accept_and_execute_inner(session, envelope, Some(prepare))
+    }
+
+    pub(crate) fn accept_and_execute_inner(
+        &mut self,
+        session: ControlSessionToken,
+        envelope: &Envelope,
+        prepare: Option<&mut MediaPrepare<'_, P>>,
+    ) -> Result<ControlStreamAction, DesktopControlOwnerError> {
         let action = self.owner.accept_control(session, envelope)?;
+        if let ControlStreamAction::Start { token, request } = action {
+            if let (Some(_), Some(frame)) = (prepare.as_ref(), self.pipeline.opus_frame_config()) {
+                if request.sample_rate_hz != sonimesh_audio::OPUS_SAMPLE_RATE_HZ
+                    || request.channels != u32::from(sonimesh_audio::OPUS_CHANNELS)
+                    || request.frame_duration_ms != u32::from(frame.frame_duration_ms())
+                {
+                    let _ = self
+                        .owner
+                        .bridge_mut()
+                        .coordinator_mut()
+                        .abort_pending(token);
+                    return Err(DesktopControlOwnerError::MediaFormatMismatch);
+                }
+            }
+            if let Some(prepare) = prepare {
+                if self.owner.bridge().coordinator().active().is_some() {
+                    let _ = self
+                        .owner
+                        .bridge_mut()
+                        .coordinator_mut()
+                        .abort_pending(token);
+                    return Err(DesktopControlOwnerError::MediaContextMismatch);
+                }
+                if let Err(error) = prepare(
+                    session,
+                    request,
+                    self.owner.bridge().coordinator(),
+                    &mut self.pipeline,
+                ) {
+                    let _ = self
+                        .owner
+                        .bridge_mut()
+                        .coordinator_mut()
+                        .abort_pending(token);
+                    return Err(error);
+                }
+            }
+        }
         let requested = match action {
             ControlStreamAction::Start { token, request } => Some((Some(token), request.identity)),
             ControlStreamAction::Rotate { token, next, .. } => Some((Some(token), next.identity)),
@@ -442,6 +525,58 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    #[test]
+    fn preparation_failure_aborts_start_and_duplicate_does_not_prepare_again() {
+        let mut receiver = receiver();
+        let session = receiver
+            .owner_mut()
+            .install_authenticated_control_session()
+            .unwrap();
+        receiver.accept_and_execute(session, &hello()).unwrap();
+        let mut calls = 0;
+        let mut prepare = |token,
+                           request: crate::StreamStartRequest,
+                           coordinator: &crate::ControlStreamCoordinator,
+                           _: &mut TestPipeline| {
+            calls += 1;
+            assert_eq!(token, session);
+            assert_eq!(request.identity, identity());
+            assert!(coordinator.has_authenticated_control_session(token));
+            if calls == 1 {
+                Err(crate::DesktopControlOwnerError::MediaContextMismatch)
+            } else {
+                Ok(())
+            }
+        };
+        assert!(matches!(
+            receiver.accept_and_execute_with_prepare(session, &start(), &mut prepare),
+            Err(crate::DesktopControlOwnerError::MediaContextMismatch)
+        ));
+        assert!(!receiver.owner().bridge().coordinator().has_pending_change());
+        assert!(receiver.owner().bridge().coordinator().active().is_none());
+        assert!(matches!(
+            receiver.accept_and_execute_with_prepare(session, &start(), &mut prepare),
+            Ok(ControlStreamAction::Start { .. })
+        ));
+        assert!(matches!(
+            receiver.accept_and_execute_with_prepare(session, &start(), &mut prepare),
+            Ok(ControlStreamAction::Noop)
+        ));
+        let mut competing = start();
+        if let Some(envelope::Payload::StartStream(request)) = &mut competing.payload {
+            request.media_session_id = 8;
+            request.stream_id = 2;
+        }
+        assert!(
+            receiver
+                .accept_and_execute_with_prepare(session, &competing, &mut prepare)
+                .is_err()
+        );
+        assert_eq!(calls, 2);
+        assert_eq!(receiver.pipeline_mut().replacements, 1);
+        assert!(receiver.owner().bridge().coordinator().active().is_some());
     }
 
     #[test]
