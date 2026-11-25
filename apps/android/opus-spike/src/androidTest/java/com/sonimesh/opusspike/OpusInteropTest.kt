@@ -18,8 +18,20 @@ import kotlin.math.sin
 class OpusInteropTest {
     @Test
     fun encodeSyntheticToneForDesktop() {
+        encodeForDesktop("tone.opusframes", 100) { sample ->
+            (sin(2.0 * PI * (sample % 960) / 48.0) * 8_000).toInt().toShort()
+        }
+    }
+
+    @Test
+    fun encodeLatencyProbeForDesktop() {
+        val probe = latencyProbeSamples()
+        encodeForDesktop("latency-probe.opusframes", probe.size / 960) { sample -> probe[sample] }
+    }
+
+    private fun encodeForDesktop(name: String, frameCount: Int, sampleAt: (Int) -> Short) {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        val file = File(requireNotNull(context.getExternalFilesDir(null)), "tone.opusframes")
+        val file = File(requireNotNull(context.getExternalFilesDir(null)), name)
         val codec = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_OPUS)
         try {
             val format = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_OPUS, 48_000, 2)
@@ -33,22 +45,22 @@ class OpusInteropTest {
                 var finished = false
                 val deadline = android.os.SystemClock.elapsedRealtime() + 30_000
                 while (!finished && android.os.SystemClock.elapsedRealtime() < deadline) {
-                    if (submitted <= 100) {
+                    if (submitted <= frameCount) {
                         val index = codec.dequeueInputBuffer(10_000)
                         if (index >= 0) {
                             val input = requireNotNull(codec.getInputBuffer(index))
                             input.clear()
                             input.order(ByteOrder.LITTLE_ENDIAN)
-                            if (submitted < 100) {
+                            if (submitted < frameCount) {
                                 repeat(960) { sample ->
-                                    val value = (sin(2.0 * PI * sample / 48.0) * 8_000).toInt().toShort()
+                                    val value = sampleAt(submitted * 960 + sample)
                                     input.putShort(value)
                                     input.putShort(value)
                                 }
                             }
                             val size = input.position()
                             codec.queueInputBuffer(index, 0, size, submitted * 20_000L,
-                                if (submitted == 100) MediaCodec.BUFFER_FLAG_END_OF_STREAM else 0)
+                                if (submitted == frameCount) MediaCodec.BUFFER_FLAG_END_OF_STREAM else 0)
                             submitted++
                         }
                     }

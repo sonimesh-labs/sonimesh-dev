@@ -939,6 +939,22 @@ product wire format. The API 37 x86_64 emulator produced 100 packets and 96,000
 samples per channel with peak 0.250 on 2026-11-22. Other devices and capture
 behavior remain unverified.
 
+To check the latency probe through Android MediaCodec, run the specific
+instrumentation test after installing the same APKs:
+
+~~~powershell
+adb shell am instrument -w -e class 'com.sonimesh.opusspike.OpusInteropTest#encodeLatencyProbeForDesktop' com.sonimesh.opusspike.test/androidx.test.runner.AndroidJUnitRunner
+adb pull /sdcard/Android/data/com.sonimesh.opusspike/files/latency-probe.opusframes "$env:TEMP/sonimesh-latency-probe.opusframes"
+$env:SONIMESH_ANDROID_PROBE_FIXTURE = "$env:TEMP/sonimesh-latency-probe.opusframes"
+cargo test -p opus-codec-prototype --test latency_probe android_mediacodec_probe_remains_correlatable -- --ignored --nocapture
+~~~
+
+Run the cargo command from the repository root. The fixture contains only the
+synthetic probe and can be removed after the check. On 2026-11-25 the API 37
+x86_64 emulator produced 150 packets; desktop decoding and correlation found a
+312-sample offset. This is a codec interoperability result, not an end-to-end
+latency measurement or evidence of capture, networking, or physical playback.
+
 For the interactive capture-to-desktop lab, build and install `:opus-spike`'s
 debug APK, connect one device through ADB, and run from the repository root:
 

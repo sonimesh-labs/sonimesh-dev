@@ -83,6 +83,11 @@ On 2026-11-25, a native libopus software test encoded the reference at 64, 96,
 and 128 kbps and recovered a known inserted delay plus codec lookahead within
 one sample using the measurement tool. It does not exercise Android MediaCodec,
 network transport, hardware clocks, or audible playback.
+An opt-in codec interoperability check can also encode the synthetic probe with
+Android MediaCodec and correlate its desktop-decoded output. This isolated check
+passed on an API 37 x86_64 emulator on 2026-11-25; it does not exercise capture,
+networking, or physical audio devices. See [Development](development.md) for
+the procedure.
 
 Multichannel inputs are averaged by default. When the source reference or
 microphone signal is on a known channel, select its one-based channel number
