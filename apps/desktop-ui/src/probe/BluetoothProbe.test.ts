@@ -100,6 +100,38 @@ it('reports the fallback when the remembered PCM endpoint is unavailable', async
   wrapper.unmount()
 })
 
+it('restores the remembered PCM endpoint when it reappears after refresh', async () => {
+  localStorage.setItem('sonimesh.bluetoothProbe.loopbackEndpoint', 'bluetooth-output')
+  let endpointRefreshes = 0
+  const invoke = vi.fn((command: string) => {
+    if (command === 'bluetooth_status') return Promise.resolve('idle')
+    if (command === 'bluetooth_candidates') return Promise.resolve({ generation: 1, names: [] })
+    if (command === 'loopback_status') return Promise.resolve({ running: false, endpointName: '', sampleRate: 0, channels: 0, samples: 0, peak: 0, error: null })
+    if (command === 'loopback_endpoints') {
+      endpointRefreshes++
+      return Promise.resolve(endpointRefreshes === 1
+        ? [{ id: 'default-output', name: 'Speakers', isDefault: true }]
+        : [
+            { id: 'default-output', name: 'Speakers', isDefault: true },
+            { id: 'bluetooth-output', name: 'Bluetooth headphones', isDefault: false },
+          ])
+    }
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  expect((wrapper.get('#loopback-endpoint').element as HTMLSelectElement).value).toBe('default-output')
+  expect(wrapper.text()).toContain('Saved output endpoint is unavailable. Using Speakers.')
+
+  await wrapper.findAll('button').find(button => button.text() === 'Refresh output devices')!.trigger('click')
+  await flushPromises()
+  expect((wrapper.get('#loopback-endpoint').element as HTMLSelectElement).value).toBe('bluetooth-output')
+  expect(wrapper.text()).toContain('Bluetooth headphones')
+  expect(wrapper.text()).not.toContain('Saved output endpoint is unavailable.')
+  wrapper.unmount()
+})
+
 it('preserves the selected source by name when discovery order changes', async () => {
   let generation = 0
   const invoke = vi.fn((command: string) => {

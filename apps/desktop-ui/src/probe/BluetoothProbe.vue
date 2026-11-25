@@ -59,9 +59,19 @@ function sourceName() {
 
 function selectAvailableLoopbackEndpoint(endpoints: LoopbackEndpoint[]) {
   const previousId = loopbackEndpointId.value
+  const preferred = endpoints.find(endpoint => endpoint.id === readLoopbackEndpointId())
+  if (preferred) {
+    loopbackEndpoints.value = endpoints
+    loopbackEndpointId.value = preferred.id
+    loopbackEndpointMessage.value = null
+    return
+  }
+
   if (endpoints.some(endpoint => endpoint.id === previousId)) {
     loopbackEndpoints.value = endpoints
-    loopbackEndpointMessage.value = null
+    loopbackEndpointMessage.value = readLoopbackEndpointId() && previousId !== readLoopbackEndpointId()
+      ? `Saved output endpoint is unavailable. Using ${endpoints.find(endpoint => endpoint.id === previousId)?.name ?? 'the selected output'}.`
+      : null
     return
   }
 

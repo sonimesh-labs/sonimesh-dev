@@ -101,7 +101,8 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   the selected endpoint; the prompt clears when samples arrive or monitoring
   stops. The selected output endpoint is remembered between probe launches; if
   it disappears, the probe selects the default or first available endpoint and
-  reports the change.
+  reports the change. Refreshing the list switches back to the remembered
+  endpoint if it has reappeared.
   While monitoring, an integrated low-level test tone can be played on the
   selected endpoint to check that the meter responds. The probe also offers
   an explicit combined
