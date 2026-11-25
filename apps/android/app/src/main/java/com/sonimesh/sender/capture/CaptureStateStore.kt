@@ -174,14 +174,24 @@ object CaptureStateStore {
         ) {
             return
         }
-        mutableState.value = current.copy(evidence = evidence.snapshot(nowMillis()))
+        mutableState.value = current.copy(evidence = snapshotFor(current.status, current))
     }
 
     private fun publish(status: CaptureStatus) {
+        val current = mutableState.value
         mutableState.value = CaptureUiState(
             status = status,
-            evidence = evidence.snapshot(nowMillis()),
+            evidence = snapshotFor(status, current),
         )
+    }
+
+    private fun snapshotFor(status: CaptureStatus, previous: CaptureUiState): CaptureEvidenceSnapshot {
+        val snapshot = evidence.snapshot(nowMillis())
+        return if (status.isActive() && previous.status.isActive() && snapshot.recentPeakSampleMagnitude == null) {
+            snapshot.copy(recentPeakSampleMagnitude = previous.evidence.recentPeakSampleMagnitude)
+        } else {
+            snapshot
+        }
     }
 }
 

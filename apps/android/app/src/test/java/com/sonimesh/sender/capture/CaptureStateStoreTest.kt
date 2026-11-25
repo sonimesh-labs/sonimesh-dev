@@ -7,6 +7,25 @@ import org.junit.Before
 import org.junit.Test
 
 class CaptureStateStoreTest {
+    @Test
+    fun consecutive_publications_keep_recent_peak_until_new_reads_or_session() {
+        CaptureStateStore.evidence.begin(0)
+        CaptureStateStore.publishCapturing(format())
+        CaptureStateStore.evidence.recordRead(480, false, 1, 500)
+        CaptureStateStore.publishEvidence()
+        CaptureStateStore.publishCapturing(format())
+        assertEquals(500, CaptureStateStore.state.value.evidence.recentPeakSampleMagnitude)
+        CaptureStateStore.evidence.recordRead(480, true, 2, 0)
+        CaptureStateStore.publishNoCapturableAudio(format())
+        CaptureStateStore.publishEvidence()
+        assertEquals(0, CaptureStateStore.state.value.evidence.recentPeakSampleMagnitude)
+        CaptureStateStore.publishStopped(CaptureStopReason.UserRequested)
+        CaptureStateStore.publishAwaitingPermission()
+        CaptureStateStore.evidence.begin(10)
+        CaptureStateStore.publishCapturing(format())
+        assertEquals(null, CaptureStateStore.state.value.evidence.recentPeakSampleMagnitude)
+    }
+
     @Before
     fun resetStore() {
         CaptureStateStore.nowMillis = { 0L }
