@@ -69,6 +69,7 @@ class LabActivity : Activity() {
     private lateinit var usage: Spinner
     private lateinit var bitrate: Spinner
     private lateinit var muteSwitch: Switch
+    private lateinit var toneButton: Button
     private lateinit var retryButton: Button
     private lateinit var retryHint: TextView
     private var updatingMute = false
@@ -185,13 +186,14 @@ class LabActivity : Activity() {
         layout.addView(TextView(this).apply {
             text = "Already buffered audio may continue briefly after muting."
         })
-        layout.addView(Button(this).apply {
+        toneButton = Button(this).apply {
             text = if (tone == null) "Start test tone" else "Stop test tone"
             setOnClickListener {
                 toggleTone()
                 text = if (tone == null) "Start test tone" else "Stop test tone"
             }
-        })
+        }
+        layout.addView(toneButton)
         retryButton = Button(this).apply {
             text = "Retry capture with current setup"
             visibility = View.GONE
@@ -417,6 +419,10 @@ class LabActivity : Activity() {
     }
 
     override fun onStop() {
+        if (!isChangingConfigurations) {
+            stopTone()
+            toneButton.text = "Start test tone"
+        }
         LabStatus.remove(statusObserver)
         LabStatus.removeSignal(signalObserver)
         LabStatus.removeCaptureDuration(durationObserver)
@@ -821,7 +827,10 @@ class LabActivity : Activity() {
     }
 
     private fun toggleTone() {
-        tone?.let { it.stop(); it.release(); tone = null; return }
+        if (tone != null) {
+            stopTone()
+            return
+        }
         val usage = (LabStatus.captureUsage ?: selectedUsage()).usages.first()
         for (format in testToneFormats) {
             val samples = testToneSamples(format.sampleRate, format.channels)
@@ -848,6 +857,17 @@ class LabActivity : Activity() {
 
     override fun onRetainNonConfigurationInstance(): Any? = tone
 
+    private fun stopTone() {
+        tone?.let {
+            try {
+                it.stop()
+            } finally {
+                it.release()
+                tone = null
+            }
+        }
+    }
+
     internal fun isTestTonePlaying(): Boolean = tone?.playState == AudioTrack.PLAYSTATE_PLAYING
 
     internal fun testToneUsage(): Int? = tone?.audioAttributes?.usage
@@ -856,7 +876,7 @@ class LabActivity : Activity() {
         importedInvitation?.fill(0)
         importedInvitation = null
         clearPendingInvitation()
-        if (!isChangingConfigurations) tone?.let { it.stop(); it.release() }
+        if (!isChangingConfigurations) stopTone()
         tone = null
         super.onDestroy()
     }

@@ -8,6 +8,7 @@ import android.widget.Button
 import android.widget.Spinner
 import android.widget.Switch
 import android.widget.TextView
+import androidx.lifecycle.Lifecycle
 import androidx.test.core.app.ActivityScenario
 import com.sonimesh.sender.encoder.OpusBitrate
 import org.junit.Assert.assertEquals
@@ -54,6 +55,24 @@ class LabCaptureUsageUiTest {
                 } else {
                     findButton(root, "Stop test tone").performClick()
                 }
+            }
+        }
+    }
+
+    @Test
+    fun testToneStopsWhenActivityIsBackgrounded() {
+        ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                findButton(activity.window.decorView, "Start test tone").performClick()
+                assertTrue(activity.isTestTonePlaying())
+            }
+            scenario.moveToState(Lifecycle.State.CREATED)
+            scenario.moveToState(Lifecycle.State.RESUMED)
+            scenario.onActivity { activity ->
+                assertEquals(false, activity.isTestTonePlaying())
+                findButton(activity.window.decorView, "Start test tone").performClick()
+                assertTrue(activity.isTestTonePlaying())
+                findButton(activity.window.decorView, "Stop test tone").performClick()
             }
         }
     }
