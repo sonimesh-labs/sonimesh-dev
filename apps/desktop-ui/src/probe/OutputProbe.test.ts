@@ -354,6 +354,36 @@ describe('desktop output probe', () => {
     expect((wrapper.get('#lab-host').element as HTMLInputElement).value).toBe('10.0.2.2')
     wrapper.unmount()
   })
+
+  it.each(['success', 'failure'])('ignores an old route %s after settings are reset and a new query starts', async (outcome) => {
+    let resolveOld!: (address: string) => void
+    let rejectOld!: (cause: string) => void
+    let resolveNew!: (address: string) => void
+    const oldQuery = new Promise<string>((resolve, reject) => { resolveOld = resolve; rejectOld = reject })
+    const newQuery = new Promise<string>(resolve => { resolveNew = resolve })
+    const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [] })
+      .mockReturnValueOnce(oldQuery).mockReturnValueOnce(newQuery)
+    window.__TAURI__ = { core: { invoke } }
+    const wrapper = mountStoppedProbe()
+    await flushPromises()
+    await wrapper.get('#android-host').setValue('192.168.1.20')
+    await wrapper.findAll('button').find(button => button.text() === 'Suggest desktop address')!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text() === 'Reset lab settings')!.trigger('click')
+    await wrapper.get('#android-host').setValue('10.0.0.20')
+    await wrapper.findAll('button').find(button => button.text() === 'Suggest desktop address')!.trigger('click')
+    if (outcome === 'success') resolveOld('192.168.1.10')
+    else rejectOld('Old route failed')
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('192.168.1.10')
+    expect(wrapper.text()).not.toContain('Old route failed')
+    expect(wrapper.findAll('button').find(button => button.text() === 'Checking route…')!.attributes('disabled')).toBeDefined()
+    resolveNew('10.0.0.10')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Suggested desktop address: 10.0.0.10')
+    await wrapper.findAll('button').find(button => button.text() === 'Use address')!.trigger('click')
+    expect((wrapper.get('#lab-host').element as HTMLInputElement).value).toBe('10.0.0.10')
+    wrapper.unmount()
+  })
   it('sends audio controls and displays the listener-confirmed values', async () => {
     const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [] })
       .mockResolvedValueOnce({ running: true, status: 'Waiting', invitation: null, metrics: null, volume: 100, muted: false })
@@ -533,7 +563,7 @@ describe('desktop output probe', () => {
     const invoke = vi.fn((command: string) => Promise.resolve(command === 'start_lab'
       ? { running: true, sessionActive: false, status: 'Starting', invitation: null, metrics: null, volume: null, muted: null }
       : { generation: 1, devices, selectedIndex: null }))
-    window.__TAURI__ = { core: { invoke } }
+    window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
     const wrapper = mountStoppedProbe()
     await flushPromises()
     await wrapper.get('#lab-output').setValue('1')

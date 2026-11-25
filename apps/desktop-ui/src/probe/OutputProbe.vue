@@ -150,8 +150,7 @@ function clearLabSettings() {
   startupBufferMs.value = 60
   adaptive.value = false
   mediaPort.value = '39093'
-  suggestedHost.value = null
-  suggestError.value = null
+  invalidateHostSuggestion()
 }
 
 const storedLabSettings = readLabSettings()
@@ -252,6 +251,7 @@ let reconciling = false
 let controlRequest = 0
 let controlTimer: ReturnType<typeof setTimeout> | undefined
 let pendingControl: { volume: number | null; muted: boolean | null; sent: boolean } | null = null
+let suggestRequest = 0
 
 watch([labHost, androidHost, labOutput, startupBufferMs, adaptive, mediaPort], () => {
   if (labOutput.value === '') labOutputDevice.value = null
@@ -298,17 +298,26 @@ function confirmControl(snapshot: LabSnapshot) {
       (pendingControl.muted === null || pendingControl.muted === snapshot.muted)) clearControl()
 }
 
+function invalidateHostSuggestion() {
+  suggestRequest++
+  suggestBusy.value = false
+  suggestedHost.value = null
+  suggestError.value = null
+}
+
 async function suggestHost() {
   if (!window.__TAURI__ || suggestBusy.value) return
+  const request = ++suggestRequest
   suggestBusy.value = true
   suggestedHost.value = null
   suggestError.value = null
   try {
-    suggestedHost.value = await window.__TAURI__.core.invoke<string>('suggest_lab_host', { androidHost: androidHost.value.trim() })
+    const result = await window.__TAURI__.core.invoke<string>('suggest_lab_host', { androidHost: androidHost.value.trim() })
+    if (!disposed && request === suggestRequest) suggestedHost.value = result
   } catch (cause) {
-    suggestError.value = typeof cause === 'string' ? cause : 'Could not suggest a desktop address.'
+    if (!disposed && request === suggestRequest) suggestError.value = typeof cause === 'string' ? cause : 'Could not suggest a desktop address.'
   } finally {
-    suggestBusy.value = false
+    if (!disposed && request === suggestRequest) suggestBusy.value = false
   }
 }
 
@@ -486,7 +495,7 @@ async function play(index: number) {
 }
 
 onMounted(pollLab)
-onBeforeUnmount(() => { disposed = true; labRequest++; clearTimeout(timer); clearControl() })
+onBeforeUnmount(() => { disposed = true; labRequest++; suggestRequest++; clearTimeout(timer); clearControl() })
 </script>
 
 <template>
@@ -535,7 +544,7 @@ onBeforeUnmount(() => { disposed = true; labRequest++; clearTimeout(timer); clea
       <input id="lab-host" v-model="labHost" :disabled="lab.running || labBusy" autocomplete="off" />
       <p class="preview-note">For ADB reverse use 127.0.0.1 here; enter the UDP address separately in Android (typically 10.0.2.2 for an emulator).</p>
       <label for="android-host">Android device IPv4 (optional)</label>
-      <input id="android-host" v-model="androidHost" :disabled="lab.running || labBusy || suggestBusy" autocomplete="off" @input="suggestedHost = null; suggestError = null" />
+      <input id="android-host" v-model="androidHost" :disabled="lab.running || labBusy || suggestBusy" autocomplete="off" @input="invalidateHostSuggestion" />
       <button type="button" class="preview-action" :disabled="lab.running || labBusy || suggestBusy" @click="suggestHost">{{ suggestBusy ? 'Checking route…' : 'Suggest desktop address' }}</button>
       <p v-if="suggestError" class="command-error" role="alert">{{ suggestError }}</p>
       <p v-if="suggestedHost" role="status">Suggested desktop address: {{ suggestedHost }} <button type="button" class="preview-action" :disabled="lab.running || labBusy" @click="labHost = suggestedHost">Use address</button></p>
