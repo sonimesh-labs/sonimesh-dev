@@ -96,8 +96,9 @@ const { busy, createPairing, error, expirePairing, outputTestStatus, refresh, re
         <DiagnosticsPanel v-if="snapshot.capabilities?.diagnostics !== false" id="diagnostics" :metrics="snapshot.metrics" :diagnostic-exports="snapshot.diagnosticExports" :preview="snapshot.previewAdapter" :busy="busy" @set-jitter-mode="setJitterMode" @simulate-metrics-burst="simulateMetricsBurst" @export-diagnostics="exportDiagnostics" />
       </template>
       <div v-else class="loading-state">
-        <span class="loading-orbit" aria-hidden="true"></span>
-        <p>Connecting to desktop control service</p>
+        <span v-if="!error" class="loading-orbit" aria-hidden="true"></span>
+        <p>{{ error ? 'Unable to load desktop state. Retry output devices or refresh state.' : 'Connecting to desktop control service' }}</p>
+        <button v-if="error" type="button" class="preview-action" :disabled="busy" @click="refreshOutputDevices">Retry output devices</button>
       </div>
     </div>
   </main>

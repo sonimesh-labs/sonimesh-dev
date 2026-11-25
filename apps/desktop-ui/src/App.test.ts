@@ -105,6 +105,23 @@ afterEach(() => {
 })
 
 describe('App', () => {
+  it('offers device retry after an initial snapshot failure and displays recovered output', async () => {
+    desktopBridgeMock.snapshot.mockRejectedValue(new Error('enumeration failed'))
+    const wrapper = mount(App)
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toContain('desktop control service')
+    const retry = wrapper.findAll('button').find(button => button.text() === 'Retry output devices')!
+    expect(retry.exists()).toBe(true)
+
+    desktopBridgeMock.refreshOutputDevices.mockResolvedValueOnce(previewSnapshot())
+    await retry.trigger('click')
+    await flushPromises()
+    expect(desktopBridgeMock.refreshOutputDevices).toHaveBeenCalledOnce()
+    expect(wrapper.text()).toContain('Synthetic output')
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('uses neutral copy before the first authoritative snapshot arrives', async () => {
     const pendingSnapshot = deferred<DesktopSnapshot>()
     desktopBridgeMock.snapshot.mockImplementationOnce(() => pendingSnapshot.promise)

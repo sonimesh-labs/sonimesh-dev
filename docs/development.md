@@ -1556,6 +1556,9 @@ preferred endpoint, use **Refresh output devices** to select it again.
 The output inventory is cached between low-rate session snapshots. Use the
 output panel's **Refresh output devices** control to re-enumerate endpoints after
 connecting or removing a device.
+If the initial device enumeration fails, the shell retains that failure until an
+explicit retry instead of presenting an empty list as a successful enumeration.
+The loading screen provides **Retry output devices** for this situation.
 Low-rate snapshot polling has a separate UI state from user commands, so a slow
 device inventory refresh does not disable output selection. An in-flight snapshot
 is ignored after a newer user command starts, preventing stale state from replacing

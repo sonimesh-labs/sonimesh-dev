@@ -23,6 +23,7 @@ struct ShellState {
 struct OutputInventory {
     devices: Vec<OutputDevice>,
     initialized: bool,
+    initial_error: Option<String>,
 }
 
 impl OutputInventory {
@@ -38,11 +39,14 @@ impl OutputInventory {
                 }
                 Err(error) => {
                     self.initialized = true;
-                    return Err(error);
+                    self.initial_error = Some(error);
                 }
             }
         }
-        Ok(())
+        match &self.initial_error {
+            Some(error) => Err(error.clone()),
+            None => Ok(()),
+        }
     }
 
     fn refresh(
@@ -52,6 +56,7 @@ impl OutputInventory {
         let devices = probe()?;
         self.devices = devices;
         self.initialized = true;
+        self.initial_error = None;
         Ok(())
     }
 }
@@ -558,13 +563,26 @@ mod tests {
                 })
                 .is_err()
         );
-        inventory
+        let error = inventory
             .ensure_initialized(|| {
                 probes += 1;
                 Ok(Vec::new())
             })
-            .unwrap();
+            .unwrap_err();
+        assert_eq!(error, "backend unavailable");
         assert_eq!(probes, 1);
+
+        assert!(
+            inventory
+                .refresh(|| Err("still unavailable".into()))
+                .is_err()
+        );
+        assert_eq!(
+            inventory
+                .ensure_initialized(|| panic!("unexpected probe"))
+                .unwrap_err(),
+            "backend unavailable"
+        );
 
         inventory
             .refresh(|| {
@@ -573,6 +591,9 @@ mod tests {
             })
             .unwrap();
         assert_eq!(probes, 2);
+        inventory
+            .ensure_initialized(|| panic!("already initialized"))
+            .unwrap();
     }
 
     #[test]

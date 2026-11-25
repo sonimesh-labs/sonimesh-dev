@@ -41,12 +41,12 @@ export function useDesktopState() {
     if (busy.value || refreshing.value) return
 
     refreshing.value = true
-    error.value = null
     const requestRevision = snapshotRevision
     try {
       const nextSnapshot = await desktopBridge.snapshot()
       if (nextSnapshot !== undefined && requestRevision === snapshotRevision) {
         snapshot.value = nextSnapshot
+        error.value = null
       }
     } catch {
       if (requestRevision === snapshotRevision) {

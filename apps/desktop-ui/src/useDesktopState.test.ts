@@ -115,6 +115,20 @@ afterEach(() => {
 })
 
 describe('useDesktopState', () => {
+  it('keeps a startup error visible while the next snapshot is pending', async () => {
+    desktopBridgeMock.snapshot.mockRejectedValueOnce(new Error('enumeration failed'))
+    const wrapper = mount(StateHarness)
+    await flushPromises()
+    expect(wrapper.vm.error).not.toBeNull()
+
+    const pending = deferred<DesktopSnapshot>()
+    desktopBridgeMock.snapshot.mockReturnValueOnce(pending.promise)
+    const refresh = wrapper.vm.refresh()
+    expect(wrapper.vm.error).not.toBeNull()
+    pending.resolve(receiverSnapshot('ready'))
+    await refresh
+    expect(wrapper.vm.error).toBeNull()
+  })
   it('polls the bridge for low-rate state and stops polling after unmount', async () => {
     vi.useFakeTimers()
     desktopBridgeMock.snapshot.mockResolvedValue(receiverSnapshot('ready'))
