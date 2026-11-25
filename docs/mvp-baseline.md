@@ -566,7 +566,10 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   source. If Windows closes an active Bluetooth playback connection, the probe
   re-enters phone wait and keeps a jointly started output monitor running; a
   failed wait restart stops that monitor and reports the failure. Explicit user
-  disconnect still stops the jointly started monitor.
+  disconnect still stops the jointly started monitor. If the Windows output
+  stream reports an error, the probe can stop it, refresh endpoints, and try
+  again on the previous endpoint or the current default. This does not change the
+  system output route and is not device-removal recovery evidence.
   It can also start and stop the separately built paired-audio lab process and
   display its public test invitation, session status, and periodic packet,
   decode, and output-recovery observations. That process can use a selected output;

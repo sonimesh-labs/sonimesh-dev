@@ -92,6 +92,10 @@
   started output monitor, and that a failed restart returns to idle and stops the
   monitor. This is software state-flow coverage; a physical phone disconnect and
   reconnect cycle has not been exercised.
+- Recovery from a loopback error is also covered in the UI: the selected endpoint
+  is retried when present, otherwise the refreshed default is selected; no
+  available endpoint leaves the error visible. These are mocked state-flow tests,
+  not physical output-device removal evidence.
 
 Commands run from the repository root:
 

@@ -579,6 +579,63 @@ it('starts and stops the Windows system-output PCM check', async () => {
   wrapper.unmount()
 })
 
+it('restarts a failed PCM monitor on the refreshed default endpoint', async () => {
+  let endpointRefreshes = 0
+  let recovered = false
+  const invoke = vi.fn((command: string) => {
+    if (command === 'bluetooth_status') return Promise.resolve('idle')
+    if (command === 'loopback_status') return Promise.resolve(recovered
+      ? { running: true, endpointName: 'Default speakers', sampleRate: 48000, channels: 2, samples: 128, peak: 0, runPeak: 0, error: null }
+      : { running: true, endpointName: 'Removed output', sampleRate: 48000, channels: 2, samples: 4096, peak: 0, runPeak: 0.1, error: 'The Windows loopback stream reported an error.' })
+    if (command === 'loopback_endpoints') {
+      endpointRefreshes++
+      return Promise.resolve(endpointRefreshes === 1
+        ? [{ id: 'removed-output', name: 'Removed output', isDefault: false }]
+        : [{ id: 'default-output', name: 'Default speakers', isDefault: true }])
+    }
+    if (command === 'loopback_stop') return Promise.resolve({ running: false, endpointName: 'Removed output', sampleRate: 48000, channels: 2, samples: 4096, peak: 0, runPeak: 0.1, error: 'The Windows loopback stream reported an error.' })
+    if (command === 'loopback_start') {
+      recovered = true
+      return Promise.resolve({ running: true, endpointName: 'Default speakers', sampleRate: 48000, channels: 2, samples: 0, peak: 0, runPeak: 0, error: null })
+    }
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  await wrapper.findAll('button').find(button => button.text() === 'Recover PCM check')!.trigger('click')
+  await flushPromises()
+  expect(invoke).toHaveBeenCalledWith('loopback_stop')
+  expect(invoke).toHaveBeenCalledWith('loopback_start', { endpointId: 'default-output' })
+  expect((wrapper.get('#loopback-endpoint').element as HTMLSelectElement).value).toBe('default-output')
+  expect(wrapper.text()).toContain('Default speakers')
+  expect(wrapper.findAll('.command-error')).toHaveLength(0)
+  wrapper.unmount()
+})
+
+it('keeps the monitor error visible when recovery finds no output endpoint', async () => {
+  let endpointRefreshes = 0
+  const invoke = vi.fn((command: string) => {
+    if (command === 'bluetooth_status') return Promise.resolve('idle')
+    if (command === 'loopback_status') return Promise.resolve({ running: true, endpointName: 'Removed output', sampleRate: 48000, channels: 2, samples: 10, peak: 0, runPeak: 0, error: 'The Windows loopback stream reported an error.' })
+    if (command === 'loopback_endpoints') {
+      endpointRefreshes++
+      return Promise.resolve(endpointRefreshes === 1 ? [{ id: 'removed-output', name: 'Removed output', isDefault: true }] : [])
+    }
+    if (command === 'loopback_stop') return Promise.resolve({ running: false, endpointName: 'Removed output', sampleRate: 48000, channels: 2, samples: 10, peak: 0, runPeak: 0, error: 'The Windows loopback stream reported an error.' })
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  await wrapper.findAll('button').find(button => button.text() === 'Recover PCM check')!.trigger('click')
+  await flushPromises()
+  expect(invoke).not.toHaveBeenCalledWith('loopback_start', expect.anything())
+  expect(wrapper.text()).toContain('No Windows output endpoints are available.')
+  expect(wrapper.findAll('button').find(button => button.text() === 'Recover PCM check')).toBeTruthy()
+  wrapper.unmount()
+})
+
 it('retains the monitor-session peak after recent activity decays', async () => {
   const invoke = vi.fn((command: string) => {
     if (command === 'bluetooth_status') return Promise.resolve('idle')
