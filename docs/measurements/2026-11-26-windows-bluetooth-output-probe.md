@@ -35,11 +35,11 @@
   fallback connection flow after failure; it does not verify phone-initiated
   playback.
 - The current desktop probe build refreshed the sole candidate in its UI. The
-  operator selected it, started **Connect or wait for phone**, observed the
-  disconnect control become available, then disconnected and observed the
-  `Disconnected.` state. The UI automation did not capture whether Windows
-  reported `Waiting` or `Open`; no audio was played. This verifies the desktop
-  command path and cleanup, not playback or a Bluetooth PCM source.
+  operator selected it and started **Connect or wait for phone**. The UI showed
+  `Waiting for the phone to connect`, then returned to `Disconnected.` after the
+  operator disconnected. This exercises the direct-open failure fallback through
+  the desktop command path and verifies cleanup. No phone playback was started,
+  so it does not verify audible playback or a Bluetooth PCM source.
 
 Commands run from the repository root:
 
