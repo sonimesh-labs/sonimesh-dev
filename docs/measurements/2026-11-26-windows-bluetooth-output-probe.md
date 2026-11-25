@@ -79,6 +79,12 @@
   peak. This allows a short signal to remain visible after a later poll clears
   recent activity; a live level bar follows the recent peak. It still reports
   the selected system mix and cannot identify the producing app.
+- A rebuilt probe was exercised against the default `MCHOSE V9 Turbo+` output
+  at 48 kHz, 8 channels. After the local test tone finished, a delayed read
+  showed a 0.0% recent peak while retaining a 4.0% session peak across 856,320
+  samples. This confirms the live meter and retained value on the selected
+  endpoint; the tone came from the probe and does not establish phone playback
+  or an application-specific Bluetooth PCM source.
 - The local mobile-device tool exposes only an Android 9 x86_64 emulator, not a
   physical Bluetooth source, so it cannot initiate the phone-side playback test.
 
