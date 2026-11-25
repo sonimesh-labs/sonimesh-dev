@@ -51,6 +51,7 @@ async function refresh() {
   suggestPhoneInitiated.value = false
   const previousIndex = selected.value === '' ? -1 : Number(selected.value)
   const previousName = names.value[previousIndex]
+  const previousNameCount = previousName === undefined ? 0 : names.value.filter(name => name === previousName).length
   try {
     if (!window.__TAURI__) throw new Error('Desktop probe unavailable')
     const result = await window.__TAURI__.core.invoke<{ generation: number; names: string[] }>('bluetooth_candidates')
@@ -60,10 +61,7 @@ async function refresh() {
       selected.value = ''
     } else {
       const matches = result.names.flatMap((name, index) => name === previousName ? [index] : [])
-      const nextIndex = result.names[previousIndex] === previousName
-        ? previousIndex
-        : matches.length === 1 ? matches[0] : -1
-      selected.value = nextIndex < 0 ? '' : String(nextIndex)
+      selected.value = previousNameCount === 1 && matches.length === 1 ? String(matches[0]) : ''
     }
     loaded.value = true
   } catch (cause) {

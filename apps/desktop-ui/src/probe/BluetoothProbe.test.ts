@@ -57,6 +57,30 @@ it('preserves the selected source by name when discovery order changes', async (
   wrapper.unmount()
 })
 
+it('clears the selected source when duplicate names make refresh ambiguous', async () => {
+  let generation = 0
+  const invoke = vi.fn((command: string) => {
+    if (command === 'bluetooth_status') return Promise.resolve('idle')
+    if (command === 'loopback_status') return Promise.resolve({ running: false, endpointName: '', sampleRate: 0, channels: 0, samples: 0, peak: 0, error: null })
+    if (command === 'bluetooth_candidates') {
+      generation++
+      return Promise.resolve({ generation, names: ['Phone', 'Phone'] })
+    }
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  const refreshButton = wrapper.findAll('button').find(button => button.text() === 'Refresh Bluetooth sources')!
+  await refreshButton.trigger('click')
+  await flushPromises()
+  await wrapper.get('#bluetooth-source').setValue('1')
+  await refreshButton.trigger('click')
+  await flushPromises()
+  expect((wrapper.get('#bluetooth-source').element as HTMLSelectElement).value).toBe('')
+  wrapper.unmount()
+})
+
 it('refreshes candidates and connects and disconnects the selected source', async () => {
   let connected = false
   const invoke = vi.fn((command: string) => {
