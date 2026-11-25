@@ -240,6 +240,23 @@ mod platform {
         }
 
         #[test]
+        #[ignore = "requires an available non-default Windows playback endpoint"]
+        fn selected_nondefault_endpoint_loopback_starts_and_stops() {
+            let endpoint = endpoints()
+                .unwrap()
+                .into_iter()
+                .find(|endpoint| !endpoint.is_default)
+                .expect("no non-default Windows playback endpoint is available");
+            let mut monitor = Monitor::default();
+            let started = monitor
+                .start(&endpoint.id)
+                .expect("could not start selected non-default endpoint loopback");
+            assert!(started.running);
+            assert_eq!(started.endpoint_name, endpoint.name);
+            assert!(!monitor.stop().running);
+        }
+
+        #[test]
         fn peak_is_reset_after_each_snapshot() {
             let meter = Meter::default();
             meter

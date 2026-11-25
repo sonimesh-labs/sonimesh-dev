@@ -16,8 +16,8 @@
 
 - CPAL output endpoint enumeration returned at least one endpoint, and every
   listed ID could be resolved again through `HostTrait::device_by_id`.
-- The selected default endpoint started and stopped the WASAPI loopback stream;
-  its reported name matched the selected endpoint.
+- The selected default and one non-default endpoint each started and stopped a
+  WASAPI loopback stream; each reported name matched the selected endpoint.
 - The Windows Bluetooth discovery check passed. The inbound-wait check accepted
   the sole candidate, reported either waiting or already open, and returned to
   idle after close.
@@ -32,6 +32,7 @@ Commands run from the repository root:
 ~~~powershell
 cargo +1.98.1 test --offline -j 1 --manifest-path tools/tauri-output-prototype/Cargo.toml listed_output_endpoints_can_be_reopened_by_id -- --ignored --nocapture
 cargo +1.98.1 test --offline -j 1 --manifest-path tools/tauri-output-prototype/Cargo.toml selected_default_endpoint_loopback_starts_and_stops -- --ignored --nocapture
+cargo +1.98.1 test --offline -j 1 --manifest-path tools/tauri-output-prototype/Cargo.toml selected_nondefault_endpoint_loopback_starts_and_stops -- --ignored --nocapture
 cargo +1.98.1 test --offline -j 1 --manifest-path tools/tauri-output-prototype/Cargo.toml windows_discovery_returns_a_usable_snapshot -- --ignored --nocapture
 cargo +1.98.1 test --offline -j 1 --manifest-path tools/tauri-output-prototype/Cargo.toml real_windows_inbound_wait_reports_state_and_closes -- --ignored --nocapture
 cargo +1.98.1 test --offline -j 1 --manifest-path tools/tauri-output-prototype/Cargo.toml real_connection_opens_reports_state_and_closes -- --ignored --nocapture

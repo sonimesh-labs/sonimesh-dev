@@ -1184,9 +1184,9 @@ Windows audio devices. Play audio through the selected endpoint and watch its na
 sample count, and recent peak. Stop the check when finished. It reports only aggregate activity;
 the endpoint mix can include audio from other applications and does not identify
 the Bluetooth source. No PCM is retained by the probe.
-On 2026-11-26, a hardware check started and stopped loopback on the selected
-default endpoint. The run did not establish audio-signal capture. Full Bluetooth
-and output-probe results are recorded in
+On 2026-11-26, hardware checks started and stopped loopback on the selected
+default and one non-default endpoint. The run did not establish audio-signal
+capture. Full Bluetooth and output-probe results are recorded in
 [`docs/measurements/2026-11-26-windows-bluetooth-output-probe.md`](./measurements/2026-11-26-windows-bluetooth-output-probe.md).
 
 The inbound-wait hardware check below requires exactly one listed playback
