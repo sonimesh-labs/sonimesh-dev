@@ -6,7 +6,7 @@ const generation = ref(0)
 const selected = ref('')
 const loaded = ref(false)
 const busy = ref(false)
-const connected = ref(false)
+const phase = ref<'idle' | 'waiting' | 'open'>('idle')
 const error = ref<string | null>(null)
 const message = ref<string | null>(null)
 let timer: ReturnType<typeof setTimeout> | undefined
@@ -31,23 +31,25 @@ async function refresh() {
 }
 
 async function poll() {
-  if (disposed || !connected.value) return
+  if (disposed || phase.value === 'idle') return
   const request = statusRequest
   try {
-    const open = await window.__TAURI__!.core.invoke<boolean>('bluetooth_status')
+    const state = await window.__TAURI__!.core.invoke<'idle' | 'waiting' | 'open'>('bluetooth_status')
     if (disposed || request !== statusRequest) return
-    if (!open) {
-      connected.value = false
+    if (state === 'idle') {
+      phase.value = 'idle'
       message.value = 'Windows closed the playback connection.'
       return
     }
+    if (state === 'open' && phase.value === 'waiting') message.value = 'System playback connection opened.'
+    phase.value = state
   } catch (cause) {
     if (!disposed && request === statusRequest) error.value = String(cause)
   }
-  if (!disposed && request === statusRequest && connected.value) timer = setTimeout(poll, 1000)
+  if (!disposed && request === statusRequest && phase.value !== 'idle') timer = setTimeout(poll, 1000)
 }
 
-async function toggle() {
+async function toggle(mode: 'connect' | 'wait' = 'connect') {
   if (!window.__TAURI__) return
   busy.value = true
   error.value = null
@@ -55,20 +57,20 @@ async function toggle() {
   statusRequest++
   clearTimeout(timer)
   try {
-    if (connected.value) {
+    if (phase.value !== 'idle') {
       await window.__TAURI__.core.invoke('bluetooth_disconnect')
-      connected.value = false
+      phase.value = 'idle'
       clearTimeout(timer)
       message.value = 'Disconnected.'
     } else {
-      await window.__TAURI__.core.invoke('bluetooth_connect', { generation: generation.value, index: Number(selected.value) })
-      connected.value = true
-      message.value = 'System playback connection opened.'
+      await window.__TAURI__.core.invoke(mode === 'wait' ? 'bluetooth_prepare' : 'bluetooth_connect', { generation: generation.value, index: Number(selected.value) })
+      phase.value = mode === 'wait' ? 'waiting' : 'open'
+      message.value = mode === 'wait' ? 'Waiting for the phone to connect through Bluetooth.' : 'System playback connection opened.'
       void poll()
     }
   } catch (cause) {
     error.value = String(cause)
-    if (connected.value) void poll()
+    if (phase.value !== 'idle') void poll()
   } finally {
     busy.value = false
   }
@@ -79,10 +81,10 @@ onMounted(async () => {
   busy.value = true
   const request = statusRequest
   try {
-    const open = await window.__TAURI__.core.invoke<boolean>('bluetooth_status')
-    if (!disposed && request === statusRequest && open === true) {
-      connected.value = true
-      message.value = 'System playback connection is open.'
+    const state = await window.__TAURI__.core.invoke<'idle' | 'waiting' | 'open'>('bluetooth_status')
+    if (!disposed && request === statusRequest && (state === 'open' || state === 'waiting')) {
+      phase.value = state
+      message.value = state === 'waiting' ? 'Waiting for the phone to connect through Bluetooth.' : 'System playback connection is open.'
       void poll()
     }
   } catch (cause) {
@@ -100,16 +102,17 @@ onBeforeUnmount(() => { disposed = true; statusRequest++; clearTimeout(timer) })
     <p class="eyebrow">Windows experiment</p>
     <h2 id="bluetooth-title">Bluetooth system playback</h2>
     <p class="preview-note">Connect a paired source through Windows. Audio is played by the system and does not enter the SoniMesh mixer.</p>
-    <button type="button" class="preview-action" :disabled="busy || connected" @click="refresh">Refresh Bluetooth sources</button>
+    <button type="button" class="preview-action" :disabled="busy || phase !== 'idle'" @click="refresh">Refresh Bluetooth sources</button>
     <p v-if="loaded && names.length === 0" role="status">No playback sources found. Pair a compatible device in Windows, then refresh.</p>
     <template v-if="names.length">
       <label for="bluetooth-source">Playback source</label>
-      <select id="bluetooth-source" v-model="selected" :disabled="busy || connected">
+      <select id="bluetooth-source" v-model="selected" :disabled="busy || phase !== 'idle'">
         <option value="" disabled>Select a source</option>
         <option v-for="(name, index) in names" :key="index" :value="String(index)">{{ name }}</option>
       </select>
     </template>
-    <button v-if="names.length || connected" type="button" class="preview-action" :disabled="busy || (!connected && selected === '')" @click="toggle">{{ connected ? 'Disconnect Bluetooth' : 'Connect Bluetooth' }}</button>
+    <button v-if="names.length || phase !== 'idle'" type="button" class="preview-action" :disabled="busy || (phase === 'idle' && selected === '')" @click="toggle('connect')">{{ phase === 'idle' ? 'Connect Bluetooth' : 'Disconnect Bluetooth' }}</button>
+    <button v-if="names.length && phase === 'idle'" type="button" class="preview-action" :disabled="busy || selected === ''" @click="toggle('wait')">Wait for phone to connect</button>
     <p v-if="message" role="status">{{ message }}</p>
     <p v-if="error" class="command-error" role="alert">{{ error }}</p>
   </section>

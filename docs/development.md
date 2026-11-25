@@ -1173,7 +1173,9 @@ Windows, choose **Refresh Bluetooth sources**, select it, and choose **Connect
 Bluetooth**. Use **Disconnect Bluetooth** to stop. A connection shown as open
 does not confirm sound is audible; this system-routed path does not supply PCM
 to the SoniMesh mixer. Playback and disconnect behavior still need real-device
-validation.
+validation. If connecting from the desktop fails, choose **Wait for phone to
+connect** and initiate the Bluetooth connection from the paired phone. The panel
+shows whether Windows is waiting or has opened the connection.
 
 The opt-in backend hardware check below requires exactly one listed playback
 candidate and attempts to open and close it. It may change the source's audio

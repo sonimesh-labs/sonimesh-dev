@@ -7,9 +7,17 @@ pub struct Candidates {
     names: Vec<String>,
 }
 
+#[derive(Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PlaybackState {
+    Idle,
+    Waiting,
+    Open,
+}
+
 #[cfg(windows)]
 mod platform {
-    use super::Candidates;
+    use super::{Candidates, PlaybackState};
     use windows::Devices::Enumeration::DeviceInformation;
     use windows::Media::Audio::{
         AudioPlaybackConnection, AudioPlaybackConnectionOpenResultStatus,
@@ -31,6 +39,7 @@ mod platform {
         devices: Vec<DeviceInformation>,
         generation: u32,
         connection: Option<AudioPlaybackConnection>,
+        opened: bool,
     }
 
     impl Bluetooth {
@@ -57,7 +66,11 @@ mod platform {
             })
         }
 
-        pub fn connect(&mut self, generation: u32, index: usize) -> Result<(), String> {
+        fn start(
+            &mut self,
+            generation: u32,
+            index: usize,
+        ) -> Result<AudioPlaybackConnection, String> {
             if self.connection.is_some() {
                 return Err("Disconnect the current source first.".into());
             }
@@ -68,8 +81,23 @@ mod platform {
             let connection =
                 AudioPlaybackConnection::TryCreateFromId(&device.Id().map_err(|e| e.to_string())?)
                     .map_err(|e| e.to_string())?;
+            if let Err(error) = connection.Start() {
+                let _ = connection.Close();
+                return Err(error.to_string());
+            }
+            Ok(connection)
+        }
+
+        pub fn prepare(&mut self, generation: u32, index: usize) -> Result<(), String> {
+            let connection = self.start(generation, index)?;
+            self.connection = Some(connection);
+            self.opened = false;
+            Ok(())
+        }
+
+        pub fn connect(&mut self, generation: u32, index: usize) -> Result<(), String> {
+            let connection = self.start(generation, index)?;
             let result: Result<(), String> = (|| {
-                connection.Start().map_err(|e| e.to_string())?;
                 let result = connection.Open().map_err(|e| e.to_string())?;
                 let status = result.Status().map_err(|e| e.to_string())?;
                 if status != AudioPlaybackConnectionOpenResultStatus::Success {
@@ -82,25 +110,31 @@ mod platform {
             }
             result?;
             self.connection = Some(connection);
+            self.opened = true;
             Ok(())
         }
 
-        pub fn status(&mut self) -> Result<bool, String> {
+        pub fn status(&mut self) -> Result<PlaybackState, String> {
             let Some(connection) = &self.connection else {
-                return Ok(false);
+                return Ok(PlaybackState::Idle);
             };
             let state = connection.State().map_err(|e| e.to_string())?;
             if state == AudioPlaybackConnectionState::Opened {
-                return Ok(true);
+                self.opened = true;
+                return Ok(PlaybackState::Open);
             }
             if state != AudioPlaybackConnectionState::Closed {
                 return Err("Unknown playback connection state.".into());
             }
+            if !self.opened {
+                return Ok(PlaybackState::Waiting);
+            }
             self.disconnect()?;
-            Ok(false)
+            Ok(PlaybackState::Idle)
         }
 
         pub fn disconnect(&mut self) -> Result<(), String> {
+            self.opened = false;
             if let Some(connection) = self.connection.take() {
                 connection.Close().map_err(|e| e.to_string())?;
             }
@@ -116,7 +150,7 @@ mod platform {
 
     #[cfg(test)]
     mod tests {
-        use super::{Bluetooth, open_error};
+        use super::{Bluetooth, PlaybackState, open_error};
         use windows::Media::Audio::AudioPlaybackConnectionOpenResultStatus;
 
         #[test]
@@ -140,7 +174,7 @@ mod platform {
             let mut bluetooth = Bluetooth::default();
             assert!(bluetooth.connect(1, 0).is_err());
             assert!(bluetooth.connect(0, 0).is_err());
-            assert!(!bluetooth.status().unwrap());
+            assert_eq!(bluetooth.status().unwrap(), PlaybackState::Idle);
             bluetooth.disconnect().unwrap();
         }
 
@@ -167,18 +201,21 @@ mod platform {
             bluetooth
                 .connect(snapshot.generation, 0)
                 .expect("opening the system playback connection failed");
-            assert!(bluetooth.status().expect("could not read connection state"));
+            assert_eq!(
+                bluetooth.status().expect("could not read connection state"),
+                PlaybackState::Open
+            );
             bluetooth
                 .disconnect()
                 .expect("closing the system playback connection failed");
-            assert!(!bluetooth.status().unwrap());
+            assert_eq!(bluetooth.status().unwrap(), PlaybackState::Idle);
         }
     }
 }
 
 #[cfg(not(windows))]
 mod platform {
-    use super::Candidates;
+    use super::{Candidates, PlaybackState};
     #[derive(Default)]
     pub struct Bluetooth;
     impl Bluetooth {
@@ -188,8 +225,11 @@ mod platform {
         pub fn connect(&mut self, _: u32, _: usize) -> Result<(), String> {
             Err("Bluetooth playback experiment requires Windows.".into())
         }
-        pub fn status(&mut self) -> Result<bool, String> {
-            Ok(false)
+        pub fn prepare(&mut self, _: u32, _: usize) -> Result<(), String> {
+            Err("Bluetooth playback experiment requires Windows.".into())
+        }
+        pub fn status(&mut self) -> Result<PlaybackState, String> {
+            Ok(PlaybackState::Idle)
         }
         pub fn disconnect(&mut self) -> Result<(), String> {
             Ok(())

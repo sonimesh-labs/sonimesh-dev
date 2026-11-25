@@ -293,6 +293,8 @@ audio through the WLAN receiver or claim a supported PCM input. Its interface
 restores the current connection state when the view opens, so a connection can
 still be stopped after the view reloads. Known Windows open failures are shown
 as timeout, system denial, or an unspecified failure rather than numeric codes.
+The operator may instead leave the selected connection started while waiting for
+the remote source to initiate it; the waiting state does not claim playback.
 
 ## 4. Quality targets and latency budget
 

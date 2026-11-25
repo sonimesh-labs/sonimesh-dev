@@ -39,7 +39,22 @@ async fn bluetooth_connect(
 }
 
 #[tauri::command]
-async fn bluetooth_status(state: tauri::State<'_, ProbeState>) -> Result<bool, String> {
+async fn bluetooth_prepare(
+    state: tauri::State<'_, ProbeState>,
+    generation: u32,
+    index: usize,
+) -> Result<(), String> {
+    state
+        .bluetooth
+        .lock()
+        .map_err(|_| "Bluetooth state unavailable.")?
+        .prepare(generation, index)
+}
+
+#[tauri::command]
+async fn bluetooth_status(
+    state: tauri::State<'_, ProbeState>,
+) -> Result<bluetooth::PlaybackState, String> {
     state
         .bluetooth
         .lock()
@@ -692,6 +707,7 @@ fn main() {
             lab_status,
             bluetooth_candidates,
             bluetooth_connect,
+            bluetooth_prepare,
             bluetooth_status,
             bluetooth_disconnect,
             stop_lab,
