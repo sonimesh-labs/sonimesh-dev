@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import QRCode from 'qrcode'
+import BluetoothProbe from './BluetoothProbe.vue'
 
 interface OutputDevice {
   label: string
@@ -536,6 +537,7 @@ onBeforeUnmount(() => { disposed = true; labRequest++; suggestRequest++; clearTi
       </ul>
       <p v-if="message" role="status">{{ message }}</p>
     </section>
+    <BluetoothProbe />
     <section class="panel utility-panel" aria-labelledby="lab-title">
       <p class="eyebrow">Controlled network experiment</p>
       <h2 id="lab-title">Paired audio lab</h2>

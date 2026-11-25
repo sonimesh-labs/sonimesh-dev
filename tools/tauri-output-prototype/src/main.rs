@@ -1,4 +1,5 @@
 use serde::Serialize;
+mod bluetooth;
 mod lab;
 use std::sync::{
     Arc, Mutex,
@@ -10,6 +11,49 @@ struct ProbeState {
     snapshot: Mutex<SelectionSnapshot>,
     playing: Arc<AtomicBool>,
     lab: Arc<Mutex<lab::Lab>>,
+    bluetooth: Mutex<bluetooth::Bluetooth>,
+}
+
+#[tauri::command]
+async fn bluetooth_candidates(
+    state: tauri::State<'_, ProbeState>,
+) -> Result<bluetooth::Candidates, String> {
+    state
+        .bluetooth
+        .lock()
+        .map_err(|_| "Bluetooth state unavailable.")?
+        .refresh()
+}
+
+#[tauri::command]
+async fn bluetooth_connect(
+    state: tauri::State<'_, ProbeState>,
+    generation: u32,
+    index: usize,
+) -> Result<(), String> {
+    state
+        .bluetooth
+        .lock()
+        .map_err(|_| "Bluetooth state unavailable.")?
+        .connect(generation, index)
+}
+
+#[tauri::command]
+async fn bluetooth_status(state: tauri::State<'_, ProbeState>) -> Result<bool, String> {
+    state
+        .bluetooth
+        .lock()
+        .map_err(|_| "Bluetooth state unavailable.")?
+        .status()
+}
+
+#[tauri::command]
+async fn bluetooth_disconnect(state: tauri::State<'_, ProbeState>) -> Result<(), String> {
+    state
+        .bluetooth
+        .lock()
+        .map_err(|_| "Bluetooth state unavailable.")?
+        .disconnect()
 }
 
 fn spawn_lab_monitor(lab: &Arc<Mutex<lab::Lab>>) -> std::thread::JoinHandle<()> {
@@ -646,16 +690,24 @@ fn main() {
             suggest_lab_host,
             start_lab,
             lab_status,
+            bluetooth_candidates,
+            bluetooth_connect,
+            bluetooth_status,
+            bluetooth_disconnect,
             stop_lab,
             control_lab
         ])
         .build(tauri::generate_context!())
         .expect("desktop output probe failed")
         .run(|app, event| {
-            if matches!(event, tauri::RunEvent::Exit)
-                && let Ok(mut lab) = app.state::<ProbeState>().lab.lock()
-            {
-                lab.stop();
+            if matches!(event, tauri::RunEvent::Exit) {
+                let state = app.state::<ProbeState>();
+                if let Ok(mut lab) = state.lab.lock() {
+                    lab.stop();
+                }
+                if let Ok(mut bluetooth) = state.bluetooth.lock() {
+                    let _ = bluetooth.disconnect();
+                }
             }
         });
 }

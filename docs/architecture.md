@@ -287,6 +287,9 @@ available to the application. The prototype does not
 enter the WLAN MVP. While the experiment is open, it checks the system
 connection state outside any audio callback and reports a system closure before
 cleaning up; it does not automatically reconnect.
+The separate desktop output probe may offer the same system-routed connection
+experiment with explicit selection and stop controls. It does not route this
+audio through the WLAN receiver or claim a supported PCM input.
 
 ## 4. Quality targets and latency budget
 

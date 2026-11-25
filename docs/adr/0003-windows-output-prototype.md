@@ -57,6 +57,12 @@ Add an optional `cpal-output` feature to `sonimesh-platform` for the first Windo
 This decision does not select the release backend. It authorizes a measured CPAL
 prototype only.
 
+The separate output probe may also expose a Windows system playback connection
+experiment: enumerate candidates, connect an explicitly selected source, show
+connection state, and close on request or application exit. This is an
+independent system-routed path, not input to CPAL or the SoniMesh mixer. A
+successful API call alone does not prove audible playback or device support.
+
 The Android audio lab commands may enumerate outputs and let the operator select
 one for a session. They resolve the choice to its CPAL device ID and probe that
 specific endpoint before creating the matching render source. This interactive
