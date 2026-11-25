@@ -1050,8 +1050,9 @@ the separately configured UDP destination for ADB reverse.
 For a direct connection, the probe can optionally wrap the same lab invitation
 with the running listener's UDP port as `SONIMESH-LAB1:<port>:<hex>`. Android
 accepts this experimental text in scan, paste, and share flows and applies the
-port along with the invitation. The unwrapped hexadecimal invitation remains
-available, including for a relay whose listen port differs from the receiver's.
+port along with the invitation and reports the applied port in the status. The
+unwrapped hexadecimal invitation remains available, including for a relay whose
+listen port differs from the receiver's.
 This wrapper is a lab convenience, not the production pairing QR format.
 The probe recognizes numbered listener session events and keeps connection
 endpoints out of its event history. To exercise the listener-to-snapshot path

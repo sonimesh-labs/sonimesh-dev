@@ -634,10 +634,10 @@ class LabActivity : Activity() {
                     .apply()
                 retained = true
                 invitation.setText("")
-                LabStatus.publish(
-                    if (useAddressForUdp && udpAddress != null) "Invitation applied. UDP uses the same address."
-                    else "Invitation applied. Check the desktop IPv4 for UDP separately.",
-                )
+                val portMessage = parsed.mediaPort?.let { " UDP port set to $it." } ?: ""
+                val addressMessage = if (useAddressForUdp && udpAddress != null) " UDP uses the same address."
+                    else " Check the desktop IPv4 for UDP separately."
+                LabStatus.publish("Invitation applied.$portMessage$addressMessage")
             } finally {
                 decoded.pairingId.fill(0)
                 decoded.pairingSecret.fill(0)

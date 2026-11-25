@@ -9,6 +9,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
+import android.widget.TextView
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
 import com.sonimesh.sender.protocol.PairingQr
@@ -58,9 +59,11 @@ class LabPairingTest {
                 port.setText("39093")
                 activity.applyScannedInvitation("SONIMESH-LAB1:39094:$payload")
                 assertEquals("39094", port.text.toString())
+                assertTrue(hasText(root, "Status: Invitation applied. UDP port set to 39094. Check the desktop IPv4 for UDP separately."))
                 assertEquals("127.0.0.1", host.text.toString())
                 activity.applyScannedInvitation(payload)
                 assertEquals("39094", port.text.toString())
+                assertTrue(hasText(root, "Status: Invitation applied. Check the desktop IPv4 for UDP separately."))
                 for (invalid in listOf("SONIMESH-LAB1:0:$payload", "SONIMESH-LAB1:65536:$payload", "SONIMESH-LAB1:39095:00", "SONIMESH-LAB2:39095:$payload")) {
                     activity.applyScannedInvitation(invalid)
                     assertEquals("39094", port.text.toString())
@@ -241,6 +244,14 @@ class LabPairingTest {
                 assertEquals("cd".repeat(32), pin.text.toString())
             }
         }
+    }
+
+    private fun hasText(view: View, text: String): Boolean {
+        if (view is TextView && view.text.toString() == text) return true
+        if (view is ViewGroup) for (index in 0 until view.childCount) {
+            if (hasText(view.getChildAt(index), text)) return true
+        }
+        return false
     }
 
     private fun findButton(view: View, text: String): Button? {

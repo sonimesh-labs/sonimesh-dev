@@ -354,7 +354,7 @@ class LabStatusTest {
         ActivityScenario.launch<LabActivity>(intent).use { scenario ->
             scenario.onActivity { activity ->
                 assertTrue(findTextField(activity.window.decorView, "Lab invitation payload")?.text?.isEmpty() == true)
-                assertTrue(hasStatus(activity.window.decorView, "Status: The lab invitation must be hexadecimal text."))
+                assertTrue(hasStatus(activity.window.decorView, "Status: Paste a valid lab invitation payload."))
             }
         }
     }
