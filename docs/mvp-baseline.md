@@ -179,10 +179,10 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   capture check can list Windows playback endpoint IDs and read a selected
   endpoint's system mix, with its test tone selectable on that endpoint, through
   the same Opus/UDP/decode path into a software
-  render check. It currently
-  supports 44.1 and 48 kHz endpoints and requires non-silent playback; 44.1 kHz
-  is converted to the lab's 48 kHz Opus rate. It does not identify an
-  individual source or establish Bluetooth-specific capture. The 44.1-to-48 kHz
+  render check. It supports default endpoint rates from 8 to 48 kHz when they
+  form integer 20 ms stereo blocks, and requires non-silent playback; rates other
+  than 48 kHz are converted to the lab's 48 kHz Opus rate. It does not identify
+  an individual source or establish Bluetooth-specific capture. The 44.1-to-48 kHz
   software conversion passes its unit test, but a ToDesk virtual endpoint test
   captured blocks with only a 0.0001 peak during playback, so that endpoint's
   signal path remains unverified. On 2026-11-26, the

@@ -1184,6 +1184,10 @@ Windows audio devices. Play audio through the selected endpoint and watch its na
 sample count, and recent peak. Stop the check when finished. It reports only aggregate activity;
 the endpoint mix can include audio from other applications and does not identify
 the Bluetooth source. No PCM is retained by the probe.
+The Windows loopback capture lab accepts default endpoint rates from 8 to
+48 kHz when the rate forms an integer 20 ms stereo block; it converts captured
+audio to the lab's 48 kHz Opus format. This remains system-mix capture and does
+not expose a source-specific Bluetooth PCM stream.
 On 2026-11-26, hardware checks started and stopped loopback on the selected
 default and one non-default endpoint. The run did not establish audio-signal
 capture. Full Bluetooth and output-probe results are recorded in

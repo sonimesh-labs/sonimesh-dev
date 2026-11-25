@@ -10,6 +10,19 @@ use std::time::Duration;
 const BLOCK_SAMPLES: usize = 1_920;
 const QUEUE_BLOCKS: usize = 8;
 const CAPTURE_BLOCK_DURATION_MS: u32 = 20;
+const MIN_CAPTURE_RATE_HZ: u32 = 8_000;
+const MAX_CAPTURE_RATE_HZ: u32 = 48_000;
+
+fn samples_per_capture_block(sample_rate_hz: u32) -> Option<usize> {
+    if !(MIN_CAPTURE_RATE_HZ..=MAX_CAPTURE_RATE_HZ).contains(&sample_rate_hz)
+        || sample_rate_hz % (1_000 / CAPTURE_BLOCK_DURATION_MS) != 0
+    {
+        return None;
+    }
+    usize::try_from(sample_rate_hz / (1_000 / CAPTURE_BLOCK_DURATION_MS))
+        .ok()?
+        .checked_mul(2)
+}
 
 fn stereo_pair(left: f32, right: Option<f32>) -> [f32; 2] {
     let left = if left.is_finite() { left } else { 0.0 };
@@ -173,14 +186,12 @@ impl Capture {
         let endpoint_name = device.description()?.name().to_owned();
         let supported = device.default_output_config()?;
         let sample_rate_hz = supported.sample_rate();
-        if !matches!(sample_rate_hz, 44_100 | 48_000) {
+        let Some(samples_per_block) = samples_per_capture_block(sample_rate_hz) else {
             return Err(format!(
-                "selected endpoint uses {sample_rate_hz} Hz; this lab supports 44.1 or 48 kHz"
+                "selected endpoint uses {sample_rate_hz} Hz; this lab supports 8-48 kHz rates with whole 20 ms blocks"
             )
             .into());
-        }
-        let samples_per_block =
-            usize::try_from(sample_rate_hz / (1_000 / CAPTURE_BLOCK_DURATION_MS))? * 2;
+        };
         let channels = usize::from(supported.channels());
         if channels == 0 {
             return Err("selected endpoint has no audio channels".into());
@@ -247,8 +258,14 @@ mod tests {
 
     #[test]
     fn capture_rates_fit_the_bounded_stereo_block() {
-        assert_eq!(BLOCK_SAMPLES, 48_000 / 50 * 2);
-        assert_eq!(44_100 / 50 * 2, 1_764);
+        for rate in [8_000, 16_000, 24_000, 32_000, 44_100, 48_000] {
+            let samples = samples_per_capture_block(rate).unwrap();
+            assert_eq!(samples, usize::try_from(rate / 50).unwrap() * 2);
+            assert!(samples <= BLOCK_SAMPLES);
+        }
+        assert_eq!(samples_per_capture_block(7_950), None);
+        assert_eq!(samples_per_capture_block(11_025), None);
+        assert_eq!(samples_per_capture_block(48_050), None);
     }
 
     #[test]

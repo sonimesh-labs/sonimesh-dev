@@ -714,6 +714,28 @@ mod tests {
         assert!(output.iter().any(|sample| sample.abs() > 0.1));
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn capture_resampler_accepts_common_lower_endpoint_rates() {
+        for rate in [8_000, 16_000, 24_000, 32_000, 44_100] {
+            let mut resampler = super::CaptureResampler::new(rate).unwrap();
+            let samples_per_block = usize::try_from(rate / 50).unwrap() * 2;
+            let input = vec![0.25_f32; samples_per_block];
+            let mut output = [0.0_f32; super::SAMPLES];
+
+            assert!(
+                !resampler.push(&input, &mut output).unwrap(),
+                "{rate} Hz first block"
+            );
+            assert!(
+                resampler.push(&input, &mut output).unwrap(),
+                "{rate} Hz second block"
+            );
+            assert!(output.iter().all(|sample| sample.is_finite()));
+            assert!(output.iter().any(|sample| sample.abs() > 0.1));
+        }
+    }
+
     #[test]
     fn native_opus_udp_loopback_reaches_the_render_source() {
         super::check(None).expect("loopback audio path");
