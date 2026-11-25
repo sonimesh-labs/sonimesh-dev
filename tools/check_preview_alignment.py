@@ -23,8 +23,8 @@ ALIGNMENTS = (
 # publishes them.
 PREVIEW_ONLY_STREAM_FIELDS = frozenset({"currentJitterMs", "playoutDelayMs"})
 
-# The shell's saved-output fallback is not part of the Rust lifecycle snapshot.
-PREVIEW_ONLY_OUTPUT_FIELDS = frozenset({"selectionFallback"})
+# Output selection policy belongs to the shell, not the Rust lifecycle snapshot.
+PREVIEW_ONLY_OUTPUT_FIELDS = frozenset({"selectionFallback", "followsSystemDefault"})
 
 # DesktopSnapshot fields owned by the preview adapter or by separate low-rate
 # APIs rather than by the Rust control snapshot: output-device lists, volume
@@ -603,6 +603,7 @@ export interface StreamMetrics {
 export interface OutputSnapshot {
   selectionRetained: boolean
   selectionFallback?: boolean
+  followsSystemDefault?: boolean
   streamActive: boolean
   faultReported: boolean
   health: OutputHealth

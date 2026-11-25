@@ -37,6 +37,7 @@ jobs:
           components: clippy,rustfmt
       - uses: Swatinem/rust-cache@v2
       - name: Check workspace architecture boundaries
+        shell: bash
         run: |
           python tools/check_workspace_boundaries.py --self-test
           python tools/check_workspace_boundaries.py
