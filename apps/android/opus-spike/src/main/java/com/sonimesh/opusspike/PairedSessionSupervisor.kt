@@ -30,6 +30,7 @@ internal class PairedSessionSupervisor(
     private val destinationPort: Int,
     private val setupSocket: SetupSocket,
     private val onStatus: (String) -> Unit,
+    private val onInitialSessionStarted: () -> Unit,
     private val onReconnectFailure: (String) -> Unit,
     private val onPacketSent: () -> Unit,
 ) : Thread("audio-lab-paired-session") {
@@ -166,6 +167,7 @@ internal class PairedSessionSupervisor(
                 onStatus("Desktop connection restored. Sending captured audio again.")
             } else {
                 hasStartedSession = true
+                onInitialSessionStarted()
                 startupComplete.countDown()
             }
             Log.i(TAG, "paired[$traceId] media session started")
@@ -203,7 +205,7 @@ internal class PairedSessionSupervisor(
         var connectAttempt = 0
         val connection = connectPairedWithRetry(running::get, Thread::sleep, onRetry = {
             Log.i(TAG, "paired[$traceId] retrying control connection")
-            onStatus("Desktop listener is not ready. Retrying connection…")
+            if (!hasStartedSession) onStatus("Desktop listener is not ready. Retrying connection…")
         }) {
             connectAttempt += 1
             Log.i(TAG, "paired[$traceId] control connection attempt $connectAttempt")

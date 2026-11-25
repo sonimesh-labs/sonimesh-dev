@@ -210,6 +210,11 @@ class LabCaptureService : Service() {
                             }
                         }
                     },
+                    onInitialSessionStarted = {
+                        handler.post {
+                            if (running.get() && !terminalStatus) updateForegroundConnectionStatus(null)
+                        }
+                    },
                     onReconnectFailure = { message ->
                         handler.post { finishWith(message) }
                     },
@@ -515,8 +520,9 @@ class LabCaptureService : Service() {
         manager.notify(1, builder.build())
     }
 
-    private fun updateForegroundConnectionStatus(message: String) {
+    private fun updateForegroundConnectionStatus(message: String?) {
         foregroundConnectionStatus = when {
+            message == null -> null
             message.startsWith("Desktop listener is not ready.") -> "Connecting to desktop"
             message.startsWith("Desktop connection lost.") -> "Reconnecting to desktop"
             message.startsWith("Desktop connection restored.") -> "Desktop reconnected"

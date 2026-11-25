@@ -210,6 +210,9 @@ class PairedCaptureTest {
                     if (!retrying) SystemClock.sleep(50)
                 }
                 assertTrue("connection retry was not reported", retrying)
+                val manager = instrumentation.targetContext.getSystemService(NotificationManager::class.java)
+                assertEquals("Transport: paired UDP · Connecting to desktop",
+                    manager.activeNotifications.firstOrNull { it.id == 1 }?.notification?.extras?.getString(Notification.EXTRA_TEXT))
                 instrumentation.sendStatus(1, Bundle().apply { putString("pairedCapture", "retrying") })
                 DatagramSocket().use { socket ->
                     val marker = byteArrayOf(1)
@@ -225,6 +228,11 @@ class PairedCaptureTest {
                 if (!capturing) SystemClock.sleep(100)
             }
             assertTrue("capture did not start", capturing)
+            if (expectConnectionRetry) {
+                val notification = instrumentation.targetContext.getSystemService(NotificationManager::class.java)
+                    .activeNotifications.firstOrNull { it.id == 1 }?.notification
+                assertEquals("Transport: paired UDP", notification?.extras?.getString(Notification.EXTRA_TEXT))
+            }
             scenario.onActivity { activity ->
                 val usage = if (changeUsage) "Media" else "All supported usages"
                 val bitrate = args.getString("bitrateKbps") ?: "96"

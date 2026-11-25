@@ -456,6 +456,10 @@ through its open action, and verified the restored notification while capture
 continued. The loopback listener received 188 packets and decoded 178 frames
 with a cumulative peak of 0.436. This is emulator service and decoder evidence,
 not physical WLAN or audible continuity evidence.
+On 2026-11-25, the API 37 x86_64 startup-refusal test also verified that the
+connecting notification clears after the first session starts; the listener
+received and decoded 172 packets. The established-session reconnect and mute
+notification tests passed separately. These are emulator loopback checks.
 
 To verify recovery after automatic reconnect exhaustion, run the listener with
 `--keep-listening --disconnect-after-ms 1000 --reject-starts 33` and invoke
@@ -480,11 +484,11 @@ python tools/fixtures/paired_retry_gate.py
 ~~~
 
 Grant the lab's audio and notification permissions, then run the following
-instrumentation with the listener's `SPKI_HEX` in `$pin`; select the entire
+instrumentation with the listener's `INVITATION_HEX` in `$invitationHex`; select the entire
 screen in the system consent UI:
 
 ~~~powershell
-adb shell am instrument -w -e pairingSpkiHex $pin -e pairingHost 10.0.2.2 -e mediaHost 10.0.2.2 -e retryGate true -e class 'com.sonimesh.opusspike.PairedCaptureTest#captures_after_refused_connection_is_retried' com.sonimesh.opusspike.test/androidx.test.runner.AndroidJUnitRunner
+adb shell am instrument -w -e pairingInvitationHex $invitationHex -e mediaHost 10.0.2.2 -e retryGate true -e class 'com.sonimesh.opusspike.PairedCaptureTest#captures_after_refused_connection_is_retried' com.sonimesh.opusspike.test/androidx.test.runner.AndroidJUnitRunner
 ~~~
 
 The test sends a local UDP marker only after observing the retry status; the
