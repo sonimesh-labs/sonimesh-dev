@@ -292,6 +292,36 @@ class PairedCaptureTest {
                     assertTrue("notification did not return to capture activity", returned)
                 }
                 if (retryAfterReconnectExhaustion) {
+                    scenario.onActivity { activity ->
+                        find(activity.window.decorView) { it is Button && it.text.toString() == "Stop test tone" }.performClick()
+                    }
+                    var silent = false
+                    val silentDeadline = SystemClock.elapsedRealtime() + 10_000
+                    while (!silent && SystemClock.elapsedRealtime() < silentDeadline) {
+                        scenario.onActivity { activity ->
+                            val root = activity.window.decorView
+                            silent = containsStatus(root, "Capture signal: no capturable audio")
+                            assertTrue("signal change replaced reconnect status",
+                                containsStatus(root, "Status: Desktop connection lost. Reconnecting"))
+                        }
+                        if (!silent) SystemClock.sleep(100)
+                    }
+                    assertTrue("capture signal did not report silence during reconnect", silent)
+                    scenario.onActivity { activity ->
+                        find(activity.window.decorView) { it is Button && it.text.toString() == "Start test tone" }.performClick()
+                    }
+                    var signal = false
+                    val signalDeadline = SystemClock.elapsedRealtime() + 10_000
+                    while (!signal && SystemClock.elapsedRealtime() < signalDeadline) {
+                        scenario.onActivity { activity ->
+                            val root = activity.window.decorView
+                            signal = containsStatus(root, "Capture signal: signal detected")
+                            assertTrue("signal recovery replaced reconnect status",
+                                containsStatus(root, "Status: Desktop connection lost. Reconnecting"))
+                        }
+                        if (!signal) SystemClock.sleep(100)
+                    }
+                    assertTrue("capture signal did not recover during reconnect", signal)
                     var retryAvailable = false
                     val retryDeadline = SystemClock.elapsedRealtime() + 60_000
                     while (!retryAvailable && SystemClock.elapsedRealtime() < retryDeadline) {

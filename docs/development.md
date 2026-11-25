@@ -401,6 +401,8 @@ an actionable status; Stop cancels an in-progress retry. Automatic recovery
 requires the desktop lab to stay running with `--keep-listening`; otherwise the
 retry eventually ends. This behavior uses the public fixed lab fixture and is
 not the product pairing or reconnect policy.
+While reconnecting, the connection status remains visible even if the capture
+signal changes; the separate capture-signal indicator continues to update.
 
 To verify one established-session interruption on an API 37 emulator, start the
 listener with a one-time control disconnect after five seconds:
@@ -472,6 +474,10 @@ capture. On 2026-11-25 this passed on an API 37 x86_64 emulator; the desktop
 listener accepted the manual session, received nine media packets, and decoded
 nine frames with a cumulative peak of 0.094. This is loopback recovery and
 decoder evidence, not audible playback or physical WLAN evidence.
+On the same emulator, a later run stopped and restarted the test tone during
+reconnect, observed both signal transitions while the reconnect status remained
+visible, and then successfully retried after exhaustion. Separate normal-signal
+and reconnect tests passed as well.
 
 To repeat the earlier reconnect-through-gate test, start these commands in
 separate terminals from the repository root (leave ADB reverse for port 47610
