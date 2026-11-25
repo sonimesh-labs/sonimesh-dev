@@ -59,6 +59,19 @@ one-based and must exist in every recording. For example, use
 channel. The tool does not automatically choose a channel; record the choice in
 the measurement report. Opposite-polarity channels can cancel when averaged.
 
+Use `--reference-channel N` to select a one-based reference channel as well.
+For example, a common-interface file containing the reference on channel 1 and
+the captured output on channel 2 can be measured without splitting the file:
+
+```sh
+cargo run -p sonimesh-latency-measurement -- measure \
+  --reference-channel 1 --recording-channel 2 capture.wav capture.wav
+```
+
+The reference channel must contain the probe at the start of the file; the
+measured offset remains relative to that probe, and the setup must still be
+calibrated and documented before interpreting it as physical latency.
+
 Pass `--offsets-only` to print just the per-run offset numbers, one per line.
 This composes with `summary` so offsets from separate measurement sessions can
 be accumulated and aggregated:

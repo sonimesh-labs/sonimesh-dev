@@ -72,11 +72,13 @@ offset, and prints per-run offsets plus a p50/p95/p99 summary. It is a software
 measurement aid; the acoustic setup and the report metadata above still define
 what the result means.
 
-Multichannel recordings are averaged by default. When the microphone signal is
-on a known channel, select its one-based channel number with `measure
---recording-channel`; the same selection applies to every recording. Record the
-chosen channel in the measurement report. This is an operator choice, not an
-automatic signal selection or evidence of physical latency by itself.
+Multichannel inputs are averaged by default. When the source reference or
+microphone signal is on a known channel, select its one-based channel number
+with `measure --reference-channel` or `--recording-channel`; the recording
+selection applies to every recording. A common-interface recording can be used
+as both inputs with separate channel selections. Record the chosen channels in
+the measurement report. These are operator choices, not automatic signal
+selection or evidence of physical latency by themselves.
 
 Every report must include Android model and build, Windows version, Wi-Fi AP,
 network band, output device, sample rate, channel count, buffer mode, frame size,

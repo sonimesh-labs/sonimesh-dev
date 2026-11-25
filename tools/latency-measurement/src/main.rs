@@ -60,6 +60,7 @@ struct MeasureArgs {
     coarse_factor: usize,
     distinctness_ratio: f64,
     probe_ms: Option<f64>,
+    reference_channel: Option<usize>,
     recording_channel: Option<usize>,
     reference: PathBuf,
     recordings: Vec<PathBuf>,
@@ -120,8 +121,11 @@ fn run_generate(args: &GenerateArgs) -> Result<(), Box<dyn Error>> {
     clippy::cast_sign_loss
 )]
 fn run_measure(args: &MeasureArgs) -> Result<(), Box<dyn Error>> {
-    let reference = read_mono(&args.reference)
-        .map_err(|error| format!("reference {}: {error}", args.reference.display()))?;
+    let reference = match args.reference_channel {
+        Some(channel) => read_channel(&args.reference, channel),
+        None => read_mono(&args.reference),
+    }
+    .map_err(|error| format!("reference {}: {error}", args.reference.display()))?;
     let mut offsets_ms = Vec::with_capacity(args.recordings.len());
     for (index, path) in args.recordings.iter().enumerate() {
         let recording = match args.recording_channel {
@@ -373,6 +377,7 @@ fn parse_measure(rest: &[String]) -> Result<Option<MeasureArgs>, String> {
     let mut coarse_factor = 16_usize;
     let mut distinctness_ratio = 3.0_f64;
     let mut probe_ms: Option<f64> = None;
+    let mut reference_channel = None;
     let mut recording_channel = None;
     let mut offsets_only = false;
     let mut paths: Vec<PathBuf> = Vec::new();
@@ -381,13 +386,17 @@ fn parse_measure(rest: &[String]) -> Result<Option<MeasureArgs>, String> {
         let arg = &rest[index];
         match arg.as_str() {
             "--offsets-only" => offsets_only = true,
-            "--recording-channel" => {
+            "--reference-channel" | "--recording-channel" => {
                 index += 1;
-                let channel = parse_usize(rest.get(index), "--recording-channel")?;
+                let channel = parse_usize(rest.get(index), arg)?;
                 if channel == 0 {
-                    return Err("--recording-channel must be at least 1".into());
+                    return Err(format!("{arg} must be at least 1"));
                 }
-                recording_channel = Some(channel);
+                if arg == "--reference-channel" {
+                    reference_channel = Some(channel);
+                } else {
+                    recording_channel = Some(channel);
+                }
             }
             "--max-search-ms" => {
                 index += 1;
@@ -437,6 +446,7 @@ fn parse_measure(rest: &[String]) -> Result<Option<MeasureArgs>, String> {
         coarse_factor,
         distinctness_ratio,
         probe_ms,
+        reference_channel,
         recording_channel,
         reference,
         recordings,
@@ -498,7 +508,7 @@ fn print_usage() {
 
 Usage:
   sonimesh-latency-measurement generate [--sample-rate N] [--seconds N] [--seed N] [--bits FMT] <output.wav>
-  sonimesh-latency-measurement measure [--max-search-ms N] [--coarse-factor N] [--distinctness-ratio R] [--probe-ms N] [--recording-channel N] [--offsets-only] <reference.wav> <recording.wav>...
+  sonimesh-latency-measurement measure [--max-search-ms N] [--coarse-factor N] [--distinctness-ratio R] [--probe-ms N] [--reference-channel N] [--recording-channel N] [--offsets-only] <reference.wav> <recording.wav>...
   sonimesh-latency-measurement info [--check] <wave.wav>...
   sonimesh-latency-measurement summary
   sonimesh-latency-measurement --help
@@ -519,6 +529,7 @@ Options:
   --coarse-factor N       Coarse-search downsampling factor (default: 16).
   --distinctness-ratio R  Minimum best/second-best peak ratio (default: 3.0).
   --probe-ms N            Correlation probe duration in ms (default: 32768 samples, about 683 ms at 48 kHz).
+  --reference-channel N   Use one-based channel N in the reference (default: average).
   --recording-channel N   Use one-based channel N in every recording (default: average).
   --offsets-only          Print only per-run offsets (one per line) for summary.
   --check                 Fail unless all files share the same sample rate (info).

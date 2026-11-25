@@ -237,6 +237,72 @@ fn cli_selects_recording_channel_and_checks_each_file() {
 }
 
 #[test]
+fn cli_measures_two_channels_from_one_common_interface_recording() {
+    let bin = env!("CARGO_BIN_EXE_sonimesh-latency-measurement");
+    let dir = test_dir("common_interface");
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("capture.wav");
+    let reference = test_signal(SAMPLE_RATE, 3, 7);
+    let recording = delayed_recording(12_000, &reference);
+    let mut bytes =
+        sonimesh_latency_measurement::encode_mono(SAMPLE_RATE, &[], SampleFormat::Float32);
+    let data_size = u32::try_from(recording.len() * 8).unwrap();
+    bytes[4..8].copy_from_slice(&(36 + data_size).to_le_bytes());
+    bytes[22..24].copy_from_slice(&2_u16.to_le_bytes());
+    bytes[28..32].copy_from_slice(&(SAMPLE_RATE * 8).to_le_bytes());
+    bytes[32..34].copy_from_slice(&8_u16.to_le_bytes());
+    bytes[40..44].copy_from_slice(&data_size.to_le_bytes());
+    for (index, sample) in recording.iter().enumerate() {
+        bytes.extend_from_slice(&reference.get(index).copied().unwrap_or(0.0).to_le_bytes());
+        bytes.extend_from_slice(&sample.to_le_bytes());
+    }
+    std::fs::write(&path, bytes).unwrap();
+    let run = |reference_channel: &str| {
+        Command::new(bin)
+            .args([
+                "measure",
+                "--reference-channel",
+                reference_channel,
+                "--recording-channel",
+                "2",
+                "--offsets-only",
+            ])
+            .arg(&path)
+            .arg(&path)
+            .output()
+            .unwrap()
+    };
+    let result = run("1");
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let offset: f64 = String::from_utf8(result.stdout)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    assert!((offset - 250.0).abs() < 0.1);
+    let invalid = run("3");
+    let error = String::from_utf8_lossy(&invalid.stderr);
+    assert!(!invalid.status.success());
+    assert!(
+        error.contains("reference")
+            && error.contains("capture.wav")
+            && error.contains("channel 3")
+            && error.contains("2 channel"),
+        "{error}"
+    );
+    let zero = run("0");
+    assert!(!zero.status.success());
+    assert!(
+        String::from_utf8_lossy(&zero.stderr).contains("--reference-channel must be at least 1")
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
 fn cli_generate_and_measure_round_trip() {
     for format in [
         SampleFormat::Pcm16,
