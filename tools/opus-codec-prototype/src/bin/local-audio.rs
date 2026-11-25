@@ -14,9 +14,9 @@ use sonimesh_app::{
     OutputSelection, ReceiverOutputController, ReceiverPcmEndpointFactory, SourcePcmFormat,
     UdpPollOutcome, UdpReceiverPipeline,
 };
-use sonimesh_audio::{
-    DecodeStep, OpusFrameConfig, PolyphaseResampler, StreamDecodeWorker, realtime_pcm_queue,
-};
+#[cfg(windows)]
+use sonimesh_audio::PolyphaseResampler;
+use sonimesh_audio::{DecodeStep, OpusFrameConfig, StreamDecodeWorker, realtime_pcm_queue};
 use sonimesh_diagnostics::StreamCounters;
 use sonimesh_network::{MediaSessionSendOutcome, MediaSessionSender};
 use sonimesh_platform::{
@@ -30,6 +30,7 @@ const FRAMES: u32 = 100;
 const PACED_FRAMES_PER_SECOND: u32 = 50;
 const MAX_PACED_SECONDS: u32 = 3_600;
 const MAX_CAPTURE_SECONDS: u32 = 30;
+#[cfg(windows)]
 const MAX_CAPTURE_RESAMPLE_SAMPLES: usize = SAMPLES * 3;
 const FRAME_INTERVAL: Duration = Duration::from_millis(20);
 const STARTUP_BUFFER: Duration = Duration::from_millis(60);
