@@ -13,6 +13,10 @@ let timer: ReturnType<typeof setTimeout> | undefined
 let disposed = false
 let statusRequest = 0
 
+function sourceName() {
+  return names.value[Number(selected.value)] ?? 'selected source'
+}
+
 async function refresh() {
   busy.value = true
   error.value = null
@@ -41,7 +45,7 @@ async function poll() {
       message.value = 'Windows closed the playback connection.'
       return
     }
-    if (state === 'open' && phase.value === 'waiting') message.value = 'System playback connection opened.'
+    if (state === 'open' && phase.value === 'waiting') message.value = `System playback connection opened for ${sourceName()}.`
     phase.value = state
   } catch (cause) {
     if (!disposed && request === statusRequest) error.value = String(cause)
@@ -65,7 +69,9 @@ async function toggle(mode: 'connect' | 'wait' = 'connect') {
     } else {
       await window.__TAURI__.core.invoke(mode === 'wait' ? 'bluetooth_prepare' : 'bluetooth_connect', { generation: generation.value, index: Number(selected.value) })
       phase.value = mode === 'wait' ? 'waiting' : 'open'
-      message.value = mode === 'wait' ? 'Waiting for the phone to connect through Bluetooth.' : 'System playback connection opened.'
+      message.value = mode === 'wait'
+        ? `Waiting for the phone to connect to ${sourceName()} through Bluetooth.`
+        : `System playback connection opened for ${sourceName()}.`
       void poll()
     }
   } catch (cause) {
@@ -84,7 +90,9 @@ onMounted(async () => {
     const state = await window.__TAURI__.core.invoke<'idle' | 'waiting' | 'open'>('bluetooth_status')
     if (!disposed && request === statusRequest && (state === 'open' || state === 'waiting')) {
       phase.value = state
-      message.value = state === 'waiting' ? 'Waiting for the phone to connect through Bluetooth.' : 'System playback connection is open.'
+      message.value = state === 'waiting'
+        ? 'Waiting for the phone to connect through Bluetooth.'
+        : 'System playback connection is open.'
       void poll()
     }
   } catch (cause) {
