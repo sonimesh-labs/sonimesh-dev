@@ -231,9 +231,18 @@ mod tests {
 
     #[test]
     fn mono_is_duplicated_and_non_finite_samples_become_silence() {
-        assert_eq!(stereo_pair(0.25, None), [0.25, 0.25]);
-        assert_eq!(stereo_pair(f32::NAN, Some(0.5)), [0.0, 0.5]);
-        assert_eq!(stereo_pair(0.25, Some(f32::INFINITY)), [0.25, 0.0]);
+        assert_eq!(
+            stereo_pair(0.25, None).map(f32::to_bits),
+            [0.25, 0.25].map(f32::to_bits)
+        );
+        assert_eq!(
+            stereo_pair(f32::NAN, Some(0.5)).map(f32::to_bits),
+            [0.0, 0.5].map(f32::to_bits)
+        );
+        assert_eq!(
+            stereo_pair(0.25, Some(f32::INFINITY)).map(f32::to_bits),
+            [0.25, 0.0].map(f32::to_bits)
+        );
     }
 
     #[test]
@@ -244,8 +253,11 @@ mod tests {
 
     #[test]
     fn integer_and_float_samples_convert_to_float() {
-        assert_eq!(i16::MAX.to_sample::<f32>(), 32767.0 / 32768.0);
-        assert_eq!(0.5_f64.to_sample::<f32>(), 0.5);
+        assert_eq!(
+            i16::MAX.to_sample::<f32>().to_bits(),
+            (32767.0_f32 / 32768.0).to_bits()
+        );
+        assert_eq!(0.5_f64.to_sample::<f32>().to_bits(), 0.5_f32.to_bits());
     }
 
     #[test]
