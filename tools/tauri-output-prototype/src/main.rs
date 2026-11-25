@@ -11,18 +11,22 @@ struct ProbeState {
     snapshot: Mutex<SelectionSnapshot>,
     playing: Arc<AtomicBool>,
     lab: Arc<Mutex<lab::Lab>>,
-    bluetooth: Mutex<bluetooth::Bluetooth>,
+    bluetooth: Arc<Mutex<bluetooth::Bluetooth>>,
 }
 
 #[tauri::command]
 async fn bluetooth_candidates(
     state: tauri::State<'_, ProbeState>,
 ) -> Result<bluetooth::Candidates, String> {
-    state
-        .bluetooth
-        .lock()
-        .map_err(|_| "Bluetooth state unavailable.")?
-        .refresh()
+    let bluetooth = Arc::clone(&state.bluetooth);
+    tauri::async_runtime::spawn_blocking(move || {
+        bluetooth
+            .lock()
+            .map_err(|_| "Bluetooth state unavailable.")?
+            .refresh()
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -31,11 +35,15 @@ async fn bluetooth_connect(
     generation: u32,
     index: usize,
 ) -> Result<(), String> {
-    state
-        .bluetooth
-        .lock()
-        .map_err(|_| "Bluetooth state unavailable.")?
-        .connect(generation, index)
+    let bluetooth = Arc::clone(&state.bluetooth);
+    tauri::async_runtime::spawn_blocking(move || {
+        bluetooth
+            .lock()
+            .map_err(|_| "Bluetooth state unavailable.")?
+            .connect(generation, index)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -44,11 +52,15 @@ async fn bluetooth_prepare(
     generation: u32,
     index: usize,
 ) -> Result<(), String> {
-    state
-        .bluetooth
-        .lock()
-        .map_err(|_| "Bluetooth state unavailable.")?
-        .prepare(generation, index)
+    let bluetooth = Arc::clone(&state.bluetooth);
+    tauri::async_runtime::spawn_blocking(move || {
+        bluetooth
+            .lock()
+            .map_err(|_| "Bluetooth state unavailable.")?
+            .prepare(generation, index)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]

@@ -292,7 +292,16 @@ experiment with explicit selection and stop controls. It does not route this
 audio through the WLAN receiver or claim a supported PCM input. Its interface
 restores the current connection state when the view opens, so a connection can
 still be stopped after the view reloads. Known Windows open failures are shown
-as timeout, system denial, or an unspecified failure rather than numeric codes.
+as timeout, system denial, or an unspecified failure with the Windows error code.
+Candidate discovery and connection setup run on Tauri's blocking task pool so
+the synchronous WinRT waits do not occupy the UI runtime.
+
+A separate WASAPI loopback experiment may check whether system-routed Bluetooth
+audio can be observed as PCM at the selected render endpoint. Loopback captures
+the endpoint's rendered mix, not a source-isolated Bluetooth stream, so a positive
+result would need to be evaluated against the product's mixing requirements.
+This remains an experiment; it does not change the Bluetooth capability result
+until validated on Windows hardware.
 The operator may instead leave the selected connection started while waiting for
 the remote source to initiate it; the waiting state does not claim playback.
 
