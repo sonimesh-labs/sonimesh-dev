@@ -328,15 +328,18 @@ fn capture_check(endpoint_id: Option<&str>, seconds: u32) -> LabResult<()> {
     if sent == 0 || source_peak < 0.001 {
         output.stop();
         return Err(format!(
-            "no non-silent system-mix audio reached the selected endpoint (captured_samples={source_samples}, source_peak={source_peak:.4})"
+            "no non-silent system-mix audio reached the selected endpoint (captured_samples={source_samples}, source_peak={source_peak:.4}, xruns={})",
+            capture.xruns()
         )
         .into());
     }
     output.output_mut().finish()?;
     output.stop();
     println!(
-        "system-mix capture check passed: endpoint={}, captured_samples={}, source_peak={source_peak:.4}, opus_frames={sent}, decoded_frames={decoded_frames}; this does not identify an audio source",
-        capture.endpoint_name, source_samples
+        "system-mix capture check passed: endpoint={}, captured_samples={}, source_peak={source_peak:.4}, xruns={}, opus_frames={sent}, decoded_frames={decoded_frames}; this does not identify an audio source",
+        capture.endpoint_name,
+        source_samples,
+        capture.xruns()
     );
     Ok(())
 }

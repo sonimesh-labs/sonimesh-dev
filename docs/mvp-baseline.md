@@ -183,9 +183,10 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   individual source or establish Bluetooth-specific capture. On 2026-11-26, the
   default endpoint carried the local test tone through 118 Opus frames with a
   source peak of 0.0812; a quiet endpoint produced no captured samples as expected.
-  The enumerated Realtek non-default endpoint played the tone but its loopback
-  stream reported a buffer underrun/overrun; no separately named Bluetooth output
-  appeared in this enumeration.
+  The enumerated Realtek non-default endpoint also passed two repeated tone runs;
+  each recorded one CPAL xrun and decoded 149 frames. The lab counts this
+  discontinuity and continues. No separately named Bluetooth output appeared in
+  this enumeration.
   A separate Android MediaCodec spike generated 100 synthetic 20 ms Opus
   packets on an API 37 x86_64 emulator and desktop libopus decoded them to
   non-silent PCM. This is codec interoperability evidence, not capture, network,

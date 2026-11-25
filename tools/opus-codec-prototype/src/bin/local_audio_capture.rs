@@ -1,5 +1,5 @@
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::{FromSample, SampleFormat, SizedSample, Stream};
+use cpal::{ErrorKind, FromSample, SampleFormat, SizedSample, Stream};
 use sonimesh_audio::{RealtimePcmProducer, realtime_pcm_queue};
 use std::error::Error;
 use std::str::FromStr;
@@ -21,7 +21,17 @@ fn stereo_pair(left: f32, right: Option<f32>) -> [f32; 2] {
 struct CaptureStats {
     samples: AtomicU64,
     peak_bits: AtomicU32,
+    xruns: AtomicU64,
     error: AtomicBool,
+}
+
+fn record_stream_error(stats: &CaptureStats, error: &cpal::Error) {
+    if error.kind() == ErrorKind::Xrun {
+        stats.xruns.fetch_add(1, Ordering::Relaxed);
+    } else {
+        eprintln!("Windows loopback input stream failed: {error}");
+        stats.error.store(true, Ordering::Relaxed);
+    }
 }
 
 pub struct Capture {
@@ -73,10 +83,7 @@ where
                 .peak_bits
                 .fetch_max(peak.to_bits(), Ordering::Relaxed);
         },
-        move |error| {
-            eprintln!("Windows loopback input stream failed: {error}");
-            stats.error.store(true, Ordering::Relaxed);
-        },
+        move |error| record_stream_error(&stats, &error),
         Some(Duration::from_secs(3)),
     )?)
 }
@@ -194,6 +201,10 @@ impl Capture {
         f32::from_bits(self.stats.peak_bits.load(Ordering::Relaxed))
     }
 
+    pub fn xruns(&self) -> u64 {
+        self.stats.xruns.load(Ordering::Relaxed)
+    }
+
     pub fn failed(&self) -> bool {
         self.stats.error.load(Ordering::Relaxed)
     }
@@ -220,5 +231,14 @@ mod tests {
     fn integer_and_float_samples_convert_to_float() {
         assert_eq!(i16::MAX.to_sample::<f32>(), 32767.0 / 32768.0);
         assert_eq!(0.5_f64.to_sample::<f32>(), 0.5);
+    }
+
+    #[test]
+    fn xrun_is_counted_without_stopping_capture() {
+        let stats = CaptureStats::default();
+        record_stream_error(&stats, &ErrorKind::Xrun.into());
+
+        assert_eq!(stats.xruns.load(Ordering::Relaxed), 1);
+        assert!(!stats.error.load(Ordering::Relaxed));
     }
 }

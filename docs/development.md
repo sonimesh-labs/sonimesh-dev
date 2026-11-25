@@ -1651,8 +1651,10 @@ captured the prototype's own two-second test tone (226,560 samples, source peak
 0.0812); 118 Opus frames were sent and decoded, including when both commands
 selected its listed endpoint ID. A two-second run without active playback
 correctly reported no captured samples. The listed Realtek non-default endpoint
-played its test tone, but its loopback stream reported a buffer underrun/overrun;
-no endpoint identified as Bluetooth appeared in that enumeration.
+also passed two repeated runs; each recorded one CPAL xrun and still decoded 149
+frames. The xrun is a data discontinuity notification, so the capture check counts
+it and continues. No endpoint identified as Bluetooth appeared in that
+enumeration.
 
 CI runs formatting, linting, and tests on Linux and Windows, and builds the
 capture-only Android bootstrap with Java 21, API 36, and Build Tools 35.0.0.
