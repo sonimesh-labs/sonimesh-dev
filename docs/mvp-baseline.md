@@ -85,7 +85,8 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   probe exposes refresh, connect, wait for phone connection, disconnect, and
   system closure status for the same experiment. Candidate discovery and
   connection setup run on Tauri's blocking task pool so WinRT waits do not occupy
-  the UI runtime. An opt-in CPAL/WASAPI loopback meter lists output endpoints,
+  the UI runtime; status checks and disconnects use the same blocking pool. An
+  opt-in CPAL/WASAPI loopback meter lists output endpoints,
   selects the default initially, and reports the selected endpoint name, format,
   sample count, recent peak, and approximate recent PCM activity after samples
   arrive for standard integer and floating-point PCM formats without retaining

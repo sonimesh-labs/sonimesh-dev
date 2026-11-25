@@ -111,20 +111,28 @@ async fn bluetooth_prepare(
 async fn bluetooth_status(
     state: tauri::State<'_, ProbeState>,
 ) -> Result<bluetooth::PlaybackState, String> {
-    state
-        .bluetooth
-        .lock()
-        .map_err(|_| "Bluetooth state unavailable.")?
-        .status()
+    let bluetooth = Arc::clone(&state.bluetooth);
+    tauri::async_runtime::spawn_blocking(move || {
+        bluetooth
+            .lock()
+            .map_err(|_| "Bluetooth state unavailable.")?
+            .status()
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
 async fn bluetooth_disconnect(state: tauri::State<'_, ProbeState>) -> Result<(), String> {
-    state
-        .bluetooth
-        .lock()
-        .map_err(|_| "Bluetooth state unavailable.")?
-        .disconnect()
+    let bluetooth = Arc::clone(&state.bluetooth);
+    tauri::async_runtime::spawn_blocking(move || {
+        bluetooth
+            .lock()
+            .map_err(|_| "Bluetooth state unavailable.")?
+            .disconnect()
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 fn spawn_lab_monitor(lab: &Arc<Mutex<lab::Lab>>) -> std::thread::JoinHandle<()> {
