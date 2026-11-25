@@ -179,7 +179,10 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   silence. An API 37 x86_64 emulator test observes MediaCodec end-of-stream and
   at least one audio packet using the tail-drain helper; it does not verify the
   content of the final packet, the full service path, or a physical codec.
-  Its MediaCodec encoder now lives in a reusable experimental Android module;
+  Once the control connection is ready, the lab reports that audio capture and
+  the encoder are being prepared until capture starts. Reconnection and terminal
+  status take precedence over that progress message. Its MediaCodec encoder now
+  lives in a reusable experimental Android module;
   the main capture-only application does not yet use it.
   The Android lab also reports sustained silent capture and returns to its
   capturing status when signal resumes; this does not establish desktop delivery.

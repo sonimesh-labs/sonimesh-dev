@@ -451,6 +451,11 @@ One earlier retry logged a MediaCodec configuration failure. A longer run timed
 out at 240 seconds, although the second listener session reported 167 decoded
 frames with nonzero peak. This is partial loopback evidence, not a passing
 instrumentation result or audible-playback evidence.
+After restarting the API 37 emulator on 2026-11-25, the original five-second
+disconnect instrumentation passed with capture continuing through reconnection.
+A separate paired-session instrumentation observed the preparation status
+before the capturing status and completed normally. These runs do not establish
+physical WLAN reliability or audible playback.
 
 ~~~powershell
 adb shell am instrument -w -e pairingInvitationHex $invitationHex -e mediaHost 10.0.2.2 -e reconnectTest true -e class 'com.sonimesh.opusspike.PairedCaptureTest#reconnects_after_desktop_disconnect_without_restarting_capture' com.sonimesh.opusspike.test/androidx.test.runner.AndroidJUnitRunner

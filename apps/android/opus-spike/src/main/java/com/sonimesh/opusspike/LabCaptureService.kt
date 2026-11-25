@@ -273,6 +273,11 @@ class LabCaptureService : Service() {
                 }
             }
             connected = true
+            handler.post {
+                if (running.get() && !terminalStatus) {
+                    publishCaptureStatus("Preparing audio capture and encoder…")
+                }
+            }
             val captureConfigBuilder = AudioPlaybackCaptureConfiguration.Builder(projection)
             usage.usages.forEach(captureConfigBuilder::addMatchingUsage)
             val captureConfig = captureConfigBuilder.build()

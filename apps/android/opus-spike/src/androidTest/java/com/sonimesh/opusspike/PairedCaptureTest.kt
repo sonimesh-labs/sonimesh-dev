@@ -111,6 +111,26 @@ class PairedCaptureTest {
     fun keeps_service_active_while_screen_is_off() = runCapture(screenOff = true)
 
     @Test
+    fun reports_preparation_before_capture() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        var prepared = false
+        var capturedAfterPreparation = false
+        val observer: (String) -> Unit = { message ->
+            if (message == "Preparing audio capture and encoder…") prepared = true
+            if (message.startsWith("Capturing audio") && prepared) capturedAfterPreparation = true
+        }
+        instrumentation.runOnMainSync { LabStatus.observe(observer) }
+        try {
+            runCapture()
+            instrumentation.runOnMainSync {
+                assertTrue("preparation was not reported before capture", capturedAfterPreparation)
+            }
+        } finally {
+            instrumentation.runOnMainSync { LabStatus.remove(observer) }
+        }
+    }
+
+    @Test
     fun reconnects_after_desktop_disconnect_without_restarting_capture() {
         assumeTrue("reconnect test requires --disconnect-after-ms with --keep-listening", InstrumentationRegistry.getArguments().getString("reconnectTest") == "true")
         runCapture(expectReconnect = true)
