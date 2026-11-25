@@ -158,8 +158,10 @@ class LabActivity : Activity() {
         layout.addView(Button(this).apply {
             text = "Stop capture"
             setOnClickListener {
-                val active = !LabStatus.captureAdmission.canBegin()
-                if (active) {
+                if (LabStatus.captureAdmission.cancelPending()) {
+                    clearPendingInvitation()
+                    LabStatus.publish("Capture start cancelled. Close the permission or screen-capture dialog before retrying.")
+                } else if (!LabStatus.captureAdmission.canBegin()) {
                     startService(Intent(this@LabActivity, LabCaptureService::class.java).setAction("stop"))
                 } else {
                     LabStatus.publish("Capture service is not running.")
@@ -719,7 +721,11 @@ class LabActivity : Activity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == 1) {
             val granted = grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED
-            if (!LabStatus.captureAdmission.permissionResult(granted)) return
+            val cancelled = LabStatus.captureAdmission.cancellationPending()
+            if (!LabStatus.captureAdmission.permissionResult(granted)) {
+                if (cancelled && LabStatus.captureAdmission.canBegin()) LabStatus.publish("Capture start cancelled.")
+                return
+            }
             if (granted) {
                 if (LabStatus.captureAdmission.awaitingNotification()) requestNotificationPermission() else requestProjection()
             }
@@ -729,7 +735,11 @@ class LabActivity : Activity() {
             }
         } else if (requestCode == 5) {
             val granted = grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED
-            if (!LabStatus.captureAdmission.notificationResult(granted)) return
+            val cancelled = LabStatus.captureAdmission.cancellationPending()
+            if (!LabStatus.captureAdmission.notificationResult(granted)) {
+                if (cancelled && LabStatus.captureAdmission.canBegin()) LabStatus.publish("Capture start cancelled.")
+                return
+            }
             if (granted) requestProjection()
             else {
                 clearPendingInvitation()
@@ -768,7 +778,11 @@ class LabActivity : Activity() {
         }
         if (requestCode == 2) {
             val granted = resultCode == RESULT_OK && data != null
-            if (!LabStatus.captureAdmission.projectionResult(granted)) return
+            val cancelled = LabStatus.captureAdmission.cancellationPending()
+            if (!LabStatus.captureAdmission.projectionResult(granted)) {
+                if (cancelled && LabStatus.captureAdmission.canBegin()) LabStatus.publish("Capture start cancelled.")
+                return
+            }
             if (!granted) {
                 clearPendingInvitation()
                 LabStatus.publish("Screen capture consent was not granted.")

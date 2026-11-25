@@ -22,6 +22,31 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class LabStatusTest {
     @Test
+    fun stopCancelsPendingProjectionAndIgnoresItsResult() {
+        val instrumentation = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
+        val pendingField = LabActivity::class.java.getDeclaredField("pendingInvitation").apply { isAccessible = true }
+        try {
+            ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    assertTrue(LabStatus.captureAdmission.begin(false))
+                    pendingField.set(activity, byteArrayOf(1, 2))
+                    requireNotNull(findButton(activity.window.decorView, "Stop capture")).performClick()
+                    assertEquals(null, pendingField.get(activity))
+                    assertTrue(LabStatus.captureAdmission.cancellationPending())
+                    assertTrue(!LabStatus.captureAdmission.canBegin())
+                    deliverScannerResult(activity, 2, Activity.RESULT_OK, null)
+                    assertTrue(LabStatus.captureAdmission.canBegin())
+                    assertTrue(hasStatus(activity.window.decorView, "Status: Capture start cancelled."))
+                    assertTrue(LabStatus.captureAdmission.begin(false))
+                    LabStatus.captureAdmission.launchFailed()
+                }
+            }
+        } finally {
+            instrumentation.runOnMainSync { LabStatus.captureAdmission.launchFailed() }
+        }
+    }
+
+    @Test
     fun pending_invitation_survives_recreation_and_is_cleared_on_denial() {
         val instrumentation = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
         val original = labHex(labInvitation("ab".repeat(32)))

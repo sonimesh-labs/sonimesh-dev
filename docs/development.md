@@ -639,6 +639,9 @@ The lab activity also ignores repeated start requests while permission or screen
 capture consent is pending, or while its service is active or stopping. It shows
 a brief message without replacing the current session status. Once
 the service finishes, starting again requests fresh screen-capture consent.
+If **Stop capture** is used while a permission or consent request is pending,
+the lab cancels that start and ignores its eventual result. Close the system
+dialog before starting another capture.
 The desktop defaults to a software PCM check. On Windows, add `--features playback`
 before `--` and pass `--play` after it to use the default output device; add
 `--select-output` to choose a device. `--require-tone` checks decoded audio,
