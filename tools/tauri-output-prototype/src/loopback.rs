@@ -240,6 +240,39 @@ mod platform {
         }
 
         #[test]
+        #[ignore = "requires a Windows Bluetooth candidate and playback endpoints"]
+        fn bluetooth_wait_and_default_endpoint_monitor_run_together() {
+            use crate::bluetooth::{Bluetooth, PlaybackState};
+
+            let mut bluetooth = Bluetooth::default();
+            bluetooth
+                .refresh()
+                .expect("could not refresh Bluetooth sources");
+            let endpoint = endpoints()
+                .unwrap()
+                .into_iter()
+                .find(|endpoint| endpoint.is_default)
+                .expect("no default Windows playback endpoint is available");
+            let mut monitor = Monitor::default();
+
+            assert!(
+                monitor.start(&endpoint.id).unwrap().running,
+                "default endpoint monitoring did not start"
+            );
+            bluetooth
+                .prepare(1, 0)
+                .expect("could not prepare the Bluetooth wait");
+            assert!(matches!(
+                bluetooth.status().unwrap(),
+                PlaybackState::Waiting | PlaybackState::Open
+            ));
+
+            bluetooth.disconnect().unwrap();
+            assert_eq!(bluetooth.status().unwrap(), PlaybackState::Idle);
+            assert!(!monitor.stop().running);
+        }
+
+        #[test]
         #[ignore = "requires an available non-default Windows playback endpoint"]
         fn selected_nondefault_endpoint_loopback_starts_and_stops() {
             let endpoint = endpoints()

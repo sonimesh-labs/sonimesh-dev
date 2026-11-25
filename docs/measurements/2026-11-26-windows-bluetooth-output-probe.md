@@ -21,6 +21,10 @@
 - The Windows Bluetooth discovery check passed. The inbound-wait check accepted
   the sole candidate, reported either waiting or already open, and returned to
   idle after close.
+- A combined check started the default WASAPI loopback monitor and Bluetooth
+  inbound wait together, observed waiting or open, then stopped both. It passed
+  without playing audio; this confirms the two operations can coexist, not that
+  Bluetooth audio reaches the monitored output.
 - A direct open attempt returned `UnknownFailure` with Windows extended error
   `0x8007001F`. The connection was closed by the implementation after failure.
   The remote source's state was not established, so the cause remains unknown.
@@ -35,6 +39,7 @@ cargo +1.98.1 test --offline -j 1 --manifest-path tools/tauri-output-prototype/C
 cargo +1.98.1 test --offline -j 1 --manifest-path tools/tauri-output-prototype/Cargo.toml selected_nondefault_endpoint_loopback_starts_and_stops -- --ignored --nocapture
 cargo +1.98.1 test --offline -j 1 --manifest-path tools/tauri-output-prototype/Cargo.toml windows_discovery_returns_a_usable_snapshot -- --ignored --nocapture
 cargo +1.98.1 test --offline -j 1 --manifest-path tools/tauri-output-prototype/Cargo.toml real_windows_inbound_wait_reports_state_and_closes -- --ignored --nocapture
+cargo +1.98.1 test --offline -j 1 --manifest-path tools/tauri-output-prototype/Cargo.toml bluetooth_wait_and_default_endpoint_monitor_run_together -- --ignored --nocapture
 cargo +1.98.1 test --offline -j 1 --manifest-path tools/tauri-output-prototype/Cargo.toml real_connection_opens_reports_state_and_closes -- --ignored --nocapture
 ~~~
 
