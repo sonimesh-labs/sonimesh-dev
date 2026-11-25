@@ -137,6 +137,32 @@ mod platform {
             }
         }
     }
+
+    #[cfg(test)]
+    mod tests {
+        use super::Meter;
+        use std::sync::atomic::Ordering;
+
+        #[test]
+        fn peak_is_reset_after_each_snapshot() {
+            let meter = Meter::default();
+            meter
+                .peak_bits
+                .fetch_max(0.75_f32.to_bits(), Ordering::Relaxed);
+            meter
+                .peak_bits
+                .fetch_max(0.25_f32.to_bits(), Ordering::Relaxed);
+
+            assert_eq!(
+                f32::from_bits(meter.peak_bits.swap(0, Ordering::Relaxed)),
+                0.75
+            );
+            assert_eq!(
+                f32::from_bits(meter.peak_bits.swap(0, Ordering::Relaxed)),
+                0.0
+            );
+        }
+    }
 }
 
 #[cfg(not(windows))]
