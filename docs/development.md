@@ -955,6 +955,18 @@ x86_64 emulator produced 150 packets; desktop decoding and correlation found a
 312-sample offset. This is a codec interoperability result, not an end-to-end
 latency measurement or evidence of capture, networking, or physical playback.
 
+For a paired capture experiment, start `paired-audio-lab --check-probe` with
+the usual pairing and address options, start capture, play **Play latency
+probe**, wait for playback to finish, then stop capture. The listener checks
+the first 30 seconds of decoded stereo audio (averaged to mono) in memory after
+stop and exits unsuccessfully if it cannot find a distinct correlation. It does
+not write an audio file. This option is single-session and cannot be combined
+with `--keep-listening`; the sample window can contain other capturable audio.
+On 2026-11-25 two API 37 x86_64 emulator loopback runs included one successful
+detection and one failure; both reported late packets and jitter resync drops.
+The successful run had 171 PLC decisions. These checks are not proof of stable
+delivery or a physical latency measurement.
+
 For the interactive capture-to-desktop lab, build and install `:opus-spike`'s
 debug APK, connect one device through ADB, and run from the repository root:
 

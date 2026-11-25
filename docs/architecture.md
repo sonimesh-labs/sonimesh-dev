@@ -129,6 +129,9 @@ The paired audio lab can optionally report low-rate packet, decode, and output
 recovery state while a session is active. These diagnostics are sampled outside
 the output callback and do not prove audible playback or identify why capture
 is silent.
+An explicit single-session probe check may retain up to 30 seconds of decoded
+mono samples in memory and correlate them after the receiver stops. It writes no
+audio file and reports detection only; it does not measure end-to-end latency.
 An isolated Tauri desktop probe can display Windows output devices and their
 default formats and play an explicitly requested short test tone through one
 selected endpoint. It is a platform experiment, separate from the synthetic

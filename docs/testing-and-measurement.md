@@ -88,6 +88,11 @@ Android MediaCodec and correlate its desktop-decoded output. This isolated check
 passed on an API 37 x86_64 emulator on 2026-11-25; it does not exercise capture,
 networking, or physical audio devices. See [Development](development.md) for
 the procedure.
+The paired lab also offers an explicit, bounded in-memory check for the probe in
+decoded receiver audio. It reports detection rather than physical latency; loss,
+capture policy, or processing can prevent detection. The operator should run it
+only with an intended test source, since the checked samples may contain other
+capturable audio.
 
 Multichannel inputs are averaged by default. When the source reference or
 microphone signal is on a known channel, select its one-based channel number

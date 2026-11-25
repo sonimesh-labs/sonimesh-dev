@@ -6,12 +6,13 @@ mod common;
 #[cfg(any(test, all(windows, feature = "playback")))]
 mod lab_control;
 mod lab_decoder;
+mod lab_probe;
 
 use std::fmt::Write;
 use std::io::Write as IoWrite;
 use std::net::{Ipv4Addr, SocketAddrV4};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use rcgen::generate_simple_self_signed;
@@ -219,6 +220,7 @@ fn run_session(
 #[allow(clippy::struct_excessive_bools)] // Independent command-line switches.
 struct Options {
     require_tone: bool,
+    check_probe: bool,
     play: bool,
     select_output: bool,
     output_id_stdin: bool,
@@ -241,6 +243,7 @@ impl Default for Options {
     fn default() -> Self {
         Self {
             require_tone: false,
+            check_probe: false,
             play: false,
             select_output: false,
             output_id_stdin: false,
@@ -273,6 +276,7 @@ impl Options {
         while let Some(arg) = args.next() {
             match arg.as_str() {
                 "--require-tone" if !result.require_tone => result.require_tone = true,
+                "--check-probe" if !result.check_probe => result.check_probe = true,
                 "--play" if !result.play => result.play = true,
                 "--select-output" if !result.select_output => result.select_output = true,
                 "--output-id-stdin" if !result.output_id_stdin => result.output_id_stdin = true,
@@ -351,11 +355,14 @@ impl Options {
                 }
                 _ => {
                     return Err(
-                        "usage: paired-audio-lab [--require-tone] [--play [--select-output | --output-id-stdin | --output-id-framed] [--control]] [--status] [--signal-status] [--adaptive] [--startup-buffer-ms 20-120] [--keep-listening [--disconnect-after-ms 100-120000 [--disconnect-count 1-20]] [--reject-starts 1-36]] [--media-port PORT] [--bind IPv4 --host IPv4]"
+                        "usage: paired-audio-lab [--require-tone] [--check-probe] [--play [--select-output | --output-id-stdin | --output-id-framed] [--control]] [--status] [--signal-status] [--adaptive] [--startup-buffer-ms 20-120] [--keep-listening [--disconnect-after-ms 100-120000 [--disconnect-count 1-20]] [--reject-starts 1-36]] [--media-port PORT] [--bind IPv4 --host IPv4]"
                             .into(),
                     );
                 }
             }
+        }
+        if result.check_probe && result.keep_listening {
+            return Err("--check-probe requires a single session".into());
         }
         if (result.select_output || result.output_id_stdin || result.output_id_framed)
             && !result.play
@@ -830,6 +837,7 @@ struct ObservedDecoder {
     decoder: lab_decoder::Decoder,
     peak: Arc<AtomicU32>,
     interval_peak: Arc<AtomicU32>,
+    probe: Option<Arc<Mutex<lab_probe::ProbeCheck>>>,
 }
 
 impl FrameDecoder for ObservedDecoder {
@@ -844,11 +852,24 @@ impl FrameDecoder for ObservedDecoder {
         self.peak.fetch_max(peak.to_bits(), Ordering::Relaxed);
         self.interval_peak
             .fetch_max(peak.to_bits(), Ordering::Relaxed);
+        if let Some(probe) = &self.probe {
+            probe
+                .lock()
+                .expect("probe lock poisoned")
+                .observe(&output[..count]);
+        }
         Ok(count)
     }
 
     fn decode_plc(&mut self, output: &mut [f32]) -> Result<usize, Self::Error> {
-        self.decoder.decode_plc(output)
+        let count = self.decoder.decode_plc(output)?;
+        if let Some(probe) = &self.probe {
+            probe
+                .lock()
+                .expect("probe lock poisoned")
+                .observe(&output[..count]);
+        }
+        Ok(count)
     }
 
     fn reset(&mut self) {
@@ -1068,6 +1089,9 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
     };
     let decoded_peak = Arc::new(AtomicU32::new(0));
     let interval_peak = Arc::new(AtomicU32::new(0));
+    let probe = options
+        .check_probe
+        .then(|| Arc::new(Mutex::new(lab_probe::ProbeCheck::new())));
     let mut next_signal = None;
     let mut previous_signal_decoded = 0_u64;
     let deadline = Instant::now() + Duration::from_secs(40);
@@ -1151,6 +1175,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                                             decoder: lab_decoder::Decoder::new()?,
                                             peak: Arc::clone(&decoded_peak),
                                             interval_peak: Arc::clone(&interval_peak),
+                                            probe: probe.clone(),
                                         },
                                         producer,
                                         0,
@@ -1296,6 +1321,12 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                             schedule.max_lateness_us
                         );
                         resyncs.print();
+                        if let Some(probe) = &probe {
+                            match probe.lock().expect("probe lock poisoned").detect() {
+                                Ok(_) => lab_println!("RESULT latency probe detected"),
+                                Err(error) => return Err(format!("latency probe not detected in first 30 seconds of decoded audio: {error}").into()),
+                            }
+                        }
                         if decoded == 0 || peak < 0.001 {
                             if options.require_tone {
                                 return Err("no non-silent audio decoded".into());
@@ -1448,6 +1479,7 @@ mod tests {
                 decoder: lab_decoder::Decoder::new().unwrap(),
                 peak: Arc::new(AtomicU32::new(0)),
                 interval_peak: Arc::new(AtomicU32::new(0)),
+                probe: None,
             },
             producer,
             0,
@@ -1509,6 +1541,7 @@ mod tests {
                 decoder: lab_decoder::Decoder::new().unwrap(),
                 peak: Arc::new(AtomicU32::new(0)),
                 interval_peak: Arc::new(AtomicU32::new(0)),
+                probe: None,
             },
             producer,
             0,
@@ -1645,6 +1678,7 @@ mod tests {
                         decoder: lab_decoder::Decoder::new()?,
                         peak: Arc::new(AtomicU32::new(0)),
                         interval_peak: Arc::new(AtomicU32::new(0)),
+                        probe: None,
                     },
                     producer,
                     0,
@@ -1717,6 +1751,7 @@ mod tests {
                 decoder: lab_decoder::Decoder::new().unwrap(),
                 peak: Arc::new(AtomicU32::new(0)),
                 interval_peak: Arc::new(AtomicU32::new(0)),
+                probe: None,
             },
             producer,
             0,
@@ -1906,6 +1941,7 @@ mod tests {
                 decoder: lab_decoder::Decoder::new().unwrap(),
                 peak: Arc::new(AtomicU32::new(0)),
                 interval_peak: Arc::new(AtomicU32::new(0)),
+                probe: None,
             },
             producer,
             0,
@@ -1965,6 +2001,7 @@ mod tests {
                 decoder: lab_decoder::Decoder::new().unwrap(),
                 peak: Arc::new(AtomicU32::new(0)),
                 interval_peak: Arc::new(AtomicU32::new(0)),
+                probe: None,
             },
             producer,
             0,
@@ -2029,6 +2066,7 @@ mod tests {
                 decoder: lab_decoder::Decoder::new().unwrap(),
                 peak: Arc::new(AtomicU32::new(0)),
                 interval_peak: Arc::new(AtomicU32::new(0)),
+                probe: None,
             },
             producer,
             0,
@@ -2127,6 +2165,7 @@ mod tests {
                 decoder: lab_decoder::Decoder::new().unwrap(),
                 peak: Arc::new(AtomicU32::new(0)),
                 interval_peak: Arc::new(AtomicU32::new(0)),
+                probe: None,
             },
             producer,
             0,
@@ -2251,6 +2290,7 @@ mod tests {
                 decoder: lab_decoder::Decoder::new().unwrap(),
                 peak: Arc::new(AtomicU32::new(0)),
                 interval_peak: Arc::new(AtomicU32::new(0)),
+                probe: None,
             },
             producer,
             0,
@@ -2360,6 +2400,14 @@ mod tests {
         };
         let defaults = Options::parse(args(&[])).unwrap();
         assert!(!defaults.play && !defaults.require_tone);
+        assert!(!defaults.check_probe);
+        assert!(
+            Options::parse(args(&["--check-probe"]))
+                .unwrap()
+                .check_probe
+        );
+        assert!(Options::parse(args(&["--check-probe", "--check-probe"])).is_err());
+        assert!(Options::parse(args(&["--check-probe", "--keep-listening"])).is_err());
         assert!(!defaults.status);
         assert!(!defaults.adaptive);
         assert_eq!(defaults.startup_buffer, Duration::from_millis(60));
@@ -2688,6 +2736,7 @@ mod tests {
             decoder: lab_decoder::Decoder::new().unwrap(),
             peak: Arc::clone(&peak),
             interval_peak: Arc::clone(&interval_peak),
+            probe: None,
         };
         let mut pcm = [0.0; SAMPLES];
         assert_eq!(
