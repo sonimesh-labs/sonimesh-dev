@@ -731,6 +731,12 @@ wait can increase concealment when packets arrive late.
 The same wait is used after output recovery or decoder resynchronization. This is
 a fixed startup delay, not an adaptive jitter target or an end-to-end latency
 measurement; a longer wait can overflow the bounded packet buffer under bursts.
+On 2026-11-25, `PairedCaptureTest#captures_tone_after_pairing_and_stops` passed
+on the API 37 x86_64 emulator with `--startup-buffer-ms 0` and fixed playout.
+The Windows software listener received 141 packets, decoded 140 frames, and
+reported a 0.113 peak, 15 PLC decisions, and one late packet. This single run
+does not compare configurations or establish physical WLAN, audible quality, or
+end-to-end latency.
 After a delayed playout decision the lab skips missed frame deadlines and waits
 at least 10 ms before another decision. This bounds catch-up pacing; it does not
 prevent loss caused by a host stall or establish physical audio continuity.
