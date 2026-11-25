@@ -46,12 +46,22 @@ async function refresh() {
   busy.value = true
   error.value = null
   suggestPhoneInitiated.value = false
-  selected.value = ''
+  const previousIndex = selected.value === '' ? -1 : Number(selected.value)
+  const previousName = names.value[previousIndex]
   try {
     if (!window.__TAURI__) throw new Error('Desktop probe unavailable')
     const result = await window.__TAURI__.core.invoke<{ generation: number; names: string[] }>('bluetooth_candidates')
     names.value = result.names
     generation.value = result.generation
+    if (previousName === undefined) {
+      selected.value = ''
+    } else {
+      const matches = result.names.flatMap((name, index) => name === previousName ? [index] : [])
+      const nextIndex = result.names[previousIndex] === previousName
+        ? previousIndex
+        : matches.length === 1 ? matches[0] : -1
+      selected.value = nextIndex < 0 ? '' : String(nextIndex)
+    }
     loaded.value = true
   } catch (cause) {
     error.value = String(cause)
