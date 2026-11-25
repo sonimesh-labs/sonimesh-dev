@@ -9,6 +9,7 @@ pub struct Snapshot {
     channels: u16,
     samples: u64,
     peak: f32,
+    run_peak: f32,
     error: Option<String>,
 }
 
@@ -36,6 +37,7 @@ mod platform {
     struct Meter {
         samples: AtomicU64,
         peak_bits: AtomicU32,
+        run_peak_bits: AtomicU32,
         error: AtomicBool,
     }
 
@@ -81,6 +83,9 @@ mod platform {
                         .fetch_add(data.len() as u64, Ordering::Relaxed);
                     callback_meter
                         .peak_bits
+                        .fetch_max(peak.to_bits(), Ordering::Relaxed);
+                    callback_meter
+                        .run_peak_bits
                         .fetch_max(peak.to_bits(), Ordering::Relaxed);
                 },
                 move |_| {
@@ -182,6 +187,7 @@ mod platform {
                 channels: self.channels,
                 samples: self.meter.samples.load(Ordering::Relaxed),
                 peak: f32::from_bits(self.meter.peak_bits.swap(0, Ordering::Relaxed)),
+                run_peak: f32::from_bits(self.meter.run_peak_bits.load(Ordering::Relaxed)),
                 error,
             }
         }
@@ -296,7 +302,13 @@ mod platform {
                 .peak_bits
                 .fetch_max(0.75_f32.to_bits(), Ordering::Relaxed);
             meter
+                .run_peak_bits
+                .fetch_max(0.75_f32.to_bits(), Ordering::Relaxed);
+            meter
                 .peak_bits
+                .fetch_max(0.25_f32.to_bits(), Ordering::Relaxed);
+            meter
+                .run_peak_bits
                 .fetch_max(0.25_f32.to_bits(), Ordering::Relaxed);
 
             assert_eq!(
@@ -306,6 +318,10 @@ mod platform {
             assert_eq!(
                 f32::from_bits(meter.peak_bits.swap(0, Ordering::Relaxed)),
                 0.0
+            );
+            assert_eq!(
+                f32::from_bits(meter.run_peak_bits.load(Ordering::Relaxed)),
+                0.75
             );
         }
     }
@@ -335,6 +351,7 @@ mod platform {
                 channels: 0,
                 samples: 0,
                 peak: 0.0,
+                run_peak: 0.0,
                 error: None,
             }
         }
@@ -347,6 +364,7 @@ mod platform {
                 channels: 0,
                 samples: 0,
                 peak: 0.0,
+                run_peak: 0.0,
                 error: None,
             }
         }

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 
-type LoopbackSnapshot = { running: boolean; endpointName: string; sampleRate: number; channels: number; samples: number; peak: number; error: string | null }
+type LoopbackSnapshot = { running: boolean; endpointName: string; sampleRate: number; channels: number; samples: number; peak: number; runPeak: number; error: string | null }
 type LoopbackEndpoint = { id: string; name: string; isDefault: boolean }
 
 const names = ref<string[]>([])
@@ -359,7 +359,7 @@ onBeforeUnmount(() => {
     <button type="button" class="preview-action" :disabled="loopbackBusy || loopbackToneBusy || !loopback?.running" @click="playLoopbackTestTone">{{ loopbackToneBusy ? 'Playing...' : 'Play test tone' }}</button>
     <p v-if="loopbackToneMessage" role="status">{{ loopbackToneMessage }}</p>
     <p v-if="loopback?.running && loopback.samples === 0" role="status">{{ loopbackNoSamplesLong ? 'No Windows audio samples have arrived yet. Start playback and check the selected output endpoint.' : 'Waiting for Windows audio samples.' }}</p>
-    <p v-if="loopback && (loopback.running || loopback.sampleRate > 0)" role="status">{{ loopback.endpointName }} · {{ loopback.sampleRate }} Hz, {{ loopback.channels }} channels; {{ loopback.samples }} samples; recent peak {{ (loopback.peak * 100).toFixed(1) }}%<template v-if="loopback.samples > 0">; {{ loopback.peak > 0.001 ? 'PCM activity detected recently' : 'No recent PCM activity' }}</template>.</p>
+    <p v-if="loopback && (loopback.running || loopback.sampleRate > 0)" role="status">{{ loopback.endpointName }} · {{ loopback.sampleRate }} Hz, {{ loopback.channels }} channels; {{ loopback.samples }} samples; recent peak {{ (loopback.peak * 100).toFixed(1) }}%; session peak {{ ((loopback.runPeak ?? loopback.peak) * 100).toFixed(1) }}%<template v-if="loopback.samples > 0">; {{ loopback.peak > 0.001 ? 'PCM activity detected recently' : 'No recent PCM activity' }}</template>.</p>
     <p v-if="loopbackError || loopback?.error" class="command-error" role="alert">{{ loopbackError || loopback?.error }}</p>
   </section>
 </template>

@@ -558,6 +558,11 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   realtime integration is connected to the desktop UI process.
 - an isolated Tauri output-probe prototype that lists Windows CPAL devices and
   their default formats and can play a short test tone on a selected endpoint.
+  Its Bluetooth system-playback experiment can monitor a selected Windows output
+  mix and displays both the recent PCM peak and the highest peak since monitoring
+  started, so a brief signal remains visible after the recent meter clears. Neither
+  value identifies which application produced the audio or proves an
+  application-specific Bluetooth PCM source.
   It can also start and stop the separately built paired-audio lab process and
   display its public test invitation, session status, and periodic packet,
   decode, and output-recovery observations. That process can use a selected output;

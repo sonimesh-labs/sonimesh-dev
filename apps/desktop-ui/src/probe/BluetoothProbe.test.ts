@@ -523,6 +523,21 @@ it('starts and stops the Windows system-output PCM check', async () => {
   wrapper.unmount()
 })
 
+it('retains the monitor-session peak after recent activity decays', async () => {
+  const invoke = vi.fn((command: string) => {
+    if (command === 'bluetooth_status') return Promise.resolve('idle')
+    if (command === 'loopback_endpoints') return Promise.resolve([{ id: 'default-endpoint', name: 'Default speakers', isDefault: true }])
+    if (command === 'loopback_status') return Promise.resolve({ running: true, endpointName: 'Default speakers', sampleRate: 48000, channels: 2, samples: 4096, peak: 0, runPeak: 0.5, error: null })
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  expect(wrapper.text()).toContain('recent peak 0.0%; session peak 50.0%')
+  expect(wrapper.text()).toContain('No recent PCM activity.')
+  wrapper.unmount()
+})
+
 it('plays a short tone on the monitored endpoint and refreshes its meter', async () => {
   let running = false
   let samples = 0

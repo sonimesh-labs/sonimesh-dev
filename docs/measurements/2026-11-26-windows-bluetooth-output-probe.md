@@ -51,6 +51,11 @@
   candidate discovery and refreshed the output-endpoint list; the source picker
   appeared. This validates the settings-return refresh path, not discovery of a
   newly paired device. An already-running loopback is left alone.
+- On 2026-11-26, the refreshed picker contained one playback candidate, the
+  vivo X100. A direct connection attempt returned Windows error `0x8007001F`;
+  no connection opened. The phone-initiated wait reached `Waiting` and was
+  disconnected immediately. This verifies the current host's wait-state and
+  cleanup path, not phone-initiated playback.
 - The combined **Connect + monitor (auto wait fallback)** action entered the
   phone-wait state and started loopback on the selected default output. While no
   phone playback was active, loopback reported zero samples and zero peak. The
@@ -70,6 +75,10 @@
   displayed 153,600 samples, a 4.0% recent peak, and PCM activity. The monitor
   was stopped and the temporary probe closed. This verifies the integrated
   playback-to-meter path, not audible quality or Bluetooth-specific capture.
+- The output meter now retains a session peak alongside its resettable recent
+  peak. This allows a short signal to remain visible after a later poll clears
+  recent activity; it still reports the selected system mix and cannot identify
+  the producing app.
 - The local mobile-device tool exposes only an Android 9 x86_64 emulator, not a
   physical Bluetooth source, so it cannot initiate the phone-side playback test.
 
