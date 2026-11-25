@@ -50,6 +50,14 @@
   operator disconnected; the UI returned to `Disconnected.` and offered **Start
   PCM check**, confirming the combined monitor stopped. This verifies concurrent
   startup and cleanup, not audio delivery to the endpoint.
+- A separate default-output monitor run started at zero samples and zero peak.
+  After the probe played its approximately two-second, low-level test tone on
+  that selected endpoint, the UI reported 848,640 samples and a 4.0% recent peak
+  and indicated PCM activity. Stopping the monitor returned the UI to **Start PCM
+  check** and the recent peak fell to zero. This verifies that the selected
+  endpoint's Windows output mix is observable and that its recent-peak display
+  updates; it does not identify which application produced audio or establish a
+  Bluetooth-specific PCM source.
 - The local mobile-device tool exposes only an Android 9 x86_64 emulator, not a
   physical Bluetooth source, so it cannot initiate the phone-side playback test.
 
@@ -66,7 +74,8 @@ cargo +1.98.1 test --offline -j 1 --manifest-path tools/tauri-output-prototype/C
 cargo +1.98.1 test --offline -j 1 --manifest-path tools/tauri-output-prototype/Cargo.toml real_connection_opens_reports_state_and_closes -- --ignored --nocapture
 ~~~
 
-This run does not establish audible playback, phone-initiated connection,
-Bluetooth-specific PCM capture, or an `ApplicationPcmSource`. The loopback test
-only establishes that the selected default render endpoint can be opened and
-closed; no audio was deliberately played during the test.
+This run does not establish phone-initiated connection, Bluetooth-specific PCM
+capture, or an `ApplicationPcmSource`. The loopback test establishes that the
+selected default render endpoint can be opened and closed and that a deliberately
+played probe tone appears in its Windows output mix; it does not establish
+source-specific capture or independently assess human audibility.

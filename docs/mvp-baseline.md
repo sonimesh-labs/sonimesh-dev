@@ -105,6 +105,10 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   be re-resolved and selected default and non-default endpoint loopback streams
   started and stopped. A combined Bluetooth-wait and default-output-loopback
   check also started and closed both successfully without playing audio. The
+  desktop probe's low-level test tone then produced 848,640 counted samples and
+  a 4.0% recent peak in the selected default endpoint's Windows output mix;
+  activity cleared after the monitor stopped. This confirms the meter responds
+  to endpoint playback, not which source produced it.
   Bluetooth inbound-wait check passed. A recovery check reproduced direct open's
   `UnknownFailure` / `0x8007001F`, then refreshed the candidate and entered
   inbound wait successfully. Phone-initiated playback and an application PCM
