@@ -1047,6 +1047,19 @@ experimental QR contains the same hexadecimal test payload as the text field;
 it is not the production binary QR representation from ADR 0018. A scan from a
 non-loopback address also fills the UDP destination; a loopback invitation keeps
 the separately configured UDP destination for ADB reverse.
+The probe recognizes numbered listener session events and keeps connection
+endpoints out of its event history. To exercise the listener-to-snapshot path
+with the API 37 emulator at `emulator-5556`, install both audio-lab debug APKs,
+build the playback listener above, then run:
+
+~~~powershell
+cargo +1.98.1 test --manifest-path tools/tauri-output-prototype/Cargo.toml --locked emulator_capture_updates_real_listener_snapshot -- --ignored
+~~~
+
+On 2026-11-25 this test observed an active decoded signal and retained decoded
+frame counts after the Android test stopped. It covers the Windows listener,
+snapshot parser and emulator loopback, not the window interaction, audible
+playback or a physical WLAN.
 **Scan and start paired capture** applies a valid scanned invitation and then
 requests the usual recording permission and screen-capture consent. A cancelled
 scan or invalid invitation does not start capture. **Scan lab invitation**

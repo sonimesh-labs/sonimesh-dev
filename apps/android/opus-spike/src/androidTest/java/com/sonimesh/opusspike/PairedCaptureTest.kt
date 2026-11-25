@@ -140,7 +140,13 @@ class PairedCaptureTest {
         if (startFromScan) assumeTrue("scan test requires pairingInvitationHex", args.containsKey("pairingInvitationHex"))
         if (startFromPaste) assumeTrue("paste test requires pairingInvitationHex", args.containsKey("pairingInvitationHex"))
         ActivityScenario.launch<LabActivity>(Intent(instrumentation.targetContext, LabActivity::class.java)).use { scenario ->
-            args.getString("bitrateKbps")?.let { requested ->
+            scenario.onActivity { activity ->
+                (find(activity.window.decorView) {
+                    it is Spinner && it.contentDescription == "Playback usage for capture"
+                } as Spinner).setSelection(if (changeUsage) 1 else 0)
+            }
+            instrumentation.waitForIdleSync()
+            (args.getString("bitrateKbps") ?: "96").let { requested ->
                 val position = listOf("64", "96", "128").indexOf(requested)
                 require(position >= 0) { "unsupported test bitrate" }
                 scenario.onActivity { activity ->

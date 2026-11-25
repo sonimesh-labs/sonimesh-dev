@@ -387,14 +387,14 @@ fn update_snapshot(snapshot: &mut LabSnapshot, line: &str) {
         }
         snapshot.session_active = false;
         snapshot.signal = None;
-    } else if line == "RESULT client connected" {
+    } else if session_event(line, "RESULT client connected") {
         snapshot.status = "Android connecting".into();
         snapshot.metrics = None;
         snapshot.signal = None;
         snapshot.session_active = false;
     } else if line == "RESULT pairing verified" {
         snapshot.status = "Paired; negotiating session".into();
-    } else if line == "RESULT receiver started" {
+    } else if session_event(line, "RESULT receiver started") {
         snapshot.status = "Session active".into();
         snapshot.metrics = None;
         snapshot.signal = None;
@@ -433,6 +433,16 @@ fn update_snapshot(snapshot: &mut LabSnapshot, line: &str) {
     }
 }
 
+fn session_event(line: &str, event: &str) -> bool {
+    line == event
+        || line
+            .strip_prefix(event)
+            .and_then(|suffix| suffix.strip_prefix(" session "))
+            .and_then(|suffix| suffix.split_whitespace().next())
+            .and_then(|number| number.parse::<u64>().ok())
+            .is_some_and(|number| number > 0)
+}
+
 fn parse_signal(line: &str) -> Option<LabSignal> {
     let parts: Vec<_> = line.split_whitespace().collect();
     let ["SIGNAL", "decoded", decoded, "peak", peak] = parts.as_slice() else {
@@ -465,7 +475,12 @@ fn record_event(snapshot: &mut LabSnapshot, line: &str) {
     if snapshot.events.len() == MAX_LAB_EVENTS {
         snapshot.events.remove(0);
     }
-    snapshot.events.push(bound_event(line));
+    let safe_line = if line.starts_with("RESULT client connected ") {
+        "RESULT client connected"
+    } else {
+        line
+    };
+    snapshot.events.push(bound_event(safe_line));
 }
 
 fn bound_event(line: &str) -> String {
@@ -701,6 +716,37 @@ mod tests {
         assert!(snapshot.status.contains("Session active"));
         update_snapshot(&mut snapshot, "INVITATION_HEX invalid");
         assert_eq!(snapshot.invitation.as_deref(), Some("01ab"));
+    }
+
+    #[test]
+    fn numbered_listener_events_enable_metrics_and_hide_endpoints() {
+        let mut snapshot = LabSnapshot::default();
+        let connected =
+            "RESULT client connected session 1 local=127.0.0.1:47610 peer=127.0.0.1:12345";
+        record_event(&mut snapshot, connected);
+        update_snapshot(&mut snapshot, connected);
+        assert_eq!(snapshot.status, "Android connecting");
+        assert_eq!(snapshot.events, ["RESULT client connected"]);
+        update_snapshot(&mut snapshot, "RESULT pairing verified");
+        update_snapshot(&mut snapshot, "RESULT receiver started session 1");
+        assert!(snapshot.session_active);
+        update_snapshot(
+            &mut snapshot,
+            "STATUS packets 9 rejected 0 decoded 8 peak 0.100 plc 1 decode_errors 0 buffered 0 output active",
+        );
+        update_snapshot(&mut snapshot, "SIGNAL decoded 8 peak 0.100");
+        assert_eq!(snapshot.metrics.as_ref().unwrap().decoded, "8");
+        assert_eq!(snapshot.signal.as_ref().unwrap().decoded, 8);
+        update_snapshot(&mut snapshot, "RESULT session complete");
+        assert!(!snapshot.session_active);
+        update_snapshot(
+            &mut snapshot,
+            "RESULT client connected session 2 local=127.0.0.1:47610 peer=127.0.0.1:12346",
+        );
+        assert_eq!(snapshot.status, "Android connecting");
+        assert!(snapshot.metrics.is_none());
+        update_snapshot(&mut snapshot, "RESULT receiver started session invalid");
+        assert!(!snapshot.session_active);
     }
 
     #[test]
@@ -1178,6 +1224,13 @@ mod tests {
         loop {
             let state = lab.refresh();
             if state.status == "Session failed; waiting for Android" {
+                assert!(
+                    state
+                        .events
+                        .iter()
+                        .any(|event| event == "RESULT client connected")
+                );
+                assert!(state.events.iter().all(|event| !event.contains("peer=")));
                 break;
             }
             assert!(
@@ -1226,5 +1279,104 @@ mod tests {
         }
         assert!(!lab.refresh().running, "unavailable device must fail");
         assert_eq!(lab.refresh().media_port, None);
+    }
+
+    #[test]
+    #[ignore = "requires the playback lab binary, Windows output and an installed API 37 emulator test"]
+    fn emulator_capture_updates_real_listener_snapshot() {
+        let mut lab = Lab::default();
+        lab.start("10.0.2.2", None, 60, false, 39093).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let invitation = loop {
+            let snapshot = lab.refresh();
+            if let Some(invitation) = snapshot.invitation {
+                break invitation;
+            }
+            assert!(
+                snapshot.running && Instant::now() < deadline,
+                "{}",
+                snapshot.status
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        let mut instrumentation = Command::new("adb")
+            .args([
+                "-s",
+                "emulator-5556",
+                "shell",
+                "am",
+                "instrument",
+                "-w",
+                "-e",
+                "pairingInvitationHex",
+                &invitation,
+                "-e",
+                "mediaHost",
+                "10.0.2.2",
+                "-e",
+                "bitrateKbps",
+                "96",
+                "-e",
+                "class",
+                "com.sonimesh.opusspike.PairedCaptureTest#captures_tone_after_pairing_and_stops",
+                "com.sonimesh.opusspike.test/androidx.test.runner.AndroidJUnitRunner",
+            ])
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(50);
+        let mut observed_signal = false;
+        let mut last_observation = String::new();
+        while Instant::now() < deadline {
+            let snapshot = lab.refresh();
+            last_observation = format!(
+                "status={} active={} metrics={:?} signal={:?} events={:?}",
+                snapshot.status,
+                snapshot.session_active,
+                snapshot.metrics,
+                snapshot.signal,
+                snapshot.events
+            );
+            if snapshot.session_active
+                && snapshot
+                    .signal
+                    .as_ref()
+                    .is_some_and(|signal| signal.decoded > 0)
+            {
+                observed_signal = true;
+            }
+            if instrumentation.try_wait().unwrap().is_some() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        if instrumentation.try_wait().unwrap().is_none() {
+            instrumentation.kill().unwrap();
+        }
+        let output = instrumentation.wait_with_output().unwrap();
+        let text = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            text.contains("OK (1 test)"),
+            "instrumentation failed: {text}"
+        );
+        assert!(
+            observed_signal,
+            "listener snapshot did not report an active decoded signal: {last_observation}"
+        );
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let final_snapshot = loop {
+            let snapshot = lab.refresh();
+            if !snapshot.session_active || Instant::now() >= deadline {
+                break snapshot;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        assert!(
+            final_snapshot.metrics.as_ref().is_some_and(|metrics| {
+                metrics.decoded.parse::<u64>().is_ok_and(|count| count > 0)
+            }),
+            "listener snapshot did not retain decoded frames: {last_observation}"
+        );
+        lab.stop();
     }
 }
