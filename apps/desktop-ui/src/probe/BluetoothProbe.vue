@@ -195,7 +195,7 @@ onBeforeUnmount(() => { disposed = true; statusRequest++; clearTimeout(timer); c
     </select>
     <button type="button" class="preview-action" :disabled="loopbackBusy || (!loopback?.running && !loopbackEndpointId)" @click="toggleLoopback">{{ loopbackBusy ? 'Working...' : loopback?.running ? 'Stop PCM check' : 'Start PCM check' }}</button>
     <p v-if="loopback?.running && loopback.samples === 0" role="status">Waiting for Windows audio samples.</p>
-    <p v-if="loopback && (loopback.running || loopback.sampleRate > 0)" role="status">{{ loopback.endpointName }} · {{ loopback.sampleRate }} Hz, {{ loopback.channels }} channels; {{ loopback.samples }} samples; recent peak {{ (loopback.peak * 100).toFixed(1) }}%; {{ loopback.samples > 0 && loopback.peak > 0.001 ? 'PCM activity detected recently' : 'No recent PCM activity' }}.</p>
+    <p v-if="loopback && (loopback.running || loopback.sampleRate > 0)" role="status">{{ loopback.endpointName }} · {{ loopback.sampleRate }} Hz, {{ loopback.channels }} channels; {{ loopback.samples }} samples; recent peak {{ (loopback.peak * 100).toFixed(1) }}%<template v-if="loopback.samples > 0">; {{ loopback.peak > 0.001 ? 'PCM activity detected recently' : 'No recent PCM activity' }}</template>.</p>
     <p v-if="loopbackError || loopback?.error" class="command-error" role="alert">{{ loopbackError || loopback?.error }}</p>
   </section>
 </template>

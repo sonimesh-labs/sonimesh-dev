@@ -87,8 +87,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   connection setup run on Tauri's blocking task pool so WinRT waits do not occupy
   the UI runtime. An opt-in CPAL/WASAPI loopback meter lists output endpoints,
   selects the default initially, and reports the selected endpoint name, format,
-  sample count, recent peak, and approximate recent PCM activity for standard
-  integer and floating-point PCM formats without retaining PCM; it observes the
+  sample count, recent peak, and approximate recent PCM activity after samples
+  arrive for standard integer and floating-point PCM formats without retaining
+  PCM; it observes the
   system mix and does not establish
   source-specific Bluetooth capture. On 2026-11-26, a Windows endpoint ID could
   be re-resolved and selected default and non-default endpoint loopback streams

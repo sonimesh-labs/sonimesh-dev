@@ -206,5 +206,6 @@ it('shows when a running loopback stream has not delivered samples yet', async (
   await wrapper.findAll('button').find(button => button.text() === 'Start PCM check')!.trigger('click')
   await flushPromises()
   expect(wrapper.text()).toContain('Waiting for Windows audio samples.')
+  expect(wrapper.text()).not.toContain('No recent PCM activity.')
   wrapper.unmount()
 })
