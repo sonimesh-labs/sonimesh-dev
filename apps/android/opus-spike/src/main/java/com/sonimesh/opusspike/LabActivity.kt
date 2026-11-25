@@ -172,6 +172,10 @@ class LabActivity : Activity() {
         }
         layout.addView(setupFeedback)
         layout.addView(Button(this).apply {
+            text = "Start paired UDP capture"
+            setOnClickListener { startCapture(true, paired = true) }
+        })
+        layout.addView(Button(this).apply {
             text = "Stop capture"
             setOnClickListener {
                 if (LabStatus.captureAdmission.cancelPending()) {
@@ -404,10 +408,6 @@ class LabActivity : Activity() {
                     address.setText(parsed.hostAddress)
                 }
             }
-        })
-        layout.addView(Button(this).apply {
-            text = "Start paired UDP capture"
-            setOnClickListener { startCapture(true, paired = true) }
         })
         layout.addView(TextView(this).apply {
             text = "New test tones use the current capture usage, or the selection when capture is stopped. Restart a playing tone to apply changes."

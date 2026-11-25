@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
+import android.graphics.Rect
 import android.os.SystemClock
 import android.view.View
 import android.view.ViewGroup
@@ -21,6 +22,24 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class LabStatusTest {
+    @Test
+    fun pairedCaptureStartIsVisibleAndValidatesTheCurrentSetup() {
+        ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+            androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+            scenario.onActivity { activity ->
+                val root = activity.window.decorView
+                val start = requireNotNull(findButton(root, "Start paired UDP capture"))
+                val visible = Rect()
+                assertTrue("paired start should be visible before scrolling", start.getGlobalVisibleRect(visible))
+                assertEquals(start.height, visible.height())
+                requireNotNull(findTextField(root, "Desktop IPv4 address for UDP")).text = ""
+                start.performClick()
+                assertTrue(hasStatus(root, "Status: Enter a valid desktop IPv4 address for UDP."))
+                assertTrue(LabStatus.captureAdmission.canBegin())
+            }
+        }
+    }
+
     @Test
     fun stopCancelsPendingProjectionAndIgnoresItsResult() {
         val instrumentation = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
