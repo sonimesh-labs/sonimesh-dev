@@ -366,7 +366,7 @@ class LabStatusTest {
                     requireNotNull(findTextField(root, "Desktop IPv4 address for UDP"))
                         .text = if (transport == LabTransport.Udp) "" else "10.0.2.2"
                     requireNotNull(findTextField(root, "Paired control IPv4 address")).text = ""
-                    val retry = requireNotNull(findButton(root, "Retry last capture"))
+                    val retry = requireNotNull(findButton(root, "Retry capture with current setup"))
                     assertEquals(View.VISIBLE, retry.visibility)
                     retry.performClick()
                     val expected = if (transport == LabTransport.Udp) "Status: Enter a valid desktop IPv4 address for UDP."
@@ -521,7 +521,7 @@ class LabStatusTest {
             ActivityScenario.launch(LabActivity::class.java).use { scenario ->
                 scenario.onActivity { activity ->
                     assertTrue(hasStatus(activity.window.decorView, "Status: Desktop connection ended."))
-                    assertEquals(View.VISIBLE, requireNotNull(findButton(activity.window.decorView, "Retry last capture")).visibility)
+                    assertEquals(View.VISIBLE, requireNotNull(findButton(activity.window.decorView, "Retry capture with current setup")).visibility)
                     requireNotNull(findButton(activity.window.decorView, "Clear saved lab setup")).performClick()
                 }
             }
@@ -558,7 +558,7 @@ class LabStatusTest {
                     val root = activity.window.decorView
                     requireNotNull(findTextField(root, "Desktop IPv4 address for UDP")).text = "10.0.2.2"
                     requireNotNull(findTextField(root, "Paired lab desktop SPKI")).text = "cd".repeat(32)
-                    requireNotNull(findButton(root, "Retry last capture")).performClick()
+                    requireNotNull(findButton(root, "Retry capture with current setup")).performClick()
                     assertTrue(!activity.getPreferences(Activity.MODE_PRIVATE).contains("labInvitation"))
                     LabStatus.captureAdmission.launchFailed()
                 }
@@ -622,7 +622,7 @@ class LabStatusTest {
             var retryVisible = false
             while (!retryVisible && SystemClock.elapsedRealtime() < deadline) {
                 scenario.onActivity { activity ->
-                    retryVisible = findButton(activity.window.decorView, "Retry last capture")?.visibility == View.VISIBLE
+                    retryVisible = findButton(activity.window.decorView, "Retry capture with current setup")?.visibility == View.VISIBLE
                 }
                 if (!retryVisible) SystemClock.sleep(50)
             }
@@ -630,7 +630,7 @@ class LabStatusTest {
             scenario.recreate()
             scenario.onActivity { activity ->
                 assertTrue(hasStatus(activity.window.decorView, "Status: Unable to start capture."))
-                assertEquals(View.VISIBLE, findButton(activity.window.decorView, "Retry last capture")?.visibility)
+                assertEquals(View.VISIBLE, findButton(activity.window.decorView, "Retry capture with current setup")?.visibility)
             }
         }
     }

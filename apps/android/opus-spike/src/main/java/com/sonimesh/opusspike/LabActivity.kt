@@ -70,6 +70,7 @@ class LabActivity : Activity() {
     private lateinit var bitrate: Spinner
     private lateinit var muteSwitch: Switch
     private lateinit var retryButton: Button
+    private lateinit var retryHint: TextView
     private var updatingMute = false
     private val muteObserver: (Boolean?) -> Unit = { muted ->
         updatingMute = true
@@ -192,7 +193,7 @@ class LabActivity : Activity() {
             }
         })
         retryButton = Button(this).apply {
-            text = "Retry last capture"
+            text = "Retry capture with current setup"
             visibility = View.GONE
             setOnClickListener {
                 when (LabStatus.retryTransport) {
@@ -204,6 +205,8 @@ class LabActivity : Activity() {
             }
         }
         layout.addView(retryButton)
+        retryHint = TextView(this).apply { visibility = View.GONE }
+        layout.addView(retryHint)
         signal = TextView(this)
         layout.addView(signal)
         duration = TextView(this)
@@ -506,6 +509,7 @@ class LabActivity : Activity() {
         pendingInvitation = if (paired) importedInvitation?.copyOf() else null
         setupFeedback.text = ""
         retryButton.visibility = View.GONE
+        retryHint.visibility = View.GONE
         if (needsPermission) {
             try {
                 requestPermissions(arrayOf(Manifest.permission.RECORD_AUDIO), 1)
@@ -543,8 +547,11 @@ class LabActivity : Activity() {
 
     private fun updateRetryButton() {
         if (!::retryButton.isInitialized) return
-        val retryable = LabStatus.captureAdmission.canBegin() && LabStatus.retryTransport != null
+        val transport = LabStatus.retryTransport
+        val retryable = LabStatus.captureAdmission.canBegin() && transport != null
         retryButton.visibility = if (retryable) View.VISIBLE else View.GONE
+        retryHint.visibility = retryButton.visibility
+        retryHint.text = if (retryable) "Retry transport: ${transport?.label}. Current settings will be used." else ""
     }
 
     private fun copyLabEvidence() {

@@ -384,15 +384,22 @@ class PairedCaptureTest {
                             retryAvailable = LabStatus.captureAdmission.canBegin() &&
                                 containsStatus(root, "Status: Desktop connection was not restored after 12 attempts") &&
                                 runCatching {
-                                    find(root) { it is Button && it.text.toString() == "Retry last capture" && it.visibility == View.VISIBLE }
+                                    find(root) { it is Button && it.text.toString() == "Retry capture with current setup" && it.visibility == View.VISIBLE }
                                 }.isSuccess
                         }
                         if (!retryAvailable) SystemClock.sleep(100)
                     }
                     assertTrue("retry did not become available after reconnect attempts were exhausted", retryAvailable)
                     scenario.onActivity { activity ->
+                        val root = activity.window.decorView
+                        assertTrue(containsStatus(root, "Retry transport: paired UDP. Current settings will be used."))
+                        (find(root) { it is Spinner && it.contentDescription == "Opus target bitrate for capture" } as Spinner)
+                            .setSelection(0)
+                    }
+                    instrumentation.waitForIdleSync()
+                    scenario.onActivity { activity ->
                         find(activity.window.decorView) {
-                            it is Button && it.text.toString() == "Retry last capture"
+                            it is Button && it.text.toString() == "Retry capture with current setup"
                         }.performClick()
                     }
                     assertTrue("screen-capture selector missing after retry", clickNode(automation, "Share one app"))
@@ -418,6 +425,10 @@ class PairedCaptureTest {
                         "manual retry did not start a new paired capture (status=$retryStatus, admissionCanBegin=$retryAdmissionCanBegin)",
                         capturingAgain,
                     )
+                    scenario.onActivity { activity ->
+                        assertTrue("retry did not use the updated bitrate", containsStatus(activity.window.decorView,
+                            "Session request: All supported usages, 64 kbps target"))
+                    }
                     var resumedMedia = false
                     val mediaDeadline = SystemClock.elapsedRealtime() + 10_000
                     while (!resumedMedia && SystemClock.elapsedRealtime() < mediaDeadline) {

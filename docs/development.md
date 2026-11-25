@@ -570,12 +570,16 @@ ready for another attempt and reports that the test tone is unavailable on the
 device instead of crashing the activity. It tries common 48 kHz and 44.1 kHz
 stereo/mono formats before reporting that failure.
 After a capture service finishes, including after a desktop connection or capture
-failure, it also shows **Retry last capture** near the same status area. The
-button appears after cleanup completes. The retry reuses the last service's
-transport even if the activity was closed and reopened in the same process. It
-uses the current setup fields, then requests any required permission or
+failure, it also shows **Retry capture with current setup** near the same status area. The
+button appears after cleanup completes and shows the transport it will reuse,
+even if the activity was closed and reopened in the same process. It uses the
+current setup fields and selectors, then requests any required permission or
 screen-capture consent again;
 starting a new session hides the retry action.
+On 2026-11-25, API 37 x86_64 instrumentation changed the bitrate target from
+96 to 64 kbps after reconnect exhaustion and verified the retried paired session
+used the new selection. The loopback listener decoded 205 frames with a peak of
+0.108. This does not establish physical WLAN or audible playback.
 Unmute resumes captured audio without a new consent session. Audio already encoded,
 in transit, or buffered at the receiver can still play briefly after muting; this
 control is not an immediate stop. It resets when the session ends.

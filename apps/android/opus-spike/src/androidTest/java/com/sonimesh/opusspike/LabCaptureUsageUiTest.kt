@@ -65,20 +65,20 @@ class LabCaptureUsageUiTest {
                 scenario.onActivity { activity ->
                     LabStatus.serviceStarted(LabCaptureUsage.All, OpusBitrate.STANDARD)
                     LabStatus.publish("Desktop connection failed. Check the listener and control address.")
-                    assertEquals(View.GONE, findButton(activity.window.decorView, "Retry last capture").visibility)
+                    assertEquals(View.GONE, findButton(activity.window.decorView, "Retry capture with current setup").visibility)
                     LabStatus.serviceFinished()
                 }
                 androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().waitForIdleSync()
                 scenario.onActivity { activity ->
-                    assertEquals(View.VISIBLE, findButton(activity.window.decorView, "Retry last capture").visibility)
+                    assertEquals(View.VISIBLE, findButton(activity.window.decorView, "Retry capture with current setup").visibility)
                     LabStatus.publish("Unable to play test tone on this device.")
-                    assertEquals(View.VISIBLE, findButton(activity.window.decorView, "Retry last capture").visibility)
+                    assertEquals(View.VISIBLE, findButton(activity.window.decorView, "Retry capture with current setup").visibility)
                     LabStatus.serviceStarted(LabCaptureUsage.All, OpusBitrate.STANDARD)
                     LabStatus.publish("Connecting to the desktop listener…")
                 }
                 androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().waitForIdleSync()
                 scenario.onActivity { activity ->
-                    assertEquals(View.GONE, findButton(activity.window.decorView, "Retry last capture").visibility)
+                    assertEquals(View.GONE, findButton(activity.window.decorView, "Retry capture with current setup").visibility)
                 }
             }
         } finally {
