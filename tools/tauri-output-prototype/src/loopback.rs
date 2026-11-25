@@ -274,8 +274,15 @@ mod platform {
         fn listed_output_endpoints_can_be_reopened_by_id() {
             let endpoints = endpoints().unwrap();
             assert!(!endpoints.is_empty());
+            if let Some(default_index) = endpoints.iter().position(|endpoint| endpoint.is_default) {
+                assert_eq!(default_index, 0, "default endpoint should be listed first");
+            }
             let host = cpal::default_host();
             for endpoint in endpoints {
+                eprintln!(
+                    "endpoint={} default={} sample_rate_hz={:?} channels={:?}",
+                    endpoint.name, endpoint.is_default, endpoint.sample_rate, endpoint.channels
+                );
                 let id = cpal::DeviceId::from_str(&endpoint.id).unwrap();
                 assert!(host.device_by_id(&id).is_some(), "{}", endpoint.name);
             }

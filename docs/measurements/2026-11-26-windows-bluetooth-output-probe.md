@@ -16,6 +16,12 @@
 
 - CPAL output endpoint enumeration returned at least one endpoint, and every
   listed ID could be resolved again through `HostTrait::device_by_id`.
+- A follow-up enumeration returned five endpoints. The default reported 48 kHz
+  and eight channels; three other endpoints reported 48 kHz stereo, and one
+  virtual endpoint reported 44.1 kHz stereo. The default and a non-default
+  endpoint both started and stopped the selected-endpoint WASAPI loopback check.
+  No listed endpoint name identified a Bluetooth output. These results verify
+  endpoint metadata and loopback setup only, not Bluetooth audio capture.
 - The selected default and one non-default endpoint each started and stopped a
   WASAPI loopback stream; each reported name matched the selected endpoint.
 - The Windows Bluetooth discovery check passed. The inbound-wait check accepted
