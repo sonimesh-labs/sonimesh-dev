@@ -163,7 +163,14 @@ mod platform {
         }
 
         pub fn snapshot(&self) -> Snapshot {
-            self.stop()
+            Snapshot {
+                running: false,
+                sample_rate: 0,
+                channels: 0,
+                samples: 0,
+                peak: 0.0,
+                error: None,
+            }
         }
     }
 }
