@@ -372,6 +372,7 @@ onMounted(async () => {
       loopbackNoSamplesLong.value = false
       void pollLoopback()
     }
+    await refresh()
     await refreshLoopbackEndpoints()
   } catch (cause) {
     if (!disposed && request === statusRequest) error.value = String(cause)

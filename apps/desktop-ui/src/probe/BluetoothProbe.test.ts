@@ -20,6 +20,8 @@ it('opens Windows Bluetooth settings from the probe', async () => {
   window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
   const wrapper = mount(BluetoothProbe)
   await flushPromises()
+  expect(invoke).toHaveBeenCalledWith('bluetooth_candidates')
+  expect(wrapper.get('#bluetooth-source').text()).toContain('Phone')
   await wrapper.findAll('button').find(button => button.text() === 'Open Bluetooth settings')!.trigger('click')
   await flushPromises()
   expect(invoke).toHaveBeenCalledWith('open_bluetooth_settings')
@@ -47,13 +49,11 @@ it('preserves the selected source by name when discovery order changes', async (
   window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
   const wrapper = mount(BluetoothProbe)
   await flushPromises()
+  await wrapper.get('#bluetooth-source').setValue('0')
   const refreshButton = wrapper.findAll('button').find(button => button.text() === 'Refresh Bluetooth sources')!
   await refreshButton.trigger('click')
   await flushPromises()
-  await wrapper.get('#bluetooth-source').setValue('1')
-  await refreshButton.trigger('click')
-  await flushPromises()
-  expect((wrapper.get('#bluetooth-source').element as HTMLSelectElement).value).toBe('0')
+  expect((wrapper.get('#bluetooth-source').element as HTMLSelectElement).value).toBe('1')
   wrapper.unmount()
 })
 
@@ -584,6 +584,7 @@ it('restarts a failed PCM monitor on the refreshed default endpoint', async () =
   let recovered = false
   const invoke = vi.fn((command: string) => {
     if (command === 'bluetooth_status') return Promise.resolve('idle')
+    if (command === 'bluetooth_candidates') return Promise.resolve({ generation: 1, names: [] })
     if (command === 'loopback_status') return Promise.resolve(recovered
       ? { running: true, endpointName: 'Default speakers', sampleRate: 48000, channels: 2, samples: 128, peak: 0, runPeak: 0, error: null }
       : { running: true, endpointName: 'Removed output', sampleRate: 48000, channels: 2, samples: 4096, peak: 0, runPeak: 0.1, error: 'The Windows loopback stream reported an error.' })

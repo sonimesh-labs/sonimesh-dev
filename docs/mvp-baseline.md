@@ -84,8 +84,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   one candidate, but Windows failed to open it in a later test. The separate desktop output
   probe exposes refresh, connect, wait for phone connection, disconnect, and
   system closure status for the same experiment, with a shortcut to Windows
-  Bluetooth settings and refresh of Bluetooth candidates and idle output
-  endpoints when returning to the probe.
+  Bluetooth settings, automatic Bluetooth candidate discovery on probe entry,
+  and refresh of Bluetooth candidates and idle output endpoints when returning
+  to the probe.
   Candidate discovery and
   connection setup run on Tauri's blocking task pool so WinRT waits do not occupy
   the UI runtime; status checks and disconnects use the same blocking pool. An
