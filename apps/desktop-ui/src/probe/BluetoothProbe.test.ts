@@ -171,7 +171,23 @@ it('starts and stops the Windows system-output PCM check', async () => {
   await wrapper.findAll('button').find(button => button.text() === 'Stop PCM check')!.trigger('click')
   await flushPromises()
   expect(invoke).toHaveBeenCalledWith('loopback_stop')
-  expect(wrapper.text()).toContain('4096 samples; recent peak 50.0%.')
+  expect(wrapper.text()).toContain('4096 samples; recent peak 50.0%;')
+  expect(wrapper.text()).toContain('PCM activity detected recently.')
+  wrapper.unmount()
+})
+
+it('distinguishes an open PCM stream with no recent signal', async () => {
+  const invoke = vi.fn((command: string) => {
+    if (command === 'bluetooth_status') return Promise.resolve('idle')
+    if (command === 'loopback_endpoints') return Promise.resolve([{ id: 'default-endpoint', name: 'Default speakers', isDefault: true }])
+    if (command === 'loopback_status') return Promise.resolve({ running: true, endpointName: 'Default speakers', sampleRate: 48000, channels: 2, samples: 4096, peak: 0, error: null })
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  expect(wrapper.text()).toContain('No recent PCM activity.')
+  expect(wrapper.text()).toContain('Measures the selected Windows playback mix')
   wrapper.unmount()
 })
 
