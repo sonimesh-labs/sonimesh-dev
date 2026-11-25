@@ -181,6 +181,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   The lab can also play one reduced-amplitude 48 kHz MLS probe matching the
   latency tool's seed-7 reference during capture. API 37 paired-loopback testing
   observes the probe locally; external recording and physical latency remain open.
+  A separate native Opus software test correlates the probe after 64, 96, and
+  128 kbps encoding against a known injected delay and codec lookahead; this does
+  not validate the Android encoder or a physical audio path.
   An optional paired-listener status report exposes in-session packet and decode
   counts, decoded peak, and output recovery state for controlled-lab diagnosis.
   On normal stop it also reports a final post-drain snapshot; the desktop probe

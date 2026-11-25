@@ -79,6 +79,10 @@ latency measurement. Generate the matching reference with
 `generate --sample-rate 48000 --seconds 3 --seed 7`, record the source and output on a common timeline,
 and document routing and clock setup. Android and desktop audio processing can
 alter the signal; an unsuccessful correlation does not by itself identify why.
+On 2026-11-25, a native libopus software test encoded the reference at 64, 96,
+and 128 kbps and recovered a known inserted delay plus codec lookahead within
+one sample using the measurement tool. It does not exercise Android MediaCodec,
+network transport, hardware clocks, or audible playback.
 
 Multichannel inputs are averaged by default. When the source reference or
 microphone signal is on a known channel, select its one-based channel number

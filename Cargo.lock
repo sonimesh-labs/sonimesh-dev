@@ -881,6 +881,7 @@ dependencies = [
  "sonimesh-app",
  "sonimesh-audio",
  "sonimesh-diagnostics",
+ "sonimesh-latency-measurement",
  "sonimesh-network",
  "sonimesh-platform",
  "sonimesh-protocol",

@@ -23,5 +23,8 @@ sonimesh-platform = { path = "../../crates/sonimesh-platform" }
 sonimesh-protocol = { path = "../../crates/sonimesh-protocol" }
 zeroize = "1.9.0"
 
+[dev-dependencies]
+sonimesh-latency-measurement = { path = "../latency-measurement" }
+
 [lints]
 workspace = true
