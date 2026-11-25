@@ -74,6 +74,11 @@ async fn bluetooth_candidates(
 }
 
 #[tauri::command]
+fn open_bluetooth_settings() -> Result<(), String> {
+    bluetooth::Bluetooth::open_settings()
+}
+
+#[tauri::command]
 async fn bluetooth_connect(
     state: tauri::State<'_, ProbeState>,
     generation: u32,
@@ -770,6 +775,7 @@ fn main() {
             start_lab,
             lab_status,
             bluetooth_candidates,
+            open_bluetooth_settings,
             bluetooth_connect,
             bluetooth_prepare,
             bluetooth_status,

@@ -83,7 +83,8 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   open and close a selected system-routed connection. Local enumeration found
   one candidate, but Windows failed to open it in a later test. The separate desktop output
   probe exposes refresh, connect, wait for phone connection, disconnect, and
-  system closure status for the same experiment. Candidate discovery and
+  system closure status for the same experiment, with a shortcut to Windows
+  Bluetooth settings before refreshing candidates. Candidate discovery and
   connection setup run on Tauri's blocking task pool so WinRT waits do not occupy
   the UI runtime; status checks and disconnects use the same blocking pool. An
   opt-in CPAL/WASAPI loopback meter lists output endpoints,

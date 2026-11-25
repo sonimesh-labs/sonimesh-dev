@@ -60,6 +60,16 @@ async function refresh() {
   }
 }
 
+async function openBluetoothSettings() {
+  if (!window.__TAURI__) return
+  error.value = null
+  try {
+    await window.__TAURI__.core.invoke('open_bluetooth_settings')
+  } catch (cause) {
+    error.value = String(cause)
+  }
+}
+
 async function poll() {
   if (disposed || phase.value === 'idle') return
   const request = statusRequest
@@ -272,6 +282,7 @@ onBeforeUnmount(() => { disposed = true; statusRequest++; loopbackRequest++; cle
     <p class="eyebrow">Windows experiment</p>
     <h2 id="bluetooth-title">Bluetooth system playback</h2>
     <p class="preview-note">Connect a paired source through Windows. Audio is played by the system and does not enter the SoniMesh mixer.</p>
+    <button type="button" class="preview-action" :disabled="busy" @click="openBluetoothSettings">Open Bluetooth settings</button>
     <button type="button" class="preview-action" :disabled="busy || phase !== 'idle'" @click="refresh">Refresh Bluetooth sources</button>
     <p v-if="loaded && names.length === 0" role="status">No playback sources found. Pair a compatible device in Windows, then refresh.</p>
     <template v-if="names.length">

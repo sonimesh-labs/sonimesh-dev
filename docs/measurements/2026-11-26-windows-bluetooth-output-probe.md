@@ -44,6 +44,9 @@
   Windows open error (`0x8007001F`) inline with the phone-wait status rather than
   as a failed-operation alert. The UI returned to `Disconnected.` after stop.
   This confirms the status presentation and cleanup; it does not verify playback.
+- The probe's **Open Bluetooth settings** action opened the Windows **Bluetooth
+  & devices** page from the desktop UI. Device pairing and post-pair discovery
+  were not part of this check.
 - The combined **Connect + monitor (auto wait fallback)** action entered the
   phone-wait state and started loopback on the selected default output. While no
   phone playback was active, loopback reported zero samples and zero peak. The

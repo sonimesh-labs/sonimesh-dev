@@ -44,6 +44,14 @@ mod platform {
     }
 
     impl Bluetooth {
+        pub fn open_settings() -> Result<(), String> {
+            std::process::Command::new("explorer.exe")
+                .arg("ms-settings:bluetooth")
+                .spawn()
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        }
+
         pub fn refresh(&mut self) -> Result<Candidates, String> {
             let selector =
                 AudioPlaybackConnection::GetDeviceSelector().map_err(|e| e.to_string())?;
@@ -290,6 +298,10 @@ mod platform {
     #[derive(Default)]
     pub struct Bluetooth;
     impl Bluetooth {
+        pub fn open_settings() -> Result<(), String> {
+            Err("Bluetooth settings are available on Windows.".into())
+        }
+
         pub fn refresh(&mut self) -> Result<Candidates, String> {
             Err("Bluetooth playback experiment requires Windows.".into())
         }

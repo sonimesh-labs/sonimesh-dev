@@ -5,6 +5,18 @@ import BluetoothProbe from './BluetoothProbe.vue'
 
 afterEach(() => { delete window.__TAURI__; vi.useRealTimers() })
 
+it('opens Windows Bluetooth settings from the probe', async () => {
+  const invoke = vi.fn((command: string) => Promise.resolve(command === 'bluetooth_status' ? 'idle' : command === 'loopback_status' ? { running: false, endpointName: '', sampleRate: 0, channels: 0, samples: 0, peak: 0, error: null } : undefined))
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  await wrapper.findAll('button').find(button => button.text() === 'Open Bluetooth settings')!.trigger('click')
+  await flushPromises()
+  expect(invoke).toHaveBeenCalledWith('open_bluetooth_settings')
+  expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+  wrapper.unmount()
+})
+
 it('refreshes candidates and connects and disconnects the selected source', async () => {
   let connected = false
   const invoke = vi.fn((command: string) => {
@@ -18,14 +30,14 @@ it('refreshes candidates and connects and disconnects the selected source', asyn
   window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
   const wrapper = mount(BluetoothProbe)
   await flushPromises()
-  await wrapper.get('button').trigger('click')
+  await wrapper.findAll('button').find(button => button.text() === 'Refresh Bluetooth sources')!.trigger('click')
   await flushPromises()
   await wrapper.get('select').setValue('0')
-  await wrapper.findAll('button')[1].trigger('click')
+  await wrapper.findAll('button').find(button => button.text() === 'Connect Bluetooth')!.trigger('click')
   await flushPromises()
   expect(invoke).toHaveBeenCalledWith('bluetooth_connect', { generation: 3, index: 0 })
   expect(wrapper.text()).toContain('System playback connection opened for Phone.')
-  await wrapper.findAll('button')[1].trigger('click')
+  await wrapper.findAll('button').find(button => button.text() === 'Disconnect Bluetooth')!.trigger('click')
   await flushPromises()
   expect(invoke).toHaveBeenCalledWith('bluetooth_disconnect')
   expect(wrapper.text()).toContain('Disconnected.')
@@ -43,14 +55,14 @@ it('reports empty discovery and system closure', async () => {
   window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
   const wrapper = mount(BluetoothProbe)
   await flushPromises()
-  await wrapper.get('button').trigger('click')
+  await wrapper.findAll('button').find(button => button.text() === 'Refresh Bluetooth sources')!.trigger('click')
   await flushPromises()
   expect(wrapper.text()).toContain('No playback sources found.')
   empty = false
-  await wrapper.get('button').trigger('click')
+  await wrapper.findAll('button').find(button => button.text() === 'Refresh Bluetooth sources')!.trigger('click')
   await flushPromises()
   await wrapper.get('select').setValue('0')
-  await wrapper.findAll('button')[1].trigger('click')
+  await wrapper.findAll('button').find(button => button.text() === 'Connect Bluetooth')!.trigger('click')
   await flushPromises()
   expect(wrapper.text()).toContain('Windows closed the playback connection.')
   wrapper.unmount()
@@ -133,7 +145,7 @@ it('waits for the phone to initiate a connection and can cancel waiting', async 
   window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
   const wrapper = mount(BluetoothProbe)
   await flushPromises()
-  await wrapper.get('button').trigger('click')
+  await wrapper.findAll('button').find(button => button.text() === 'Refresh Bluetooth sources')!.trigger('click')
   await flushPromises()
   await wrapper.get('select').setValue('0')
   await wrapper.findAll('button').find(button => button.text() === 'Wait for phone to connect')!.trigger('click')
