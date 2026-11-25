@@ -12,11 +12,20 @@ pub struct Snapshot {
     error: Option<String>,
 }
 
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Endpoint {
+    id: String,
+    name: String,
+    is_default: bool,
+}
+
 #[cfg(windows)]
 mod platform {
-    use super::Snapshot;
+    use super::{Endpoint, Snapshot};
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-    use cpal::{FromSample, SampleFormat, SizedSample, Stream, StreamConfig};
+    use cpal::{DeviceId, FromSample, SampleFormat, SizedSample, Stream, StreamConfig};
+    use std::str::FromStr;
     use std::sync::{
         Arc,
         atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
@@ -82,14 +91,39 @@ mod platform {
             .map_err(|error| error.to_string())
     }
 
+    pub fn endpoints() -> Result<Vec<Endpoint>, String> {
+        let host = cpal::default_host();
+        let default_id = host
+            .default_output_device()
+            .and_then(|device| device.id().ok());
+        host.output_devices()
+            .map_err(|error| error.to_string())?
+            .map(|device| {
+                let id = device.id().map_err(|error| error.to_string())?;
+                let name = device
+                    .description()
+                    .map_err(|error| error.to_string())?
+                    .name()
+                    .to_owned();
+                Ok(Endpoint {
+                    is_default: default_id.as_ref() == Some(&id),
+                    id: id.to_string(),
+                    name,
+                })
+            })
+            .collect()
+    }
+
     impl Monitor {
-        pub fn start(&mut self) -> Result<Snapshot, String> {
+        pub fn start(&mut self, endpoint_id: &str) -> Result<Snapshot, String> {
             if self.stream.is_some() {
                 return Ok(self.snapshot());
             }
-            let device = cpal::default_host()
-                .default_output_device()
-                .ok_or("No default Windows playback device is available.")?;
+            let host = cpal::default_host();
+            let device_id = DeviceId::from_str(endpoint_id).map_err(|error| error.to_string())?;
+            let device = host
+                .device_by_id(&device_id)
+                .ok_or("The selected Windows playback device is no longer available.")?;
             let endpoint_name = device
                 .description()
                 .map_err(|error| error.to_string())?
@@ -155,8 +189,10 @@ mod platform {
 
     #[cfg(test)]
     mod tests {
-        use super::Meter;
+        use super::{Meter, endpoints};
+        use cpal::traits::HostTrait;
         use cpal::{FromSample, Sample};
+        use std::str::FromStr;
         use std::sync::atomic::Ordering;
 
         fn normalized<T: Sample>(sample: T) -> f32
@@ -172,6 +208,18 @@ mod platform {
             assert_eq!(normalized(u8::MAX), 127.0 / 128.0);
             assert_eq!(normalized(0_u16), -1.0);
             assert_eq!(normalized(0.5_f64), 0.5);
+        }
+
+        #[test]
+        #[ignore = "requires Windows playback endpoints"]
+        fn listed_output_endpoints_can_be_reopened_by_id() {
+            let endpoints = endpoints().unwrap();
+            assert!(!endpoints.is_empty());
+            let host = cpal::default_host();
+            for endpoint in endpoints {
+                let id = cpal::DeviceId::from_str(&endpoint.id).unwrap();
+                assert!(host.device_by_id(&id).is_some(), "{}", endpoint.name);
+            }
         }
 
         #[test]
@@ -198,13 +246,17 @@ mod platform {
 
 #[cfg(not(windows))]
 mod platform {
-    use super::Snapshot;
+    use super::{Endpoint, Snapshot};
+
+    pub fn endpoints() -> Result<Vec<Endpoint>, String> {
+        Ok(Vec::new())
+    }
 
     #[derive(Default)]
     pub struct Monitor;
 
     impl Monitor {
-        pub fn start(&mut self) -> Result<Snapshot, String> {
+        pub fn start(&mut self, _endpoint_id: &str) -> Result<Snapshot, String> {
             Err("System output loopback is available only in the Windows probe.".into())
         }
 
@@ -235,3 +287,4 @@ mod platform {
 }
 
 pub use platform::Monitor;
+pub use platform::endpoints;

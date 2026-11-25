@@ -122,6 +122,10 @@ it('starts and stops the Windows system-output PCM check', async () => {
   let running = false
   const invoke = vi.fn((command: string) => {
     if (command === 'bluetooth_status') return Promise.resolve('idle')
+    if (command === 'loopback_endpoints') return Promise.resolve([
+      { id: 'default-endpoint', name: 'Default speakers', isDefault: true },
+      { id: 'bt-endpoint', name: 'Bluetooth headphones', isDefault: false },
+    ])
     if (command === 'loopback_status') return Promise.resolve({ running, endpointName: 'Default speakers', sampleRate: running ? 48000 : 0, channels: running ? 2 : 0, samples: 4096, peak: 0.5, error: null })
     if (command === 'loopback_start') { running = true; return Promise.resolve({ running, endpointName: 'Default speakers', sampleRate: 48000, channels: 2, samples: 0, peak: 0, error: null }) }
     if (command === 'loopback_stop') { running = false; return Promise.resolve({ running, endpointName: 'Default speakers', sampleRate: 48000, channels: 2, samples: 4096, peak: 0.5, error: null }) }
@@ -130,8 +134,10 @@ it('starts and stops the Windows system-output PCM check', async () => {
   window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
   const wrapper = mount(BluetoothProbe)
   await flushPromises()
+  await wrapper.get('#loopback-endpoint').setValue('bt-endpoint')
   await wrapper.findAll('button').find(button => button.text() === 'Start PCM check')!.trigger('click')
   await flushPromises()
+  expect(invoke).toHaveBeenCalledWith('loopback_start', { endpointId: 'bt-endpoint' })
   expect(wrapper.text()).toContain('48000 Hz, 2 channels')
   expect(wrapper.text()).toContain('Default speakers')
   await wrapper.findAll('button').find(button => button.text() === 'Stop PCM check')!.trigger('click')
@@ -145,6 +151,7 @@ it('shows when a running loopback stream has not delivered samples yet', async (
   let running = false
   const invoke = vi.fn((command: string) => {
     if (command === 'bluetooth_status') return Promise.resolve('idle')
+    if (command === 'loopback_endpoints') return Promise.resolve([{ id: 'default-endpoint', name: 'Default speakers', isDefault: true }])
     if (command === 'loopback_status') return Promise.resolve({ running, endpointName: 'Default speakers', sampleRate: running ? 48000 : 0, channels: running ? 2 : 0, samples: 0, peak: 0, error: null })
     if (command === 'loopback_start') { running = true; return Promise.resolve({ running, endpointName: 'Default speakers', sampleRate: 48000, channels: 2, samples: 0, peak: 0, error: null }) }
     return Promise.resolve()

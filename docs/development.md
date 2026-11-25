@@ -1177,9 +1177,11 @@ validation. If connecting from the desktop fails, choose **Wait for phone to
 connect** and initiate the Bluetooth connection from the paired phone. The panel
 shows whether Windows is waiting or has opened the connection.
 
-To check whether PCM reaches the default Windows output endpoint, choose **Start
-PCM check** in the same panel, play audio through Windows, and watch the endpoint
-name, sample count, and recent peak. Stop the check when finished. It reports only aggregate activity;
+To check whether PCM reaches a Windows output endpoint, choose the endpoint in the
+**Output endpoint** list and choose **Start PCM check** in the same panel. The default
+endpoint is selected initially; choose **Refresh output devices** after changing
+Windows audio devices. Play audio through the selected endpoint and watch its name,
+sample count, and recent peak. Stop the check when finished. It reports only aggregate activity;
 the endpoint mix can include audio from other applications and does not identify
 the Bluetooth source. No PCM is retained by the probe.
 On 2026-11-26, a two-second start with no audio being played returned zero samples

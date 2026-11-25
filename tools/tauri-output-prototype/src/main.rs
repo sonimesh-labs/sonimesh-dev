@@ -17,13 +17,23 @@ struct ProbeState {
 }
 
 #[tauri::command]
-async fn loopback_start(state: tauri::State<'_, ProbeState>) -> Result<loopback::Snapshot, String> {
+async fn loopback_endpoints() -> Result<Vec<loopback::Endpoint>, String> {
+    tauri::async_runtime::spawn_blocking(loopback::endpoints)
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn loopback_start(
+    state: tauri::State<'_, ProbeState>,
+    endpoint_id: String,
+) -> Result<loopback::Snapshot, String> {
     let loopback = Arc::clone(&state.loopback);
     let result = tauri::async_runtime::spawn_blocking(move || {
         loopback
             .lock()
             .map_err(|_| "Loopback state unavailable.")?
-            .start()
+            .start(&endpoint_id)
     })
     .await
     .map_err(|error| error.to_string())??;
@@ -756,6 +766,7 @@ fn main() {
             bluetooth_prepare,
             bluetooth_status,
             bluetooth_disconnect,
+            loopback_endpoints,
             loopback_start,
             loopback_status,
             loopback_stop,

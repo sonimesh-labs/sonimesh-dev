@@ -300,12 +300,13 @@ A separate WASAPI loopback experiment may check whether system-routed Bluetooth
 audio can be observed as PCM at the selected render endpoint. Loopback captures
 the endpoint's rendered mix, not a source-isolated Bluetooth stream, so a positive
 result would need to be evaluated against the product's mixing requirements.
-The desktop probe now has an opt-in meter for the default Windows render endpoint,
-implemented through CPAL's WASAPI loopback input. It supports the standard integer
-and floating-point PCM sample formats exposed by CPAL and reports format, sample
-count, endpoint name, and peak since the last poll without storing PCM. This checks
-endpoint activity only; Bluetooth source capture remains unverified and the
-capability result stays unchanged.
+The desktop probe now has an opt-in meter for a selected Windows render endpoint,
+implemented through CPAL's WASAPI loopback input. It lists CPAL output devices,
+selects the default initially, and supports the standard integer and floating-point
+PCM sample formats exposed by CPAL. It reports format, sample count, endpoint name,
+and peak since the last poll without storing PCM. This checks endpoint activity
+only; Bluetooth source capture remains unverified and the capability result stays
+unchanged.
 The operator may instead leave the selected connection started while waiting for
 the remote source to initiate it; the waiting state does not claim playback.
 
