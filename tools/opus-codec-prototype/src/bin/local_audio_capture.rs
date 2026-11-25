@@ -9,6 +9,7 @@ use std::time::Duration;
 
 const BLOCK_SAMPLES: usize = 1_920;
 const QUEUE_BLOCKS: usize = 8;
+const CAPTURE_BLOCK_DURATION_MS: u32 = 20;
 
 fn stereo_pair(left: f32, right: Option<f32>) -> [f32; 2] {
     let left = if left.is_finite() { left } else { 0.0 };
@@ -39,6 +40,7 @@ pub struct Capture {
     pub consumer: sonimesh_audio::RealtimePcmConsumer<BLOCK_SAMPLES>,
     stats: Arc<CaptureStats>,
     pub endpoint_name: String,
+    pub sample_rate_hz: u32,
 }
 
 fn build_stream<T>(
@@ -46,6 +48,7 @@ fn build_stream<T>(
     config: &cpal::StreamConfig,
     mut producer: RealtimePcmProducer<BLOCK_SAMPLES>,
     channels: usize,
+    samples_per_block: usize,
     stats: Arc<CaptureStats>,
 ) -> Result<Stream, Box<dyn Error>>
 where
@@ -71,12 +74,12 @@ where
                 block[offset] = left;
                 block[offset + 1] = right;
                 offset += 2;
-                if offset == BLOCK_SAMPLES {
-                    let _ = producer.push(&block);
+                if offset == samples_per_block {
+                    let _ = producer.push(&block[..samples_per_block]);
                     offset = 0;
                     callback_stats
                         .samples
-                        .fetch_add(BLOCK_SAMPLES as u64, Ordering::Relaxed);
+                        .fetch_add(samples_per_block as u64, Ordering::Relaxed);
                 }
             }
             callback_stats
@@ -86,6 +89,44 @@ where
         move |error| record_stream_error(&stats, &error),
         Some(Duration::from_secs(3)),
     )?)
+}
+
+fn build_sample_stream(
+    device: &cpal::Device,
+    config: &cpal::StreamConfig,
+    producer: RealtimePcmProducer<BLOCK_SAMPLES>,
+    channels: usize,
+    samples_per_block: usize,
+    stats: &Arc<CaptureStats>,
+    format: SampleFormat,
+) -> Result<Stream, Box<dyn Error>> {
+    macro_rules! build {
+        ($sample:ty) => {
+            build_stream::<$sample>(
+                device,
+                config,
+                producer,
+                channels,
+                samples_per_block,
+                Arc::clone(stats),
+            )
+        };
+    }
+    match format {
+        SampleFormat::I8 => build!(i8),
+        SampleFormat::I16 => build!(i16),
+        SampleFormat::I24 => build!(cpal::I24),
+        SampleFormat::I32 => build!(i32),
+        SampleFormat::I64 => build!(i64),
+        SampleFormat::U8 => build!(u8),
+        SampleFormat::U16 => build!(u16),
+        SampleFormat::U24 => build!(cpal::U24),
+        SampleFormat::U32 => build!(u32),
+        SampleFormat::U64 => build!(u64),
+        SampleFormat::F32 => build!(f32),
+        SampleFormat::F64 => build!(f64),
+        format => Err(format!("unsupported loopback sample format: {format:?}").into()),
+    }
 }
 
 impl Capture {
@@ -131,13 +172,15 @@ impl Capture {
         };
         let endpoint_name = device.description()?.name().to_owned();
         let supported = device.default_output_config()?;
-        if supported.sample_rate() != 48_000 {
+        let sample_rate_hz = supported.sample_rate();
+        if !matches!(sample_rate_hz, 44_100 | 48_000) {
             return Err(format!(
-                "selected endpoint uses {} Hz; this lab currently requires 48 kHz",
-                supported.sample_rate()
+                "selected endpoint uses {sample_rate_hz} Hz; this lab supports 44.1 or 48 kHz"
             )
             .into());
         }
+        let samples_per_block =
+            usize::try_from(sample_rate_hz / (1_000 / CAPTURE_BLOCK_DURATION_MS))? * 2;
         let channels = usize::from(supported.channels());
         if channels == 0 {
             return Err("selected endpoint has no audio channels".into());
@@ -145,51 +188,22 @@ impl Capture {
         let config = supported.config();
         let (producer, consumer) = realtime_pcm_queue::<BLOCK_SAMPLES>(QUEUE_BLOCKS)?;
         let stats = Arc::new(CaptureStats::default());
-        let stream = match supported.sample_format() {
-            SampleFormat::I8 => {
-                build_stream::<i8>(&device, &config, producer, channels, Arc::clone(&stats))
-            }
-            SampleFormat::I16 => {
-                build_stream::<i16>(&device, &config, producer, channels, Arc::clone(&stats))
-            }
-            SampleFormat::I24 => {
-                build_stream::<cpal::I24>(&device, &config, producer, channels, Arc::clone(&stats))
-            }
-            SampleFormat::I32 => {
-                build_stream::<i32>(&device, &config, producer, channels, Arc::clone(&stats))
-            }
-            SampleFormat::I64 => {
-                build_stream::<i64>(&device, &config, producer, channels, Arc::clone(&stats))
-            }
-            SampleFormat::U8 => {
-                build_stream::<u8>(&device, &config, producer, channels, Arc::clone(&stats))
-            }
-            SampleFormat::U16 => {
-                build_stream::<u16>(&device, &config, producer, channels, Arc::clone(&stats))
-            }
-            SampleFormat::U24 => {
-                build_stream::<cpal::U24>(&device, &config, producer, channels, Arc::clone(&stats))
-            }
-            SampleFormat::U32 => {
-                build_stream::<u32>(&device, &config, producer, channels, Arc::clone(&stats))
-            }
-            SampleFormat::U64 => {
-                build_stream::<u64>(&device, &config, producer, channels, Arc::clone(&stats))
-            }
-            SampleFormat::F32 => {
-                build_stream::<f32>(&device, &config, producer, channels, Arc::clone(&stats))
-            }
-            SampleFormat::F64 => {
-                build_stream::<f64>(&device, &config, producer, channels, Arc::clone(&stats))
-            }
-            format => return Err(format!("unsupported loopback sample format: {format:?}").into()),
-        }?;
+        let stream = build_sample_stream(
+            &device,
+            &config,
+            producer,
+            channels,
+            samples_per_block,
+            &stats,
+            supported.sample_format(),
+        )?;
         stream.play()?;
         Ok(Self {
             _stream: stream,
             consumer,
             stats,
             endpoint_name,
+            sample_rate_hz,
         })
     }
 
@@ -223,8 +237,9 @@ mod tests {
     }
 
     #[test]
-    fn block_size_matches_one_stereo_opus_frame() {
+    fn capture_rates_fit_the_bounded_stereo_block() {
         assert_eq!(BLOCK_SAMPLES, 48_000 / 50 * 2);
+        assert_eq!(44_100 / 50 * 2, 1_764);
     }
 
     #[test]

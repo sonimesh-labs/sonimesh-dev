@@ -179,8 +179,12 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   endpoint's system mix, with its test tone selectable on that endpoint, through
   the same Opus/UDP/decode path into a software
   render check. It currently
-  requires a 48 kHz endpoint and non-silent playback; it does not identify an
-  individual source or establish Bluetooth-specific capture. On 2026-11-26, the
+  supports 44.1 and 48 kHz endpoints and requires non-silent playback; 44.1 kHz
+  is converted to the lab's 48 kHz Opus rate. It does not identify an
+  individual source or establish Bluetooth-specific capture. The 44.1-to-48 kHz
+  software conversion passes its unit test, but a ToDesk virtual endpoint test
+  captured blocks with only a 0.0001 peak during playback, so that endpoint's
+  signal path remains unverified. On 2026-11-26, the
   default endpoint carried the local test tone through 118 Opus frames with a
   source peak of 0.0812; a quiet endpoint produced no captured samples as expected.
   The enumerated Realtek non-default endpoint also passed two repeated tone runs;

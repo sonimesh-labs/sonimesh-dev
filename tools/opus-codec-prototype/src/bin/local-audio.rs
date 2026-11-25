@@ -14,7 +14,9 @@ use sonimesh_app::{
     OutputSelection, ReceiverOutputController, ReceiverPcmEndpointFactory, SourcePcmFormat,
     UdpPollOutcome, UdpReceiverPipeline,
 };
-use sonimesh_audio::{DecodeStep, OpusFrameConfig, StreamDecodeWorker, realtime_pcm_queue};
+use sonimesh_audio::{
+    DecodeStep, OpusFrameConfig, PolyphaseResampler, StreamDecodeWorker, realtime_pcm_queue,
+};
 use sonimesh_diagnostics::StreamCounters;
 use sonimesh_network::{MediaSessionSendOutcome, MediaSessionSender};
 use sonimesh_platform::{
@@ -28,6 +30,7 @@ const FRAMES: u32 = 100;
 const PACED_FRAMES_PER_SECOND: u32 = 50;
 const MAX_PACED_SECONDS: u32 = 3_600;
 const MAX_CAPTURE_SECONDS: u32 = 30;
+const MAX_CAPTURE_RESAMPLE_SAMPLES: usize = SAMPLES * 3;
 const FRAME_INTERVAL: Duration = Duration::from_millis(20);
 const STARTUP_BUFFER: Duration = Duration::from_millis(60);
 type LabResult<T> = Result<T, Box<dyn Error>>;
@@ -197,6 +200,58 @@ type CaptureReceiver = UdpReceiverPipeline<Decoder, 8, 1_148, SAMPLES>;
 type CaptureOutput = ReceiverOutputController<CheckOutput, SAMPLES>;
 
 #[cfg(windows)]
+struct CaptureResampler {
+    resampler: PolyphaseResampler,
+    input: Box<[f32]>,
+    input_samples: usize,
+}
+
+#[cfg(windows)]
+impl CaptureResampler {
+    fn new(input_rate_hz: u32) -> LabResult<Self> {
+        Ok(Self {
+            resampler: PolyphaseResampler::new(input_rate_hz, 48_000, 2)?,
+            input: vec![0.0; MAX_CAPTURE_RESAMPLE_SAMPLES].into_boxed_slice(),
+            input_samples: 0,
+        })
+    }
+
+    fn reset(&mut self) {
+        self.resampler.reset();
+        self.input_samples = 0;
+    }
+
+    fn push(&mut self, input: &[f32], output: &mut [f32; SAMPLES]) -> LabResult<bool> {
+        let Some(end) = self.input_samples.checked_add(input.len()) else {
+            return Err("capture resampler input length overflowed".into());
+        };
+        if end > self.input.len() {
+            return Err("capture resampler input buffer is full".into());
+        }
+        self.input[self.input_samples..end].copy_from_slice(input);
+        self.input_samples = end;
+        let needed_frames = self
+            .resampler
+            .input_frames_for_output(SAMPLES / 2)
+            .ok_or("capture resampler input size overflowed")?;
+        if self.input_samples / 2 < needed_frames {
+            return Ok(false);
+        }
+        let result = self
+            .resampler
+            .process(&self.input[..self.input_samples], output)?;
+        if result.produced_output_frames != SAMPLES / 2 {
+            return Err("capture resampler produced an incomplete Opus frame".into());
+        }
+        let consumed_samples = result.consumed_input_frames * 2;
+        self.input
+            .copy_within(consumed_samples..self.input_samples, 0);
+        self.input_samples -= consumed_samples;
+        Ok(true)
+    }
+}
+
+#[cfg(windows)]
 fn create_capture_path() -> LabResult<(CaptureReceiver, MediaSessionSender, CaptureOutput)> {
     let frame = OpusFrameConfig::new(48_000, 2, 20)?;
     let secret = SessionSecret::new([0x42; 32]);
@@ -284,32 +339,54 @@ fn capture_check(endpoint_id: Option<&str>, seconds: u32) -> LabResult<()> {
 
     let (mut receiver, mut sender, mut output) = create_capture_path()?;
     let mut capture = Capture::start(endpoint_id)?;
+    let mut capture_resampler = if capture.sample_rate_hz == 48_000 {
+        None
+    } else {
+        Some(CaptureResampler::new(capture.sample_rate_hz)?)
+    };
     println!(
-        "capturing the system mix from {} for up to {seconds}s; playback must already be audible on that endpoint",
-        capture.endpoint_name
+        "capturing the system mix from {} ({} Hz) for up to {seconds}s; playback must already be audible on that endpoint",
+        capture.endpoint_name, capture.sample_rate_hz
     );
     let mut encoder = opus::Encoder::new(48_000, opus::Channels::Stereo, opus::Application::Audio)?;
     let mut pcm = [0.0_f32; SAMPLES];
+    let mut capture_pcm = [0.0_f32; SAMPLES];
     let mut packet = [0_u8; 1_148];
     let deadline = Instant::now() + Duration::from_secs(u64::from(seconds));
     let mut sent = 0_u32;
     let mut decoded_frames = 0_u32;
+    let mut observed_xruns = capture.xruns();
     while Instant::now() < deadline {
         if capture.failed() {
             return Err("Windows loopback capture stream reported an error".into());
         }
-        if capture.consumer.is_empty() {
+        let xruns = capture.xruns();
+        if xruns != observed_xruns {
+            if let Some(resampler) = &mut capture_resampler {
+                resampler.reset();
+            }
+            observed_xruns = xruns;
+        }
+        let RealtimePcmPopOutcome::Filled {
+            samples,
+            discontinuity,
+            ..
+        } = capture.consumer.pop_into(&mut capture_pcm)
+        else {
             std::thread::sleep(Duration::from_millis(2));
             continue;
-        }
-        if !matches!(
-            capture.consumer.pop_into(&mut pcm),
-            RealtimePcmPopOutcome::Filled {
-                samples: SAMPLES,
-                ..
+        };
+        if let Some(resampler) = &mut capture_resampler {
+            if discontinuity {
+                resampler.reset();
             }
-        ) {
-            continue;
+            if !resampler.push(&capture_pcm[..samples], &mut pcm)? {
+                continue;
+            }
+        } else if samples != SAMPLES {
+            return Err("48 kHz loopback produced an incomplete PCM frame".into());
+        } else {
+            pcm.copy_from_slice(&capture_pcm);
         }
         process_capture_frame(
             &pcm,
@@ -328,16 +405,17 @@ fn capture_check(endpoint_id: Option<&str>, seconds: u32) -> LabResult<()> {
     if sent == 0 || source_peak < 0.001 {
         output.stop();
         return Err(format!(
-            "no non-silent system-mix audio reached the selected endpoint (captured_samples={source_samples}, source_peak={source_peak:.4}, xruns={})",
-            capture.xruns()
+            "no non-silent system-mix audio reached the selected endpoint (sample_rate_hz={}, captured_samples={source_samples}, source_peak={source_peak:.4}, xruns={})",
+            capture.sample_rate_hz, capture.xruns()
         )
         .into());
     }
     output.output_mut().finish()?;
     output.stop();
     println!(
-        "system-mix capture check passed: endpoint={}, captured_samples={}, source_peak={source_peak:.4}, xruns={}, opus_frames={sent}, decoded_frames={decoded_frames}; this does not identify an audio source",
+        "system-mix capture check passed: endpoint={}, sample_rate_hz={}, captured_samples={}, source_peak={source_peak:.4}, xruns={}, opus_frames={sent}, decoded_frames={decoded_frames}; this does not identify an audio source",
         capture.endpoint_name,
+        capture.sample_rate_hz,
         source_samples,
         capture.xruns()
     );
@@ -622,6 +700,19 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> LabResult<Mode> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(windows)]
+    #[test]
+    fn capture_resampler_converts_44100_hz_blocks_to_opus_shape() {
+        let mut resampler = super::CaptureResampler::new(44_100).unwrap();
+        let input = [0.25_f32; 1_764];
+        let mut output = [0.0_f32; super::SAMPLES];
+
+        assert!(!resampler.push(&input, &mut output).unwrap());
+        assert!(resampler.push(&input, &mut output).unwrap());
+        assert!(output.iter().all(|sample| sample.is_finite()));
+        assert!(output.iter().any(|sample| sample.abs() > 0.1));
+    }
+
     #[test]
     fn native_opus_udp_loopback_reaches_the_render_source() {
         super::check(None).expect("loopback audio path");
