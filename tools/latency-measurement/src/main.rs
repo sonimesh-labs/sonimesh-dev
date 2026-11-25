@@ -60,6 +60,7 @@ struct MeasureArgs {
     coarse_factor: usize,
     distinctness_ratio: f64,
     probe_ms: Option<f64>,
+    aligned_start_ms: f64,
     reference_channel: Option<usize>,
     recording_channel: Option<usize>,
     reference: PathBuf,
@@ -126,6 +127,16 @@ fn run_measure(args: &MeasureArgs) -> Result<(), Box<dyn Error>> {
         None => read_mono(&args.reference),
     }
     .map_err(|error| format!("reference {}: {error}", args.reference.display()))?;
+    let start_samples =
+        (args.aligned_start_ms * f64::from(reference.sample_rate_hz) / 1_000.0).round();
+    if start_samples >= reference.samples.len() as f64 {
+        return Err(format!(
+            "reference {}: --aligned-start-ms is beyond the available samples",
+            args.reference.display()
+        )
+        .into());
+    }
+    let start_samples = start_samples as usize;
     let mut offsets_ms = Vec::with_capacity(args.recordings.len());
     for (index, path) in args.recordings.iter().enumerate() {
         let recording = match args.recording_channel {
@@ -142,6 +153,13 @@ fn run_measure(args: &MeasureArgs) -> Result<(), Box<dyn Error>> {
             )
             .into());
         }
+        if start_samples >= recording.samples.len() {
+            return Err(format!(
+                "recording {}: --aligned-start-ms is beyond the available samples",
+                path.display()
+            )
+            .into());
+        }
         let mut config = OffsetConfig::new(reference.sample_rate_hz);
         config.max_search_ms = args.max_search_ms;
         config.coarse_factor = args.coarse_factor;
@@ -150,8 +168,12 @@ fn run_measure(args: &MeasureArgs) -> Result<(), Box<dyn Error>> {
             config.probe_len =
                 (probe_ms * f64::from(reference.sample_rate_hz) / 1_000.0).round() as usize;
         }
-        let estimate = estimate_offset_ms(&config, &reference.samples, &recording.samples)
-            .map_err(|error| format!("recording {}: {error}", path.display()))?;
+        let estimate = estimate_offset_ms(
+            &config,
+            &reference.samples[start_samples..],
+            &recording.samples[start_samples..],
+        )
+        .map_err(|error| format!("recording {}: {error}", path.display()))?;
         if args.offsets_only {
             println!("{:.3}", estimate.offset_ms);
         } else {
@@ -377,6 +399,7 @@ fn parse_measure(rest: &[String]) -> Result<Option<MeasureArgs>, String> {
     let mut coarse_factor = 16_usize;
     let mut distinctness_ratio = 3.0_f64;
     let mut probe_ms: Option<f64> = None;
+    let mut aligned_start_ms = 0.0_f64;
     let mut reference_channel = None;
     let mut recording_channel = None;
     let mut offsets_only = false;
@@ -386,6 +409,10 @@ fn parse_measure(rest: &[String]) -> Result<Option<MeasureArgs>, String> {
         let arg = &rest[index];
         match arg.as_str() {
             "--offsets-only" => offsets_only = true,
+            "--aligned-start-ms" => {
+                index += 1;
+                aligned_start_ms = parse_f64(rest.get(index), "--aligned-start-ms")?;
+            }
             "--reference-channel" | "--recording-channel" => {
                 index += 1;
                 let channel = parse_usize(rest.get(index), arg)?;
@@ -424,6 +451,9 @@ fn parse_measure(rest: &[String]) -> Result<Option<MeasureArgs>, String> {
     if !max_search_ms.is_finite() || max_search_ms <= 0.0 {
         return Err("--max-search-ms must be positive".into());
     }
+    if !aligned_start_ms.is_finite() || aligned_start_ms < 0.0 {
+        return Err("--aligned-start-ms must be finite and non-negative".into());
+    }
     if coarse_factor == 0 {
         return Err("--coarse-factor must be non-zero".into());
     }
@@ -446,6 +476,7 @@ fn parse_measure(rest: &[String]) -> Result<Option<MeasureArgs>, String> {
         coarse_factor,
         distinctness_ratio,
         probe_ms,
+        aligned_start_ms,
         reference_channel,
         recording_channel,
         reference,
@@ -508,7 +539,7 @@ fn print_usage() {
 
 Usage:
   sonimesh-latency-measurement generate [--sample-rate N] [--seconds N] [--seed N] [--bits FMT] <output.wav>
-  sonimesh-latency-measurement measure [--max-search-ms N] [--coarse-factor N] [--distinctness-ratio R] [--probe-ms N] [--reference-channel N] [--recording-channel N] [--offsets-only] <reference.wav> <recording.wav>...
+  sonimesh-latency-measurement measure [--max-search-ms N] [--coarse-factor N] [--distinctness-ratio R] [--probe-ms N] [--aligned-start-ms N] [--reference-channel N] [--recording-channel N] [--offsets-only] <reference.wav> <recording.wav>...
   sonimesh-latency-measurement info [--check] <wave.wav>...
   sonimesh-latency-measurement summary
   sonimesh-latency-measurement --help
@@ -529,6 +560,7 @@ Options:
   --coarse-factor N       Coarse-search downsampling factor (default: 16).
   --distinctness-ratio R  Minimum best/second-best peak ratio (default: 3.0).
   --probe-ms N            Correlation probe duration in ms (default: 32768 samples, about 683 ms at 48 kHz).
+  --aligned-start-ms N    Skip N ms in all inputs on a shared timeline (default: 0).
   --reference-channel N   Use one-based channel N in the reference (default: average).
   --recording-channel N   Use one-based channel N in every recording (default: average).
   --offsets-only          Print only per-run offsets (one per line) for summary.

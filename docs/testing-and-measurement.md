@@ -80,6 +80,12 @@ as both inputs with separate channel selections. Record the chosen channels in
 the measurement report. These are operator choices, not automatic signal
 selection or evidence of physical latency by themselves.
 
+For inputs on a shared recording timeline, `measure --aligned-start-ms` skips
+the same interval in both channels before correlation, so a recording can start
+before its probe. The search window then begins at that shared position. Record
+the chosen start and ensure the reference probe is present in the selected
+window; this option assumes the inputs are already time-aligned.
+
 Every report must include Android model and build, Windows version, Wi-Fi AP,
 network band, output device, sample rate, channel count, buffer mode, frame size,
 Opus bitrate, jitter mode, and limiter configuration.

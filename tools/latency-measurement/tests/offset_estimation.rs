@@ -303,6 +303,75 @@ fn cli_measures_two_channels_from_one_common_interface_recording() {
 }
 
 #[test]
+fn cli_measures_after_shared_leading_silence() {
+    let bin = env!("CARGO_BIN_EXE_sonimesh-latency-measurement");
+    let dir = test_dir("aligned_start");
+    std::fs::create_dir_all(&dir).unwrap();
+    let reference_path = dir.join("reference.wav");
+    let recording_path = dir.join("recording.wav");
+    let short_path = dir.join("short.wav");
+    let probe = test_signal(SAMPLE_RATE, 3, 7);
+    let reference = delayed_recording(72_000, &probe);
+    let recording = delayed_recording(12_000, &reference);
+    write_mono(
+        &reference_path,
+        SAMPLE_RATE,
+        &reference,
+        SampleFormat::Float32,
+    )
+    .unwrap();
+    write_mono(
+        &recording_path,
+        SAMPLE_RATE,
+        &recording,
+        SampleFormat::Float32,
+    )
+    .unwrap();
+    write_mono(&short_path, SAMPLE_RATE, &[0.0; 100], SampleFormat::Float32).unwrap();
+    let run = |start: &str, recording: &std::path::Path| {
+        Command::new(bin)
+            .args(["measure", "--aligned-start-ms", start, "--offsets-only"])
+            .arg(&reference_path)
+            .arg(recording)
+            .output()
+            .unwrap()
+    };
+    let result = run("1500", &recording_path);
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let offset: f64 = String::from_utf8(result.stdout)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    assert!((offset - 250.0).abs() < 0.1);
+    for invalid in ["-1", "NaN", "inf"] {
+        let result = run(invalid, &recording_path);
+        assert!(!result.status.success());
+        assert!(
+            String::from_utf8_lossy(&result.stderr)
+                .contains("--aligned-start-ms must be finite and non-negative")
+        );
+    }
+    let too_late = run("999999", &recording_path);
+    assert!(!too_late.status.success());
+    assert!(String::from_utf8_lossy(&too_late.stderr).contains("reference"));
+    let short = run("1500", &short_path);
+    assert!(!short.status.success());
+    let error = String::from_utf8_lossy(&short.stderr);
+    assert!(
+        error.contains("recording")
+            && error.contains("short.wav")
+            && error.contains("--aligned-start-ms"),
+        "{error}"
+    );
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
 fn cli_generate_and_measure_round_trip() {
     for format in [
         SampleFormat::Pcm16,

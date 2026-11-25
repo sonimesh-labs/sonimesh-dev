@@ -68,9 +68,21 @@ cargo run -p sonimesh-latency-measurement -- measure \
   --reference-channel 1 --recording-channel 2 capture.wav capture.wav
 ```
 
-The reference channel must contain the probe at the start of the file; the
-measured offset remains relative to that probe, and the setup must still be
-calibrated and documented before interpreting it as physical latency.
+If recording began before the probe, use `--aligned-start-ms N` to skip the
+same duration in the reference and every recording, for example:
+
+```sh
+cargo run -p sonimesh-latency-measurement -- measure \
+  --reference-channel 1 --recording-channel 2 --aligned-start-ms 1500 \
+  capture.wav capture.wav
+```
+
+Choose a start near the reference probe and keep the probe in the selected
+reference window. The option assumes a shared timeline and rounds the start to
+the nearest sample. `--max-search-ms` is measured from that selected position.
+It defaults to zero skipped time. The measured offset remains relative to the
+selected reference window; calibrate and document the setup before interpreting
+it as physical latency.
 
 Pass `--offsets-only` to print just the per-run offset numbers, one per line.
 This composes with `summary` so offsets from separate measurement sessions can
