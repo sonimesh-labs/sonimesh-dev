@@ -642,6 +642,9 @@ the service finishes, starting again requests fresh screen-capture consent.
 If **Stop capture** is used while a permission or consent request is pending,
 the lab cancels that start and ignores its eventual result. Close the system
 dialog before starting another capture.
+Copied or shared Android lab evidence includes the last known sending-mute
+state. It is retained after a session stops and starts off for each new session;
+it does not record the full mute history.
 The desktop defaults to a software PCM check. On Windows, add `--features playback`
 before `--` and pass `--play` after it to use the default output device; add
 `--select-output` to choose a device. `--require-tone` checks decoded audio,

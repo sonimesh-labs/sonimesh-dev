@@ -228,6 +228,7 @@ class LabStatusTest {
                     LabStatus.publishSenderQueueDrops(7)
                     LabStatus.publishSentPackets(12)
                     LabStatus.publishEncoderRate(73)
+                    LabStatus.publishSenderMuted(true)
                     requireNotNull(findButton(activity.window.decorView, "Copy lab evidence")).performClick()
 
                     val clip = requireNotNull(
@@ -238,6 +239,7 @@ class LabStatusTest {
                     assertTrue(text.contains("Transport: ADB TCP"))
                     assertTrue(text.contains("Capture signal: no capturable audio"))
                     assertTrue(text.contains("Capture duration: 42s"))
+                    assertTrue(text.contains("Sending mute (last known): on"))
                     assertTrue(text.contains("Sender queue drops: 7"))
                     assertTrue(text.contains("Media packets sent: 12"))
                     assertTrue(text.contains("Encoded payload average: 73 kbps"))
@@ -249,6 +251,24 @@ class LabStatusTest {
                     LabStatus.publishSignal(null)
                     LabStatus.publishCaptureDuration(null)
                 }
+            }
+        }
+    }
+
+    @Test
+    fun evidenceRetainsLastMuteAfterStopAndResetsOnNextSession() {
+        val instrumentation = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
+        instrumentation.runOnMainSync {
+            try {
+                LabStatus.serviceStarted(LabCaptureUsage.All, OpusBitrate.STANDARD)
+                assertTrue(LabStatus.copyableEvidence().contains("Sending mute (last known): off"))
+                LabStatus.publishSenderMuted(true)
+                LabStatus.serviceFinished()
+                assertTrue(LabStatus.copyableEvidence().contains("Sending mute (last known): on"))
+                LabStatus.serviceStarted(LabCaptureUsage.All, OpusBitrate.STANDARD)
+                assertTrue(LabStatus.copyableEvidence().contains("Sending mute (last known): off"))
+            } finally {
+                LabStatus.serviceFinished()
             }
         }
     }

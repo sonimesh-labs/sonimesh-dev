@@ -55,6 +55,7 @@ internal object LabStatus {
     private var captureDurationSeconds: Long? = null
     private val durationObservers = mutableSetOf<(Long?) -> Unit>()
     private var senderMuted: Boolean? = null
+    private var lastSenderMuted: Boolean? = null
     private val muteObservers = mutableSetOf<(Boolean?) -> Unit>()
 
     fun serviceStarted(usage: LabCaptureUsage, bitrate: OpusBitrate, transport: LabTransport = LabTransport.Adb, udpPort: Int? = null) {
@@ -93,6 +94,7 @@ internal object LabStatus {
 
     fun publishSenderMuted(value: Boolean?) {
         senderMuted = value
+        if (value != null) lastSenderMuted = value
         muteObservers.toList().forEach { it(value) }
     }
 
@@ -209,6 +211,7 @@ internal object LabStatus {
         }
         appendLine("Capture signal: ${signalState?.label ?: "—"}")
         appendLine("Capture duration: ${captureDurationSeconds?.let { "${it}s" } ?: "—"}")
+        appendLine("Sending mute (last known): ${lastSenderMuted?.let { if (it) "on" else "off" } ?: "—"}")
         appendLine("Sender queue drops: ${senderQueueDrops ?: "—"}")
         appendLine("Media packets sent: ${sentPackets ?: "—"}")
         appendLine("Encoded payload average: ${encoderRate?.let { "$it kbps" } ?: "—"}")
