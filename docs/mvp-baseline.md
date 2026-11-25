@@ -92,7 +92,10 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   arrive for standard integer and floating-point PCM formats without retaining
   PCM; it observes the
   system mix and does not establish
-  source-specific Bluetooth capture. On 2026-11-26, a Windows endpoint ID could
+  source-specific Bluetooth capture. The probe also offers an explicit combined
+  wait-and-monitor action that starts endpoint monitoring before preparing the
+  phone connection and stops a newly started monitor if preparation fails. On
+  2026-11-26, a Windows endpoint ID could
   be re-resolved and selected default and non-default endpoint loopback streams
   started and stopped. The Bluetooth inbound-wait check passed, while direct open again
   returned `UnknownFailure` / `0x8007001F`; phone-initiated playback and an

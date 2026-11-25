@@ -108,14 +108,17 @@ async function toggleLoopback() {
   }
 }
 
-async function toggle(mode: 'connect' | 'wait' = 'connect') {
+async function toggle(mode: 'connect' | 'wait' = 'connect', monitorOutput = false) {
   if (!window.__TAURI__) return
   busy.value = true
+  if (monitorOutput) loopbackBusy.value = true
   error.value = null
   suggestPhoneInitiated.value = false
   message.value = null
   statusRequest++
   clearTimeout(timer)
+  let loopbackStartedHere = false
+  let bluetoothAttempted = false
   try {
     if (phase.value !== 'idle') {
       await window.__TAURI__.core.invoke('bluetooth_disconnect')
@@ -123,19 +126,45 @@ async function toggle(mode: 'connect' | 'wait' = 'connect') {
       clearTimeout(timer)
       message.value = 'Disconnected.'
     } else {
+      if (monitorOutput && !loopback.value?.running) {
+        loopbackError.value = null
+        try {
+          loopback.value = await window.__TAURI__.core.invoke<LoopbackSnapshot>('loopback_start', { endpointId: loopbackEndpointId.value })
+          if (!loopback.value.running) throw new Error('Windows output monitoring did not start.')
+          loopbackStartedHere = true
+        } catch (cause) {
+          loopbackError.value = String(cause)
+          throw cause
+        }
+      }
+      bluetoothAttempted = true
       await window.__TAURI__.core.invoke(mode === 'wait' ? 'bluetooth_prepare' : 'bluetooth_connect', { generation: generation.value, index: Number(selected.value) })
       phase.value = mode === 'wait' ? 'waiting' : 'open'
       message.value = mode === 'wait'
-        ? `Waiting for the phone to connect to ${sourceName()} through Bluetooth.`
+        ? `Waiting for the phone to connect to ${sourceName()} through Bluetooth.${monitorOutput ? ' Windows output monitoring is active.' : ''}`
         : `System playback connection opened for ${sourceName()}.`
+      if (loopbackStartedHere) void pollLoopback()
       void poll()
     }
   } catch (cause) {
-    error.value = String(cause)
+    if (loopbackStartedHere) {
+      clearTimeout(loopbackTimer)
+      try {
+        loopback.value = await window.__TAURI__!.core.invoke<LoopbackSnapshot>('loopback_stop')
+      } catch (stopCause) {
+        loopbackError.value = String(stopCause)
+      }
+    }
+    if (monitorOutput && !bluetoothAttempted) {
+      loopbackError.value ||= String(cause)
+    } else {
+      error.value = String(cause)
+    }
     suggestPhoneInitiated.value = mode === 'connect' && phase.value === 'idle'
     if (phase.value !== 'idle') void poll()
   } finally {
     busy.value = false
+    if (monitorOutput) loopbackBusy.value = false
   }
 }
 
@@ -182,6 +211,7 @@ onBeforeUnmount(() => { disposed = true; statusRequest++; clearTimeout(timer); c
     </template>
     <button v-if="names.length || phase !== 'idle'" type="button" class="preview-action" :disabled="busy || (phase === 'idle' && selected === '')" @click="toggle('connect')">{{ phase === 'idle' ? 'Connect Bluetooth' : 'Disconnect Bluetooth' }}</button>
     <button v-if="names.length && phase === 'idle'" type="button" class="preview-action" :disabled="busy || selected === ''" @click="toggle('wait')">Wait for phone to connect</button>
+    <button v-if="names.length && phase === 'idle'" type="button" class="preview-action" :disabled="busy || loopbackBusy || selected === '' || !loopbackEndpointId" @click="toggle('wait', true)">Wait + monitor system output</button>
     <p v-if="message" role="status">{{ message }}</p>
     <p v-if="error" class="command-error" role="alert">{{ error }}</p>
     <p v-if="suggestPhoneInitiated" role="status">Try waiting for the phone to connect, then start playback from the phone.</p>
