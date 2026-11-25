@@ -140,3 +140,20 @@ it('starts and stops the Windows system-output PCM check', async () => {
   expect(wrapper.text()).toContain('4096 samples; recent peak 50.0%.')
   wrapper.unmount()
 })
+
+it('shows when a running loopback stream has not delivered samples yet', async () => {
+  let running = false
+  const invoke = vi.fn((command: string) => {
+    if (command === 'bluetooth_status') return Promise.resolve('idle')
+    if (command === 'loopback_status') return Promise.resolve({ running, endpointName: 'Default speakers', sampleRate: running ? 48000 : 0, channels: running ? 2 : 0, samples: 0, peak: 0, error: null })
+    if (command === 'loopback_start') { running = true; return Promise.resolve({ running, endpointName: 'Default speakers', sampleRate: 48000, channels: 2, samples: 0, peak: 0, error: null }) }
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  await wrapper.findAll('button').find(button => button.text() === 'Start PCM check')!.trigger('click')
+  await flushPromises()
+  expect(wrapper.text()).toContain('Waiting for Windows audio samples.')
+  wrapper.unmount()
+})

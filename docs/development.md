@@ -1182,6 +1182,9 @@ PCM check** in the same panel, play audio through Windows, and watch the endpoin
 name, sample count, and recent peak. Stop the check when finished. It reports only aggregate activity;
 the endpoint mix can include audio from other applications and does not identify
 the Bluetooth source. No PCM is retained by the probe.
+On 2026-11-26, a two-second start with no audio being played returned zero samples
+and a zero peak. This verifies status and stop behavior only; signal capture still
+needs a playback source.
 
 The inbound-wait hardware check below requires exactly one listed playback
 candidate, prepares Windows to accept a remote connection for two seconds, and
