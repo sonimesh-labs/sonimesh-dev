@@ -564,11 +564,11 @@ describe('desktop output probe', () => {
     const wrapper = mountStoppedProbe()
     await flushPromises()
     await wrapper.get('#lab-output').setValue('1')
-    await wrapper.get('#lab-buffer').setValue('40')
+    await wrapper.get('#lab-buffer').setValue('0')
     await wrapper.get('#lab-playout').setValue(true)
     await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
     await flushPromises()
-    expect(invoke).toHaveBeenCalledWith('start_lab', { host: '127.0.0.1', generation: 4, index: 1, startupBufferMs: 40, adaptive: true, mediaPort: 39093, controlPort: 47610 })
+    expect(invoke).toHaveBeenCalledWith('start_lab', { host: '127.0.0.1', generation: 4, index: 1, startupBufferMs: 0, adaptive: true, mediaPort: 39093, controlPort: 47610 })
     expect(wrapper.get('#lab-buffer').attributes('disabled')).toBeDefined()
     expect(wrapper.get('#lab-output').attributes('disabled')).toBeDefined()
     expect(wrapper.get('button').attributes('disabled')).toBeDefined()
@@ -1207,7 +1207,7 @@ describe('desktop output probe', () => {
 
   it('restores lab settings and requires reselection when the saved device snapshot is stale', async () => {
     localStorage.setItem('sonimesh.outputProbe.labSettings', JSON.stringify({
-      labHost: '192.168.1.7', androidHost: '192.168.1.22', labOutput: '1', startupBufferMs: 100, adaptive: true, mediaPort: 39094,
+      labHost: '192.168.1.7', androidHost: '192.168.1.22', labOutput: '1', startupBufferMs: 0, adaptive: true, mediaPort: 39094,
     }))
     const invoke = vi.fn().mockResolvedValueOnce({ generation: 3, devices: [
       { label: 'Default', sampleRateHz: 48_000, channels: 2, isDefault: true },
@@ -1218,7 +1218,7 @@ describe('desktop output probe', () => {
     await flushPromises()
     expect((wrapper.get('#lab-host').element as HTMLInputElement).value).toBe('192.168.1.7')
     expect((wrapper.get('#android-host').element as HTMLInputElement).value).toBe('192.168.1.22')
-    expect((wrapper.get('#lab-buffer').element as HTMLSelectElement).value).toBe('100')
+    expect((wrapper.get('#lab-buffer').element as HTMLSelectElement).value).toBe('0')
     expect((wrapper.get('#lab-media-port').element as HTMLInputElement).value).toBe('39094')
     expect((wrapper.get('#lab-playout').element as HTMLSelectElement).value).toBe('true')
     expect((wrapper.get('#lab-output').element as HTMLSelectElement).value).toBe('unavailable')
@@ -1235,11 +1235,11 @@ describe('desktop output probe', () => {
     expect((wrapper.get('#lab-host').element as HTMLInputElement).value).toBe('127.0.0.1')
     expect((wrapper.get('#lab-buffer').element as HTMLSelectElement).value).toBe('60')
     await wrapper.get('#lab-host').setValue('10.0.0.8')
-    await wrapper.get('#lab-buffer').setValue('20')
+    await wrapper.get('#lab-buffer').setValue('0')
     await wrapper.get('#lab-playout').setValue('true')
     const stored = JSON.parse(localStorage.getItem('sonimesh.outputProbe.labSettings')!)
     expect(stored.labHost).toBe('10.0.0.8')
-    expect(stored.startupBufferMs).toBe(20)
+    expect(stored.startupBufferMs).toBe(0)
     expect(stored.adaptive).toBe(true)
     wrapper.unmount()
   })

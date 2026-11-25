@@ -138,8 +138,8 @@ impl Lab {
         if self.child.is_some() {
             return Err("The listener is already running.".into());
         }
-        if !(20..=120).contains(&startup_buffer_ms) || !startup_buffer_ms.is_multiple_of(20) {
-            return Err("Startup buffer must be 20 to 120 ms in 20 ms steps.".into());
+        if startup_buffer_ms > 120 || !startup_buffer_ms.is_multiple_of(20) {
+            return Err("Startup buffer must be 0 to 120 ms in 20 ms steps.".into());
         }
         if media_port == 0 {
             return Err("Receiver UDP port must be between 1 and 65535.".into());
@@ -771,7 +771,7 @@ mod tests {
         for host in ["invalid", "0.0.0.0", "224.0.0.1", "255.255.255.255"] {
             assert!(lab.start(host, None, 60, false, 39093, 47610).is_err());
         }
-        for value in [0, 19, 30, 121, 140] {
+        for value in [1, 19, 30, 121, 140] {
             assert!(
                 lab.start("127.0.0.1", None, value, false, 39093, 47610)
                     .is_err()
@@ -1242,7 +1242,7 @@ mod tests {
         let device = output.default_device_probe().unwrap().device.id;
         let mut lab = Lab::default();
         let started = lab
-            .start("127.0.0.1", Some(device.as_str()), 40, false, 39094, 47612)
+            .start("127.0.0.1", Some(device.as_str()), 0, false, 39094, 47612)
             .unwrap();
         assert_eq!(started.media_port, Some(39094));
         assert_eq!(started.control_port, Some(47612));

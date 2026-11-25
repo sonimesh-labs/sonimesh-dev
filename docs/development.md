@@ -725,7 +725,9 @@ before `--` and pass `--play` after it to use the default output device; add
 `--select-output` to choose a device. `--require-tone` checks decoded audio,
 not whether it was audible. Output callback counts are not a listening test.
 For controlled network experiments, `--startup-buffer-ms` selects the initial
-wait after the first packet, in 20 ms steps from 20 to 120 ms (default 60 ms).
+wait after the first packet, in 20 ms steps from 0 to 120 ms (default 60 ms).
+Zero removes the fixed wait; adaptive playout may still gate decoding. A shorter
+wait can increase concealment when packets arrive late.
 The same wait is used after output recovery or decoder resynchronization. This is
 a fixed startup delay, not an adaptive jitter target or an end-to-end latency
 measurement; a longer wait can overflow the bounded packet buffer under bursts.

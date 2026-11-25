@@ -94,7 +94,7 @@ function evidenceValue(value: unknown): string {
 }
 
 const LAB_SETTINGS_KEY = 'sonimesh.outputProbe.labSettings'
-const startupBufferChoices = [20, 40, 60, 80, 100, 120]
+const startupBufferChoices = [0, 20, 40, 60, 80, 100, 120]
 
 interface StoredLabSettings {
   labHost?: string
@@ -570,7 +570,7 @@ onBeforeUnmount(() => { disposed = true; labRequest++; suggestRequest++; clearTi
       <select id="lab-buffer" v-model.number="startupBufferMs" :disabled="lab.running || labBusy">
         <option v-for="value in startupBufferChoices" :key="value" :value="value">{{ value }} ms</option>
       </select>
-      <p class="preview-note">Initial playout wait; restart the listener to change it. This is not an end-to-end latency measurement.</p>
+      <p class="preview-note">Initial fixed playout wait; 0 ms starts without an extra wait. Adaptive mode can still wait for packets. Restart the listener to change it.</p>
       <label for="lab-playout">Playout mode</label>
       <select id="lab-playout" v-model="adaptive" :disabled="lab.running || labBusy">
         <option :value="false">Fixed</option>

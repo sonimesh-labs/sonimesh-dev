@@ -345,9 +345,9 @@ impl Options {
                         .next()
                         .ok_or("--startup-buffer-ms requires a value")?
                         .parse::<u64>()
-                        .map_err(|_| "startup buffer must be 20 to 120 ms in 20 ms steps")?;
-                    if !(20..=120).contains(&value) || value % 20 != 0 {
-                        return Err("startup buffer must be 20 to 120 ms in 20 ms steps".into());
+                        .map_err(|_| "startup buffer must be 0 to 120 ms in 20 ms steps")?;
+                    if value > 120 || value % 20 != 0 {
+                        return Err("startup buffer must be 0 to 120 ms in 20 ms steps".into());
                     }
                     result.startup_buffer = Duration::from_millis(value);
                     startup_buffer_set = true;
@@ -368,7 +368,7 @@ impl Options {
                 }
                 _ => {
                     return Err(
-                        "usage: paired-audio-lab [--require-tone] [--check-probe] [--play [--select-output | --output-id-stdin | --output-id-framed] [--control]] [--status] [--signal-status] [--adaptive] [--startup-buffer-ms 20-120] [--keep-listening [--disconnect-after-ms 100-120000 [--disconnect-count 1-20]] [--reject-starts 1-36]] [--control-port PORT] [--media-port PORT] [--bind IPv4 --host IPv4]"
+                        "usage: paired-audio-lab [--require-tone] [--check-probe] [--play [--select-output | --output-id-stdin | --output-id-framed] [--control]] [--status] [--signal-status] [--adaptive] [--startup-buffer-ms 0-120] [--keep-listening [--disconnect-after-ms 100-120000 [--disconnect-count 1-20]] [--reject-starts 1-36]] [--control-port PORT] [--media-port PORT] [--bind IPv4 --host IPv4]"
                             .into(),
                     );
                 }
@@ -2459,6 +2459,20 @@ mod tests {
     }
 
     #[test]
+    fn zero_startup_wait_schedules_the_first_accepted_frame_immediately() {
+        let now = Instant::now();
+        let mut next = None;
+        arm_playout(
+            &mut next,
+            InsertOutcome::Inserted,
+            false,
+            now,
+            Duration::ZERO,
+        );
+        assert_eq!(next, Some(now));
+    }
+
+    #[test]
     fn playout_deadline_does_not_accumulate_poll_delay() {
         let origin = Instant::now();
         let mut deadline = origin;
@@ -2527,14 +2541,14 @@ mod tests {
         assert!(!defaults.status);
         assert!(!defaults.adaptive);
         assert_eq!(defaults.startup_buffer, Duration::from_millis(60));
-        for value in ["20", "40", "60", "80", "100", "120"] {
+        for value in ["0", "20", "40", "60", "80", "100", "120"] {
             let options = Options::parse(args(&["--startup-buffer-ms", value])).unwrap();
             assert_eq!(
                 options.startup_buffer.as_millis(),
                 value.parse::<u128>().unwrap()
             );
         }
-        for value in ["0", "19", "30", "140", "invalid"] {
+        for value in ["1", "19", "30", "140", "invalid"] {
             assert!(Options::parse(args(&["--startup-buffer-ms", value])).is_err());
         }
         assert!(Options::parse(args(&["--startup-buffer-ms"])).is_err());

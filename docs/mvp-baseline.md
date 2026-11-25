@@ -214,7 +214,7 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   listener snapshot. Session evidence copy/share includes those events, and
   remains available with status plus events when a session ends before metrics
   arrive. This is operator evidence only and excludes invitations and audio.
-  Its fixed startup wait is configurable from 20 to 120 ms for network experiments;
+  Its fixed startup wait is configurable from 0 to 120 ms for network experiments;
   the desktop probe exposes this setting before listener startup. An opt-in
   experimental Balanced adaptive target gates live playout with bounded waits;
   those waits can produce silence and target reductions do not accelerate

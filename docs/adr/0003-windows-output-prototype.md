@@ -89,9 +89,11 @@ available observations. They do not establish audibility or latency.
 The probe resolves a selection from its device snapshot and passes the opaque
 endpoint ID to the child through its standard input; the child probes that exact
 endpoint before listening. Refreshing the list invalidates a pending selection.
-Before starting, the probe can select the child's fixed startup buffer from 20
-to 120 ms in 20 ms steps; changing it requires restarting the listener. This is
-an experiment setting, not an adaptive jitter or end-to-end latency measurement.
+Before starting, the probe can select the child's fixed startup wait from 0
+to 120 ms in 20 ms steps; changing it requires restarting the listener. Zero
+starts playout at the first accepted frame without an additional fixed wait.
+Adaptive playout can still gate decoding. This is an experiment setting, not an
+end-to-end latency measurement.
 The same control-domain pipe carries bounded local gain and mute commands after
 startup. The probe displays values acknowledged by the child; its per-stream
 gain handle retains these values through output recovery and successive sessions.
