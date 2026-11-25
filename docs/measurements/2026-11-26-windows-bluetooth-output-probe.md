@@ -87,6 +87,11 @@
   or an application-specific Bluetooth PCM source.
 - The local mobile-device tool exposes only an Android 9 x86_64 emulator, not a
   physical Bluetooth source, so it cannot initiate the phone-side playback test.
+- The probe's UI test simulates Windows closing an opened connection. It verifies
+  that the selected source returns to phone wait without stopping a jointly
+  started output monitor, and that a failed restart returns to idle and stops the
+  monitor. This is software state-flow coverage; a physical phone disconnect and
+  reconnect cycle has not been exercised.
 
 Commands run from the repository root:
 

@@ -563,7 +563,10 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   started, with a live level bar for the recent peak, so a brief signal remains
   visible after the recent meter clears. Neither value identifies which
   application produced the audio or proves an application-specific Bluetooth PCM
-  source.
+  source. If Windows closes an active Bluetooth playback connection, the probe
+  re-enters phone wait and keeps a jointly started output monitor running; a
+  failed wait restart stops that monitor and reports the failure. Explicit user
+  disconnect still stops the jointly started monitor.
   It can also start and stop the separately built paired-audio lab process and
   display its public test invitation, session status, and periodic packet,
   decode, and output-recovery observations. That process can use a selected output;

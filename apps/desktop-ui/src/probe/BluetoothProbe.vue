@@ -30,6 +30,7 @@ let disposed = false
 let statusRequest = 0
 let loopbackRequest = 0
 let refreshOnFocus = false
+let recoverBluetoothWait = false
 
 function sourceName() {
   return names.value[Number(selected.value)] ?? 'selected source'
@@ -43,6 +44,30 @@ function updateLoopbackWaitState(snapshot: LoopbackSnapshot) {
   }
   loopbackStartedAt ??= Date.now()
   loopbackNoSamplesLong.value = Date.now() - loopbackStartedAt >= LOOPBACK_NO_SAMPLES_DELAY_MS
+}
+
+async function resumeBluetoothWait(request: number): Promise<'recovered' | 'failed' | false> {
+  if (!recoverBluetoothWait || selected.value === '') return false
+  busy.value = true
+  try {
+    await window.__TAURI__!.core.invoke('bluetooth_prepare', {
+      generation: generation.value,
+      index: Number(selected.value),
+    })
+    if (disposed || request !== statusRequest) return 'failed'
+    phase.value = 'waiting'
+    message.value = `Windows closed the playback connection. Waiting for ${sourceName()} to reconnect through Bluetooth.${combinedMonitorOwned.value ? ' Windows output monitoring remains active.' : ''}`
+  } catch (cause) {
+    if (disposed || request !== statusRequest) return 'failed'
+    recoverBluetoothWait = false
+    phase.value = 'idle'
+    error.value = `Windows closed the playback connection, but waiting could not restart: ${String(cause)}`
+    await stopCombinedMonitor()
+    return 'failed'
+  } finally {
+    if (!disposed && request === statusRequest) busy.value = false
+  }
+  return 'recovered'
 }
 
 async function refresh() {
@@ -95,21 +120,31 @@ function refreshCandidatesOnFocus() {
 async function poll() {
   if (disposed || phase.value === 'idle') return
   const request = statusRequest
+  let shouldContinue = true
   try {
     const state = await window.__TAURI__!.core.invoke<'idle' | 'waiting' | 'open'>('bluetooth_status')
     if (disposed || request !== statusRequest) return
     if (state === 'idle') {
-      phase.value = 'idle'
-      message.value = 'Windows closed the playback connection.'
-      await stopCombinedMonitor()
-      return
+      shouldContinue = false
+      const recovery = await resumeBluetoothWait(request)
+      if (disposed || request !== statusRequest || recovery === 'failed') return
+      if (recovery === 'recovered') {
+        shouldContinue = true
+      } else {
+        recoverBluetoothWait = false
+        phase.value = 'idle'
+        message.value = 'Windows closed the playback connection.'
+        await stopCombinedMonitor()
+        return
+      }
+    } else {
+      if (state === 'open' && phase.value === 'waiting') message.value = `System playback connection opened for ${sourceName()}.`
+      phase.value = state
     }
-    if (state === 'open' && phase.value === 'waiting') message.value = `System playback connection opened for ${sourceName()}.`
-    phase.value = state
   } catch (cause) {
     if (!disposed && request === statusRequest) error.value = String(cause)
   }
-  if (!disposed && request === statusRequest && phase.value !== 'idle') timer = setTimeout(poll, 1000)
+  if (!disposed && request === statusRequest && shouldContinue) timer = setTimeout(poll, 1000)
 }
 
 async function pollLoopback() {
@@ -225,6 +260,7 @@ async function toggle(mode: 'connect' | 'wait' = 'connect', monitorOutput = fals
   let directError: unknown
   try {
     if (phase.value !== 'idle') {
+      recoverBluetoothWait = false
       await window.__TAURI__.core.invoke('bluetooth_disconnect')
       phase.value = 'idle'
       clearTimeout(timer)
@@ -259,6 +295,7 @@ async function toggle(mode: 'connect' | 'wait' = 'connect', monitorOutput = fals
         await window.__TAURI__.core.invoke(mode === 'wait' ? 'bluetooth_prepare' : 'bluetooth_connect', { generation: generation.value, index: Number(selected.value) })
       }
       phase.value = connectionMode === 'wait' ? 'waiting' : 'open'
+      recoverBluetoothWait = true
       message.value = connectionMode === 'wait'
         ? `${directError ? `Direct connection failed (${String(directError)}). ` : ''}Waiting for the phone to connect to ${sourceName()} through Bluetooth.${monitorOutput ? ' Windows output monitoring is active.' : ''}`
         : `System playback connection opened for ${sourceName()}.`
@@ -266,6 +303,7 @@ async function toggle(mode: 'connect' | 'wait' = 'connect', monitorOutput = fals
       void poll()
     }
   } catch (cause) {
+    recoverBluetoothWait = false
     if (loopbackStartedHere) {
       await stopCombinedMonitor()
     }

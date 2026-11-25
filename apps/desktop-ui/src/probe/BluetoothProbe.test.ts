@@ -371,7 +371,7 @@ it('stops newly started monitoring and reports both errors when automatic wait a
   wrapper.unmount()
 })
 
-it('stops combined output monitoring when Windows closes an opened connection', async () => {
+it('re-enters phone wait and keeps combined monitoring when Windows closes an opened connection', async () => {
   vi.useFakeTimers()
   let phase = 'idle'
   let monitoring = false
@@ -405,9 +405,63 @@ it('stops combined output monitoring when Windows closes an opened connection', 
   phase = 'idle'
   await vi.advanceTimersByTimeAsync(1000)
   await flushPromises()
+  const prepareCalls = invoke.mock.calls.filter(([command]) => command === 'bluetooth_prepare')
+  expect(prepareCalls).toHaveLength(2)
+  expect(wrapper.text()).toContain('Windows closed the playback connection. Waiting for Phone to reconnect through Bluetooth.')
+  expect(wrapper.text()).toContain('Windows output monitoring remains active.')
+  expect(wrapper.text()).toContain('Waiting for Windows audio samples.')
+  expect(invoke).not.toHaveBeenCalledWith('loopback_stop')
+  await wrapper.findAll('button').find(button => button.text() === 'Disconnect Bluetooth')!.trigger('click')
+  await flushPromises()
   expect(invoke).toHaveBeenCalledWith('loopback_stop')
-  expect(wrapper.text()).toContain('Windows closed the playback connection.')
-  expect(wrapper.text()).not.toContain('Waiting for Windows audio samples.')
+  wrapper.unmount()
+})
+
+it('stops combined monitoring and reports an error when phone wait cannot resume', async () => {
+  vi.useFakeTimers()
+  let phase = 'idle'
+  let prepareCalls = 0
+  let monitoring = false
+  const invoke = vi.fn((command: string) => {
+    if (command === 'bluetooth_status') return Promise.resolve(phase)
+    if (command === 'bluetooth_candidates') return Promise.resolve({ generation: 18, names: ['Phone'] })
+    if (command === 'loopback_endpoints') return Promise.resolve([{ id: 'default-endpoint', name: 'Default speakers', isDefault: true }])
+    if (command === 'loopback_status') return Promise.resolve({ running: monitoring, endpointName: 'Default speakers', sampleRate: monitoring ? 48000 : 0, channels: 2, samples: 0, peak: 0, error: null })
+    if (command === 'loopback_start') {
+      monitoring = true
+      return Promise.resolve({ running: true, endpointName: 'Default speakers', sampleRate: 48000, channels: 2, samples: 0, peak: 0, error: null })
+    }
+    if (command === 'bluetooth_prepare') {
+      prepareCalls++
+      if (prepareCalls === 1) {
+        phase = 'waiting'
+        return Promise.resolve()
+      }
+      return Promise.reject(new Error('The source is no longer available.'))
+    }
+    if (command === 'loopback_stop') {
+      monitoring = false
+      return Promise.resolve({ running: false, endpointName: 'Default speakers', sampleRate: 48000, channels: 2, samples: 0, peak: 0, error: null })
+    }
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  await wrapper.findAll('button').find(button => button.text() === 'Refresh Bluetooth sources')!.trigger('click')
+  await flushPromises()
+  await wrapper.get('#bluetooth-source').setValue('0')
+  await wrapper.findAll('button').find(button => button.text() === 'Wait + monitor system output')!.trigger('click')
+  await flushPromises()
+  phase = 'open'
+  await vi.advanceTimersByTimeAsync(1000)
+  phase = 'idle'
+  await vi.advanceTimersByTimeAsync(1000)
+  await flushPromises()
+  expect(prepareCalls).toBe(2)
+  expect(invoke).toHaveBeenCalledWith('loopback_stop')
+  expect(wrapper.text()).toContain('waiting could not restart: Error: The source is no longer available.')
+  expect(wrapper.text()).not.toContain('Disconnect Bluetooth')
   wrapper.unmount()
 })
 
