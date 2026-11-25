@@ -1323,7 +1323,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                         resyncs.print();
                         if let Some(probe) = &probe {
                             match probe.lock().expect("probe lock poisoned").detect() {
-                                Ok(_) => lab_println!("RESULT latency probe detected"),
+                                Ok(()) => lab_println!("RESULT latency probe detected"),
                                 Err(error) => return Err(format!("latency probe not detected in first 30 seconds of decoded audio: {error}").into()),
                             }
                         }

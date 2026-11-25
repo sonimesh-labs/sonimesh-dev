@@ -93,6 +93,8 @@ decoded receiver audio. It reports detection rather than physical latency; loss,
 capture policy, or processing can prevent detection. The operator should run it
 only with an intended test source, since the checked samples may contain other
 capturable audio.
+If the leading probe segment is unavailable, this check tries later segments of
+the same known sequence; it does not infer the start time or repair missing audio.
 
 Multichannel inputs are averaged by default. When the source reference or
 microphone signal is on a known channel, select its one-based channel number
