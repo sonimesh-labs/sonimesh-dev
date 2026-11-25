@@ -13,6 +13,8 @@ import android.media.AudioTrack
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.text.method.DigitsKeyListener
 import android.view.WindowInsets
 import android.widget.ArrayAdapter
@@ -41,6 +43,9 @@ class LabActivity : Activity() {
         TestToneFormat(44_100, AudioFormat.CHANNEL_OUT_MONO, 1),
     )
     private var tone: AudioTrack? = null
+    private var latencyProbe: AudioTrack? = null
+    private val probeHandler = Handler(Looper.getMainLooper())
+    private var probeTimeout: Runnable? = null
     private var udpMode = false
     private var pairedMode = false
     private var pendingAddress = DEFAULT_LAB_ADDRESS
@@ -70,6 +75,7 @@ class LabActivity : Activity() {
     private lateinit var bitrate: Spinner
     private lateinit var muteSwitch: Switch
     private lateinit var toneButton: Button
+    private lateinit var probeButton: Button
     private lateinit var retryButton: Button
     private lateinit var retryHint: TextView
     private var updatingMute = false
@@ -84,6 +90,7 @@ class LabActivity : Activity() {
         val capturing = LabStatus.captureUsage != null
         if (observedCapture && !capturing) {
             stopTone()
+            stopLatencyProbe()
             toneButton.text = "Start test tone"
         }
         observedCapture = capturing
@@ -201,6 +208,11 @@ class LabActivity : Activity() {
             }
         }
         layout.addView(toneButton)
+        probeButton = Button(this).apply {
+            text = "Play latency probe"
+            setOnClickListener { toggleLatencyProbe() }
+        }
+        layout.addView(probeButton)
         retryButton = Button(this).apply {
             text = "Retry capture with current setup"
             visibility = View.GONE
@@ -426,6 +438,7 @@ class LabActivity : Activity() {
     }
 
     override fun onStop() {
+        stopLatencyProbe()
         if (!isChangingConfigurations) {
             stopTone()
             toneButton.text = "Start test tone"
@@ -838,6 +851,7 @@ class LabActivity : Activity() {
             stopTone()
             return
         }
+        stopLatencyProbe()
         val usage = (LabStatus.captureUsage ?: selectedUsage()).usages.first()
         for (format in testToneFormats) {
             val samples = testToneSamples(format.sampleRate, format.channels)
@@ -864,6 +878,59 @@ class LabActivity : Activity() {
 
     override fun onRetainNonConfigurationInstance(): Any? = tone
 
+    private fun toggleLatencyProbe() {
+        if (latencyProbe != null) {
+            stopLatencyProbe()
+            return
+        }
+        val captureUsage = LabStatus.captureUsage
+        if (captureUsage == null) {
+            Toast.makeText(this, "Start capture before playing the latency probe.", Toast.LENGTH_SHORT).show()
+            return
+        }
+        stopTone()
+        toneButton.text = "Start test tone"
+        val samples = latencyProbeSamples()
+        var track: AudioTrack? = null
+        try {
+            track = AudioTrack.Builder()
+                .setAudioAttributes(AudioAttributes.Builder().setUsage(captureUsage.usages.first()).build())
+                .setAudioFormat(AudioFormat.Builder().setSampleRate(LATENCY_PROBE_RATE)
+                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build())
+                .setTransferMode(AudioTrack.MODE_STATIC)
+                .setBufferSizeInBytes(samples.size * Short.SIZE_BYTES)
+                .build()
+            check(track.write(samples, 0, samples.size) == samples.size)
+            check(track.setNotificationMarkerPosition(samples.size) == AudioTrack.SUCCESS)
+            track.setPlaybackPositionUpdateListener(object : AudioTrack.OnPlaybackPositionUpdateListener {
+                override fun onMarkerReached(completed: AudioTrack) {
+                    if (latencyProbe === completed) stopLatencyProbe()
+                }
+                override fun onPeriodicNotification(track: AudioTrack) = Unit
+            }, probeHandler)
+            track.play()
+            check(track.playState == AudioTrack.PLAYSTATE_PLAYING)
+            latencyProbe = track
+            probeButton.text = "Stop latency probe"
+            val timeout = Runnable { stopLatencyProbe() }
+            probeTimeout = timeout
+            probeHandler.postDelayed(timeout, 6_000)
+        } catch (_: RuntimeException) {
+            track?.release()
+            Toast.makeText(this, "Unable to play the 48 kHz latency probe on this device.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun stopLatencyProbe() {
+        probeTimeout?.let(probeHandler::removeCallbacks)
+        probeTimeout = null
+        latencyProbe?.let {
+            latencyProbe = null
+            try { it.stop() } finally { it.release() }
+        }
+        if (::probeButton.isInitialized) probeButton.text = "Play latency probe"
+    }
+
     private fun stopTone() {
         tone?.let {
             try {
@@ -880,6 +947,7 @@ class LabActivity : Activity() {
     internal fun testToneUsage(): Int? = tone?.audioAttributes?.usage
 
     override fun onDestroy() {
+        stopLatencyProbe()
         importedInvitation?.fill(0)
         importedInvitation = null
         clearPendingInvitation()

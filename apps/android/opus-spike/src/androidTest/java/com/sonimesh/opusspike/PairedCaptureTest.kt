@@ -140,7 +140,10 @@ class PairedCaptureTest {
     @Test
     fun notification_reports_local_capture_signal() = runCapture(testNotificationSignal = true)
 
-    private fun runCapture(expectReconnect: Boolean = false, repeatedReconnects: Boolean = false, stopDuringReconnect: Boolean = false, retryAfterReconnectExhaustion: Boolean = false, screenOff: Boolean = false, notificationReturn: Boolean = false, startFromScan: Boolean = false, startFromPaste: Boolean = false, recreate: Boolean = false, changeUsage: Boolean = false, testMute: Boolean = false, expectConnectionRetry: Boolean = false, changeSetupDuringConsent: Boolean = false, testNotificationSignal: Boolean = false) {
+    @Test
+    fun plays_latency_probe_during_paired_capture() = runCapture(testLatencyProbe = true)
+
+    private fun runCapture(expectReconnect: Boolean = false, repeatedReconnects: Boolean = false, stopDuringReconnect: Boolean = false, retryAfterReconnectExhaustion: Boolean = false, screenOff: Boolean = false, notificationReturn: Boolean = false, startFromScan: Boolean = false, startFromPaste: Boolean = false, recreate: Boolean = false, changeUsage: Boolean = false, testMute: Boolean = false, expectConnectionRetry: Boolean = false, changeSetupDuringConsent: Boolean = false, testNotificationSignal: Boolean = false, testLatencyProbe: Boolean = false) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val args = InstrumentationRegistry.getArguments()
         var stopAcknowledgement = "unavailable"
@@ -304,6 +307,38 @@ class PairedCaptureTest {
                     find(activity.window.decorView) { it is Button && it.text.toString() == "Apply invitation and start paired capture" }.performClick()
                     assertEquals("draft", invitation.text.toString())
                     assertTrue(containsStatus(activity.window.decorView, "Status: Capturing audio"))
+                }
+            }
+            if (testLatencyProbe) {
+                scenario.onActivity { activity ->
+                    find(activity.window.decorView) { it is Button && it.text.toString() == "Stop test tone" }.performClick()
+                }
+                fun hasSignal(label: String): Boolean {
+                    var found = false
+                    scenario.onActivity { activity -> found = containsStatus(activity.window.decorView, "Capture signal: $label") }
+                    return found
+                }
+                val quietDeadline = SystemClock.elapsedRealtime() + 10_000
+                while (!hasSignal("no capturable audio") && SystemClock.elapsedRealtime() < quietDeadline) SystemClock.sleep(100)
+                assertTrue("capture did not become silent", hasSignal("no capturable audio"))
+                scenario.onActivity { activity ->
+                    find(activity.window.decorView) { it is Button && it.text.toString() == "Play latency probe" }.performClick()
+                    find(activity.window.decorView) { it is Button && it.text.toString() == "Stop latency probe" }
+                }
+                val signalDeadline = SystemClock.elapsedRealtime() + 5_000
+                while (!hasSignal("signal detected") && SystemClock.elapsedRealtime() < signalDeadline) SystemClock.sleep(100)
+                assertTrue("latency probe was not captured", hasSignal("signal detected"))
+                val finishDeadline = SystemClock.elapsedRealtime() + 8_000
+                var finished = false
+                while (!finished && SystemClock.elapsedRealtime() < finishDeadline) {
+                    scenario.onActivity { activity ->
+                        finished = runCatching { find(activity.window.decorView) { it is Button && it.text.toString() == "Play latency probe" } }.isSuccess
+                    }
+                    if (!finished) SystemClock.sleep(100)
+                }
+                assertTrue("latency probe did not finish", finished)
+                scenario.onActivity { activity ->
+                    find(activity.window.decorView) { it is Button && it.text.toString() == "Start test tone" }.performClick()
                 }
             }
             if (repeatedReconnects) {

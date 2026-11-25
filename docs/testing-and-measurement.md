@@ -72,6 +72,14 @@ offset, and prints per-run offsets plus a p50/p95/p99 summary. It is a software
 measurement aid; the acoustic setup and the report metadata above still define
 what the result means.
 
+The Android paired-audio lab offers a one-shot 48 kHz, three-second MLS test
+signal (seed 7) matching the generator's default sequence at reduced amplitude.
+It is an operator-controlled source for a shared-interface experiment, not a
+latency measurement. Generate the matching reference with
+`generate --sample-rate 48000 --seconds 3 --seed 7`, record the source and output on a common timeline,
+and document routing and clock setup. Android and desktop audio processing can
+alter the signal; an unsuccessful correlation does not by itself identify why.
+
 Multichannel inputs are averaged by default. When the source reference or
 microphone signal is on a known channel, select its one-based channel number
 with `measure --reference-channel` or `--recording-channel`; the recording

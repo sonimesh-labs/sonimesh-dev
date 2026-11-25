@@ -149,6 +149,13 @@ the AVD was already configured with a keyguard.
 
 The paired-audio interoperability lab exercises the real pairing, Hello and
 start/stop control messages together with protected UDP and software decoding.
+During an active capture, **Play latency probe** plays the single 48 kHz MLS
+sequence described in [testing and measurement](./testing-and-measurement.md).
+It uses the active capture usage, stops when the activity leaves the foreground
+or capture ends, and does not record or calculate latency.
+On 2026-11-25, API 37 x86_64 emulator instrumentation observed the probe in
+local capture during a paired loopback session and the desktop software listener
+finished successfully. This does not establish a physical latency measurement.
 It uses a public fixed invitation and is intended only for a controlled lab
 network. Its default is emulator and desktop loopback. From `apps/android`, build
 `:opus-spike:assembleDebug` and `:opus-spike:assembleDebugAndroidTest`, then
