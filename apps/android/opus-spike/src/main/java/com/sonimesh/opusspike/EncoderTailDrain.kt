@@ -11,13 +11,22 @@ internal fun drainEncoderTail(
 ): Boolean {
     val deadline = nowMillis() + 250
     var submitted = false
-    while (nowMillis() < deadline) {
-        if (!submitted) submitted = submitEnd()
-        when (pollOutput()) {
-            EncoderTailOutput.End -> return submitted
-            EncoderTailOutput.Empty -> idle()
-            EncoderTailOutput.Progress -> Unit
+    var interrupted = Thread.interrupted()
+    try {
+        while (nowMillis() < deadline) {
+            if (!submitted) submitted = submitEnd()
+            when (pollOutput()) {
+                EncoderTailOutput.End -> return submitted
+                EncoderTailOutput.Empty -> try {
+                    idle()
+                } catch (_: InterruptedException) {
+                    interrupted = true
+                }
+                EncoderTailOutput.Progress -> Unit
+            }
         }
+        return false
+    } finally {
+        if (interrupted) Thread.currentThread().interrupt()
     }
-    return false
 }

@@ -7,6 +7,48 @@ import org.junit.Test
 
 class EncoderTailDrainTest {
     @Test
+    fun stopInterruptBeforeDrainDoesNotPreventEndOfStream() {
+        try {
+            Thread.currentThread().interrupt()
+            var polled = false
+            assertTrue(drainEncoderTail(
+                nowMillis = { 0 },
+                submitEnd = { assertFalse(Thread.currentThread().isInterrupted); true },
+                pollOutput = { if (polled) EncoderTailOutput.End else { polled = true; EncoderTailOutput.Empty } },
+                idle = { Thread.sleep(1) },
+            ))
+            assertTrue(Thread.currentThread().isInterrupted)
+        } finally {
+            Thread.interrupted()
+        }
+    }
+
+    @Test
+    fun interruptDuringDrainPreservesDeadlineAndInterruptStatus() {
+        var now = 0L
+        var waits = 0
+        try {
+            assertFalse(drainEncoderTail(
+                nowMillis = { now },
+                submitEnd = { false },
+                pollOutput = { EncoderTailOutput.Empty },
+                idle = {
+                    now += 50
+                    if (waits++ == 0) {
+                        Thread.currentThread().interrupt()
+                        Thread.sleep(1)
+                    }
+                },
+            ))
+            assertEquals(250, now)
+            assertEquals(5, waits)
+            assertTrue(Thread.currentThread().isInterrupted)
+        } finally {
+            Thread.interrupted()
+        }
+    }
+
+    @Test
     fun drainsPendingOutputWhileWaitingToSubmitEnd() {
         var now = 0L
         var inputAttempts = 0

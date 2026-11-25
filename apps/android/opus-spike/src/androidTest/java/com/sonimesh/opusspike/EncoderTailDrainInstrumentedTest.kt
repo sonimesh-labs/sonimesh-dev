@@ -28,6 +28,7 @@ class EncoderTailDrainInstrumentedTest {
 
             val info = MediaCodec.BufferInfo()
             var packets = 0
+            Thread.currentThread().interrupt()
             val finished = drainEncoderTail(
                 nowMillis = SystemClock::elapsedRealtime,
                 submitEnd = {
@@ -54,7 +55,9 @@ class EncoderTailDrainInstrumentedTest {
             )
             assertTrue("encoder did not report end of stream within the lab deadline", finished)
             assertTrue("encoder produced no audio packets", packets > 0)
+            assertTrue("stop interrupt should be preserved", Thread.currentThread().isInterrupted)
         } finally {
+            Thread.interrupted()
             codec.release()
         }
     }

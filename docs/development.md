@@ -619,8 +619,11 @@ Android sender first gives its encoder a bounded opportunity to flush pending
 packets, padding a partial final PCM frame with silence, and then gives its
 bounded UDP queue a short time to drain before requesting stop. The waits and
 desktop tail drain are best effort, so
-network loss or slow shutdown can still truncate audio. The
-foreground service stays in a stopping state until this cleanup completes;
+network loss or slow shutdown can still truncate audio. The Android encoder tail
+drain continues its bounded wait when the capture worker
+has been interrupted for stop, and restores the thread's interrupt status after
+the drain; this does not guarantee delivery of the final packet.
+The foreground service stays in a stopping state until this cleanup completes;
 repeated start requests during that interval are ignored. A stalled control
 reply can delay completion until the control command times out. The Android
 lab reports when capture has stopped locally but the desktop did not confirm
@@ -634,7 +637,8 @@ adb shell am instrument -r -w -e class com.sonimesh.opusspike.EncoderTailDrainIn
 On 2026-11-23 this passed on an API 37 x86_64 emulator: the tail-drain helper
 observed encoder end-of-stream and at least one audio packet. It did not check
 the final packet's content, the capture service, network delivery, or a physical
-device's codec.
+device's codec. On 2026-11-25 the helper also reached end-of-stream with a
+pending thread interrupt on an API 37 x86_64 emulator; this was an isolated codec test.
 The lab activity also ignores repeated start requests while permission or screen
 capture consent is pending, or while its service is active or stopping. It shows
 a brief message without replacing the current session status. Once
