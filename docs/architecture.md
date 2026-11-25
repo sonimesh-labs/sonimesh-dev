@@ -2,7 +2,7 @@
 
 > Status: architecture draft for feasibility validation
 > Version: 1.0.0
-> Updated: 2026-11-24
+> Updated: 2026-11-25
 
 This document describes the intended product boundary and engineering constraints
 for SoniMesh. It deliberately separates verified platform facts, implementation

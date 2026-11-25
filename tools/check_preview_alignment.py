@@ -23,6 +23,9 @@ ALIGNMENTS = (
 # publishes them.
 PREVIEW_ONLY_STREAM_FIELDS = frozenset({"currentJitterMs", "playoutDelayMs"})
 
+# The shell's saved-output fallback is not part of the Rust lifecycle snapshot.
+PREVIEW_ONLY_OUTPUT_FIELDS = frozenset({"selectionFallback"})
+
 # DesktopSnapshot fields owned by the preview adapter or by separate low-rate
 # APIs rather than by the Rust control snapshot: output-device lists, volume
 # controls, the StreamCounters metrics, the reply log, the diagnostic-export
@@ -36,6 +39,7 @@ PREVIEW_ONLY_SNAPSHOT_FIELDS = frozenset(
         "metrics",
         "replies",
         "diagnosticExports",
+        "capabilities",
         "previewAdapter",
     }
 )
@@ -197,10 +201,13 @@ def ts_interface_fields(source: str, interface_name: str) -> list[str]:
                 break
 
     fields: list[str] = []
+    depth = 0
     for line in source[body_start:body_end].splitlines():
-        field_match = re.match(r"^\s*([a-z][A-Za-z0-9_]*)\s*:", line)
-        if field_match is not None:
-            fields.append(field_match.group(1))
+        if depth == 0:
+            field_match = re.match(r"^\s*([a-z][A-Za-z0-9_]*)\??\s*:", line)
+            if field_match is not None:
+                fields.append(field_match.group(1))
+        depth += line.count("{") - line.count("}")
     return fields
 
 
@@ -328,7 +335,12 @@ def validate_sources(rust_source: str, ts_source: str) -> list[str]:
             errors.append(f"preview alignment is invalid: {error}")
             continue
 
-        observed -= PREVIEW_ONLY_STREAM_FIELDS | PREVIEW_ONLY_SNAPSHOT_FIELDS
+        preview_only = {
+            "StreamMetrics": PREVIEW_ONLY_STREAM_FIELDS,
+            "OutputSnapshot": PREVIEW_ONLY_OUTPUT_FIELDS,
+            "DesktopSnapshot": PREVIEW_ONLY_SNAPSHOT_FIELDS,
+        }
+        observed -= preview_only.get(ts_interface, frozenset())
         expected = {snake_to_camel(field) for field in fields}
         missing = sorted(expected - observed)
         unexpected = sorted(observed - expected)
@@ -590,6 +602,7 @@ export interface StreamMetrics {
 
 export interface OutputSnapshot {
   selectionRetained: boolean
+  selectionFallback?: boolean
   streamActive: boolean
   faultReported: boolean
   health: OutputHealth
@@ -763,6 +776,17 @@ export interface DesktopSnapshot {
                 "DesktopSnapshot is missing fields: reconnectRemainingMs",
                 "DesktopSnapshot has undeclared fields: inventedSnapshotField",
             ],
+        )
+
+    def test_nested_optional_fields_do_not_hide_snapshot_drift(self) -> None:
+        ts = (self.TS + self.TS_INTERFACE).replace(
+            "  previewAdapter: boolean\n",
+            "  capabilities?: {\n    receiver: boolean\n    pairing: boolean\n  }\n"
+            "  inventedField?: boolean\n  previewAdapter: boolean\n",
+        )
+        self.assertEqual(
+            validate_sources(self.RUST + self.RUST_SNAPSHOT, ts),
+            ["DesktopSnapshot has undeclared fields: inventedField"],
         )
 
 

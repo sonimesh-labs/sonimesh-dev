@@ -154,6 +154,7 @@ fn bytes_to_hex(bytes: &[u8]) -> String {
     hex
 }
 
+#[allow(clippy::too_many_arguments)] // Lab injection state spans successive sessions.
 fn run_session(
     session_number: u64,
     stream: std::net::TcpStream,
@@ -257,6 +258,7 @@ impl Default for Options {
 }
 
 impl Options {
+    #[allow(clippy::too_many_lines)] // Keep CLI validation alongside its option parsing.
     fn parse(args: impl IntoIterator<Item = String>) -> LabResult<Self> {
         let mut result = Self::default();
         let mut args = args.into_iter();
@@ -378,6 +380,7 @@ impl Options {
     }
 }
 
+#[allow(clippy::too_many_arguments)] // Pass the session and lab injection state to the receiver.
 fn negotiate_hello(
     session_number: u64,
     channel: sonimesh_app::TrustedControlChannel,
@@ -1003,6 +1006,7 @@ fn stop_output(retry_at: Option<Instant>, stop: impl FnOnce() -> LabResult<()>) 
 }
 
 #[allow(clippy::too_many_lines)] // This one-shot lab owns the control and media lifetimes together.
+#[allow(clippy::too_many_arguments)] // Control state and lab fault injection are scoped to this run.
 fn receive_audio<S: std::io::Read + std::io::Write>(
     session_number: u64,
     framed: &mut UntrustedControlStream<S>,
@@ -2321,6 +2325,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)] // Covers valid and invalid combinations of CLI options.
     fn playback_arguments_preserve_default_and_require_explicit_selection() {
         let args = |items: &[&str]| {
             items
