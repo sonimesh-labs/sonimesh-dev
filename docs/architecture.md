@@ -111,6 +111,9 @@ port, or pin after importing an invitation selects the manual fixture for the ne
 capture. The lab displays that change when capture starts so the operator can
 identify the setup in use. Hexadecimal letter case alone does not change the pin
 or replace the imported invitation.
+The paired lab starts its playout buffer only when a frame enters the jitter
+buffer; an authenticated frame that is late or otherwise not queued does not
+consume the startup wait for a later playable frame.
 The Android lab can select media, game, unknown, or all three playback usages
 for a capture session; platform and source capture policies still apply.
 The capture-only Android app can play an explicitly requested local test tone

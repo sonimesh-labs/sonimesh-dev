@@ -767,6 +767,26 @@ fn playout_stalled(active: bool, gap: Option<Duration>) -> bool {
     active && gap.is_some_and(|elapsed| elapsed >= PLAYOUT_STALL)
 }
 
+fn arm_playout(
+    next: &mut Option<Instant>,
+    admission: InsertOutcome,
+    recovering: bool,
+    now: Instant,
+    startup_buffer: Duration,
+) {
+    if next.is_none()
+        && !recovering
+        && matches!(
+            admission,
+            InsertOutcome::Inserted
+                | InsertOutcome::Reordered
+                | InsertOutcome::Resynchronized { .. }
+        )
+    {
+        *next = Some(now + startup_buffer);
+    }
+}
+
 fn next_playout_deadline(deadline: Instant, now: Instant) -> Instant {
     let phase = now.duration_since(deadline).as_nanos() % PLAYOUT_PERIOD.as_nanos();
     let remaining_nanos = u64::try_from(PLAYOUT_PERIOD.as_nanos() - phase)
@@ -1403,9 +1423,13 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                                 batch_packet,
                                 Instant::now(),
                             );
-                            if next_playout.is_none() && retry_at.is_none() {
-                                next_playout = Some(Instant::now() + options.startup_buffer);
-                            }
+                            arm_playout(
+                                &mut next_playout,
+                                admission,
+                                retry_at.is_some(),
+                                Instant::now(),
+                                options.startup_buffer,
+                            );
                         }
                     }
                 }
@@ -2082,6 +2106,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)] // One stream exercises loss, late arrival, and recovery together.
     fn live_playout_conceals_loss_and_restarts_after_outage() {
         use sonimesh_protocol::{MediaKeyContext, MediaSealer};
         use std::net::UdpSocket;
@@ -2130,7 +2155,7 @@ mod tests {
             decode_live_playout(&mut receiver, &metrics, &mut consecutive_plc).unwrap(),
             Some(DecodeStep::Decoded { sequence: 0, .. })
         ));
-        let _lost = sealer.seal(0, 960, &payload[..length]).unwrap();
+        let delayed = sealer.seal(0, 960, &payload[..length]).unwrap();
         assert!(matches!(
             decode_live_playout(&mut receiver, &metrics, &mut consecutive_plc).unwrap(),
             Some(DecodeStep::Concealed { sequence: 1, .. })
@@ -2142,6 +2167,29 @@ mod tests {
             decode_live_playout(&mut receiver, &metrics, &mut consecutive_plc).unwrap(),
             Some(DecodeStep::Decoded { sequence: 2, .. })
         ));
+        send(&delayed.datagram);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let admission = loop {
+            if let Some(UdpPollOutcome::Processed { admission, .. }) =
+                poll_media(&mut receiver).unwrap()
+            {
+                break admission;
+            }
+            assert!(Instant::now() < deadline, "delayed packet was not received");
+        };
+        assert_eq!(admission, InsertOutcome::Late);
+        let now = Instant::now();
+        let mut next_playout = None;
+        arm_playout(&mut next_playout, admission, false, now, PLAYOUT_PERIOD);
+        assert_eq!(next_playout, None);
+        arm_playout(
+            &mut next_playout,
+            InsertOutcome::Inserted,
+            false,
+            now,
+            PLAYOUT_PERIOD,
+        );
+        assert_eq!(next_playout, Some(now + PLAYOUT_PERIOD));
         for sequence in 3..6 {
             assert!(
                 matches!(decode_live_playout(&mut receiver, &metrics, &mut consecutive_plc).unwrap(), Some(DecodeStep::Concealed { sequence: actual, .. }) if actual == sequence)
@@ -2374,6 +2422,40 @@ mod tests {
         );
         assert_eq!(event.batch_packet, 9);
         assert_eq!(event.previous_packet_gap, Some(Duration::from_millis(1)));
+    }
+
+    #[test]
+    fn playout_wait_starts_only_for_queued_frames_and_is_not_restarted() {
+        let now = Instant::now();
+        for admission in [
+            InsertOutcome::Duplicate,
+            InsertOutcome::Late,
+            InsertOutcome::SequenceExhausted,
+            InsertOutcome::Disabled,
+        ] {
+            let mut next = None;
+            arm_playout(&mut next, admission, false, now, PLAYOUT_PERIOD);
+            assert_eq!(next, None);
+        }
+        for admission in [
+            InsertOutcome::Inserted,
+            InsertOutcome::Reordered,
+            InsertOutcome::Resynchronized { dropped_frames: 2 },
+        ] {
+            let mut next = None;
+            arm_playout(&mut next, admission, true, now, PLAYOUT_PERIOD);
+            assert_eq!(next, None);
+            arm_playout(&mut next, admission, false, now, PLAYOUT_PERIOD);
+            assert_eq!(next, Some(now + PLAYOUT_PERIOD));
+            arm_playout(
+                &mut next,
+                admission,
+                false,
+                now + PLAYOUT_PERIOD,
+                PLAYOUT_PERIOD,
+            );
+            assert_eq!(next, Some(now + PLAYOUT_PERIOD));
+        }
     }
 
     #[test]
