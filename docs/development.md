@@ -1591,6 +1591,9 @@ current default or first available endpoint. This preference does not change
 the Windows system default. **Follow system default** removes the saved explicit
 selection; returning focus to the window or refreshing the device list picks up
 a later system-default change.
+If device enumeration fails, the last list remains visible with a warning until
+an output refresh or selection successfully enumerates devices again. A cached
+state poll alone does not clear that warning.
 The saved preference remains intact during that fallback. After reconnecting the
 preferred endpoint, use **Refresh output devices** to select it again.
 To keep the currently shown default or fallback device as an explicit preference,

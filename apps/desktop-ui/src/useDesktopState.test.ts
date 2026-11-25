@@ -485,6 +485,42 @@ describe('useDesktopState', () => {
     expect(wrapper.vm.refreshingDevices).toBe(false)
   })
 
+  it('keeps a failed focus refresh visible across cached snapshots until inventory is refreshed', async () => {
+    const initial = { ...receiverSnapshot('idle'), previewAdapter: false, selectedOutputId: 'old' }
+    const updated = { ...initial, selectedOutputId: 'new' }
+    desktopBridgeMock.snapshot.mockResolvedValue(initial)
+    desktopBridgeMock.refreshOutputDevices.mockRejectedValueOnce(new Error('enumeration failed'))
+    const wrapper = mount(StateHarness)
+    await flushPromises()
+
+    window.dispatchEvent(new Event('focus'))
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    await flushPromises()
+    const warning = 'Could not refresh output devices. Check the audio service and try again.'
+    expect(wrapper.vm.error).toBe(warning)
+    expect(wrapper.vm.snapshot?.selectedOutputId).toBe('old')
+
+    await wrapper.vm.refresh()
+    expect(wrapper.vm.error).toBe(warning)
+    desktopBridgeMock.refreshOutputDevices.mockResolvedValueOnce(updated)
+    await wrapper.vm.refreshOutputDevices()
+    expect(wrapper.vm.error).toBeNull()
+    expect(wrapper.vm.snapshot?.selectedOutputId).toBe('new')
+  })
+
+  it('clears an inventory warning when selecting an output successfully re-enumerates devices', async () => {
+    const initial = receiverSnapshot('ready')
+    desktopBridgeMock.snapshot.mockResolvedValue(initial)
+    desktopBridgeMock.refreshOutputDevices.mockRejectedValueOnce(new Error('enumeration failed'))
+    desktopBridgeMock.selectOutput.mockResolvedValueOnce(initial)
+    const wrapper = mount(StateHarness)
+    await flushPromises()
+    await wrapper.vm.refreshOutputDevices()
+    expect(wrapper.vm.error).not.toBeNull()
+    await wrapper.vm.selectOutput('device-b')
+    expect(wrapper.vm.error).toBeNull()
+  })
+
   it('reports test-tone failures without leaving a success result', async () => {
     desktopBridgeMock.snapshot.mockResolvedValueOnce(receiverSnapshot('ready'))
     desktopBridgeMock.testOutput.mockRejectedValueOnce(new Error('output unavailable'))

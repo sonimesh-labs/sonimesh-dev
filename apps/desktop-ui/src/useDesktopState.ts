@@ -1,4 +1,4 @@
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import { desktopBridge } from './bridge'
 import type { DesktopSnapshot } from './types'
@@ -10,7 +10,9 @@ export function useDesktopState() {
   const snapshot = ref<DesktopSnapshot | null>(null)
   const busy = ref(false)
   const refreshing = ref(false)
-  const error = ref<string | null>(null)
+  const controlError = ref<string | null>(null)
+  const outputInventoryError = ref<string | null>(null)
+  const error = computed(() => controlError.value ?? outputInventoryError.value)
   const outputTestStatus = ref<string | null>(null)
   const refreshingDevices = ref(false)
   let snapshotPollTimer: ReturnType<typeof setInterval> | undefined
@@ -36,19 +38,21 @@ export function useDesktopState() {
   async function run(
     command: () => Promise<DesktopSnapshot | void>,
     failureMessage = 'The desktop control service did not accept this command.',
+    onFailure?: (message: string) => void,
   ) {
     if (busy.value) return
 
     snapshotRevision += 1
     busy.value = true
-    error.value = null
+    controlError.value = null
     try {
       const nextSnapshot = await command()
       if (nextSnapshot !== undefined) {
         snapshot.value = nextSnapshot
       }
     } catch {
-      error.value = failureMessage
+      if (onFailure) onFailure(failureMessage)
+      else controlError.value = failureMessage
     } finally {
       busy.value = false
       scheduleOutputRefresh()
@@ -64,11 +68,11 @@ export function useDesktopState() {
       const nextSnapshot = await desktopBridge.snapshot()
       if (nextSnapshot !== undefined && requestRevision === snapshotRevision) {
         snapshot.value = nextSnapshot
-        error.value = null
+        controlError.value = null
       }
     } catch {
       if (requestRevision === snapshotRevision) {
-        error.value = 'The desktop control service did not accept this command.'
+        controlError.value = 'The desktop control service did not accept this command.'
       }
     } finally {
       refreshing.value = false
@@ -79,7 +83,11 @@ export function useDesktopState() {
   const selectOutput = (id: string | null) => {
     outputTestStatus.value = null
     return run(
-      () => desktopBridge.selectOutput(id),
+      async () => {
+        const nextSnapshot = await desktopBridge.selectOutput(id)
+        outputInventoryError.value = null
+        return nextSnapshot
+      },
       'Could not select this output device. Refresh the device list and try again.',
     )
   }
@@ -92,11 +100,15 @@ export function useDesktopState() {
     try {
       await run(async () => {
         const nextSnapshot = await desktopBridge.refreshOutputDevices()
+        outputInventoryError.value = null
         if (nextSnapshot.selectedOutputId !== previousSelectedOutputId) {
           outputTestStatus.value = null
         }
         return nextSnapshot
-      }, 'Could not refresh output devices. Check the audio service and try again.')
+      }, 'Could not refresh output devices. Check the audio service and try again.', (message) => {
+        outputTestStatus.value = null
+        outputInventoryError.value = message
+      })
     } finally {
       refreshingDevices.value = false
     }
