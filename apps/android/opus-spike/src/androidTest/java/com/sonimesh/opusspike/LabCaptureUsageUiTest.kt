@@ -78,6 +78,28 @@ class LabCaptureUsageUiTest {
     }
 
     @Test
+    fun testToneStopsWhenCaptureFinishes() {
+        try {
+            ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+                scenario.onActivity { activity ->
+                    LabStatus.serviceStarted(LabCaptureUsage.All, OpusBitrate.STANDARD)
+                    findButton(activity.window.decorView, "Start test tone").performClick()
+                    assertTrue(activity.isTestTonePlaying())
+                    LabStatus.serviceFinished()
+                    assertEquals(false, activity.isTestTonePlaying())
+                    findButton(activity.window.decorView, "Start test tone").performClick()
+                    assertTrue(activity.isTestTonePlaying())
+                    findButton(activity.window.decorView, "Stop test tone").performClick()
+                }
+            }
+        } finally {
+            androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().runOnMainSync {
+                LabStatus.serviceFinished()
+            }
+        }
+    }
+
+    @Test
     fun retryLastCaptureAppearsAfterFailedServiceFinishesAndHidesForNewSession() {
         try {
             ActivityScenario.launch(LabActivity::class.java).use { scenario ->
@@ -142,6 +164,7 @@ class LabCaptureUsageUiTest {
         ActivityScenario.launch(LabActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
                 val root = activity.window.decorView
+                findSpinner(root, "Playback usage for capture").setSelection(0)
                 findButton(root, "Start test tone").performClick()
                 assertEquals(AudioAttributes.USAGE_MEDIA, activity.testToneUsage())
                 findButton(root, "Stop test tone").performClick()

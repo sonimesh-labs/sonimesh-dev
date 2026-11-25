@@ -73,6 +73,7 @@ class LabActivity : Activity() {
     private lateinit var retryButton: Button
     private lateinit var retryHint: TextView
     private var updatingMute = false
+    private var observedCapture = false
     private val muteObserver: (Boolean?) -> Unit = { muted ->
         updatingMute = true
         muteSwitch.isEnabled = muted != null
@@ -80,6 +81,12 @@ class LabActivity : Activity() {
         updatingMute = false
     }
     private val statusObserver: (String) -> Unit = {
+        val capturing = LabStatus.captureUsage != null
+        if (observedCapture && !capturing) {
+            stopTone()
+            toneButton.text = "Start test tone"
+        }
+        observedCapture = capturing
         status.text = "Status: $it"
         updateRetryButton()
     }

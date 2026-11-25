@@ -175,8 +175,8 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   the main capture-only application does not yet use it.
   The Android lab also reports sustained silent capture and returns to its
   capturing status when signal resumes; this does not establish desktop delivery.
-  Its activity-owned test tone stops when the activity leaves the foreground,
-  while configuration recreation retains an active tone. API 37 x86_64
+  Its activity-owned test tone stops when capture finishes or the activity leaves
+  the foreground, while configuration recreation retains an active tone. API 37 x86_64
   instrumentation covers both transitions; physical-device behavior is untested.
   An optional paired-listener status report exposes in-session packet and decode
   counts, decoded peak, and output recovery state for controlled-lab diagnosis.
