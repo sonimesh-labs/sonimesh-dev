@@ -301,7 +301,7 @@ mod route_tests {
 
         let state = ProbeState::default();
         state
-            .start_listener(|lab| lab.start("127.0.0.1", None, 60, false, 39094, 47610))
+            .start_listener(|lab| lab.start("127.0.0.1", None, 60, false, 39094, 47610, 100))
             .unwrap();
         let monitor = spawn_lab_monitor(&state.lab);
         let mut stdin = state.lab.lock().unwrap().test_take_stdin();
@@ -393,6 +393,7 @@ fn start_lab(
     adaptive: bool,
     media_port: u16,
     control_port: u16,
+    initial_volume: u8,
 ) -> Result<lab::LabSnapshot, String> {
     let output = match index {
         Some(index) => Some(
@@ -412,6 +413,7 @@ fn start_lab(
             adaptive,
             media_port,
             control_port,
+            initial_volume,
         )
     })
 }

@@ -831,7 +831,10 @@ last lab setup. Values are length- and enum-bounded; malformed storage is
 ignored, and no invitation or session secret is stored there.
 Use **Reset lab settings** to remove that browser entry and return the host,
 output, buffer, and playout controls to their defaults without changing a
-running listener.
+running listener. The probe also remembers the last listener-confirmed volume
+and applies it before the next listener accepts a client. Resetting lab settings
+returns that startup volume to 100%; mute is not saved. If browser storage is
+unavailable, the preference lasts only while this probe view remains open.
 If the listener process exits unexpectedly, the probe also retains the last
 observations it had received; they can be incomplete. Starting a new listener or
 stopping it explicitly clears them.

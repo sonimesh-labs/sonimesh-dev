@@ -149,6 +149,7 @@ interface StoredLabSettings {
   adaptive?: boolean
   mediaPort?: number
   controlPort?: number
+  initialVolume?: number
 }
 
 function readLabSettings(): StoredLabSettings {
@@ -169,6 +170,7 @@ function readLabSettings(): StoredLabSettings {
       adaptive: typeof parsed.adaptive === 'boolean' ? parsed.adaptive : undefined,
       mediaPort: typeof parsed.mediaPort === 'number' && Number.isInteger(parsed.mediaPort) && parsed.mediaPort >= 1 && parsed.mediaPort <= 65535 ? parsed.mediaPort : undefined,
       controlPort: typeof parsed.controlPort === 'number' && Number.isInteger(parsed.controlPort) && parsed.controlPort >= 1 && parsed.controlPort <= 65535 ? parsed.controlPort : undefined,
+      initialVolume: typeof parsed.initialVolume === 'number' && Number.isInteger(parsed.initialVolume) && parsed.initialVolume >= 0 && parsed.initialVolume <= 100 ? parsed.initialVolume : undefined,
     }
   } catch {
     return {}
@@ -198,6 +200,7 @@ function clearLabSettings() {
   adaptive.value = false
   mediaPort.value = '39093'
   controlPort.value = '47610'
+  initialVolume.value = 100
   invalidateHostSuggestion()
 }
 
@@ -287,6 +290,7 @@ const adaptive = ref(storedLabSettings.adaptive ?? false)
 const mediaPort = ref(String(storedLabSettings.mediaPort ?? 39093))
 const mediaPortValid = computed(() => /^\d{1,5}$/.test(mediaPort.value) && Number(mediaPort.value) >= 1 && Number(mediaPort.value) <= 65535)
 const controlPort = ref(String(storedLabSettings.controlPort ?? 47610))
+const initialVolume = ref(storedLabSettings.initialVolume ?? 100)
 const controlPortValid = computed(() => /^\d{1,5}$/.test(controlPort.value) && Number(controlPort.value) >= 1 && Number(controlPort.value) <= 65535)
 const labBusy = ref(true)
 let labKnown = false
@@ -305,7 +309,7 @@ let controlTimer: ReturnType<typeof setTimeout> | undefined
 let pendingControl: { volume: number | null; muted: boolean | null; sent: boolean } | null = null
 let suggestRequest = 0
 
-watch([labHost, androidHost, labOutput, startupBufferMs, adaptive, mediaPort, controlPort], () => {
+watch([labHost, androidHost, labOutput, startupBufferMs, adaptive, mediaPort, controlPort, initialVolume], () => {
   if (labOutput.value === '') labOutputDevice.value = null
   const selected = !loaded.value || labOutput.value === '' || labOutput.value === 'unavailable'
     ? undefined
@@ -326,6 +330,7 @@ watch([labHost, androidHost, labOutput, startupBufferMs, adaptive, mediaPort, co
     adaptive: adaptive.value,
     mediaPort: mediaPortValid.value ? Number(mediaPort.value) : undefined,
     controlPort: controlPortValid.value ? Number(controlPort.value) : undefined,
+    initialVolume: initialVolume.value,
   })
 })
 
@@ -348,7 +353,10 @@ function confirmControl(snapshot: LabSnapshot) {
   }
   if (pendingControl?.sent &&
       (pendingControl.volume === null || pendingControl.volume === snapshot.volume) &&
-      (pendingControl.muted === null || pendingControl.muted === snapshot.muted)) clearControl()
+      (pendingControl.muted === null || pendingControl.muted === snapshot.muted)) {
+    if (pendingControl.volume !== null) initialVolume.value = pendingControl.volume
+    clearControl()
+  }
 }
 
 function invalidateHostSuggestion() {
@@ -442,7 +450,7 @@ async function toggleLab() {
   try {
     lab.value = lab.value.running
       ? await window.__TAURI__.core.invoke<LabSnapshot>('stop_lab')
-      : await window.__TAURI__.core.invoke<LabSnapshot>('start_lab', { host: labHost.value.trim(), generation: generation.value, index: labOutput.value === '' ? null : Number(labOutput.value), startupBufferMs: startupBufferMs.value, adaptive: adaptive.value, mediaPort: Number(mediaPort.value), controlPort: Number(controlPort.value) })
+      : await window.__TAURI__.core.invoke<LabSnapshot>('start_lab', { host: labHost.value.trim(), generation: generation.value, index: labOutput.value === '' ? null : Number(labOutput.value), startupBufferMs: startupBufferMs.value, adaptive: adaptive.value, mediaPort: Number(mediaPort.value), controlPort: Number(controlPort.value), initialVolume: initialVolume.value })
     if (!lab.value.running) resetDirectPort()
     if (starting) labEvidenceMessage.value = null
     restoredLab.value = false
@@ -660,6 +668,7 @@ onBeforeUnmount(() => { disposed = true; labRequest++; suggestRequest++; clearTi
       <button type="button" class="preview-action" :disabled="labBusy || suggestBusy || (!lab.running && (playing !== null || busy || labOutput === 'unavailable' || !mediaPortValid || !controlPortValid))" @click="toggleLab">{{ lab.running ? 'Stop listener' : 'Start listener' }}</button>
       <p v-if="playing !== null" class="preview-note">Wait for the test sound to finish before starting the listener.</p>
       <p v-else-if="lab.running" class="preview-note">Stop the listener before testing an output.</p>
+      <p v-else class="preview-note">Starting receiver volume: {{ initialVolume }}%. The last confirmed volume is remembered.</p>
       <p role="status">{{ lab.status }}</p>
       <p v-if="labError" class="command-error" role="alert">{{ labError }}</p>
       <div v-if="lab.running && lab.volume != null && lab.muted != null">

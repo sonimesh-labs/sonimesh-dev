@@ -235,6 +235,7 @@ struct Options {
     status: bool,
     signal_status: bool,
     adaptive: bool,
+    initial_volume: Option<u8>,
     startup_buffer: Duration,
     disconnect_after_ms: Option<u64>,
     disconnect_count: Option<u8>,
@@ -259,6 +260,7 @@ impl Default for Options {
             status: false,
             signal_status: false,
             adaptive: false,
+            initial_volume: None,
             startup_buffer: Duration::from_millis(60),
             disconnect_after_ms: None,
             disconnect_count: None,
@@ -294,6 +296,17 @@ impl Options {
                 "--status" if !result.status => result.status = true,
                 "--signal-status" if !result.signal_status => result.signal_status = true,
                 "--adaptive" if !result.adaptive => result.adaptive = true,
+                "--initial-volume" if result.initial_volume.is_none() => {
+                    let value = args
+                        .next()
+                        .ok_or("--initial-volume requires a value")?
+                        .parse::<u8>()
+                        .map_err(|_| "initial volume must be 0 to 100")?;
+                    if value > 100 {
+                        return Err("initial volume must be 0 to 100".into());
+                    }
+                    result.initial_volume = Some(value);
+                }
                 "--disconnect-after-ms" if result.disconnect_after_ms.is_none() => {
                     let value = args
                         .next()
@@ -373,7 +386,7 @@ impl Options {
                 }
                 _ => {
                     return Err(
-                        "usage: paired-audio-lab [--require-tone] [--check-probe] [--play [--select-output | --output-id-stdin | --output-id-framed] [--control]] [--status] [--signal-status] [--adaptive] [--startup-buffer-ms 0-120] [--keep-listening [--disconnect-after-ms 100-120000 [--disconnect-count 1-20]] [--reject-starts 1-36]] [--control-port PORT] [--media-port PORT] [--bind IPv4 --host IPv4]"
+                        "usage: paired-audio-lab [--require-tone] [--check-probe] [--play [--select-output | --output-id-stdin | --output-id-framed] [--control] [--initial-volume 0-100]] [--status] [--signal-status] [--adaptive] [--startup-buffer-ms 0-120] [--keep-listening [--disconnect-after-ms 100-120000 [--disconnect-count 1-20]] [--reject-starts 1-36]] [--control-port PORT] [--media-port PORT] [--bind IPv4 --host IPv4]"
                             .into(),
                     );
                 }
@@ -399,6 +412,9 @@ impl Options {
         }
         if result.control && !result.play {
             return Err("--control requires --play".into());
+        }
+        if result.initial_volume.is_some() && !result.play {
+            return Err("--initial-volume requires --play".into());
         }
         if result.disconnect_after_ms.is_some() && !result.keep_listening {
             return Err("--disconnect-after-ms requires --keep-listening".into());
@@ -1004,10 +1020,13 @@ impl Playback {
                     sonimesh_app::SourcePcmFormat::new(48_000, 2)?,
                     Arc::new(StreamCounters::default()),
                 );
-                return Ok(Self(Some((
-                    sonimesh_app::ReceiverOutputController::new(output, factory),
-                    selection,
-                ))));
+                let controller = sonimesh_app::ReceiverOutputController::new(output, factory);
+                if let Some(volume) = options.initial_volume {
+                    controller
+                        .gain_handle()
+                        .set_gain(f32::from(volume) / 100.0)?;
+                }
+                return Ok(Self(Some((controller, selection))));
             }
             Ok(Self(None))
         }
@@ -2545,6 +2564,30 @@ mod tests {
         assert!(Options::parse(args(&["--check-probe", "--keep-listening"])).is_err());
         assert!(!defaults.status);
         assert!(!defaults.adaptive);
+        assert_eq!(defaults.initial_volume, None);
+        for value in ["0", "35", "100"] {
+            assert_eq!(
+                Options::parse(args(&["--play", "--initial-volume", value]))
+                    .unwrap()
+                    .initial_volume,
+                Some(value.parse().unwrap())
+            );
+        }
+        for value in ["101", "invalid"] {
+            assert!(Options::parse(args(&["--play", "--initial-volume", value])).is_err());
+        }
+        assert!(Options::parse(args(&["--initial-volume", "35"])).is_err());
+        assert!(Options::parse(args(&["--play", "--initial-volume"])).is_err());
+        assert!(
+            Options::parse(args(&[
+                "--play",
+                "--initial-volume",
+                "35",
+                "--initial-volume",
+                "50"
+            ]))
+            .is_err()
+        );
         assert_eq!(defaults.startup_buffer, Duration::from_millis(60));
         for value in ["0", "20", "40", "60", "80", "100", "120"] {
             let options = Options::parse(args(&["--startup-buffer-ms", value])).unwrap();

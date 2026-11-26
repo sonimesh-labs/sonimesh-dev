@@ -126,6 +126,7 @@ impl Lab {
         self.snapshot.running = true;
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn start(
         &mut self,
         host: &str,
@@ -134,6 +135,7 @@ impl Lab {
         adaptive: bool,
         media_port: u16,
         control_port: u16,
+        initial_volume: u8,
     ) -> Result<LabSnapshot, String> {
         self.refresh();
         if self.child.is_some() {
@@ -147,6 +149,9 @@ impl Lab {
         }
         if control_port == 0 {
             return Err("Control TCP port must be between 1 and 65535.".into());
+        }
+        if initial_volume > 100 {
+            return Err("Initial volume must be between 0 and 100.".into());
         }
         let host: Ipv4Addr = host.parse().map_err(|_| "Enter a valid IPv4 address.")?;
         if host.is_unspecified() || host.is_multicast() || host.is_broadcast() {
@@ -162,6 +167,8 @@ impl Lab {
                 "--status",
                 "--signal-status",
                 "--control",
+                "--initial-volume",
+                &initial_volume.to_string(),
                 "--bind",
                 "0.0.0.0",
                 "--host",
@@ -774,16 +781,26 @@ mod tests {
     fn rejects_invalid_host_before_launch() {
         let mut lab = Lab::default();
         for host in ["invalid", "0.0.0.0", "224.0.0.1", "255.255.255.255"] {
-            assert!(lab.start(host, None, 60, false, 39093, 47610).is_err());
+            assert!(lab.start(host, None, 60, false, 39093, 47610, 100).is_err());
         }
         for value in [1, 19, 30, 121, 140] {
             assert!(
-                lab.start("127.0.0.1", None, value, false, 39093, 47610)
+                lab.start("127.0.0.1", None, value, false, 39093, 47610, 100)
                     .is_err()
             );
         }
-        assert!(lab.start("127.0.0.1", None, 60, false, 0, 47610).is_err());
-        assert!(lab.start("127.0.0.1", None, 60, false, 39093, 0).is_err());
+        assert!(
+            lab.start("127.0.0.1", None, 60, false, 0, 47610, 100)
+                .is_err()
+        );
+        assert!(
+            lab.start("127.0.0.1", None, 60, false, 39093, 0, 100)
+                .is_err()
+        );
+        assert!(
+            lab.start("127.0.0.1", None, 60, false, 39093, 47610, 101)
+                .is_err()
+        );
         assert!(!lab.refresh().running);
         assert!(lab.control(Some(101), None).is_err());
         assert!(lab.control(None, None).is_err());
@@ -1278,7 +1295,8 @@ mod tests {
         let occupied = std::net::TcpListener::bind("0.0.0.0:0").unwrap();
         let port = occupied.local_addr().unwrap().port();
         let mut lab = Lab::default();
-        lab.start("127.0.0.1", None, 0, false, 39094, port).unwrap();
+        lab.start("127.0.0.1", None, 0, false, 39094, port, 100)
+            .unwrap();
         let deadline = Instant::now() + Duration::from_secs(10);
         let failure = loop {
             let snapshot = lab.refresh();
@@ -1290,7 +1308,8 @@ mod tests {
         };
         assert_eq!(failure.status, CONTROL_PORT_IN_USE);
         drop(occupied);
-        lab.start("127.0.0.1", None, 0, false, 39094, port).unwrap();
+        lab.start("127.0.0.1", None, 0, false, 39094, port, 100)
+            .unwrap();
         let deadline = Instant::now() + Duration::from_secs(10);
         loop {
             let snapshot = lab.refresh();
@@ -1312,14 +1331,25 @@ mod tests {
         let device = output.default_device_probe().unwrap().device.id;
         let mut lab = Lab::default();
         let started = lab
-            .start("127.0.0.1", Some(device.as_str()), 0, false, 39094, 47612)
+            .start(
+                "127.0.0.1",
+                Some(device.as_str()),
+                0,
+                false,
+                39094,
+                47612,
+                42,
+            )
             .unwrap();
         assert_eq!(started.media_port, Some(39094));
         assert_eq!(started.control_port, Some(47612));
         let deadline = Instant::now() + Duration::from_secs(10);
         let snapshot = loop {
             let snapshot = lab.refresh();
-            if !snapshot.running || snapshot.invitation.is_some() || Instant::now() >= deadline {
+            if !snapshot.running
+                || (snapshot.invitation.is_some() && snapshot.volume.is_some())
+                || Instant::now() >= deadline
+            {
                 break snapshot;
             }
             std::thread::sleep(Duration::from_millis(25));
@@ -1327,6 +1357,8 @@ mod tests {
         assert!(snapshot.running, "{}", snapshot.status);
         assert_eq!(snapshot.media_port, Some(39094));
         assert_eq!(snapshot.control_port, Some(47612));
+        assert_eq!(snapshot.volume, Some(42));
+        assert_eq!(snapshot.muted, Some(false));
         assert!(
             snapshot.invitation.is_some(),
             "listener did not publish an invitation"
@@ -1367,7 +1399,7 @@ mod tests {
             std::thread::sleep(Duration::from_millis(25));
         }
         assert!(
-            lab.start("127.0.0.1", None, 60, false, 39093, 47610)
+            lab.start("127.0.0.1", None, 60, false, 39093, 47610, 100)
                 .is_err()
         );
         let stopped = lab.stop();
@@ -1390,6 +1422,7 @@ mod tests {
                 false,
                 39093,
                 47610,
+                100,
             )
             .unwrap();
         assert!(restarted.events.is_empty());
@@ -1407,7 +1440,7 @@ mod tests {
     #[ignore = "requires the playback lab binary, Windows output and an installed API 37 emulator test"]
     fn emulator_capture_updates_real_listener_snapshot() {
         let mut lab = Lab::default();
-        lab.start("10.0.2.2", None, 60, false, 39094, 47610)
+        lab.start("10.0.2.2", None, 60, false, 39094, 47610, 100)
             .unwrap();
         let deadline = Instant::now() + Duration::from_secs(10);
         let invitation = loop {

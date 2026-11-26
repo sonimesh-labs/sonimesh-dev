@@ -24,7 +24,11 @@ pub(crate) fn apply_control(input: &str, gain: &GainControlHandle) -> Result<(),
 pub(crate) fn start_console_control(gain: GainControlHandle) {
     std::thread::spawn(move || {
         println!("Audio controls: volume 0-100 | mute | unmute");
-        println!("CONTROL volume 100 muted false");
+        println!(
+            "CONTROL volume {:.0} muted {}",
+            gain.gain() * 100.0,
+            gain.is_muted()
+        );
         let mut input = io::stdin().lock();
         let mut buffer = [0_u8; 64];
         let mut length = 0;
