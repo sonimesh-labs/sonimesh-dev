@@ -430,6 +430,26 @@ where
         Ok(())
     }
 
+    /// Installs fresh authenticated media state with its negotiated Opus frame.
+    /// The caller must ensure no stream is active.
+    ///
+    /// # Errors
+    ///
+    /// Returns without changing the pipeline if media setup or frame capacity fails.
+    pub fn install_fresh_opus_session(
+        &mut self,
+        secret: &SessionSecret,
+        context: MediaKeyContext,
+        initial_sequence: u32,
+        frame: sonimesh_audio::OpusFrameConfig,
+    ) -> Result<(), FreshSessionInstallError> {
+        self.pipeline
+            .install_fresh_opus_session(secret, context, initial_sequence, frame)?;
+        self.plaintext.fill(0);
+        self.source_pin.clear_for_fresh_session();
+        Ok(())
+    }
+
     /// Clears this stream's playout state after a drift-controller hard resync.
     pub fn hard_resynchronize(&mut self) {
         self.pipeline.hard_resynchronize();

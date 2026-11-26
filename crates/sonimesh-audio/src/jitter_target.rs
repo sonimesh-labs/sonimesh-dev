@@ -222,6 +222,20 @@ impl AdaptiveJitterTarget {
         self.config.frame_duration_ms
     }
 
+    /// Builds a fresh controller with the same policy and a new frame duration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the policy no longer fits the configured buffer.
+    pub fn with_frame_duration(
+        &self,
+        frame_duration_ms: u32,
+    ) -> Result<Self, JitterTargetConfigError> {
+        let mut config = self.config;
+        config.frame_duration_ms = frame_duration_ms;
+        Self::new(config)
+    }
+
     /// Returns the configured jitter buffer capacity in frames.
     #[must_use]
     pub const fn buffer_capacity_frames(&self) -> usize {

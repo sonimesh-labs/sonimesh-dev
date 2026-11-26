@@ -179,6 +179,25 @@ where
         self.opus_frame
     }
 
+    /// Selects a validated Opus frame shape and retires the previous playout epoch.
+    ///
+    /// The host must call this outside an active stream, after establishing the
+    /// matching media session. An insufficient PCM block leaves the worker unchanged.
+    ///
+    /// # Errors
+    ///
+    /// Returns the capacity error if the selected frame does not fit.
+    pub fn select_opus_frame(
+        &mut self,
+        frame: OpusFrameConfig,
+        sequence: u32,
+    ) -> Result<(), OpusFrameConfigError> {
+        frame.validate_pcm_block_capacity(PCM_SAMPLES_PER_BLOCK)?;
+        self.opus_frame = Some(frame);
+        self.begin_epoch(sequence);
+        Ok(())
+    }
+
     /// Admits a packet that has already passed network authentication and replay checks.
     ///
     /// # Errors
@@ -592,6 +611,49 @@ mod tests {
             RealtimePcmPopOutcome::Underflow {
                 discarded_stale_blocks: 1
             }
+        ));
+    }
+
+    #[test]
+    fn selecting_opus_frame_retires_old_audio_and_rejects_insufficient_capacity() {
+        let frame_10 = OpusFrameConfig::new(48_000, 2, 10).unwrap();
+        let frame_20 = OpusFrameConfig::new(48_000, 2, 20).unwrap();
+        let (producer, mut consumer) = realtime_pcm_queue::<960>(4).unwrap();
+        let mut worker = StreamDecodeWorker::<_, 4, 64, 960>::new_for_opus(
+            MockDecoder::reported(960),
+            producer,
+            0,
+            frame_10,
+        )
+        .unwrap();
+        worker.admit(0, 0, &[1]).unwrap();
+        worker.decode_next().unwrap();
+        worker.admit(1, 480, &[2]).unwrap();
+
+        assert_eq!(
+            worker.select_opus_frame(frame_20, 4),
+            Err(OpusFrameConfigError::PcmBlockTooSmall)
+        );
+        assert_eq!(worker.opus_frame_config(), Some(frame_10));
+        assert_eq!(worker.jitter_len(), 1);
+        assert_eq!(worker.queued_blocks(), 1);
+
+        worker.select_opus_frame(frame_10, 4).unwrap();
+        assert_eq!(worker.jitter_len(), 0);
+        assert_eq!(worker.queued_blocks(), 0);
+        let mut block = [0.0; 960];
+        assert!(matches!(
+            consumer.pop_into(&mut block),
+            RealtimePcmPopOutcome::Underflow { .. }
+        ));
+        worker.admit(4, 1_920, &[3]).unwrap();
+        assert!(matches!(
+            worker.decode_next(),
+            Ok(DecodeStep::Decoded {
+                sequence: 4,
+                samples: 960,
+                ..
+            })
         ));
     }
 

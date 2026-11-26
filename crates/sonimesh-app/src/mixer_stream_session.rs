@@ -194,7 +194,7 @@ where
     {
         let source_format = source_format_of(request)?;
         let expected = samples_per_block(request)?;
-        if expected != S {
+        if expected == 0 || expected > S {
             return Err(MixerStreamSessionError::SourceBlockMismatch { expected });
         }
         if self.slot_for(request.identity).is_some() {
@@ -718,7 +718,7 @@ pub enum MixerStreamSessionError {
     Membership(MixerAdmissionError),
     /// The negotiated source format is outside the shared audio bounds.
     SourceFormat(SourcePcmFormatError),
-    /// The pipeline's source block size differs from the frame budget.
+    /// The pipeline's source block capacity cannot hold the frame budget.
     SourceBlockMismatch {
         /// Interleaved samples required by the negotiated format and duration.
         expected: usize,
@@ -758,7 +758,7 @@ impl fmt::Display for MixerStreamSessionError {
             }
             Self::SourceBlockMismatch { expected } => write!(
                 formatter,
-                "mixer session pipeline block size must be {expected} samples"
+                "mixer session pipeline block capacity must fit {expected} samples"
             ),
             Self::DuplicateStream(identity) => {
                 write!(

@@ -99,6 +99,17 @@ different returned sample count instead of queuing audio with the wrong duration
 The generic codec-neutral worker retains its variable-length behavior.
 The desktop receiver owner checks a known Opus worker's frame policy against
 StartStream before admitting the stream or acknowledging a duplicate start.
+For a new start with a host preparation callback, it validates the requested
+10/20 ms shape and fixed PCM capacity before preparation. The host may install
+that frame policy together with a fresh media session; the resulting policy is
+checked again before admission. This permits later sessions to select another
+supported duration without changing an active stream or reusing its queued PCM.
+Failures before installation leave the existing pipeline unchanged.
+When adaptive jitter targeting is enabled, installation also rebuilds its frame
+conversion for the selected duration; a target range that cannot fit the fixed
+jitter capacity rejects the replacement before changing pipeline state. Mixer
+source blocks reserve capacity for the largest frame and carry their actual
+initialized length to the output adapter.
 An unconfigured generic worker does not report a format, so the host remains
 responsible for matching it to the negotiated stream.
 The deterministic A-F simulator also constructs mock `StreamDecodeWorker`

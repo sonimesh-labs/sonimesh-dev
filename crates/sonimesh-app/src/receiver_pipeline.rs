@@ -97,6 +97,10 @@ pub enum FreshSessionInstallError {
     ReusedSessionId,
     /// The replacement AEAD opener could not be derived.
     Ingress(ProtectedIngressError),
+    /// The selected Opus frame does not fit the reserved PCM block.
+    Frame(sonimesh_audio::OpusFrameConfigError),
+    /// The adaptive jitter policy cannot fit the selected frame duration.
+    Target(JitterTargetConfigError),
 }
 
 impl fmt::Display for FreshSessionInstallError {
@@ -106,6 +110,8 @@ impl fmt::Display for FreshSessionInstallError {
                 formatter.write_str("fresh media session reused the active session ID")
             }
             Self::Ingress(error) => write!(formatter, "fresh media ingress setup failed: {error}"),
+            Self::Frame(error) => write!(formatter, "fresh Opus frame setup failed: {error}"),
+            Self::Target(error) => write!(formatter, "fresh jitter target setup failed: {error}"),
         }
     }
 }
@@ -115,6 +121,8 @@ impl std::error::Error for FreshSessionInstallError {
         match self {
             Self::ReusedSessionId => None,
             Self::Ingress(error) => Some(error),
+            Self::Frame(error) => Some(error),
+            Self::Target(error) => Some(error),
         }
     }
 }
@@ -541,18 +549,69 @@ where
         context: MediaKeyContext,
         initial_sequence: u32,
     ) -> Result<(), FreshSessionInstallError> {
+        self.install_fresh_session_inner(secret, context, initial_sequence, None)
+    }
+
+    fn install_fresh_session_inner(
+        &mut self,
+        secret: &SessionSecret,
+        context: MediaKeyContext,
+        initial_sequence: u32,
+        frame: Option<sonimesh_audio::OpusFrameConfig>,
+    ) -> Result<(), FreshSessionInstallError> {
+        if let Some(frame) = frame {
+            frame
+                .validate_pcm_block_capacity(PCM_SAMPLES_PER_BLOCK)
+                .map_err(FreshSessionInstallError::Frame)?;
+        }
+        let replacement_target = match (frame, self.adaptive_target.as_ref()) {
+            (Some(frame), Some(adaptive)) => Some(
+                adaptive
+                    .target
+                    .with_frame_duration(u32::from(frame.frame_duration_ms()))
+                    .map_err(FreshSessionInstallError::Target)?,
+            ),
+            _ => None,
+        };
         if context.session_id == self.ingress.context().session_id {
             return Err(FreshSessionInstallError::ReusedSessionId);
         }
         let replacement = ProtectedMediaIngress::new(secret, context)
             .map_err(FreshSessionInstallError::Ingress)?;
+        if let Some(frame) = frame {
+            self.decode
+                .select_opus_frame(frame, initial_sequence)
+                .map_err(FreshSessionInstallError::Frame)?;
+        } else {
+            self.decode.begin_epoch(initial_sequence);
+        }
         self.ingress = replacement;
-        self.decode.begin_epoch(initial_sequence);
+        if let (Some(adaptive), Some(target)) = (&mut self.adaptive_target, replacement_target) {
+            adaptive.target = target;
+        }
         self.counters.reset_queued_pcm_epoch();
         self.counters.reset_jitter_epoch();
         self.reset_adaptive_target_epoch();
         self.counters.stream_reset();
         Ok(())
+    }
+
+    /// Installs a fresh media session and its selected Opus frame policy.
+    ///
+    /// The host must use this only for a new stream while no stream is active.
+    /// Invalid capacity or media state leaves the previous pipeline unchanged.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the frame does not fit or the fresh media state fails.
+    pub fn install_fresh_opus_session(
+        &mut self,
+        secret: &SessionSecret,
+        context: MediaKeyContext,
+        initial_sequence: u32,
+        frame: sonimesh_audio::OpusFrameConfig,
+    ) -> Result<(), FreshSessionInstallError> {
+        self.install_fresh_session_inner(secret, context, initial_sequence, Some(frame))
     }
 
     /// Clears this stream's playout state after a drift-controller hard resync.
@@ -693,11 +752,115 @@ where
 
 #[cfg(test)]
 mod fresh_session_error_tests {
-    use super::FreshSessionInstallError;
+    use super::{AdaptiveTargetConfig, FreshSessionInstallError, ReceiverStreamPipeline};
+    use sonimesh_audio::{
+        FrameDecoder, JitterMode, OpusFrameConfig, StreamDecodeWorker, realtime_pcm_queue,
+    };
+    use sonimesh_diagnostics::StreamCounters;
+    use sonimesh_protocol::{MediaDirection, MediaKeyContext, SessionSecret};
+    use std::{convert::Infallible, sync::Arc};
+
+    struct Decoder;
+
+    impl FrameDecoder for Decoder {
+        type Error = Infallible;
+
+        fn decode(&mut self, _: &[u8], output: &mut [f32]) -> Result<usize, Self::Error> {
+            Ok(output.len())
+        }
+
+        fn decode_plc(&mut self, output: &mut [f32]) -> Result<usize, Self::Error> {
+            Ok(output.len())
+        }
+    }
 
     #[test]
     fn reused_session_policy_error_has_no_synthetic_cause() {
         assert!(std::error::Error::source(&FreshSessionInstallError::ReusedSessionId).is_none());
+    }
+
+    #[test]
+    fn fresh_opus_session_updates_adaptive_frame_conversion_and_preserves_failed_state() {
+        let secret = SessionSecret::new([3; 32]);
+        let context =
+            |id| MediaKeyContext::new(id, 1, 0, MediaDirection::AndroidToDesktop).unwrap();
+        let frame_20 = OpusFrameConfig::new(48_000, 2, 20).unwrap();
+        let frame_10 = OpusFrameConfig::new(48_000, 2, 10).unwrap();
+        let (producer, _consumer) = realtime_pcm_queue::<1920>(4).unwrap();
+        let worker =
+            StreamDecodeWorker::<_, 8, 64, 1920>::new_for_opus(Decoder, producer, 0, frame_20)
+                .unwrap();
+        let mut pipeline = ReceiverStreamPipeline::with_worker_and_adaptive_target(
+            &secret,
+            context(1),
+            worker,
+            Arc::new(StreamCounters::default()),
+            AdaptiveTargetConfig::preset(JitterMode::Balanced, 20, 8, 1_000),
+        )
+        .unwrap();
+        assert_eq!(
+            pipeline.install_fresh_opus_session(&secret, context(1), 0, frame_10),
+            Err(FreshSessionInstallError::ReusedSessionId)
+        );
+        assert_eq!(pipeline.opus_frame_config(), Some(frame_20));
+        assert_eq!(
+            pipeline
+                .adaptive_target
+                .as_ref()
+                .unwrap()
+                .target
+                .frame_duration_ms(),
+            20
+        );
+        pipeline
+            .install_fresh_opus_session(&secret, context(2), 0, frame_10)
+            .unwrap();
+        let target = &pipeline.adaptive_target.as_ref().unwrap().target;
+        assert_eq!(
+            (
+                target.frame_duration_ms(),
+                target.min_frames(),
+                target.max_frames()
+            ),
+            (10, 4, 7)
+        );
+        assert_eq!(pipeline.context(), context(2));
+    }
+
+    #[test]
+    fn fresh_opus_session_rejects_target_that_exceeds_jitter_capacity() {
+        let secret = SessionSecret::new([3; 32]);
+        let context =
+            |id| MediaKeyContext::new(id, 1, 0, MediaDirection::AndroidToDesktop).unwrap();
+        let frame_20 = OpusFrameConfig::new(48_000, 2, 20).unwrap();
+        let frame_10 = OpusFrameConfig::new(48_000, 2, 10).unwrap();
+        let (producer, _consumer) = realtime_pcm_queue::<1920>(4).unwrap();
+        let worker =
+            StreamDecodeWorker::<_, 4, 64, 1920>::new_for_opus(Decoder, producer, 0, frame_20)
+                .unwrap();
+        let mut pipeline = ReceiverStreamPipeline::with_worker_and_adaptive_target(
+            &secret,
+            context(1),
+            worker,
+            Arc::new(StreamCounters::default()),
+            AdaptiveTargetConfig::preset(JitterMode::Balanced, 20, 4, 1_000),
+        )
+        .unwrap();
+        assert!(matches!(
+            pipeline.install_fresh_opus_session(&secret, context(2), 0, frame_10),
+            Err(FreshSessionInstallError::Target(_))
+        ));
+        assert_eq!(pipeline.context(), context(1));
+        assert_eq!(pipeline.opus_frame_config(), Some(frame_20));
+        assert_eq!(
+            pipeline
+                .adaptive_target
+                .as_ref()
+                .unwrap()
+                .target
+                .frame_duration_ms(),
+            20
+        );
     }
 }
 

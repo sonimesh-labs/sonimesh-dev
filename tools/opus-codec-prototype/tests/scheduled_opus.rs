@@ -366,7 +366,7 @@ fn paired_tls_scheduler_output<O: AudioOutput>(
     let media_address = pipeline.local_addr().unwrap();
     let bridge = ControlToMixerBridge::new(
         state,
-        &[Capability::FrameDuration20Ms],
+        &[Capability::FrameDuration10Ms, Capability::FrameDuration20Ms],
         output,
         selection,
         8,
@@ -396,8 +396,14 @@ fn paired_tls_scheduler_output<O: AudioOutput>(
                     MediaDirection::AndroidToDesktop,
                 )
                 .map_err(|_| sonimesh_app::DesktopControlOwnerError::MediaContextMismatch)?;
+            let frame = OpusFrameConfig::new(
+                request.sample_rate_hz,
+                u16::try_from(request.channels).unwrap(),
+                u16::try_from(request.frame_duration_ms).unwrap(),
+            )
+            .unwrap();
             pipeline
-                .install_fresh_session(grant.root(), grant.context(), 0)
+                .install_fresh_opus_session(grant.root(), grant.context(), 0, frame)
                 .map_err(|_| sonimesh_app::DesktopControlOwnerError::MediaContextMismatch)
         };
     for envelope in [
@@ -406,7 +412,10 @@ fn paired_tls_scheduler_output<O: AudioOutput>(
             request_id: 1,
             payload: Some(envelope::Payload::Hello(Hello {
                 supported_versions: vec![CONTROL_PROTOCOL_VERSION],
-                capabilities: vec![Capability::FrameDuration20Ms as i32],
+                capabilities: vec![
+                    Capability::FrameDuration10Ms as i32,
+                    Capability::FrameDuration20Ms as i32,
+                ],
                 display_name: "loopback sender".to_owned(),
             })),
         },
@@ -418,7 +427,7 @@ fn paired_tls_scheduler_output<O: AudioOutput>(
                 stream_id: 1,
                 sample_rate_hz: 48_000,
                 channels: 2,
-                frame_duration_ms: 20,
+                frame_duration_ms: 10,
                 media_key_epoch: 0,
             })),
         },
@@ -435,6 +444,9 @@ fn paired_tls_scheduler_output<O: AudioOutput>(
                 Some(ControlSessionPoll::Processed { .. }) => break,
                 Some(ControlSessionPoll::Empty) if Instant::now() < deadline => {
                     std::thread::yield_now();
+                }
+                Some(ControlSessionPoll::Rejected { .. }) => {
+                    panic!("control rejected: {:?}", read_reply(&mut client))
                 }
                 result => panic!("control did not complete: {result:?}"),
             }
@@ -459,13 +471,13 @@ fn paired_tls_scheduler_output<O: AudioOutput>(
     let mut encoder =
         opus::Encoder::new(48_000, opus::Channels::Stereo, opus::Application::Audio).unwrap();
     let mut packet = [0; 1_148];
-    let samples = std::array::from_fn::<_, SAMPLES, _>(|i| {
+    let samples = std::array::from_fn::<_, 960, _>(|i| {
         (f32::from(u16::try_from(i / 2 % 48).unwrap()) * std::f32::consts::TAU / 48.0).sin() * 0.2
     });
     for sequence in 0..3 {
         let length = encoder.encode_float(&samples, &mut packet).unwrap();
         sender
-            .send_frame(0, sequence * 960, &packet[..length])
+            .send_frame(0, sequence * 480, &packet[..length])
             .unwrap();
     }
     let deadline = Instant::now() + Duration::from_secs(2);
@@ -477,7 +489,7 @@ fn paired_tls_scheduler_output<O: AudioOutput>(
         assert!(Instant::now() < deadline, "UDP packets did not arrive");
         std::thread::yield_now();
     }
-    for (now, expected) in [(40, 0), (60, 1), (80, 2)] {
+    for (now, expected) in [(20, 0), (30, 1), (40, 2)] {
         let tick = scheduler.tick_scheduled_at(now);
         assert_eq!(tick.state, ScheduledReceiverState::Active);
         assert!(tick.control.is_ok() && tick.packets.is_ok() && tick.pump.is_ok());
@@ -507,7 +519,7 @@ fn paired_tls_scheduler_output<O: AudioOutput>(
     client.flush().unwrap();
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
-        match scheduler.tick_scheduled_at(80).control.unwrap() {
+        match scheduler.tick_scheduled_at(40).control.unwrap() {
             Some(ControlSessionPoll::Processed { .. }) => break,
             Some(ControlSessionPoll::Empty) if Instant::now() < deadline => {
                 std::thread::yield_now();
@@ -661,7 +673,7 @@ fn scheduled_protected_opus(buffered: bool, dynamic: bool) {
     let reply = read_reply(&mut client);
     assert_eq!(reply.request_id, hello.request_id);
     assert!(matches!(reply.payload, Some(envelope::Payload::Hello(_))));
-    for (sample_rate, channels, duration) in [(44_100, 2, 20), (48_000, 1, 20), (48_000, 2, 10)] {
+    for (sample_rate, channels, duration) in [(44_100, 2, 20), (48_000, 1, 20)] {
         let mut mismatch = start.clone();
         let Some(envelope::Payload::StartStream(request)) = mismatch.payload.as_mut() else {
             unreachable!()

@@ -28,6 +28,18 @@ pub(crate) type MediaPrepare<'a, P> = dyn FnMut(
     ) -> Result<(), DesktopControlOwnerError>
     + 'a;
 
+fn opus_request_fits(request: StreamStartRequest, capacity: usize) -> bool {
+    let frame = u16::try_from(request.channels).ok().and_then(|channels| {
+        u16::try_from(request.frame_duration_ms)
+            .ok()
+            .and_then(|duration| {
+                sonimesh_audio::OpusFrameConfig::new(request.sample_rate_hz, channels, duration)
+                    .ok()
+            })
+    });
+    frame.is_some_and(|frame| frame.validate_pcm_block_capacity(capacity).is_ok())
+}
+
 /// Result of one UDP media scheduler tick.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct UdpMediaTick {
@@ -180,18 +192,16 @@ where
     ) -> Result<ControlStreamAction, DesktopControlOwnerError> {
         let action = self.owner.accept_control(session, envelope)?;
         if let ControlStreamAction::Start { token, request } = action {
-            if let (Some(_), Some(frame)) = (prepare.as_ref(), self.pipeline.opus_frame_config()) {
-                if request.sample_rate_hz != sonimesh_audio::OPUS_SAMPLE_RATE_HZ
-                    || request.channels != u32::from(sonimesh_audio::OPUS_CHANNELS)
-                    || request.frame_duration_ms != u32::from(frame.frame_duration_ms())
-                {
-                    let _ = self
-                        .owner
-                        .bridge_mut()
-                        .coordinator_mut()
-                        .abort_pending(token);
-                    return Err(DesktopControlOwnerError::MediaFormatMismatch);
-                }
+            if prepare.is_some()
+                && self.pipeline.opus_frame_config().is_some()
+                && !opus_request_fits(request, PCM_SAMPLES_PER_BLOCK)
+            {
+                let _ = self
+                    .owner
+                    .bridge_mut()
+                    .coordinator_mut()
+                    .abort_pending(token);
+                return Err(DesktopControlOwnerError::MediaFormatMismatch);
             }
             if let Some(prepare) = prepare {
                 if self.owner.bridge().coordinator().active().is_some() {
@@ -577,6 +587,18 @@ mod tests {
         assert_eq!(calls, 2);
         assert_eq!(receiver.pipeline_mut().replacements, 1);
         assert!(receiver.owner().bridge().coordinator().active().is_some());
+    }
+
+    #[test]
+    fn opus_request_validation_checks_fixed_capacity() {
+        let request = crate::StreamStartRequest {
+            identity: identity(),
+            sample_rate_hz: 48_000,
+            channels: 2,
+            frame_duration_ms: 20,
+        };
+        assert!(!super::opus_request_fits(request, 960));
+        assert!(super::opus_request_fits(request, 1920));
     }
 
     #[test]
