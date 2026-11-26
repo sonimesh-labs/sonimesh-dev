@@ -3,6 +3,8 @@ import { flushPromises, mount } from '@vue/test-utils'
 import type { DesktopBridgeInvoke } from '../bridge'
 import BluetoothProbe from './BluetoothProbe.vue'
 
+const originalClipboard = navigator.clipboard
+
 afterEach(() => {
   delete window.__TAURI__
   vi.useRealTimers()
@@ -10,6 +12,52 @@ afterEach(() => {
   sessionStorage.removeItem('sonimesh.bluetoothProbe.combinedMonitorOwned')
   sessionStorage.removeItem('sonimesh.bluetoothProbe.recoveryPending')
   localStorage.removeItem('sonimesh.bluetoothProbe.loopbackEndpoint')
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: originalClipboard })
+})
+
+it('copies a source-neutral Bluetooth and system output observation', async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined)
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+  const invoke = vi.fn((command: string) => {
+    if (command === 'bluetooth_status') return Promise.resolve('open')
+    if (command === 'bluetooth_candidates') return Promise.resolve({ generation: 1, names: ['Private phone'], ids: ['private-id'], capability: 'SystemRouted' })
+    if (command === 'loopback_endpoints') return Promise.resolve([{ id: 'private-endpoint', name: 'Private speakers', isDefault: true }])
+    if (command === 'loopback_status') return Promise.resolve({ running: true, endpointId: 'private-endpoint', endpointName: 'Private speakers', sampleRate: 48000, channels: 2, samples: 4096, peak: 0.04, runPeak: 0.5, error: null })
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  await wrapper.findAll('button').find(button => button.text() === 'Copy Bluetooth observation')!.trigger('click')
+  const observation = writeText.mock.calls[0][0] as string
+  expect(observation).toContain('Bluetooth connection: open')
+  expect(observation).toContain('Playback capability: SystemRouted')
+  expect(observation).toContain('Last reported samples: 4096')
+  expect(observation).toContain('Last reported recent peak: 4.0%')
+  expect(observation).toContain('Session peak: 50.0%')
+  expect(observation).toContain('do not identify the Bluetooth source')
+  expect(observation).not.toMatch(/Private|private-/)
+  expect(wrapper.text()).toContain('Bluetooth observation copied.')
+  wrapper.unmount()
+})
+
+it('reports unavailable status and clipboard failure when copying an observation', async () => {
+  const writeText = vi.fn().mockRejectedValue(new Error('Clipboard unavailable'))
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+  const invoke = vi.fn((command: string) => {
+    if (command === 'bluetooth_status' || command === 'loopback_status') return Promise.reject(new Error('Unavailable'))
+    if (command === 'bluetooth_candidates') return Promise.resolve({ generation: 1, names: [], capability: 'SystemRouted' })
+    if (command === 'loopback_endpoints') return Promise.resolve([])
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  await wrapper.findAll('button').find(button => button.text() === 'Copy Bluetooth observation')!.trigger('click')
+  expect(writeText.mock.calls[0][0]).toContain('Bluetooth connection: status unavailable')
+  expect(writeText.mock.calls[0][0]).toContain('Windows output monitor: status unavailable')
+  expect(wrapper.text()).toContain('Could not copy the observation.')
+  wrapper.unmount()
 })
 
 it('opens Windows Bluetooth settings from the probe', async () => {

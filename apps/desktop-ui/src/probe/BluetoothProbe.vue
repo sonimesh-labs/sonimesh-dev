@@ -50,6 +50,7 @@ const loopbackStatusError = ref<string | null>(null)
 const loopbackEndpointMessage = ref<string | null>(null)
 const loopbackToneBusy = ref(false)
 const loopbackToneMessage = ref<string | null>(null)
+const observationMessage = ref<string | null>(null)
 const loopbackNoSamplesLong = ref(false)
 const combinedMonitorOwned = ref(false)
 let timer: ReturnType<typeof setTimeout> | undefined
@@ -197,6 +198,31 @@ function updateLoopbackWaitState(snapshot: LoopbackSnapshot) {
   }
   loopbackStartedAt ??= Date.now()
   loopbackNoSamplesLong.value = Date.now() - loopbackStartedAt >= LOOPBACK_NO_SAMPLES_DELAY_MS
+}
+
+async function copyBluetoothObservation() {
+  const snapshot = loopback.value
+  const lines = [
+    'SoniMesh Bluetooth experiment',
+    `Bluetooth connection: ${statusError.value ? `status unavailable (last reported: ${phase.value})` : phase.value}`,
+    `Playback capability: ${playbackCapability.value ?? 'unknown'}`,
+    `Windows output monitor: ${loopbackStatusError.value ? 'status unavailable' : snapshot ? (snapshot.running ? 'running' : 'stopped') : 'unknown'}`,
+  ]
+  if (snapshot && snapshot.sampleRate > 0) {
+    lines.push(`Last reported format: ${snapshot.sampleRate} Hz, ${snapshot.channels} channels`)
+    lines.push(`Last reported samples: ${snapshot.samples}`)
+    lines.push(`Last reported recent peak: ${(snapshot.peak * 100).toFixed(1)}%`)
+    lines.push(`Session peak: ${snapshot.runPeak == null ? 'unknown' : `${(snapshot.runPeak * 100).toFixed(1)}%`}`)
+  }
+  if (loopbackError.value || snapshot?.error) lines.push('Output monitor reported an error.')
+  lines.push('PCM observations are from the Windows output mix and do not identify the Bluetooth source or prove audible playback.')
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable')
+    await navigator.clipboard.writeText(lines.join('\n'))
+    observationMessage.value = 'Bluetooth observation copied.'
+  } catch {
+    observationMessage.value = 'Could not copy the observation. Use the visible status instead.'
+  }
 }
 
 async function resumeBluetoothWait(request: number): Promise<'recovered' | 'failed' | false> {
@@ -632,5 +658,7 @@ onBeforeUnmount(() => {
     </div>
     <p v-if="loopback && (loopback.running || loopback.sampleRate > 0)" role="status">{{ loopback.endpointName }} · {{ loopback.sampleRate }} Hz, {{ loopback.channels }} channels; {{ loopback.samples }} samples; recent peak {{ (loopback.peak * 100).toFixed(1) }}%; session peak {{ ((loopback.runPeak ?? loopback.peak) * 100).toFixed(1) }}%<template v-if="loopback.samples > 0">; {{ loopback.peak > 0.001 ? 'PCM activity detected recently' : 'No recent PCM activity' }}</template>.</p>
     <p v-if="loopbackStatusError || loopbackError || loopback?.error" class="command-error" role="alert">{{ loopbackStatusError || loopbackError || loopback?.error }}</p>
+    <button type="button" class="preview-action" :disabled="busy || loopbackBusy" @click="copyBluetoothObservation">Copy Bluetooth observation</button>
+    <p v-if="observationMessage" role="status">{{ observationMessage }}</p>
   </section>
 </template>
