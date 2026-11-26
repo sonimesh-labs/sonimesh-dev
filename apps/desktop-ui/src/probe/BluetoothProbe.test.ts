@@ -241,7 +241,7 @@ it('reports empty discovery and system closure', async () => {
   await flushPromises()
   await wrapper.findAll('button').find(button => button.text() === 'Refresh Bluetooth sources')!.trigger('click')
   await flushPromises()
-  expect(wrapper.text()).toContain('No playback sources found.')
+  expect(wrapper.text()).toContain('No playback sources are currently listed. Check pairing and refresh; an empty list does not establish adapter support.')
   empty = false
   await wrapper.findAll('button').find(button => button.text() === 'Refresh Bluetooth sources')!.trigger('click')
   await flushPromises()

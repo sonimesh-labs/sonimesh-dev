@@ -70,6 +70,13 @@ function playbackCapabilityDescription(capability: PlaybackCapability) {
   }
 }
 
+function emptyPlaybackSourcesDescription(capability: PlaybackCapability | null) {
+  if (capability === 'Unsupported') {
+    return 'Bluetooth playback is unavailable on this platform.'
+  }
+  return 'No playback sources are currently listed. Check pairing and refresh; an empty list does not establish adapter support.'
+}
+
 function loopbackEndpointLabel(endpoint: LoopbackEndpoint) {
   const details = [endpoint.isDefault ? 'default' : '', endpoint.sampleRate ? `${endpoint.sampleRate / 1000} kHz` : '', endpoint.channels ? `${endpoint.channels} ch` : '']
     .filter(Boolean)
@@ -469,7 +476,7 @@ onBeforeUnmount(() => {
     <button type="button" class="preview-action" :disabled="busy" @click="openBluetoothSettings">Open Bluetooth settings</button>
     <button type="button" class="preview-action" :disabled="busy || phase !== 'idle'" @click="refresh">Refresh Bluetooth sources</button>
     <p v-if="discovering" role="status">{{ loaded ? 'Refreshing Bluetooth sources...' : 'Searching for Bluetooth sources...' }}</p>
-    <p v-else-if="loaded && names.length === 0" role="status">{{ playbackCapability === 'Unsupported' ? 'Bluetooth playback is unavailable on this platform.' : 'No playback sources found. Pair a compatible device in Windows, then refresh.' }}</p>
+    <p v-else-if="loaded && names.length === 0" role="status">{{ emptyPlaybackSourcesDescription(playbackCapability) }}</p>
     <template v-if="names.length">
       <label for="bluetooth-source">Playback source</label>
       <select id="bluetooth-source" v-model="selected" :disabled="busy || phase !== 'idle'">
