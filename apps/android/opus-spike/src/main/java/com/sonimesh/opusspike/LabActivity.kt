@@ -337,7 +337,11 @@ class LabActivity : Activity() {
         invitationUsesUdpAddress = Switch(this).apply {
             text = "Use invitation address for UDP when scanning or starting"
             isSaveEnabled = false
-            isChecked = savedInstanceState?.getBoolean("scanUsesInvitationAddress", true) ?: true
+            isChecked = savedInstanceState?.getBoolean("scanUsesInvitationAddress", true)
+                ?: labPreferences.getBoolean(PREF_INVITATION_USES_UDP_ADDRESS, true)
+            setOnCheckedChangeListener { _, checked ->
+                labPreferences.edit().putBoolean(PREF_INVITATION_USES_UDP_ADDRESS, checked).apply()
+            }
         }
         layout.addView(invitationUsesUdpAddress)
         layout.addView(Button(this).apply {
@@ -758,6 +762,7 @@ class LabActivity : Activity() {
         importedPin = ""
         importedHost = ""
         importedControlPort = DEFAULT_LAB_CONTROL_PORT
+        invitationUsesUdpAddress.isChecked = true
         labPreferences.edit()
             .remove(PREF_INVITATION)
             .remove(PREF_PIN)
@@ -765,6 +770,7 @@ class LabActivity : Activity() {
             .remove(PREF_CONTROL_PORT)
             .remove("desktopAddress")
             .remove(PREF_MEDIA_PORT)
+            .remove(PREF_INVITATION_USES_UDP_ADDRESS)
             .apply()
         invitation.setText("")
         pin.setText("")
@@ -1011,3 +1017,4 @@ private const val PREF_CONTROL_PORT = "labControlPort"
 private const val PREF_USAGE = "labCaptureUsage"
 private const val PREF_BITRATE = "labBitrate"
 private const val PREF_MEDIA_PORT = "labMediaPort"
+private const val PREF_INVITATION_USES_UDP_ADDRESS = "labInvitationUsesUdpAddress"

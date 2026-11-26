@@ -281,6 +281,7 @@ class LabPairingTest {
         ActivityScenario.launch(LabActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
                 val root = activity.window.decorView
+                requireNotNull(findButton(root, "Clear saved lab setup")).performClick()
                 val toggle = requireNotNull(findSwitch(root, "Use invitation address for UDP when scanning or starting"))
                 assertTrue(toggle.isChecked)
                 toggle.isChecked = false
@@ -302,6 +303,38 @@ class LabPairingTest {
                 assertTrue(hasText(root, "Status: Enter a valid desktop IPv4 address for UDP."))
                 assertEquals("39094", requireNotNull(findField(root, "Desktop UDP port")).text.toString())
                 assertTrue(LabStatus.captureAdmission.canBegin())
+                requireNotNull(findButton(root, "Clear saved lab setup")).performClick()
+            }
+        }
+    }
+
+    @Test
+    fun relay_address_choice_survives_reopening_and_clear_restores_default() {
+        val payload = labHex(labInvitation("AB".repeat(32), "192.168.1.7"))
+        val switchText = "Use invitation address for UDP when scanning or starting"
+        ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                val root = activity.window.decorView
+                requireNotNull(findButton(root, "Clear saved lab setup")).performClick()
+                requireNotNull(findSwitch(root, switchText)).isChecked = false
+            }
+        }
+        ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                val root = activity.window.decorView
+                assertFalse(requireNotNull(findSwitch(root, switchText)).isChecked)
+                val udp = requireNotNull(findField(root, "Desktop IPv4 address for UDP"))
+                udp.setText("192.168.1.9")
+                activity.applyScannedInvitation(payload)
+                assertEquals("192.168.1.9", udp.text.toString())
+                assertEquals("192.168.1.7", requireNotNull(findField(root, "Paired control IPv4 address")).text.toString())
+                requireNotNull(findButton(root, "Clear saved lab setup")).performClick()
+                assertTrue(requireNotNull(findSwitch(root, switchText)).isChecked)
+            }
+        }
+        ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                assertTrue(requireNotNull(findSwitch(activity.window.decorView, switchText)).isChecked)
             }
         }
     }
@@ -329,6 +362,7 @@ class LabPairingTest {
                 invitation.setText(payload)
                 requireNotNull(findButton(root, "Apply invitation and use address for UDP")).performClick()
                 assertEquals("192.168.1.7", udp.text.toString())
+                requireNotNull(findButton(root, "Clear saved lab setup")).performClick()
             }
         }
     }
