@@ -285,6 +285,7 @@ mod platform {
             let snapshot = bluetooth.refresh().unwrap();
             assert_eq!(snapshot.generation, 1);
             assert!(snapshot.names.len() <= 64);
+            println!("Windows playback candidates: {}", snapshot.names.len());
             assert_eq!(snapshot.ids.len(), snapshot.names.len());
             let candidates = snapshot
                 .names

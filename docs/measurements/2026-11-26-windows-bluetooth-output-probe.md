@@ -27,6 +27,10 @@
 - The Windows Bluetooth discovery check passed. The inbound-wait check accepted
   the sole candidate, reported either waiting or already open, and returned to
   idle after close.
+- The latest discovery HIL run reported one candidate. Its snapshot contained
+  one aligned name/ID pair and passed the deterministic-order assertion; the
+  test prints only the candidate count, not device names or IDs. This validates
+  the current enumeration contract, not phone playback.
 - A combined check started the default WASAPI loopback monitor and Bluetooth
   inbound wait together, observed waiting or open, then stopped both. It passed
   without playing audio; this confirms the two operations can coexist, not that
