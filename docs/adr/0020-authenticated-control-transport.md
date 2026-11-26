@@ -90,6 +90,10 @@ then sends StopStream when capture ends. During capture, the same worker polls
 the otherwise idle control connection and stops with a connection-ended status
 when it closes; this poll and StopStream never read the TLS stream concurrently.
 This detects an observed close or read failure, not a silent network partition.
+For the controlled lab's reconnect loop, a session must stay established for ten
+seconds to clear the consecutive-failure count. A shorter session that ends
+unexpectedly counts as another failure, preventing rapid connection flapping
+from bypassing the twelve-failure limit. The delay remains bounded and cancellable.
 On normal lab shutdown the UDP sender gets up to 2.5 seconds to drain and a
 further 0.5 seconds to exit after cancellation. StopStream is attempted only
 after it exits, with a 2-second reply timeout; the control socket close grace is

@@ -7,21 +7,31 @@ import org.junit.Test
 
 class PairedReconnectDelayTest {
     @Test
-    fun establishedSessionsResetConsecutiveReconnectFailures() {
+    fun onlyStableSessionsResetConsecutiveReconnectFailures() {
         val failures = PairedReconnectFailures()
-        repeat(20) {
-            failures.sessionEnded(established = true)
-            assertEquals(0, failures.count)
-            assertEquals(500L, pairedReconnectDelayMillis(failures.count))
-            repeat(3) { failures.sessionEnded(established = false) }
-            assertEquals(3, failures.count)
-        }
-        failures.sessionEnded(established = true)
-        repeat(12) { attempt ->
-            failures.sessionEnded(established = false)
+        repeat(6) { attempt ->
+            failures.sessionEnded(establishedAt = 1_000L, now = 10_999L)
             assertEquals(attempt + 1, failures.count)
         }
-        assertEquals(12, failures.count)
+        failures.sessionEnded(establishedAt = 1_000L, now = 11_000L)
+        assertEquals(0, failures.count)
+        assertEquals(500L, pairedReconnectDelayMillis(failures.count))
+        repeat(12) { attempt ->
+            failures.sessionEnded(establishedAt = null, now = 20_000L)
+            assertEquals(attempt + 1, failures.count)
+        }
+        failures.sessionEnded(establishedAt = 20_000L, now = 30_000L)
+        repeat(12) { attempt ->
+            failures.sessionEnded(establishedAt = 30_000L, now = 30_100L)
+            assertEquals(attempt + 1, failures.count)
+        }
+    }
+
+    @Test
+    fun clockRegressionDoesNotTreatSessionAsStable() {
+        val failures = PairedReconnectFailures()
+        failures.sessionEnded(establishedAt = 2_000L, now = 1_000L)
+        assertEquals(1, failures.count)
     }
 
     @Test

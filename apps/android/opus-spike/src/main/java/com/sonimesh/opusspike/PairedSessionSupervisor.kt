@@ -87,9 +87,13 @@ internal class PairedSessionSupervisor(
                     if (!waitBeforeReconnect(reconnectFailures.count)) break
                 }
 
-                var sessionEstablished = false
+                var sessionEstablishedAt: Long? = null
+                var sessionEndedAt: Long? = null
                 try {
-                    runSession { sessionEstablished = true }
+                    runSession(
+                        onEstablished = { sessionEstablishedAt = SystemClock.elapsedRealtime() },
+                        onEnded = { sessionEndedAt = SystemClock.elapsedRealtime() },
+                    )
                 } catch (error: Exception) {
                     Log.i(TAG, "paired[$traceId] session ended (${error.javaClass.simpleName})")
                     if (!hasStartedSession) {
@@ -102,9 +106,9 @@ internal class PairedSessionSupervisor(
                         }
                         break
                     }
-                    reconnectFailures.sessionEnded(sessionEstablished)
+                    reconnectFailures.sessionEnded(sessionEstablishedAt, sessionEndedAt ?: SystemClock.elapsedRealtime())
                     if (reconnectFailures.count >= MAX_RECONNECT_ATTEMPTS) {
-                        onReconnectFailure("Desktop connection was not restored after $MAX_RECONNECT_ATTEMPTS attempts. Stop and start capture to try again.")
+                        onReconnectFailure("Desktop connection could not stay connected after $MAX_RECONNECT_ATTEMPTS attempts. Stop and start capture to try again.")
                         break
                     }
                 }
@@ -118,7 +122,7 @@ internal class PairedSessionSupervisor(
         }
     }
 
-    private fun runSession(onEstablished: () -> Unit) {
+    private fun runSession(onEstablished: () -> Unit, onEnded: () -> Unit) {
         val connection = connect()
         activeSocket = connection.socket
         if (!running.get()) {
@@ -202,6 +206,7 @@ internal class PairedSessionSupervisor(
                 }
             }
         } finally {
+            onEnded()
             sessionActive.set(false)
             sender?.join(SENDER_EXIT_TIMEOUT_MS)
             if (sender?.isAlive == true) sender?.interrupt()
@@ -361,7 +366,7 @@ internal class PairedReconnectFailures {
     var count = 0
         private set
 
-    fun sessionEnded(established: Boolean) {
-        count = if (established) 0 else count + 1
+    fun sessionEnded(establishedAt: Long?, now: Long) {
+        count = if (establishedAt != null && now - establishedAt >= 10_000L) 0 else count + 1
     }
 }

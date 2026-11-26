@@ -484,7 +484,7 @@ class PairedCaptureTest {
                         scenario.onActivity { activity ->
                             val root = activity.window.decorView
                             retryAvailable = LabStatus.captureAdmission.canBegin() &&
-                                containsStatus(root, "Status: Desktop connection was not restored after 12 attempts") &&
+                                containsStatus(root, "Status: Desktop connection could not stay connected after 12 attempts") &&
                                 runCatching {
                                     find(root) { it is Button && it.text.toString() == "Retry capture with current setup" && it.visibility == View.VISIBLE }
                                 }.isSuccess
