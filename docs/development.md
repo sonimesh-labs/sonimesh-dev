@@ -1397,8 +1397,9 @@ become the system default. The ID is not written into the saved lab settings.
 During an active session, choose another output (or the system default) and use
 **Apply output**. The probe waits for the listener's result; a failed query leaves
 the current output running, and a failed start attempts to restore it. The output
-selector is disabled while the request is pending. Use **Refresh devices** to
-update the list, including after reopening a running listener. If the session
+selector is disabled while the request is pending. Reopening the probe refreshes
+the output list automatically; use **Refresh devices** to retry a failed refresh
+or update the list after changing devices. If the session
 ends, start a new session before trying again. A 2026-11-26 Windows process test
 confirmed default-output and unavailable-device responses during a paired session;
 it did not establish a physical endpoint switch or audible continuity.

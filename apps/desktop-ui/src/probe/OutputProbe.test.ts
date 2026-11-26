@@ -32,6 +32,57 @@ function mountStoppedProbe() {
 }
 
 describe('desktop output probe', () => {
+  it('loads outputs after a restored pending switch is acknowledged', async () => {
+    vi.useFakeTimers()
+    const base = { running: true, sessionActive: true, status: 'Session active', invitation: null, metrics: null, volume: 50, muted: false, outputId: 'a' }
+    let status = { ...base, outputSwitch: { id: '1', status: 'pending' } }
+    const invoke = vi.fn((command: string) => {
+      if (command === 'lab_status') return Promise.resolve(status)
+      if (command === 'probe_outputs') return Promise.resolve({ generation: 1, devices: [
+        { id: 'a', label: 'Speakers', sampleRateHz: 48000, channels: 2, isDefault: true },
+        { id: 'b', label: 'Headphones', sampleRateHz: 48000, channels: 2, isDefault: false },
+      ] })
+      return Promise.reject('unexpected command')
+    })
+    window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+    const wrapper = mount(OutputProbe)
+    await flushPromises()
+    expect(invoke).not.toHaveBeenCalledWith('probe_outputs', expect.anything())
+    status = { ...base, outputId: 'b', outputSwitch: { id: '1', status: 'applied' } }
+    await vi.advanceTimersByTimeAsync(1000)
+    await flushPromises()
+    expect(wrapper.text()).toContain('Current output: Headphones')
+    expect((wrapper.get('#lab-output').element as HTMLSelectElement).value).toBe('1')
+    wrapper.unmount()
+  })
+  it('reloads a running listener output and allows retrying a failed device refresh', async () => {
+    const running = { running: true, sessionActive: true, status: 'Session active', invitation: null, metrics: null, volume: 50, muted: false, outputId: 'headphones', outputSwitch: null }
+    let fail = true
+    const invoke = vi.fn((command: string) => {
+      if (command === 'lab_status') return Promise.resolve(running)
+      if (command === 'probe_outputs') {
+        if (fail) return Promise.reject('device query failed')
+        return Promise.resolve({ generation: 3, devices: [
+          { id: 'speakers', label: 'Speakers', sampleRateHz: 48000, channels: 2, isDefault: true },
+          { id: 'headphones', label: 'Headphones', sampleRateHz: 48000, channels: 2, isDefault: false },
+        ] })
+      }
+      return Promise.reject('unexpected command')
+    })
+    window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+    const wrapper = mount(OutputProbe)
+    await flushPromises()
+    expect(wrapper.text()).toContain('Could not inspect output devices. Try refreshing.')
+    expect(wrapper.text()).toContain('Selected output unavailable in current list')
+    expect(wrapper.findAll('button').find(button => button.text() === 'Apply output')!.attributes('disabled')).toBeDefined()
+    fail = false
+    await wrapper.findAll('button').find(button => button.text() === 'Refresh devices')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Current output: Headphones')
+    expect((wrapper.get('#lab-output').element as HTMLSelectElement).value).toBe('1')
+    expect(wrapper.findAll('button').find(button => button.text() === 'Apply output')!.attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
   it('waits for the listener to confirm a running output switch', async () => {
     vi.useFakeTimers()
     const devices = [
@@ -232,7 +283,7 @@ describe('desktop output probe', () => {
     wrapper.unmount()
   })
 
-  it('restores a running listener and stops it before inspecting outputs', async () => {
+  it('restores a running listener and inspects outputs while it runs', async () => {
     vi.useFakeTimers()
     localStorage.setItem('sonimesh.outputProbe.labSettings', JSON.stringify({ mediaPort: 39093, startupBufferMs: 20, adaptive: false }))
     const settings = { startupBufferMs: 80, adaptive: true }
@@ -240,9 +291,9 @@ describe('desktop output probe', () => {
     Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
     const invoke = vi.fn()
       .mockResolvedValueOnce({ running: true, sessionActive: true, status: 'Session active', invitation: '01ab', metrics: null, events: ['started'], volume: 60, muted: false, mediaPort: 39094, settings })
+      .mockResolvedValueOnce({ generation: 1, devices: [] })
       .mockResolvedValueOnce({ running: true, sessionActive: false, status: 'Waiting for Android', invitation: '01ab', metrics: null, events: ['started'], volume: 60, muted: false, mediaPort: 39094, settings })
       .mockResolvedValueOnce({ running: false, sessionActive: false, status: 'Stopped', invitation: null, metrics: null, events: ['started'], volume: null, muted: null, settings })
-      .mockResolvedValueOnce({ generation: 1, devices: [] })
     window.__TAURI__ = { core: { invoke } }
     const wrapper = mount(OutputProbe)
     await flushPromises()
@@ -255,7 +306,7 @@ describe('desktop output probe', () => {
     expect(writeText).toHaveBeenCalledWith(expect.stringContaining('Listener launch settings: 80 ms startup buffer; adaptive playout'))
     expect((wrapper.get('#lab-media-port').element as HTMLInputElement).value).toBe('39093')
     expect(wrapper.get('#lab-media-port-help').text()).toContain('use the running listener UDP port on Android')
-    expect(invoke).not.toHaveBeenCalledWith('probe_outputs', expect.anything())
+    expect(invoke).toHaveBeenCalledWith('probe_outputs', { generation: 0, selectedIndex: null })
     await vi.advanceTimersByTimeAsync(1000)
     expect(wrapper.text()).toContain('Waiting for Android')
     await wrapper.findAll('button').find(button => button.text() === 'Stop listener')!.trigger('click')
@@ -287,8 +338,8 @@ describe('desktop output probe', () => {
     vi.useFakeTimers()
     const invoke = vi.fn()
       .mockResolvedValueOnce({ running: true, sessionActive: false, status: 'Waiting', invitation: null, metrics: null, volume: 100, muted: false })
-      .mockResolvedValueOnce({ running: false, sessionActive: false, status: 'Listener exited', invitation: null, metrics: null, volume: null, muted: null })
       .mockResolvedValueOnce({ generation: 1, devices: [] })
+      .mockResolvedValueOnce({ running: false, sessionActive: false, status: 'Listener exited', invitation: null, metrics: null, volume: null, muted: null })
     window.__TAURI__ = { core: { invoke } }
     const wrapper = mount(OutputProbe)
     await flushPromises()
@@ -306,6 +357,7 @@ describe('desktop output probe', () => {
     const base = { running: true, sessionActive: true, status: 'Session active', invitation: null, metrics: null, volume: 50, muted: false }
     const invoke = vi.fn()
       .mockResolvedValueOnce({ ...base, signal: null })
+      .mockResolvedValueOnce({ generation: 1, devices: [] })
       .mockResolvedValueOnce({ ...base, signal: { decoded: 50, peak: 0.1 } })
       .mockResolvedValueOnce({ ...base, signal: { decoded: 50, peak: 0 } })
       .mockResolvedValueOnce({ ...base, signal: { decoded: 0, peak: null } })
@@ -344,8 +396,8 @@ describe('desktop output probe', () => {
     const metrics = { packets: '120', rejected: '3', decoded: '115', peak: '0.250', plc: '2', decodeErrors: '1', buffered: '4', output: 'active', late: '0', resyncDropped: '0', playout: 'fixed', adaptive: null }
     const invoke = vi.fn()
       .mockResolvedValueOnce({ running: true, sessionActive: true, status: 'Session active', invitation: '01ab', events: ['READY', 'RESULT receiver started'], metrics, volume: 50, muted: false })
-      .mockResolvedValueOnce({ running: false, sessionActive: false, status: 'Listener exited', invitation: null, events: ['READY', 'RESULT receiver started', 'OUTPUT stopped'], metrics, volume: null, muted: null })
       .mockResolvedValueOnce({ generation: 1, devices: [] })
+      .mockResolvedValueOnce({ running: false, sessionActive: false, status: 'Listener exited', invitation: null, events: ['READY', 'RESULT receiver started', 'OUTPUT stopped'], metrics, volume: null, muted: null })
     window.__TAURI__ = { core: { invoke } }
     const wrapper = mount(OutputProbe)
     await flushPromises()
@@ -399,6 +451,7 @@ describe('desktop output probe', () => {
     vi.useFakeTimers()
     const base = { running: true, sessionActive: true, status: 'Session active', invitation: null, events: [], metrics: null, signal: { decoded: 10, peak: 0.2 }, volume: 0, muted: true }
     const invoke = vi.fn().mockResolvedValueOnce(base)
+      .mockResolvedValueOnce({ generation: 1, devices: [] })
       .mockResolvedValueOnce({ ...base, muted: false })
       .mockResolvedValueOnce({ ...base, volume: 50, muted: false })
     window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
@@ -420,6 +473,7 @@ describe('desktop output probe', () => {
     const pendingPoll = new Promise(resolve => { resolvePoll = resolve })
     const invoke = vi.fn()
       .mockResolvedValueOnce({ running: true, sessionActive: false, status: 'Waiting', invitation: null, metrics: null, volume: 100, muted: false })
+      .mockResolvedValueOnce({ generation: 1, devices: [] })
       .mockReturnValueOnce(pendingPoll)
       .mockResolvedValueOnce({ running: false, sessionActive: false, status: 'Stopped', invitation: null, metrics: null, volume: null, muted: null })
       .mockResolvedValueOnce({ generation: 1, devices: [] })

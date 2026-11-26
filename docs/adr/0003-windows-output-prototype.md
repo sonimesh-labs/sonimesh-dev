@@ -75,7 +75,10 @@ lab selection does not establish device hot-plug recovery or release support.
 The separate desktop output probe enumerates endpoint identities first and
 queries each default format independently. An endpoint whose format cannot be
 queried remains visible with its format marked unavailable; enumeration failure
-is still reported as a list-level error. This is a read-only snapshot and does
+is still reported as a list-level error. Enumeration and per-device format queries
+run on a blocking worker so slow platform calls do not occupy the Tauri command
+runtime. Reopening the probe refreshes this snapshot even when its listener is
+already running; the current endpoint is matched by ID. This is a read-only snapshot and does
 not establish output support or device recovery. The operator may explicitly
 request a two-second, low-amplitude test tone on a listed endpoint. The test
 re-probes that endpoint, owns the CPAL stream on a worker, and stops it after

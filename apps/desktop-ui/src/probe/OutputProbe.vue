@@ -452,6 +452,7 @@ async function pollLab(retryUnknown = false) {
     if (disposed || request !== labRequest) return
     const wasRunning = lab.value.running
     const wasSessionActive = lab.value.sessionActive
+    const wasSwitchPending = lab.value.outputSwitch?.status === 'pending'
     const hadMetrics = lab.value.metrics !== null
     lab.value = snapshot
     if (snapshot.outputSwitch?.status === 'applied') rememberLabOutputId(snapshot.outputId ?? null)
@@ -473,10 +474,12 @@ async function pollLab(retryUnknown = false) {
         rememberLabOutputId(snapshot.outputId ?? null)
         labOutput.value = snapshot.outputId == null ? '' : 'unavailable'
       }
-      if (!snapshot.running) void refresh()
+      void refresh()
     } else if (wasRunning && !snapshot.running) {
       restoredLab.value = false
       if (!loaded.value) void refresh()
+    } else if (wasSwitchPending && snapshot.outputSwitch?.status !== 'pending' && !loaded.value) {
+      void refresh()
     }
     if (!disposed && lab.value.running) timer = setTimeout(pollLab, 1000)
   } catch {

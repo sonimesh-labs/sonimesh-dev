@@ -572,7 +572,7 @@ struct OutputDevice {
 }
 
 #[tauri::command]
-fn probe_outputs(
+async fn probe_outputs(
     state: tauri::State<'_, ProbeState>,
     generation: u32,
     selected_index: Option<usize>,
@@ -581,17 +581,22 @@ fn probe_outputs(
     {
         use sonimesh_platform::AudioOutput;
 
-        let output = sonimesh_platform::CpalOutput::new();
-        let devices = output
-            .devices()
-            .map_err(|_| "Could not inspect output devices.")?;
-        let ids: Vec<_> = devices.iter().map(|device| device.id.clone()).collect();
-        let devices = map_devices(devices, |id| {
-            output
-                .device_probe(id)
-                .ok()
-                .map(|probe| (probe.sample_rate_hz, probe.channels))
-        });
+        let (ids, devices) = tauri::async_runtime::spawn_blocking(|| {
+            let output = sonimesh_platform::CpalOutput::new();
+            let devices = output
+                .devices()
+                .map_err(|_| "Could not inspect output devices.")?;
+            let ids: Vec<_> = devices.iter().map(|device| device.id.clone()).collect();
+            let devices = map_devices(devices, |id| {
+                output
+                    .device_probe(id)
+                    .ok()
+                    .map(|probe| (probe.sample_rate_hz, probe.channels))
+            });
+            Ok::<_, &'static str>((ids, devices))
+        })
+        .await
+        .map_err(|_| "Could not inspect output devices.")??;
         let mut snapshot = state
             .snapshot
             .lock()
