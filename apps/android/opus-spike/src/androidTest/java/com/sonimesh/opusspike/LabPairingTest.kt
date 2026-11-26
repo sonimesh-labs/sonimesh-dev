@@ -50,6 +50,34 @@ class LabPairingTest {
     }
 
     @Test
+    fun edited_shared_invitation_survives_activity_recreation() {
+        val payload = labHex(labInvitation("AB".repeat(32)))
+        val replacement = labHex(labInvitation("CD".repeat(32)))
+        val intent = Intent(InstrumentationRegistry.getInstrumentation().targetContext, LabActivity::class.java).apply {
+            action = Intent.ACTION_SEND
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, payload)
+        }
+        ActivityScenario.launch<LabActivity>(intent).use { scenario ->
+            scenario.onActivity { activity ->
+                val field = requireNotNull(findField(activity.window.decorView, "Lab invitation payload"))
+                assertEquals(payload, field.text.toString())
+                field.setText(replacement)
+            }
+            scenario.recreate()
+            scenario.onActivity { activity ->
+                val field = requireNotNull(findField(activity.window.decorView, "Lab invitation payload"))
+                assertEquals(replacement, field.text.toString())
+                requireNotNull(findButton(activity.window.decorView, "Clear saved lab setup")).performClick()
+            }
+            scenario.recreate()
+            scenario.onActivity { activity ->
+                assertEquals("", requireNotNull(findField(activity.window.decorView, "Lab invitation payload")).text.toString())
+            }
+        }
+    }
+
+    @Test
     fun direct_invitation_applies_port_only_after_payload_validation() {
         val payload = labHex(labInvitation("AB".repeat(32)))
         ActivityScenario.launch(LabActivity::class.java).use { scenario ->

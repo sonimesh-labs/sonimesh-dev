@@ -433,7 +433,7 @@ class LabActivity : Activity() {
             text = "New test tones use the current capture usage, or the selection when capture is stopped. Restart a playing tone to apply changes."
         })
         setContentView(ScrollView(this).apply { addView(layout) })
-        handleIncomingInvitation(intent)
+        if (savedInstanceState == null) handleIncomingInvitation(intent)
         if (savedInstanceState == null && importedInvitation != null && intent?.action != Intent.ACTION_SEND) {
             LabStatus.publishIfIdle("Restored the last lab setup. Check the UDP address before starting.")
         }
