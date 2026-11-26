@@ -100,7 +100,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   the UI runtime; status checks and disconnects use the same blocking pool. An
   opt-in CPAL/WASAPI loopback meter lists output endpoints, puts the default
   first and sorts the rest by name, and shows default sample rate and channel
-  count when available. It selects the default initially and reports the selected endpoint name, format,
+  count when available. Endpoints with the same name receive distinct numbers
+  ordered by their device IDs, including when the device list is refreshed.
+  It selects the default initially and reports the selected endpoint name, format,
   sample count, recent peak, and approximate recent PCM activity after samples
   arrive for standard integer and floating-point PCM formats without retaining
   PCM; it observes the

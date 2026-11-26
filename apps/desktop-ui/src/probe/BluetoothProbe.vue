@@ -143,9 +143,11 @@ function emptyPlaybackSourcesDescription(capability: PlaybackCapability | null) 
 }
 
 function loopbackEndpointLabel(endpoint: LoopbackEndpoint) {
+  const matchingIds = loopbackEndpoints.value.filter(candidate => candidate.name === endpoint.name).map(candidate => candidate.id).sort()
+  const name = matchingIds.length > 1 ? `${endpoint.name} (${matchingIds.indexOf(endpoint.id) + 1})` : endpoint.name
   const details = [endpoint.isDefault ? 'default' : '', endpoint.sampleRate ? `${endpoint.sampleRate / 1000} kHz` : '', endpoint.channels ? `${endpoint.channels} ch` : '']
     .filter(Boolean)
-  return details.length ? `${endpoint.name} (${details.join(', ')})` : endpoint.name
+  return details.length ? `${name} (${details.join(', ')})` : name
 }
 
 function selectAvailableLoopbackEndpoint(endpoints: LoopbackEndpoint[]) {

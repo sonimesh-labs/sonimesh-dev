@@ -1046,6 +1046,36 @@ it('shows output endpoint format when Windows provides it', async () => {
   wrapper.unmount()
 })
 
+it('distinguishes same-name outputs across refreshes and starts the chosen endpoint', async () => {
+  const endpoints = [
+    { id: 'output-b', name: 'Speakers', isDefault: true, sampleRate: 48000, channels: 2 },
+    { id: 'output-a', name: 'Speakers', isDefault: false, sampleRate: 48000, channels: 2 },
+  ]
+  let refreshes = 0
+  const invoke = vi.fn((command: string) => {
+    if (command === 'bluetooth_status') return Promise.resolve('idle')
+    if (command === 'bluetooth_candidates') return Promise.resolve({ generation: 1, names: [] })
+    if (command === 'loopback_status') return Promise.resolve({ running: false, endpointName: '', sampleRate: 0, channels: 0, samples: 0, peak: 0, error: null })
+    if (command === 'loopback_endpoints') return Promise.resolve(++refreshes === 1 ? endpoints : [...endpoints].reverse())
+    if (command === 'loopback_start') return Promise.resolve({ running: true, endpointId: 'output-a', endpointName: 'Speakers', sampleRate: 48000, channels: 2, samples: 0, peak: 0, error: null })
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  expect(wrapper.get('option[value="output-a"]').text()).toBe('Speakers (1) (48 kHz, 2 ch)')
+  expect(wrapper.get('option[value="output-b"]').text()).toBe('Speakers (2) (default, 48 kHz, 2 ch)')
+  await wrapper.get('#loopback-endpoint').setValue('output-a')
+  await wrapper.findAll('button').find(button => button.text() === 'Refresh output devices')!.trigger('click')
+  await flushPromises()
+  expect(wrapper.get('option[value="output-a"]').text()).toBe('Speakers (1) (48 kHz, 2 ch)')
+  expect((wrapper.get('#loopback-endpoint').element as HTMLSelectElement).value).toBe('output-a')
+  await wrapper.findAll('button').find(button => button.text() === 'Start PCM check')!.trigger('click')
+  await flushPromises()
+  expect(invoke).toHaveBeenCalledWith('loopback_start', { endpointId: 'output-a' })
+  wrapper.unmount()
+})
+
 it('restarts a failed PCM monitor on the refreshed default endpoint', async () => {
   let endpointRefreshes = 0
   let recovered = false
