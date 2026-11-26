@@ -117,6 +117,9 @@ export function useDesktopState() {
     outputTestStatus.value = null
     return run(
       async () => {
+        const current = await desktopBridge.refreshOutputDevices()
+        snapshot.value = current
+        outputInventoryError.value = null
         await desktopBridge.testOutput()
         outputTestStatus.value = 'Test tone completed on the selected output.'
       },

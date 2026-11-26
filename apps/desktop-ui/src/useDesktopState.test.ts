@@ -434,6 +434,7 @@ describe('useDesktopState', () => {
   it('reports successful completion of the selected-output test tone', async () => {
     desktopBridgeMock.snapshot.mockResolvedValueOnce(receiverSnapshot('ready'))
     desktopBridgeMock.testOutput.mockResolvedValueOnce(undefined)
+    desktopBridgeMock.refreshOutputDevices.mockResolvedValue(receiverSnapshot('ready'))
     const wrapper = mount(StateHarness)
     await flushPromises()
 
@@ -458,6 +459,54 @@ describe('useDesktopState', () => {
     desktopBridgeMock.selectOutput.mockResolvedValueOnce(receiverSnapshot('ready'))
     await wrapper.vm.selectOutput('other-output')
     expect(wrapper.vm.outputTestStatus).toBe(null)
+  })
+
+  it('refreshes the selected output before playing the test tone', async () => {
+    const initial = { ...receiverSnapshot('ready'), selectedOutputId: 'old-default' }
+    const updated = { ...initial, selectedOutputId: 'new-default' }
+    desktopBridgeMock.snapshot.mockResolvedValueOnce(initial)
+    desktopBridgeMock.refreshOutputDevices.mockResolvedValueOnce(updated)
+    desktopBridgeMock.testOutput.mockImplementationOnce(async () => {
+      expect(wrapper.vm.snapshot?.selectedOutputId).toBe('new-default')
+    })
+    const wrapper = mount(StateHarness)
+    await flushPromises()
+
+    await wrapper.vm.testOutput()
+
+    expect(desktopBridgeMock.testOutput).toHaveBeenCalledOnce()
+    expect(wrapper.vm.snapshot?.selectedOutputId).toBe('new-default')
+  })
+
+  it('does not play the test tone when the output inventory cannot be refreshed', async () => {
+    desktopBridgeMock.snapshot.mockResolvedValueOnce(receiverSnapshot('ready'))
+    desktopBridgeMock.refreshOutputDevices.mockRejectedValueOnce(new Error('enumeration failed'))
+    const wrapper = mount(StateHarness)
+    await flushPromises()
+
+    await wrapper.vm.testOutput()
+
+    expect(desktopBridgeMock.testOutput).not.toHaveBeenCalled()
+    expect(wrapper.vm.outputTestStatus).toBeNull()
+    expect(wrapper.vm.error).not.toBeNull()
+  })
+
+  it('shows an empty refreshed inventory when no output remains available', async () => {
+    const initial = receiverSnapshot('ready')
+    desktopBridgeMock.snapshot.mockResolvedValueOnce(initial)
+    desktopBridgeMock.refreshOutputDevices.mockResolvedValueOnce({
+      ...initial, outputDevices: [], selectedOutputId: null,
+    })
+    desktopBridgeMock.testOutput.mockRejectedValueOnce(new Error('no output'))
+    const wrapper = mount(StateHarness)
+    await flushPromises()
+
+    await wrapper.vm.testOutput()
+
+    expect(wrapper.vm.snapshot?.outputDevices).toEqual([])
+    expect(wrapper.vm.snapshot?.selectedOutputId).toBeNull()
+    expect(wrapper.vm.outputTestStatus).toBeNull()
+    expect(wrapper.vm.error).not.toBeNull()
   })
 
   it('reports output selection failures and releases the command state', async () => {
@@ -523,6 +572,7 @@ describe('useDesktopState', () => {
 
   it('reports test-tone failures without leaving a success result', async () => {
     desktopBridgeMock.snapshot.mockResolvedValueOnce(receiverSnapshot('ready'))
+    desktopBridgeMock.refreshOutputDevices.mockResolvedValueOnce(receiverSnapshot('ready'))
     desktopBridgeMock.testOutput.mockRejectedValueOnce(new Error('output unavailable'))
     const wrapper = mount(StateHarness)
     await flushPromises()

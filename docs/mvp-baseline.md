@@ -623,8 +623,10 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   or first available endpoint while retaining the saved preference. Refreshing
   after the endpoint returns restores it. Returning focus to the desktop shell
   also refreshes the inventory; if a command is running, the refresh waits for
-  that command to finish. A short low-level test tone can be
-  played through the selected endpoint.
+  that command to finish. Before playing a short low-level test tone, the shell
+  refreshes the inventory and displays the resolved endpoint, including a changed
+  system default or a fallback for a missing saved device. If refresh fails, it
+  does not play using the stale selection.
   The shell explicitly
   disables pairing, receiver, stream controls, and live diagnostics because it
   does not yet construct the receiver owner. No live receiver, audio, key, or

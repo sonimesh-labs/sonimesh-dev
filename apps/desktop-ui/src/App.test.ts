@@ -256,6 +256,7 @@ describe('App', () => {
     expect((wrapper.get('.inline-actions button.secondary-action').element as HTMLButtonElement).disabled).toBe(true)
     expect(wrapper.find('#diagnostics').exists()).toBe(false)
 
+    desktopBridgeMock.refreshOutputDevices.mockResolvedValueOnce(shellSnapshot)
     desktopBridgeMock.testOutput.mockResolvedValueOnce(undefined)
     await wrapper.get('.output-test-button').trigger('click')
     await flushPromises()
