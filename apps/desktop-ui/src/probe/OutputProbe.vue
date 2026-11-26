@@ -18,6 +18,16 @@ declare global {
 }
 
 const devices = ref<OutputDevice[]>([])
+const deviceLabels = computed(() => devices.value.map((device, index) => {
+  const matches = devices.value.flatMap((candidate, candidateIndex) => candidate.label === device.label ? [candidateIndex] : [])
+  if (matches.length < 2) return device.label
+  matches.sort((left, right) => {
+    const leftId = devices.value[left].id ?? ''
+    const rightId = devices.value[right].id ?? ''
+    return leftId < rightId ? -1 : leftId > rightId ? 1 : left - right
+  })
+  return `${device.label} (${matches.indexOf(index) + 1})`
+}))
 const busy = ref(false)
 const error = ref<string | null>(null)
 const loaded = ref(false)
@@ -556,11 +566,11 @@ onBeforeUnmount(() => { disposed = true; labRequest++; suggestRequest++; clearTi
       <ul v-if="devices.length" class="probe-list" aria-label="Available output devices">
         <li v-for="(device, index) in devices" :key="index" class="selected-device">
           <div>
-            <strong>{{ device.label }}{{ device.isDefault ? ' (default)' : '' }}</strong>
+            <strong>{{ deviceLabels[index] }}{{ device.isDefault ? ' (default)' : '' }}</strong>
             <span v-if="device.sampleRateHz !== null && device.channels !== null">{{ device.sampleRateHz.toLocaleString() }} Hz · {{ device.channels }} channels</span>
             <span v-else>Default format unavailable</span>
           </div>
-          <button type="button" class="preview-action probe-play" :disabled="busy || playing !== null || lab.running || labBusy || device.sampleRateHz === null" :aria-label="`Play test tone on ${device.label}`" @click="play(index)">
+          <button type="button" class="preview-action probe-play" :disabled="busy || playing !== null || lab.running || labBusy || device.sampleRateHz === null" :aria-label="`Play test tone on ${deviceLabels[index]}`" @click="play(index)">
             {{ playing === index ? 'Playing…' : 'Test sound' }}
           </button>
         </li>
@@ -578,7 +588,7 @@ onBeforeUnmount(() => { disposed = true; labRequest++; suggestRequest++; clearTi
       <select id="lab-output" v-model="labOutput" :disabled="lab.running || labBusy || busy" @change="onLabOutputChange">
         <option value="">System default output</option>
         <option v-if="labOutput === 'unavailable'" value="unavailable" disabled>Previously selected output unavailable</option>
-        <option v-for="(device, index) in devices" :key="index" :value="String(index)" :disabled="device.sampleRateHz === null">{{ device.label }}{{ device.isDefault ? ' (default)' : '' }}</option>
+        <option v-for="(device, index) in devices" :key="index" :value="String(index)" :disabled="device.sampleRateHz === null">{{ deviceLabels[index] }}{{ device.isDefault ? ' (default)' : '' }}</option>
       </select>
       <p v-if="labOutput === 'unavailable'" role="status">Select an available output before starting the listener.</p>
       <label for="lab-host">Desktop address for Android control</label>

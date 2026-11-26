@@ -1157,8 +1157,11 @@ The isolated Tauri prototype displays the Windows output endpoints and default
 formats returned by the CPAL adapter, and can play a short test tone after the
 operator selects an endpoint. It can manage the separate lab listener but does
 not change the system default output. If one endpoint's format cannot be read, it remains listed with an
-unavailable-format indication. Build the web assets and run the prototype from
-the repository root:
+unavailable-format indication.
+Endpoints with the same display name have numbered labels in both the output list
+and listener selector. Numbers are ordered by endpoint ID while the set of
+same-name devices remains unchanged; adding or removing one may change the numbers.
+Build the web assets and run the prototype from the repository root:
 
 ~~~powershell
 Push-Location apps/desktop-ui

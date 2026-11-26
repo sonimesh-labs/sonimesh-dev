@@ -632,6 +632,28 @@ describe('desktop output probe', () => {
     reopened.unmount()
   })
 
+  it('keeps same-name output labels and test controls distinct across reordering', async () => {
+    const first = { id: 'a-id', label: 'USB DAC', sampleRateHz: 48_000, channels: 2, isDefault: false }
+    const second = { id: 'b-id', label: 'USB DAC', sampleRateHz: 48_000, channels: 2, isDefault: false }
+    const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [second, first] })
+      .mockResolvedValueOnce({ generation: 2, devices: [first, second] })
+      .mockResolvedValueOnce(undefined)
+    window.__TAURI__ = { core: { invoke } }
+    const wrapper = mountStoppedProbe()
+    await flushPromises()
+    let options = wrapper.get('#lab-output').findAll('option')
+    expect(options[1].text()).toBe('USB DAC (2)')
+    expect(options[2].text()).toBe('USB DAC (1)')
+    await wrapper.findAll('button').find(button => button.text() === 'Refresh devices')!.trigger('click')
+    await flushPromises()
+    options = wrapper.get('#lab-output').findAll('option')
+    expect(options[1].text()).toBe('USB DAC (1)')
+    expect(options[2].text()).toBe('USB DAC (2)')
+    await wrapper.get('[aria-label="Play test tone on USB DAC (2)"]').trigger('click')
+    expect(invoke).toHaveBeenCalledWith('play_test_tone', { generation: 2, index: 1 })
+    wrapper.unmount()
+  })
+
   it('restores the chosen endpoint after a failed refresh and clears it on default selection', async () => {
     const chosen = { id: 'chosen-id', label: 'Headphones', sampleRateHz: 48_000, channels: 2, isDefault: false }
     const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [chosen] })
