@@ -93,6 +93,113 @@ impl AudioOutput for MemoryOutput {
     }
 }
 
+#[cfg(all(windows, feature = "playback"))]
+struct MeteredOutput {
+    inner: sonimesh_platform::CpalOutput,
+    heard_samples: Arc<std::sync::atomic::AtomicBool>,
+}
+
+#[cfg(all(windows, feature = "playback"))]
+struct MeteredSource {
+    inner: Box<dyn RenderSource>,
+    heard_samples: Arc<std::sync::atomic::AtomicBool>,
+}
+
+#[cfg(all(windows, feature = "playback"))]
+impl RenderSource for MeteredSource {
+    fn render(&mut self, output: &mut [f32]) {
+        self.inner.render(output);
+        if output.iter().any(|sample| sample.abs() > 0.001) {
+            self.heard_samples
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+}
+
+#[cfg(all(windows, feature = "playback"))]
+impl AudioOutput for MeteredOutput {
+    fn devices(&self) -> Result<Vec<OutputDeviceInfo>, OutputError> {
+        self.inner.devices()
+    }
+
+    fn start(
+        &mut self,
+        device: Option<&OutputDeviceId>,
+        config: OutputConfig,
+        source: Box<dyn RenderSource>,
+    ) -> Result<(), OutputError> {
+        self.inner.start(
+            device,
+            config,
+            Box::new(MeteredSource {
+                inner: source,
+                heard_samples: Arc::clone(&self.heard_samples),
+            }),
+        )
+    }
+
+    fn stop(&mut self) {
+        self.inner.stop();
+    }
+
+    fn health(&self) -> OutputHealth {
+        self.inner.health()
+    }
+}
+
+#[cfg(all(windows, feature = "playback"))]
+#[test]
+#[ignore = "opens the default Windows audio output and plays a short test signal"]
+fn paired_tls_scheduler_reaches_windows_output_callback() {
+    let output = sonimesh_platform::CpalOutput::new();
+    let probe = output
+        .default_device_probe()
+        .expect("default output is available");
+    let config = probe
+        .output_config(None, 8_192)
+        .expect("output format is supported");
+    println!(
+        "CPAL output: {} Hz, {} channels, {:?}",
+        config.sample_rate_hz, config.channels, config.sample_format
+    );
+    let selection = OutputSelection {
+        device: Some(probe.device.id),
+        config,
+    };
+    let meter = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    paired_tls_scheduler_output(
+        MeteredOutput {
+            inner: output,
+            heard_samples: meter,
+        },
+        selection,
+        |output| {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while !output
+                .heard_samples
+                .load(std::sync::atomic::Ordering::Relaxed)
+                && Instant::now() < deadline
+            {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            let status = output.inner.status();
+            assert!(status.callback_count > 0, "output callback did not run");
+            assert!(
+                output
+                    .heard_samples
+                    .load(std::sync::atomic::Ordering::Relaxed),
+                "decoded signal did not reach output callback"
+            );
+            assert_eq!(output.inner.health(), OutputHealth::Healthy);
+            println!(
+                "CPAL callbacks: {}, largest callback frames: {}",
+                status.callback_count, status.maximum_callback_frames
+            );
+        },
+        |output| assert!(!output.inner.is_running()),
+    );
+}
+
 fn read_reply(stream: &mut impl Read) -> Envelope {
     let mut prefix = [0; 4];
     stream.read_exact(&mut prefix).unwrap();
@@ -105,8 +212,41 @@ fn read_reply(stream: &mut impl Read) -> Envelope {
 }
 
 #[test]
-#[allow(clippy::too_many_lines)] // Exercises pairing, control, media and output as one path.
 fn paired_tls_scheduler_decodes_protected_opus_to_output() {
+    paired_tls_scheduler_output(
+        MemoryOutput::default(),
+        OutputSelection {
+            device: None,
+            config: OutputConfig {
+                sample_rate_hz: 48_000,
+                channels: 2,
+                sample_format: SampleFormat::Float32,
+                requested_callback_frames: Some(480),
+                maximum_callback_frames: 1_024,
+            },
+        },
+        |output| {
+            let mut rendered = [0.0; 256];
+            let mut peak = 0.0_f32;
+            for _ in 0..16 {
+                output.source.as_mut().unwrap().render(&mut rendered);
+                peak = rendered
+                    .iter()
+                    .fold(peak, |peak, sample| peak.max(sample.abs()));
+            }
+            assert!(peak > 0.001, "paired audio must reach output");
+        },
+        |output| assert!(output.source.is_none()),
+    );
+}
+
+#[allow(clippy::too_many_lines)] // Exercises pairing, control, media and output as one path.
+fn paired_tls_scheduler_output<O: AudioOutput>(
+    output: O,
+    selection: OutputSelection,
+    verify_output: impl FnOnce(&mut O),
+    verify_stopped: impl FnOnce(&mut O),
+) {
     use rcgen::generate_simple_self_signed;
     use rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
     use sonimesh_app::{
@@ -226,17 +366,8 @@ fn paired_tls_scheduler_decodes_protected_opus_to_output() {
     let bridge = ControlToMixerBridge::new(
         state,
         &[Capability::FrameDuration20Ms],
-        MemoryOutput::default(),
-        OutputSelection {
-            device: None,
-            config: OutputConfig {
-                sample_rate_hz: 48_000,
-                channels: 2,
-                sample_format: SampleFormat::Float32,
-                requested_callback_frames: Some(480),
-                maximum_callback_frames: 1_024,
-            },
-        },
+        output,
+        selection,
         8,
         8,
     )
@@ -340,15 +471,7 @@ fn paired_tls_scheduler_decodes_protected_opus_to_output() {
         .bridge_mut()
         .mixer_mut()
         .output_mut();
-    let mut rendered = [0.0; 256];
-    let mut peak = 0.0_f32;
-    for _ in 0..16 {
-        output.source.as_mut().unwrap().render(&mut rendered);
-        peak = rendered
-            .iter()
-            .fold(peak, |peak, sample| peak.max(sample.abs()));
-    }
-    assert!(peak > 0.001, "paired audio must reach output");
+    verify_output(output);
     let stop = Envelope {
         protocol_version: CONTROL_PROTOCOL_VERSION,
         request_id: 3,
@@ -377,15 +500,13 @@ fn paired_tls_scheduler_decodes_protected_opus_to_output() {
     assert!(
         matches!(reply.payload, Some(envelope::Payload::StreamStatus(status)) if status.state == StreamState::Stopped as i32)
     );
-    assert!(
+    verify_stopped(
         scheduler
             .receiver_mut()
             .owner_mut()
             .bridge_mut()
             .mixer_mut()
-            .output_mut()
-            .source
-            .is_none()
+            .output_mut(),
     );
 }
 

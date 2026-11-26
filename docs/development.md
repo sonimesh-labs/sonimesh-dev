@@ -1697,6 +1697,20 @@ environment variable; the Windows CI step sets that variable. This run is
 native-build and basic decode/PLC evidence for ADR 0009 only; it is not a
 quality, power, latency, Android ABI, or malformed-payload fuzz result.
 
+To exercise the paired scheduler with the Windows default output and a short
+generated test signal, run:
+
+~~~powershell
+cargo +1.85.0 test --locked -p opus-codec-prototype --features playback --test scheduled_opus paired_tls_scheduler_reaches_windows_output_callback -- --ignored --nocapture
+~~~
+
+On 2026-11-26, Windows 11 build 26200 passed this local loopback test with a
+48 kHz, eight-channel Float32 default endpoint. One callback of 1,056 frames
+contained non-silent decoded samples; the output stopped after StopStream. The
+test uses a synthetic 20 ms stereo Opus source and an in-process TLS peer, not
+an Android device or a physical network. It does not measure audible output,
+latency, sustained playback, or device recovery.
+
 For a local end-to-end media-path exercise, the `local-audio` binary in the
 same prototype sends a generated tone through native Opus, encrypted UDP
 loopback, the receiver and its render source. `--check` runs without audio

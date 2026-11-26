@@ -57,6 +57,11 @@ Add an optional `cpal-output` feature to `sonimesh-platform` for the first Windo
 This decision does not select the release backend. It authorizes a measured CPAL
 prototype only.
 
+The native Opus integration test can optionally run the paired TLS scheduler
+against the default CPAL endpoint, observing decoded samples in the output
+callback. This opt-in local test is separate from CI and does not establish
+audibility, physical latency, or device lifecycle support.
+
 The separate output probe may also expose a Windows system playback connection
 experiment: enumerate candidates, connect an explicitly selected source, show
 connection state, and close on request or application exit. This is an
