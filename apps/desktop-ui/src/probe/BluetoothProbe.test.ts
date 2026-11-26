@@ -88,6 +88,52 @@ it('keeps polling the old output when stopping it for a switch fails', async () 
   wrapper.unmount()
 })
 
+it('stops the switched combined monitor if Bluetooth recovery fails during the switch', async () => {
+  vi.useFakeTimers()
+  let phase = 'idle'
+  let prepareCalls = 0
+  let active = ''
+  let completeSwitch!: (snapshot: object) => void
+  const snapshot = (id: string, running: boolean) => ({ running, endpointId: id, endpointName: id, sampleRate: 48000, channels: 2, samples: 0, peak: 0, runPeak: 0, error: null })
+  const invoke = vi.fn((command: string, args?: { endpointId?: string }) => {
+    if (command === 'bluetooth_status') return Promise.resolve(phase)
+    if (command === 'bluetooth_candidates') return Promise.resolve({ generation: 1, names: ['Phone'], capability: 'SystemRouted' })
+    if (command === 'loopback_endpoints') return Promise.resolve([{ id: 'old', name: 'Speakers', isDefault: true }, { id: 'new', name: 'Headphones', isDefault: false }])
+    if (command === 'loopback_status') return Promise.resolve(snapshot(active, !!active))
+    if (command === 'bluetooth_prepare') {
+      if (++prepareCalls === 1) { phase = 'waiting'; return Promise.resolve() }
+      return Promise.reject(new Error('Phone unavailable'))
+    }
+    if (command === 'loopback_stop') { const previous = active; active = ''; return Promise.resolve(snapshot(previous, false)) }
+    if (command === 'loopback_start') {
+      if (args?.endpointId === 'new') return new Promise(resolve => { completeSwitch = resolve })
+      active = 'old'
+      return Promise.resolve(snapshot(active, true))
+    }
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  await wrapper.get('#bluetooth-source').setValue('0')
+  await wrapper.findAll('button').find(button => button.text() === 'Wait + monitor system output')!.trigger('click')
+  await flushPromises()
+  await wrapper.get('#loopback-endpoint').setValue('new')
+  await wrapper.findAll('button').find(button => button.text() === 'Switch PCM check to selected output')!.trigger('click')
+  await flushPromises()
+  phase = 'idle'
+  await vi.advanceTimersByTimeAsync(1000)
+  expect(invoke.mock.calls.filter(([command]) => command === 'loopback_stop')).toHaveLength(1)
+  active = 'new'
+  completeSwitch(snapshot('new', true))
+  await flushPromises()
+  expect(invoke.mock.calls.filter(([command]) => command === 'loopback_stop')).toHaveLength(2)
+  expect(active).toBe('')
+  expect(sessionStorage.getItem('sonimesh.bluetoothProbe.combinedMonitorOwned')).toBeNull()
+  expect(wrapper.text()).toContain('Phone unavailable')
+  wrapper.unmount()
+})
+
 it('copies a source-neutral Bluetooth and system output observation', async () => {
   const writeText = vi.fn().mockResolvedValue(undefined)
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })

@@ -118,6 +118,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   its test tone targets the monitored output rather than a different saved preference.
   The operator can switch the monitored endpoint while Bluetooth stays connected;
   the meter restarts with fresh counters and reports a failed switch for retry.
+  On 2026-11-26, a Windows backend test stopped the 48 kHz eight-channel default
+  loopback and started the 48 kHz stereo ASUS virtual output. This did not exercise
+  a Bluetooth connection, the UI, audible playback, or physical device removal.
   While monitoring, an integrated low-level test tone can be played on the
   selected endpoint to check that the meter responds. The probe also offers
   an explicit combined
