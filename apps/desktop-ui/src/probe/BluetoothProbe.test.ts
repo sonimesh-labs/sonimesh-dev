@@ -6,6 +6,7 @@ import BluetoothProbe from './BluetoothProbe.vue'
 afterEach(() => {
   delete window.__TAURI__
   vi.useRealTimers()
+  sessionStorage.removeItem('sonimesh.bluetoothProbe.sourceId')
   localStorage.removeItem('sonimesh.bluetoothProbe.loopbackEndpoint')
 })
 
@@ -178,6 +179,51 @@ it('preserves the selected source by identity when discovery order changes', asy
   await refreshButton.trigger('click')
   await flushPromises()
   expect((wrapper.get('#bluetooth-source').element as HTMLSelectElement).value).toBe('1')
+  wrapper.unmount()
+})
+
+it('restores the selected Bluetooth source when reopening the panel', async () => {
+  let generation = 0
+  const invoke = vi.fn((command: string) => {
+    if (command === 'bluetooth_status') return Promise.resolve('idle')
+    if (command === 'loopback_status') return Promise.resolve({ running: false, endpointName: '', sampleRate: 0, channels: 0, samples: 0, peak: 0, error: null })
+    if (command === 'bluetooth_candidates') {
+      generation++
+      return Promise.resolve(generation === 1
+        ? { generation, names: ['Phone', 'Headset'], ids: ['phone-id', 'headset-id'] }
+        : { generation, names: ['Headset', 'Phone'], ids: ['headset-id', 'phone-id'] })
+    }
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+
+  const first = mount(BluetoothProbe)
+  await flushPromises()
+  await first.get('#bluetooth-source').setValue('0')
+  expect(sessionStorage.getItem('sonimesh.bluetoothProbe.sourceId')).toBe('phone-id')
+  expect(first.get('#bluetooth-source').text()).not.toContain('phone-id')
+  first.unmount()
+
+  const reopened = mount(BluetoothProbe)
+  await flushPromises()
+  expect((reopened.get('#bluetooth-source').element as HTMLSelectElement).value).toBe('1')
+  expect(reopened.get('#bluetooth-source').text()).toContain('Phone')
+  reopened.unmount()
+})
+
+it('clears a stale source preference when the current bridge has no candidate IDs', async () => {
+  sessionStorage.setItem('sonimesh.bluetoothProbe.sourceId', 'old-device-id')
+  const invoke = vi.fn((command: string) => {
+    if (command === 'bluetooth_status') return Promise.resolve('idle')
+    if (command === 'loopback_status') return Promise.resolve({ running: false, endpointName: '', sampleRate: 0, channels: 0, samples: 0, peak: 0, error: null })
+    if (command === 'bluetooth_candidates') return Promise.resolve({ generation: 1, names: ['Phone'] })
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  await wrapper.get('#bluetooth-source').setValue('0')
+  expect(sessionStorage.getItem('sonimesh.bluetoothProbe.sourceId')).toBeNull()
   wrapper.unmount()
 })
 

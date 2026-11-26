@@ -90,9 +90,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   candidate discovery with visible search/refresh status, and refreshes
   candidates and idle output endpoints when returning to the probe.
   The probe distinguishes candidates with duplicate display names and retains
-  the selected device across refreshes using its in-memory Windows device ID;
-  duplicate names use a stable name-and-ID order, and the ID is not persisted or
-  shown in the interface.
+  the selected device across panel reopens and refreshes using a window-scoped
+  session ID; duplicate names use a stable name-and-ID order, and the ID is not
+  written to app configuration or shown in the interface.
   Candidate discovery and
   connection setup run on Tauri's blocking task pool so WinRT waits do not occupy
   the UI runtime; status checks and disconnects use the same blocking pool. An

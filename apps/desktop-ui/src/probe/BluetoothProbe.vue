@@ -11,6 +11,7 @@ const playbackCapability = ref<PlaybackCapability | null>(null)
 const LOOPBACK_NO_SAMPLES_DELAY_MS = 5000
 const generation = ref(0)
 const selected = ref('')
+const BLUETOOTH_SOURCE_KEY = 'sonimesh.bluetoothProbe.sourceId'
 const loaded = ref(false)
 const discovering = ref(false)
 const busy = ref(false)
@@ -63,6 +64,24 @@ function sourceName() {
 function sourceOptionLabel(index: number, name: string) {
   const matchingIndexes = names.value.flatMap((candidate, candidateIndex) => candidate === name ? [candidateIndex] : [])
   return matchingIndexes.length > 1 ? `${name} (${matchingIndexes.indexOf(index) + 1})` : name
+}
+
+function readBluetoothSourceId() {
+  try {
+    return sessionStorage.getItem(BLUETOOTH_SOURCE_KEY) ?? undefined
+  } catch {
+    return undefined
+  }
+}
+
+function rememberBluetoothSource() {
+  try {
+    const id = candidateIds.value[Number(selected.value)]
+    if (id) sessionStorage.setItem(BLUETOOTH_SOURCE_KEY, id)
+    else sessionStorage.removeItem(BLUETOOTH_SOURCE_KEY)
+  } catch {
+    // Session preference is optional; the current selection still works.
+  }
 }
 
 function playbackCapabilityDescription(capability: PlaybackCapability) {
@@ -160,7 +179,7 @@ async function refresh() {
   error.value = null
   suggestPhoneInitiated.value = false
   const previousIndex = selected.value === '' ? -1 : Number(selected.value)
-  const previousId = candidateIds.value[previousIndex]
+  const previousId = candidateIds.value[previousIndex] ?? readBluetoothSourceId()
   const previousName = names.value[previousIndex]
   const previousNameCount = previousName === undefined ? 0 : names.value.filter(name => name === previousName).length
   try {
@@ -490,7 +509,7 @@ onBeforeUnmount(() => {
     <p v-else-if="loaded && names.length === 0" role="status">{{ emptyPlaybackSourcesDescription(playbackCapability) }}</p>
     <template v-if="names.length">
       <label for="bluetooth-source">Playback source</label>
-      <select id="bluetooth-source" v-model="selected" :disabled="busy || phase !== 'idle'">
+      <select id="bluetooth-source" v-model="selected" :disabled="busy || phase !== 'idle'" @change="rememberBluetoothSource">
         <option value="" disabled>Select a source</option>
         <option v-for="(name, index) in names" :key="index" :value="String(index)">{{ sourceOptionLabel(index, name) }}</option>
       </select>

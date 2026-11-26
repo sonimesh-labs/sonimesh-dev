@@ -282,7 +282,8 @@ The Windows Bluetooth prototype may enumerate system playback candidates and,
 after an explicit operator selection, start, open, and close a system-routed
 connection. The operator can refresh the candidate list before selection; a
 selection always refers to the last displayed enumeration. Candidate device IDs
-are used only in memory to keep the same selection across refreshes; duplicate
+are held in window-scoped session storage to restore the selection across panel
+reopens and refreshes; they are not written to app configuration. Duplicate
 display names receive ordinal labels in a deterministic name-and-ID order.
 Enumeration or a
 successful open does not establish that audio is audible or that PCM is
