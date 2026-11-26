@@ -243,12 +243,14 @@ internal class PairedSessionSupervisor(
             DatagramSocket().use { udp ->
                 udp.connect(destination, destinationPort)
                 var previousSendNanos: Long? = null
+                val sequence = PairedMediaSequence()
                 while (sessionActive.get() && (!producerFinished.get() || packets.isNotEmpty())) {
                     val packet = takePacedPacket(packets) {
                         waitForPairedSendGap(previousSendNanos, sessionActive::get, SystemClock::elapsedRealtimeNanos, TimeUnit.NANOSECONDS::sleep)
                     } ?: if (!sessionActive.get() || Thread.currentThread().isInterrupted) break else continue
                     if (!sessionActive.get()) break
-                    val datagram = sealer.seal(packet.sequence, packet.sequence * 960, 0, packet.bytes)
+                    val sessionSequence = sequence.next(packet.sequence)
+                    val datagram = sealer.seal(sessionSequence, sessionSequence * 960, 0, packet.bytes)
                     udp.send(DatagramPacket(datagram, datagram.size))
                     previousSendNanos = SystemClock.elapsedRealtimeNanos()
                     onPacketSent()
@@ -292,6 +294,21 @@ internal class PairedSessionSupervisor(
         "test-injected receiver unavailable" -> "test-injected"
         "output unavailable" -> "output-unavailable"
         else -> "other"
+    }
+}
+
+/** Maps the continuous encoder sequence to a fresh paired media session. */
+internal class PairedMediaSequence {
+    private var first: Long? = null
+    private var previous: Long? = null
+
+    fun next(encodedSequence: Long): Long {
+        require(encodedSequence >= 0 && (previous == null || encodedSequence > previous!!))
+        val base = first ?: encodedSequence.also { first = it }
+        val relative = encodedSequence - base
+        require(relative <= 0xffff_ffffL)
+        previous = encodedSequence
+        return relative
     }
 }
 

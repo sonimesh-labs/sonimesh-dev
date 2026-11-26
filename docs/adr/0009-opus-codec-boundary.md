@@ -67,6 +67,10 @@ overflow, and stop still drains within its existing deadline. This experimental
 minimum spacing can add queueing delay; it is not a latency or quality claim.
 The sender waits before taking the next packet from the queue, so packets
 arriving during a wait remain subject to the same oldest-drop policy.
+Each new paired media session numbers its first sent encoded packet from zero
+and preserves subsequent gaps caused by local queue drops. Its sample timestamp
+uses that session-relative sequence. This lets the fresh desktop decoder begin
+at its expected sequence after reconnect while capture and encoding continue.
 This is an experimental component, not yet an encoder selection or a change to
 the capture-only main application. Device and end-to-end validation remain open.
 The Android lab may request 64, 96, or 128 kb/s from MediaCodec for a new

@@ -287,7 +287,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   experimental supervisor keeps the current capture/encoder alive, drops queued
   media from the retired session, and retries a fresh paired media session with
   bounded, cancellable monotonic backoff, checking the remaining time once per
-  wait so crossing the deadline cannot request a negative sleep. A session must
+  wait so crossing the deadline cannot request a negative sleep. Each new session
+  starts packet numbering and sample timestamps at zero; gaps after its first
+  sent packet still reflect locally discarded encoded frames. A session must
   remain established for ten seconds before the consecutive-failure count is
   cleared; brief connect/disconnect cycles count as failures. It stops after
   twelve consecutive failures or when the
