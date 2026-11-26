@@ -418,6 +418,15 @@ that count. Stop cancels an in-progress retry. Automatic recovery
 requires the desktop lab to stay running with `--keep-listening`; otherwise the
 retry eventually ends. This behavior uses the public fixed lab fixture and is
 not the product pairing or reconnect policy.
+The paired UDP sender waits for a minimum 10 ms gap between sends to limit bursts
+from encoder output; the existing bounded queue may still discard older frames
+if production outpaces sending. This can add queueing delay and is a lab policy,
+not an audio-quality or latency guarantee. On 2026-11-26, an API 37 x86_64
+paired-probe run with Windows playback passed and observed one interval under
+10 ms among 420 sender-side observations. The listener decoded 421 frames,
+reported three PLC decisions, no late packets or resynchronization drops, and
+detected the probe. Observer timing and host scheduling vary; this single run
+does not establish a quality improvement, audible output, or physical WLAN results.
 While reconnecting, the connection status remains visible even if the capture
 signal changes; the separate capture-signal indicator continues to update.
 The indicator reports signal on the first non-silent capture read, including

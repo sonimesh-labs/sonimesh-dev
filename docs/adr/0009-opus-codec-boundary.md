@@ -45,6 +45,11 @@ The paired Android lab uses a separate reusable MediaCodec encoder module for
 its fixed 48 kHz stereo, 20 ms PCM frames and bounded Opus output. The caller
 owns capture, packet queues, scheduling, and shutdown; the encoder only accepts
 complete frames (or a padded final frame) and polls codec output without blocking.
+The paired lab sender spaces consecutive UDP sends by at least 10 ms, allowing
+limited catch-up after encoder bursts without sending an entire queued burst at
+once. Its existing eight-packet queue continues to discard the oldest packet on
+overflow, and stop still drains within its existing deadline. This experimental
+minimum spacing can add queueing delay; it is not a latency or quality claim.
 This is an experimental component, not yet an encoder selection or a change to
 the capture-only main application. Device and end-to-end validation remain open.
 The Android lab may request 64, 96, or 128 kb/s from MediaCodec for a new

@@ -229,11 +229,13 @@ internal class PairedSessionSupervisor(
         try {
             DatagramSocket().use { udp ->
                 udp.connect(destination, destinationPort)
+                var previousSendNanos: Long? = null
                 while (sessionActive.get() && (!producerFinished.get() || packets.isNotEmpty())) {
                     val packet = packets.poll(20, TimeUnit.MILLISECONDS) ?: continue
-                    if (!sessionActive.get()) break
+                    if (!waitForPairedSendGap(previousSendNanos, sessionActive::get, SystemClock::elapsedRealtimeNanos, TimeUnit.NANOSECONDS::sleep)) break
                     val datagram = sealer.seal(packet.sequence, packet.sequence * 960, 0, packet.bytes)
                     udp.send(DatagramPacket(datagram, datagram.size))
+                    previousSendNanos = SystemClock.elapsedRealtimeNanos()
                     onPacketSent()
                 }
             }
@@ -280,6 +282,26 @@ internal class PairedSessionSupervisor(
 
 internal fun pairedReconnectDelayMillis(failures: Int): Long =
     minOf(500L shl failures.coerceIn(0, 3), 4_000L)
+
+internal fun waitForPairedSendGap(
+    previousSendNanos: Long?,
+    active: () -> Boolean,
+    now: () -> Long,
+    sleep: (Long) -> Unit,
+): Boolean {
+    while (active()) {
+        if (previousSendNanos == null) return true
+        val remaining = 10_000_000L - (now() - previousSendNanos)
+        if (remaining <= 0) return true
+        try {
+            sleep(remaining)
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            return false
+        }
+    }
+    return false
+}
 
 internal fun waitForPairedReconnect(
     delay: Long,
