@@ -59,6 +59,17 @@ function sourceName() {
   return names.value[Number(selected.value)] ?? 'selected source'
 }
 
+function playbackCapabilityDescription(capability: PlaybackCapability) {
+  switch (capability) {
+    case 'ApplicationPcmSource':
+      return 'SoniMesh can access PCM from the source.'
+    case 'SystemRouted':
+      return 'Windows routes playback through the system; application PCM is unavailable.'
+    case 'Unsupported':
+      return 'No supported Bluetooth playback path is available on this platform.'
+  }
+}
+
 function loopbackEndpointLabel(endpoint: LoopbackEndpoint) {
   const details = [endpoint.isDefault ? 'default' : '', endpoint.sampleRate ? `${endpoint.sampleRate / 1000} kHz` : '', endpoint.channels ? `${endpoint.channels} ch` : '']
     .filter(Boolean)
@@ -454,7 +465,7 @@ onBeforeUnmount(() => {
     <p class="eyebrow">Windows experiment</p>
     <h2 id="bluetooth-title">Bluetooth system playback</h2>
     <p class="preview-note">Connect a paired source through Windows. Audio is played by the system and does not enter the SoniMesh mixer.</p>
-    <p v-if="playbackCapability" role="status">Capability: {{ playbackCapability }}<template v-if="playbackCapability === 'SystemRouted'">. Windows routes playback through the system; application PCM is unavailable.</template></p>
+    <p v-if="playbackCapability" role="status">Capability: {{ playbackCapability }}. {{ playbackCapabilityDescription(playbackCapability) }}</p>
     <button type="button" class="preview-action" :disabled="busy" @click="openBluetoothSettings">Open Bluetooth settings</button>
     <button type="button" class="preview-action" :disabled="busy || phase !== 'idle'" @click="refresh">Refresh Bluetooth sources</button>
     <p v-if="discovering" role="status">{{ loaded ? 'Refreshing Bluetooth sources...' : 'Searching for Bluetooth sources...' }}</p>
