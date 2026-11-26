@@ -2099,6 +2099,72 @@ mod tests {
     }
 
     #[test]
+    fn fresh_media_sessions_decode_sequence_zero_and_conceal_later_loss() {
+        use sonimesh_protocol::{MediaKeyContext, MediaSealer};
+
+        let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let address = socket.local_addr().unwrap();
+        let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let secret = SessionSecret::new([7; 32]);
+        let mut encoder =
+            opus::Encoder::new(48_000, opus::Channels::Stereo, opus::Application::Audio).unwrap();
+        let mut payload = [0_u8; 1_148];
+        let size = encoder
+            .encode_float(&[0.25; SAMPLES], &mut payload)
+            .unwrap();
+
+        for session in [1, 2] {
+            let context =
+                MediaKeyContext::new(session, 1, 0, MediaDirection::AndroidToDesktop).unwrap();
+            let counters = Arc::new(StreamCounters::default());
+            let (producer, _) = realtime_pcm_queue::<SAMPLES>(8).unwrap();
+            let worker = StreamDecodeWorker::new_for_opus(
+                ObservedDecoder {
+                    decoder: lab_decoder::Decoder::new().unwrap(),
+                    peak: Arc::new(AtomicU32::new(0)),
+                    interval_peak: Arc::new(AtomicU32::new(0)),
+                    probe: None,
+                },
+                producer,
+                0,
+                OpusFrameConfig::new(48_000, 2, 20).unwrap(),
+            )
+            .unwrap();
+            let mut receiver = Receiver::from_socket_with_worker(
+                socket.try_clone().unwrap(),
+                &secret,
+                context,
+                worker,
+                Arc::clone(&counters),
+            )
+            .unwrap();
+            let mut sealer = MediaSealer::new(&secret, context).unwrap();
+            let first = sealer.seal(0, 0, &payload[..size]).unwrap();
+            let _dropped = sealer.seal(0, 960, &payload[..size]).unwrap();
+            let third = sealer.seal(0, 1920, &payload[..size]).unwrap();
+            for packet in [&first, &third] {
+                sender.send_to(&packet.datagram, address).unwrap();
+                assert!(matches!(
+                    poll_media(&mut receiver).unwrap(),
+                    Some(UdpPollOutcome::Processed { .. })
+                ));
+            }
+            assert!(matches!(
+                receiver.decode_next().unwrap(),
+                DecodeStep::Decoded { sequence: 0, .. }
+            ));
+            assert!(matches!(
+                receiver.decode_next().unwrap(),
+                DecodeStep::Concealed { sequence: 1, .. }
+            ));
+            assert!(matches!(
+                receiver.decode_next().unwrap(),
+                DecodeStep::Decoded { sequence: 2, .. }
+            ));
+        }
+    }
+
+    #[test]
     fn stalled_playout_discards_udp_backlog_and_decodes_fresh_audio() {
         use sonimesh_protocol::{MediaKeyContext, MediaSealer};
         use std::net::UdpSocket;
