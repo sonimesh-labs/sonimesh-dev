@@ -951,6 +951,7 @@ struct Playback(
         sonimesh_app::ReceiverOutputController<sonimesh_platform::CpalOutput, SAMPLES>,
         sonimesh_app::OutputSelection,
         bool,
+        Option<Instant>,
     )>,
 );
 
@@ -980,7 +981,7 @@ fn current_default_selection(
 impl Playback {
     fn start_controls(&self) -> LabResult<()> {
         #[cfg(all(windows, feature = "playback"))]
-        if let Some((controller, _, _)) = &self.0 {
+        if let Some((controller, _, _, _)) = &self.0 {
             lab_control::start_console_control(controller.gain_handle());
             return Ok(());
         }
@@ -989,7 +990,7 @@ impl Playback {
 
     fn abort(&mut self) {
         #[cfg(all(windows, feature = "playback"))]
-        if let Some((controller, _, _)) = &mut self.0 {
+        if let Some((controller, _, _, _)) = &mut self.0 {
             controller.stop();
         }
     }
@@ -1046,7 +1047,7 @@ impl Playback {
                         .gain_handle()
                         .set_gain(f32::from(volume) / 100.0)?;
                 }
-                return Ok(Self(Some((controller, selection, follow_default))));
+                return Ok(Self(Some((controller, selection, follow_default, None))));
             }
             Ok(Self(None))
         }
@@ -1061,11 +1062,12 @@ impl Playback {
 
     fn start(&mut self, receiver: &mut Receiver) -> LabResult<bool> {
         #[cfg(all(windows, feature = "playback"))]
-        if let Some((controller, selection, follow_default)) = &mut self.0 {
+        if let Some((controller, selection, follow_default, next_check)) = &mut self.0 {
             if *follow_default {
                 *selection = current_default_selection(controller.output())?;
             }
             controller.start(selection.clone(), receiver)?;
+            *next_check = Some(Instant::now() + Duration::from_secs(1));
             return Ok(true);
         }
         let _ = receiver;
@@ -1074,13 +1076,20 @@ impl Playback {
 
     fn monitor(&mut self, receiver: &mut Receiver, retry_at: &mut Option<Instant>) -> bool {
         #[cfg(all(windows, feature = "playback"))]
-        if let Some((controller, _, follow_default)) = &mut self.0 {
-            return maintain_output(controller, receiver, retry_at, Instant::now(), |output| {
-                if !*follow_default {
-                    return Ok(None);
-                }
-                current_default_selection(output).map(Some)
-            });
+        if let Some((controller, selection, follow_default, next_check)) = &mut self.0 {
+            let now = Instant::now();
+            if *follow_default {
+                return follow_default_output(
+                    controller,
+                    receiver,
+                    selection,
+                    next_check,
+                    retry_at,
+                    now,
+                    current_default_selection,
+                );
+            }
+            return maintain_output(controller, receiver, retry_at, now, |_| Ok(None));
         }
         let _ = (receiver, retry_at);
         false
@@ -1088,7 +1097,7 @@ impl Playback {
 
     fn stop(&mut self) -> LabResult<()> {
         #[cfg(all(windows, feature = "playback"))]
-        if let Some((controller, _, _)) = &mut self.0 {
+        if let Some((controller, _, _, _)) = &mut self.0 {
             let status = controller.output().status();
             controller.stop();
             lab_println!(
@@ -1141,6 +1150,55 @@ fn maintain_output<O: sonimesh_platform::AudioOutput>(
         }
     }
     retry_at.is_some()
+}
+
+#[cfg(any(test, all(windows, feature = "playback")))]
+fn follow_default_output<O: sonimesh_platform::AudioOutput>(
+    output: &mut sonimesh_app::ReceiverOutputController<O, SAMPLES>,
+    receiver: &mut Receiver,
+    selection: &mut sonimesh_app::OutputSelection,
+    next_check: &mut Option<Instant>,
+    retry_at: &mut Option<Instant>,
+    now: Instant,
+    resolve: impl Fn(&O) -> Result<sonimesh_app::OutputSelection, String>,
+) -> bool {
+    let mut recovered_selection = None;
+    let interrupted = maintain_output(output, receiver, retry_at, now, |backend| {
+        let current = resolve(backend)?;
+        recovered_selection = Some(current.clone());
+        Ok(Some(current))
+    });
+    if interrupted {
+        if retry_at.is_none() {
+            if let Some(current) = recovered_selection {
+                *selection = current;
+            }
+            *next_check = Some(now + Duration::from_secs(1));
+        }
+        return true;
+    }
+    if next_check.is_some_and(|deadline| now < deadline) {
+        return false;
+    }
+    *next_check = Some(now + Duration::from_secs(1));
+    let Ok(current) = resolve(output.output()) else {
+        return false;
+    };
+    if current.device == selection.device {
+        return false;
+    }
+    output.stop();
+    match output.start(current.clone(), receiver) {
+        Ok(()) => {
+            *selection = current;
+            lab_println!("Output switched to the current system default.");
+        }
+        Err(error) => {
+            eprintln!("Output switch failed: {error}");
+            *retry_at = Some(now + Duration::from_secs(1));
+        }
+    }
+    true
 }
 
 fn stop_output(retry_at: Option<Instant>, stop: impl FnOnce() -> LabResult<()>) -> LabResult<()> {
@@ -1991,6 +2049,88 @@ mod tests {
         let (device, config) = output.output().selection.as_ref().unwrap();
         assert_eq!(device.as_ref(), Some(&OutputDeviceId::new("new-default")));
         assert_eq!(config.sample_rate_hz, 44_100);
+        let mut selected = sonimesh_app::OutputSelection {
+            device: device.clone(),
+            config: *config,
+        };
+        let mut next_check = Some(now + Duration::from_secs(4));
+        assert!(!follow_default_output(
+            &mut output,
+            &mut receiver,
+            &mut selected,
+            &mut next_check,
+            &mut retry,
+            now + Duration::from_millis(3_999),
+            |_| panic!("default check ran early")
+        ));
+        assert!(!follow_default_output(
+            &mut output,
+            &mut receiver,
+            &mut selected,
+            &mut next_check,
+            &mut retry,
+            now + Duration::from_secs(4),
+            |_| Err("default query failed".into())
+        ));
+        assert!(output.output().source.is_some());
+        let next_selection = sonimesh_app::OutputSelection {
+            device: Some(OutputDeviceId::new("later-default")),
+            config: OutputConfig {
+                sample_rate_hz: 48_000,
+                ..selected.config
+            },
+        };
+        output.output_mut().reject_start = true;
+        assert!(follow_default_output(
+            &mut output,
+            &mut receiver,
+            &mut selected,
+            &mut next_check,
+            &mut retry,
+            now + Duration::from_secs(5),
+            |_| Ok(next_selection.clone())
+        ));
+        assert!(retry.is_some());
+        assert_eq!(selected.device, Some(OutputDeviceId::new("new-default")));
+        output.output_mut().reject_start = false;
+        assert!(follow_default_output(
+            &mut output,
+            &mut receiver,
+            &mut selected,
+            &mut next_check,
+            &mut retry,
+            now + Duration::from_secs(6),
+            |_| Ok(next_selection.clone())
+        ));
+        assert!(retry.is_none());
+        assert_eq!(selected, next_selection);
+        assert_eq!(output.gain_handle().snapshot(), controls.snapshot());
+        let starts = output.output().starts;
+        assert!(!follow_default_output(
+            &mut output,
+            &mut receiver,
+            &mut selected,
+            &mut next_check,
+            &mut retry,
+            now + Duration::from_secs(7),
+            |_| Ok(next_selection.clone())
+        ));
+        assert_eq!(output.output().starts, starts);
+        let final_selection = sonimesh_app::OutputSelection {
+            device: Some(OutputDeviceId::new("final-default")),
+            ..next_selection.clone()
+        };
+        assert!(follow_default_output(
+            &mut output,
+            &mut receiver,
+            &mut selected,
+            &mut next_check,
+            &mut retry,
+            now + Duration::from_secs(8),
+            |_| Ok(final_selection.clone())
+        ));
+        assert!(retry.is_none());
+        assert_eq!(selected, final_selection);
         assert!(stop_output(retry, || Ok(())).is_ok());
         assert_eq!(output.gain_handle().snapshot(), controls.snapshot());
         assert_eq!(metrics.snapshot().jitter_frames, 0);
@@ -2039,20 +2179,20 @@ mod tests {
             &mut output,
             &mut receiver,
             &mut retry,
-            now + Duration::from_secs(4),
+            now + Duration::from_secs(9),
             |_| Ok(None)
         ));
         assert!(maintain_output(
             &mut output,
             &mut receiver,
             &mut retry,
-            now + Duration::from_secs(5),
+            now + Duration::from_secs(10),
             |_| Ok(None)
         ));
         assert!(retry.is_none());
         assert_eq!(
             output.output().selection.as_ref().unwrap().0.as_ref(),
-            Some(&OutputDeviceId::new("new-default"))
+            Some(&OutputDeviceId::new("final-default"))
         );
         lab_control::apply_control("mute", &controls).unwrap();
         output.stop();

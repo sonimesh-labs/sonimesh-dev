@@ -109,9 +109,14 @@ The UDP lab may retry the selected endpoint after a reported output fault while
 its media session remains connected. Recovery recreates the PCM endpoint outside
 the callback and preserves the local gain and mute settings. In the paired lab,
 the system-default choice re-probes the current default endpoint and its format
-on each recovery attempt; an explicitly selected endpoint remains pinned. This
-does not detect a default change while the existing stream stays healthy or
-establish physical device-removal behavior. If the session
+on each recovery attempt. While a stream is healthy, the paired lab also checks
+the default at most once per second on its control thread and recreates output
+when the endpoint changes. If the new endpoint cannot start, it retries the
+current default; a failed query leaves the existing output running. An explicitly
+selected endpoint remains pinned. This is experimental behavior, not Phase 2
+product output-device switching or physical device-removal evidence. The query
+runs on the lab's media/control loop, so a slow platform probe can delay playout;
+its timing on real devices remains to be measured. If the session
 ends while output recovery is pending, the lab reports an unsuccessful output
 result after acknowledging the stop request.
 If the first output start fails, the paired lab retains the prepared receiver

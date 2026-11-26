@@ -297,10 +297,11 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   the cumulative status line remains the compatibility fallback.
   After an output fault, the paired lab's system-default choice re-probes the
   current default endpoint and its format on each retry; an explicitly selected
-  endpoint remains pinned. A software test covers a failed probe, a failed start,
-  and recovery to a different sample rate while retaining gain and mute. Default
-  changes that do not fault the active stream and physical device removal remain
-  unverified.
+  endpoint remains pinned. The paired lab also checks for a changed system default
+  during healthy playback at most once per second and switches its output when
+  the endpoint changes. A software test covers failed probes and starts, a switch
+  to a different sample rate, unchanged defaults, and gain/mute retention.
+  Physical device removal and audible continuity across switches remain unverified.
   The probe retains the latest 32 bounded lifecycle events for the current
   listener snapshot. Session evidence copy/share includes those events, and
   remains available with status plus events when a session ends before metrics
