@@ -294,6 +294,8 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   frame; a unit test exercises overflow and cancellation. An API 37 paired-probe
   run observed one sub-10-ms interval among 420 sender observations; it does
   not establish physical network behavior or a quality improvement.
+  A later API 37 paired-probe run after the queue-order fix passed but observed
+  19 late packets and eight resynchronization drops, so further timing work remains.
   The probe also reports whether the listener is waiting for its first accepted
   packet, has received one recently, or has seen no new accepted packet for two
   seconds. State changes are reported promptly while the other metrics retain

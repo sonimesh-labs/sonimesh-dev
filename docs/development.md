@@ -427,6 +427,12 @@ paired-probe run with Windows playback passed and observed one interval under
 reported three PLC decisions, no late packets or resynchronization drops, and
 detected the probe. Observer timing and host scheduling vary; this single run
 does not establish a quality improvement, audible output, or physical WLAN results.
+After moving queue removal until after the send wait, a further API 37 run with
+Windows playback also passed and detected the probe. The sender reported one
+sub-10-ms interval out of 425; the receiver decoded 399 of 426 packets and
+reported 24 PLC decisions, 19 late packets and eight resynchronization drops.
+This uncontrolled run did not reproduce the previous run's clean late/drop
+counters, and does not identify the cause or establish a quality comparison.
 While reconnecting, the connection status remains visible even if the capture
 signal changes; the separate capture-signal indicator continues to update.
 The indicator reports signal on the first non-silent capture read, including
