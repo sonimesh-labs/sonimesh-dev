@@ -45,7 +45,12 @@ class EncoderTailDrainInstrumentedTest {
                 pollOutput = {
                     val index = codec.dequeueOutputBuffer(info, 0)
                     if (index < 0) EncoderTailOutput.Empty else {
-                        if (info.size > 0 && info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0) packets++
+                        if (info.size > 0 && info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0) {
+                            val packet = ByteArray(info.size)
+                            requireNotNull(codec.getOutputBuffer(index)).apply { position(info.offset); get(packet) }
+                            requireLabOpusDuration(packet)
+                            packets++
+                        }
                         val end = info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0
                         codec.releaseOutputBuffer(index, false)
                         if (end) EncoderTailOutput.End else EncoderTailOutput.Progress

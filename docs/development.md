@@ -632,6 +632,11 @@ On 2026-11-23, separate API 37 x86_64 emulator paired-capture runs selected 64
 and 128 kbps and decoded 154 and 150 frames respectively on the software
 listener, with peaks 0.100 and 0.093. These are interoperability checks, not
 actual bitrate, quality, physical-device, or latency measurements.
+The Android lab checks each encoded Opus packet's duration header before sending
+it. A packet that does not describe 20 ms ends capture with an encoder message;
+if found during stop drain, the incomplete-tail warning is shown instead. This
+does not validate the entire Opus payload or prove a device is compatible.
+
 **Last local send interval** reports packets successfully sent by the local
 sender in the latest completed sampling interval, which is at least one second
 and displays its actual duration. It can show zero while capture continues

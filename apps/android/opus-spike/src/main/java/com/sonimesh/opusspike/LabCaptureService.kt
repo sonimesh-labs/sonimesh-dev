@@ -319,6 +319,7 @@ class LabCaptureService : Service() {
             var outputSequence = 0L
             fun pollEncodedOutput(): EncoderTailOutput {
                 return when (activeCodec.poll { packet ->
+                    requireLabOpusDuration(packet)
                     check(outputSequence <= 0xffff_ffffL) { "media sequence exhausted" }
                     activeRateMeter.record(packet.size)
                     val now = SystemClock.elapsedRealtime()
@@ -410,7 +411,8 @@ class LabCaptureService : Service() {
         } catch (error: Exception) {
             if (running.get()) {
                 Log.e("SoniMeshLab", "Capture or encoding failed", error)
-                val message = if (error is EncoderStalledException) "Audio encoder stopped responding. Restart capture and try again."
+                val message = if (error is LabOpusDurationException) "Audio encoder produced an invalid or non-20 ms packet. Try another device."
+                    else if (error is EncoderStalledException) "Audio encoder stopped responding. Restart capture and try again."
                     else if (error is CaptureReadStalledException) "Audio capture stopped producing samples. Restart capture and try again."
                     else if (error is PairedStartRejectedException && error.retryable) "Desktop receiver is not ready. Check its output device and try again."
                     else if (error is PairedStartRejectedException) "Desktop rejected the audio stream. Check the listener settings and try again."

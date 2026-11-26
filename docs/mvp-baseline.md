@@ -334,6 +334,10 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   The Android lab also reports media packets successfully written to its TCP or
   UDP sender, separately from local sender-queue drops; this does not measure
   network delivery or desktop receipt and resets for the next capture.
+  It checks encoded Opus duration headers against the fixed 20 ms lab stream
+  before enqueueing and reports incompatible output instead of sending it with
+  misleading timestamps. Host tests exercise the duration check; Android codec
+  behavior on physical devices remains unverified.
   Its paired UDP sender limits consecutive sends to a minimum 10 ms gap while
   retaining the existing bounded queue and stop drain. It waits before removing
   the next packet, so queue overflow during that wait can still discard the oldest

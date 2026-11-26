@@ -45,6 +45,12 @@ The paired Android lab uses a separate reusable MediaCodec encoder module for
 its fixed 48 kHz stereo, 20 ms PCM frames and bounded Opus output. The caller
 owns capture, packet queues, scheduling, and shutdown; the encoder only accepts
 complete frames (or a padded final frame) and polls codec output without blocking.
+Before the Android lab queues a packet, it checks the Opus table of contents for
+the negotiated 20 ms duration. During capture, a malformed duration header or
+a different packet duration ends the capture with a codec-specific message. If
+found during stop drain it produces the existing incomplete-tail warning. Neither
+packet is assigned an incorrect fixed-step media timestamp. This check does not validate the full
+Opus bitstream or establish physical-device codec compatibility.
 The paired lab sender spaces consecutive UDP sends by at least 10 ms, allowing
 limited catch-up after encoder bursts without sending an entire queued burst at
 once. Its existing eight-packet queue continues to discard the oldest packet on
