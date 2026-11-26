@@ -121,7 +121,9 @@ on each recovery attempt. While a stream is healthy, the paired lab also checks
 the default at most once per second on a background worker and recreates output
 when the endpoint or its default output format changes. If the new output cannot start, it retries the
 current default; a failed query leaves the existing output running. An explicitly
-selected endpoint remains pinned. This is experimental behavior, not Phase 2
+selected endpoint remains pinned; after an output fault its ID and current default
+format are queried on a background worker before retrying. A failed query keeps
+the receiver in recovery rather than switching endpoints. This is experimental behavior, not Phase 2
 product output-device switching or physical device-removal evidence. Pending
 background observations are discarded when an output fault or new session makes
 them stale. Initial output setup and output recreation still run on the lab's

@@ -999,12 +999,15 @@ struct PlaybackState {
 struct Playback;
 
 #[cfg(all(windows, feature = "playback"))]
-fn current_default_selection(
+fn current_output_selection(
     output: &sonimesh_platform::CpalOutput,
+    device: Option<&sonimesh_platform::OutputDeviceId>,
 ) -> Result<sonimesh_app::OutputSelection, String> {
-    let probe = output
-        .default_device_probe()
-        .map_err(|error| error.to_string())?;
+    let probe = match device {
+        Some(id) => output.device_probe(id),
+        None => output.default_device_probe(),
+    }
+    .map_err(|error| error.to_string())?;
     let config = probe
         .output_config(None, 8_192)
         .map_err(|error| error.to_string())?;
@@ -1087,13 +1090,17 @@ impl Playback {
                         .gain_handle()
                         .set_gain(f32::from(volume) / 100.0)?;
                 }
-                let worker = if follow_default {
-                    Some(default_output_probe::DefaultOutputProbe::new(|| {
-                        current_default_selection(&sonimesh_platform::CpalOutput::new())
-                    })?)
-                } else {
+                let pinned_device = if follow_default {
                     None
+                } else {
+                    selection.device.clone()
                 };
+                let worker = Some(default_output_probe::DefaultOutputProbe::new(move || {
+                    current_output_selection(
+                        &sonimesh_platform::CpalOutput::new(),
+                        pinned_device.as_ref(),
+                    )
+                })?);
                 return Ok(Self(Some(PlaybackState {
                     controller,
                     selection,
@@ -1126,9 +1133,12 @@ impl Playback {
             if let Some(worker) = worker {
                 worker.invalidate();
             }
-            if *follow_default {
-                *selection = current_default_selection(controller.output())?;
-            }
+            let device = if *follow_default {
+                None
+            } else {
+                selection.device.as_ref()
+            };
+            *selection = current_output_selection(controller.output(), device)?;
             controller.start(selection.clone(), receiver)?;
             *next_check = Some(Instant::now() + Duration::from_secs(1));
             return Ok(true);
@@ -1148,14 +1158,14 @@ impl Playback {
         }) = &mut self.0
         {
             let now = Instant::now();
+            let worker = worker.as_mut().expect("playback has a probe worker");
+            if retry_at.is_none()
+                && sonimesh_platform::AudioOutput::health(controller.output())
+                    != sonimesh_platform::OutputHealth::Healthy
+            {
+                worker.invalidate();
+            }
             if *follow_default {
-                let worker = worker.as_mut().expect("default output has a probe worker");
-                if retry_at.is_none()
-                    && sonimesh_platform::AudioOutput::health(controller.output())
-                        != sonimesh_platform::OutputHealth::Healthy
-                {
-                    worker.invalidate();
-                }
                 return follow_default_output(
                     controller,
                     receiver,
@@ -1166,7 +1176,9 @@ impl Playback {
                     |_| worker.poll(),
                 );
             }
-            return maintain_output(controller, receiver, retry_at, now, |_| Ok(None));
+            return maintain_output(controller, receiver, retry_at, now, |_| {
+                worker.poll().map(Some)
+            });
         }
         let _ = (receiver, retry_at);
         false
@@ -1890,18 +1902,36 @@ mod tests {
     #[ignore = "requires a Windows default output device"]
     fn background_probe_resolves_real_default_output() {
         let mut worker = default_output_probe::DefaultOutputProbe::new(|| {
-            current_default_selection(&sonimesh_platform::CpalOutput::new())
+            current_output_selection(&sonimesh_platform::CpalOutput::new(), None)
         })
         .unwrap();
         let deadline = Instant::now() + Duration::from_secs(5);
-        loop {
+        let initial = loop {
             if let Ok(selection) = worker.poll() {
                 assert!(selection.device.is_some());
-                break;
+                break selection;
             }
             assert!(
                 Instant::now() < deadline,
                 "default output probe did not complete"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        let pinned_id = initial.device.clone().unwrap();
+        let expected_id = pinned_id.clone();
+        let mut pinned = default_output_probe::DefaultOutputProbe::new(move || {
+            current_output_selection(&sonimesh_platform::CpalOutput::new(), Some(&pinned_id))
+        })
+        .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Ok(selection) = pinned.poll() {
+                assert_eq!(selection.device, Some(expected_id));
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "pinned output probe did not complete"
             );
             std::thread::sleep(Duration::from_millis(10));
         }
@@ -2224,7 +2254,7 @@ mod tests {
         output
             .start(
                 sonimesh_app::OutputSelection {
-                    device: None,
+                    device: Some(OutputDeviceId::new("pinned-output")),
                     config: OutputConfig {
                         sample_rate_hz: 48_000,
                         channels: 2,
@@ -2263,7 +2293,7 @@ mod tests {
             &mut receiver,
             &mut retry,
             now + Duration::from_secs(1),
-            |_| Err("default output unavailable".into())
+            |_| Err("pinned output unavailable".into())
         ));
         assert_eq!(output.output().starts, 1);
         assert!(maintain_output(
@@ -2310,7 +2340,7 @@ mod tests {
             &mut retry,
             now + Duration::from_secs(3),
             |_| Ok(Some(sonimesh_app::OutputSelection {
-                device: Some(OutputDeviceId::new("new-default")),
+                device: Some(OutputDeviceId::new("pinned-output")),
                 config: OutputConfig {
                     sample_rate_hz: 44_100,
                     channels: 2,
@@ -2322,7 +2352,7 @@ mod tests {
         ));
         assert!(retry.is_none());
         let (device, config) = output.output().selection.as_ref().unwrap();
-        assert_eq!(device.as_ref(), Some(&OutputDeviceId::new("new-default")));
+        assert_eq!(device.as_ref(), Some(&OutputDeviceId::new("pinned-output")));
         assert_eq!(config.sample_rate_hz, 44_100);
         let mut selected = sonimesh_app::OutputSelection {
             device: device.clone(),
@@ -2366,7 +2396,7 @@ mod tests {
             |_| Ok(next_selection.clone())
         ));
         assert!(retry.is_some());
-        assert_eq!(selected.device, Some(OutputDeviceId::new("new-default")));
+        assert_eq!(selected.device, Some(OutputDeviceId::new("pinned-output")));
         output.output_mut().reject_start = false;
         assert!(follow_default_output(
             &mut output,

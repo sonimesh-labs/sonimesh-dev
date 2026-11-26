@@ -895,7 +895,9 @@ enter `volume 0` through `volume 100`, `mute`, or `unmute`. These local settings
 survive output recovery and successive sessions while the listener is running.
 When system-default output is selected, a reported output fault causes the paired
 listener to retry with the current default endpoint and its current format. A
-specific selected endpoint is retried by its original ID. An active stream that
+specific selected endpoint is re-probed by its original ID before each new
+session and retried using its newly probed default format after a fault;
+unavailable endpoints remain in recovery. An active stream that
 uses the system default also checks for a changed default endpoint or format at
 most once per second and recreates the output when either changes, including a
 format change on the same endpoint. A failed default query leaves the existing
