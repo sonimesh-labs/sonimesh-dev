@@ -48,22 +48,40 @@ const invitationQr = ref<string | null>(null)
 const invitationQrError = ref(false)
 const invitationCopyMessage = ref<string | null>(null)
 const DIRECT_PORT_KEY = 'sonimesh.outputProbe.directPort'
+const RELAY_PORT_KEY = 'sonimesh.outputProbe.relayPort'
 function savedDirectPort(): boolean {
   try { return sessionStorage.getItem(DIRECT_PORT_KEY) !== 'false' } catch { return true }
 }
 const includeDirectPort = ref(savedDirectPort())
+const relayPort = ref((() => {
+  try { return sessionStorage.getItem(RELAY_PORT_KEY) ?? '' } catch { return '' }
+})())
+const relayPortValid = computed(() => relayPort.value === '' ||
+  (/^\d{1,5}$/.test(relayPort.value) && Number(relayPort.value) >= 1 && Number(relayPort.value) <= 65535))
+function rememberRelayPort() {
+  try { sessionStorage.setItem(RELAY_PORT_KEY, relayPort.value) } catch { /* Optional window storage. */ }
+}
 function rememberDirectPort() {
   try { sessionStorage.setItem(DIRECT_PORT_KEY, String(includeDirectPort.value)) } catch { /* Optional window storage. */ }
 }
 function resetDirectPort() {
   includeDirectPort.value = true
-  try { sessionStorage.removeItem(DIRECT_PORT_KEY) } catch { /* Optional window storage. */ }
+  relayPort.value = ''
+  try {
+    sessionStorage.removeItem(DIRECT_PORT_KEY)
+    sessionStorage.removeItem(RELAY_PORT_KEY)
+  } catch { /* Optional window storage. */ }
 }
 const displayedInvitation = computed(() => {
   const invitation = lab.value.invitation
   if (!invitation) return null
-  return includeDirectPort.value && lab.value.running && lab.value.mediaPort != null
-    ? `SONIMESH-LAB1:${lab.value.mediaPort}:${invitation}` : invitation
+  if (includeDirectPort.value && lab.value.running && lab.value.mediaPort != null) {
+    return `SONIMESH-LAB1:${lab.value.mediaPort}:${invitation}`
+  }
+  if (!includeDirectPort.value && relayPort.value !== '') {
+    return relayPortValid.value ? `SONIMESH-LAB1:${Number(relayPort.value)}:${invitation}` : null
+  }
+  return invitation
 })
 watch(displayedInvitation, async (invitation, _previous, onCleanup) => {
   let cancelled = false
@@ -741,13 +759,19 @@ onBeforeUnmount(() => { disposed = true; labRequest++; suggestRequest++; clearTi
       </section>
       <template v-if="lab.invitation">
         <label v-if="lab.running && lab.mediaPort != null"><input id="lab-direct-port" v-model="includeDirectPort" type="checkbox" @change="rememberDirectPort" /> Include UDP port for direct connection</label>
-        <p class="preview-note">For a relay, clear this option and configure the Android UDP destination separately.</p>
+        <template v-if="!includeDirectPort">
+          <label for="lab-relay-port">Relay listen port (optional)</label>
+          <input id="lab-relay-port" v-model="relayPort" inputmode="numeric" maxlength="5" :aria-invalid="!relayPortValid" aria-describedby="lab-relay-port-help" @input="rememberRelayPort" />
+          <p id="lab-relay-port-help" class="preview-note">Leave blank to enter the port on Android. If the relay is on another host, turn off “Use invitation address for UDP when scanning” on Android and enter its address.</p>
+          <p v-if="!relayPortValid" class="command-error" role="alert">Enter a relay listen port from 1 to 65535, or leave it blank.</p>
+        </template>
+        <p v-else class="preview-note">For a relay, clear this option and configure its UDP destination.</p>
         <img v-if="invitationQr" class="lab-invitation-qr" :src="invitationQr" alt="QR code for the public lab invitation" />
         <p v-if="invitationQrError" class="command-error" role="alert">Could not display the QR code. Copy the invitation below instead.</p>
         <label for="lab-invitation">Lab invitation payload</label>
         <textarea id="lab-invitation" :value="displayedInvitation" readonly rows="4" @focus="($event.target as HTMLTextAreaElement).select()" />
-        <button type="button" class="preview-action" @click="copyInvitation">Copy invitation</button>
-        <button type="button" class="preview-action" @click="shareInvitation">Share invitation</button>
+        <button type="button" class="preview-action" :disabled="!displayedInvitation" @click="copyInvitation">Copy invitation</button>
+        <button type="button" class="preview-action" :disabled="!displayedInvitation" @click="shareInvitation">Share invitation</button>
         <p v-if="invitationCopyMessage" role="status">{{ invitationCopyMessage }}</p>
         <p class="preview-note">Scan with the Android audio lab or copy this payload. Check its UDP address before capture.</p>
       </template>

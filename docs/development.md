@@ -1309,10 +1309,15 @@ running listener's UDP port as `SONIMESH-LAB1:<port>:<hex>`. Android
 accepts this experimental text in scan, paste, and share flows and applies the
 port along with the invitation and reports the applied port in the status. The
 unwrapped hexadecimal invitation remains available by clearing the direct-port
-checkbox, including for a relay whose listen port differs from the receiver's.
+checkbox. For a relay whose listen port differs from the receiver's, optionally
+enter the relay listen port in the field that appears; the same experimental
+wrapper then carries that port. Leave it blank to use the unwrapped invitation
+and configure the Android port separately. An invalid port disables the QR,
+copy, and share actions until corrected. For a relay on another host, also turn
+off Android's scan-address option as described above.
 When window session storage is available, the choice is retained when the panel
-is reopened; the panel resets it to direct mode when it observes the listener
-stopping.
+is reopened along with the relay port; the panel resets them when it observes
+the listener stopping.
 During capture, setup feedback is shown separately so it does not replace the
 active capture status. The updated fields apply to a later capture.
 The paired request also snapshots its invitation before requesting permissions
