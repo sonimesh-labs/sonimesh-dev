@@ -10,6 +10,7 @@ const MAX_LAB_EVENT_CHARS: usize = 256;
 const SIGNAL_STALE_AFTER: Duration = Duration::from_secs(3);
 const OUTPUT_DRAIN_TIMEOUT: Duration = Duration::from_millis(200);
 const OUTPUT_DRAIN_LIMIT: usize = 2048;
+const CONTROL_PORT_IN_USE: &str = "Listener exited: control TCP port is already in use. Choose another control port and start again.";
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -250,7 +251,9 @@ impl Lab {
                     self.snapshot.control_port = None;
                     self.snapshot.signal = None;
                     self.signal_received_at = None;
-                    self.snapshot.status = "Listener exited. Rebuild it and check the selected output device and whether the control TCP port is in use.".into();
+                    if self.snapshot.status != CONTROL_PORT_IN_USE {
+                        self.snapshot.status = "Listener exited. Rebuild it and check the selected output device and whether the control TCP port is in use.".into();
+                    }
                     self.child = None;
                     self.events = None;
                 }
@@ -382,7 +385,9 @@ fn read_output(output: impl Read + Send + 'static, sender: SyncSender<ObservedLi
 }
 
 fn update_snapshot(snapshot: &mut LabSnapshot, line: &str) {
-    if let ["CONTROL", "volume", volume, "muted", muted] =
+    if line == "STARTUP control-port-in-use" {
+        snapshot.status = CONTROL_PORT_IN_USE.into();
+    } else if let ["CONTROL", "volume", volume, "muted", muted] =
         line.split_whitespace().collect::<Vec<_>>().as_slice()
     {
         if let (Ok(volume @ 0..=100), Ok(muted)) = (volume.parse::<u8>(), muted.parse::<bool>()) {
@@ -805,6 +810,38 @@ mod tests {
         assert_eq!(snapshot.metrics, Some(metrics));
         assert!(parse_metrics(&status.replace("0.250", "NaN")).is_none());
         assert!(parse_metrics(&status.replace("recovering", "unknown")).is_none());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn control_port_conflict_survives_listener_exit() {
+        let mut child = Command::new("cmd.exe")
+            .args(["/C", "exit", "1"])
+            .spawn()
+            .unwrap();
+        child.wait().unwrap();
+        let (sender, events) = mpsc::sync_channel(1);
+        sender
+            .send(ObservedLine {
+                text: "STARTUP control-port-in-use".into(),
+                received_at: Instant::now(),
+            })
+            .unwrap();
+        drop(sender);
+        let mut lab = Lab {
+            child: Some(child),
+            events: Some(events),
+            snapshot: LabSnapshot {
+                running: true,
+                control_port: Some(47610),
+                ..LabSnapshot::default()
+            },
+            signal_received_at: None,
+        };
+        let snapshot = lab.refresh();
+        assert!(!snapshot.running);
+        assert_eq!(snapshot.status, CONTROL_PORT_IN_USE);
+        assert!(snapshot.control_port.is_none());
     }
 
     #[cfg(windows)]
@@ -1232,6 +1269,39 @@ mod tests {
         assert!(event.ends_with("..."));
         assert!(event.chars().count() <= MAX_LAB_EVENT_CHARS + 3);
         assert!(event.is_char_boundary(event.len() - 3));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "requires the playback lab binary and a Windows output"]
+    fn real_listener_reports_control_port_conflict_and_retries() {
+        let occupied = std::net::TcpListener::bind("0.0.0.0:0").unwrap();
+        let port = occupied.local_addr().unwrap().port();
+        let mut lab = Lab::default();
+        lab.start("127.0.0.1", None, 0, false, 39094, port).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let failure = loop {
+            let snapshot = lab.refresh();
+            if !snapshot.running {
+                break snapshot;
+            }
+            assert!(Instant::now() < deadline, "listener did not exit");
+            std::thread::sleep(Duration::from_millis(25));
+        };
+        assert_eq!(failure.status, CONTROL_PORT_IN_USE);
+        drop(occupied);
+        lab.start("127.0.0.1", None, 0, false, 39094, port).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let snapshot = lab.refresh();
+            assert!(snapshot.running, "{}", snapshot.status);
+            if snapshot.invitation.is_some() {
+                break;
+            }
+            assert!(Instant::now() < deadline, "listener did not become ready");
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        lab.stop();
     }
 
     #[test]

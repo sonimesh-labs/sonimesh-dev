@@ -69,7 +69,12 @@ fn run() -> LabResult<()> {
     if options.control {
         playback.start_controls()?;
     }
-    let listener = PairingListener::bind(SocketAddrV4::new(options.bind, options.control_port))?;
+    let listener = PairingListener::bind(SocketAddrV4::new(options.bind, options.control_port))
+        .inspect_err(|error| {
+            if error.kind() == std::io::ErrorKind::AddrInUse {
+                lab_println!("STARTUP control-port-in-use");
+            }
+        })?;
     let address = listener.local_addr()?;
     let key = generate_simple_self_signed(vec!["localhost".to_owned()])?;
     let pin = key.key_pair.public_key_der();
