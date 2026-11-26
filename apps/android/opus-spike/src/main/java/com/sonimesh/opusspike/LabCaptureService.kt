@@ -190,6 +190,7 @@ class LabCaptureService : Service() {
         var pairedSupervisor: PairedSessionSupervisor? = null
         var connected = false
         var stopResult: Result<StreamControlResult>? = null
+        var tailFailed = false
         val pairedProducerFinished = AtomicBoolean(false)
         var flushEncoderTail: (() -> Boolean)? = null
         var senderQueueDrops = 0L
@@ -419,8 +420,12 @@ class LabCaptureService : Service() {
             record?.release()
             if (!running.get() && pairedSupervisor != null && !terminalStatus) {
                 try {
-                    if (flushEncoderTail?.invoke() == false) Log.w("SoniMeshLab", "Encoder tail drain timed out")
+                    if (flushEncoderTail?.invoke() == false) {
+                        tailFailed = true
+                        Log.w("SoniMeshLab", "Encoder tail drain timed out")
+                    }
                 } catch (error: Exception) {
+                    tailFailed = true
                     if (error is InterruptedException) Thread.currentThread().interrupt()
                     Log.w("SoniMeshLab", "Encoder tail drain failed", error)
                 }
@@ -458,7 +463,7 @@ class LabCaptureService : Service() {
             }
             handler.post {
                 workerFinished = true
-                captureStopWarning(terminalStatus, stopResult)?.let {
+                captureStopWarning(terminalStatus, stopResult, tailFailed)?.let {
                     terminalStatus = true
                     LabStatus.publish(it)
                 }

@@ -261,7 +261,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   Android device behavior.
   On normal paired shutdown it also attempts a bounded MediaCodec end-of-stream
   drain before finishing the UDP sender. A partial PCM frame is padded with
-  silence. An API 37 x86_64 emulator test observes MediaCodec end-of-stream and
+  silence. If the drain fails or times out, the lab warns that the end of the
+  audio may be missing; it also reports an unconfirmed desktop stop if both
+  occur. An API 37 x86_64 emulator test observes MediaCodec end-of-stream and
   at least one audio packet using the tail-drain helper; it does not verify the
   content of the final packet, the full service path, or a physical codec.
   Once the control connection is ready, the lab reports that audio capture and
