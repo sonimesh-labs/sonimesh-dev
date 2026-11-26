@@ -23,6 +23,7 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.SeekBar
 import android.widget.Spinner
 import android.widget.Switch
 import android.widget.TextView
@@ -78,6 +79,8 @@ class LabActivity : Activity() {
     private lateinit var usage: Spinner
     private lateinit var bitrate: Spinner
     private lateinit var muteSwitch: Switch
+    private lateinit var gainSlider: SeekBar
+    private lateinit var gainLabel: TextView
     private lateinit var invitationUsesUdpAddress: Switch
     private lateinit var toneButton: Button
     private lateinit var probeButton: Button
@@ -90,6 +93,14 @@ class LabActivity : Activity() {
         muteSwitch.isEnabled = muted != null
         muteSwitch.isChecked = muted == true
         updatingMute = false
+    }
+    private val gainObserver: (Int?) -> Unit = { gain ->
+        gainSlider.isEnabled = gain != null
+        gainLabel.text = "Sender gain: ${gain?.let { "$it%" } ?: "—"}"
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            gainSlider.stateDescription = gain?.let { "$it percent" } ?: "Unavailable"
+        }
+        if (gain != null) gainSlider.progress = gain / 5
     }
     private val statusObserver: (String) -> Unit = {
         val capturing = LabStatus.captureUsage != null
@@ -214,6 +225,29 @@ class LabActivity : Activity() {
         layout.addView(muteSwitch)
         layout.addView(TextView(this).apply {
             text = "Already buffered audio may continue briefly after muting."
+        })
+        gainLabel = TextView(this)
+        layout.addView(gainLabel)
+        gainSlider = SeekBar(this).apply {
+            contentDescription = "Sender gain"
+            max = MAX_SENDER_GAIN / 5
+            isEnabled = false
+            isSaveEnabled = false
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
+                    if (fromUser) {
+                        startService(Intent(this@LabActivity, LabCaptureService::class.java)
+                            .setAction(LabCaptureService.ACTION_SET_GAIN)
+                            .putExtra(LabCaptureService.EXTRA_GAIN, progress * 5))
+                    }
+                }
+                override fun onStartTrackingTouch(seekBar: SeekBar) = Unit
+                override fun onStopTrackingTouch(seekBar: SeekBar) = Unit
+            })
+        }
+        layout.addView(gainSlider)
+        layout.addView(TextView(this).apply {
+            text = "Boosting above 100% may cause clipping. Buffered audio may continue briefly."
         })
         toneButton = Button(this).apply {
             text = if (tone == null) "Start test tone" else "Stop test tone"
@@ -468,6 +502,7 @@ class LabActivity : Activity() {
         LabStatus.observeEncoderRate(rateObserver)
         LabStatus.observeSessionConfig(sessionObserver)
         LabStatus.observeSenderMuted(muteObserver)
+        LabStatus.observeSenderGain(gainObserver)
     }
 
     override fun onStop() {
@@ -485,6 +520,7 @@ class LabActivity : Activity() {
         LabStatus.removeEncoderRate(rateObserver)
         LabStatus.removeSessionConfig(sessionObserver)
         LabStatus.removeSenderMuted(muteObserver)
+        LabStatus.removeSenderGain(gainObserver)
         super.onStop()
     }
 

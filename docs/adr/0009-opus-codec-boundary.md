@@ -65,6 +65,11 @@ capture; 96 kb/s remains the default. This changes neither the negotiated frame
 shape nor the packet-size limit. The requested bitrate is an encoder setting,
 not a guarantee of actual bitrate, quality, device support, or network usage.
 The selection is fixed for a capture and can be changed for the next session.
+The lab also allows live sender gain from 0% to 200%, reset to 100% for each
+capture. It scales PCM before encoding in a reusable buffer and clamps samples
+to PCM16 range; boosts can clip. Mute takes precedence. This changes the sent
+signal, not Android system volume or the desktop's independent receiver gain.
+The capture-signal indicator still observes the unscaled input.
 The lab may report a cumulative average of encoded Opus payload bytes divided by
 monotonic elapsed time since capture started, including the bounded encoder tail
 drain. It updates at most once per second during capture and retains a final

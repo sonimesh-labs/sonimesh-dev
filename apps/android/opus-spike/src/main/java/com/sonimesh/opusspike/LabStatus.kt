@@ -60,6 +60,9 @@ internal object LabStatus {
     private var senderMuted: Boolean? = null
     private var lastSenderMuted: Boolean? = null
     private val muteObservers = mutableSetOf<(Boolean?) -> Unit>()
+    private var senderGain: Int? = null
+    private var lastSenderGain: Int? = null
+    private val gainObservers = mutableSetOf<(Int?) -> Unit>()
 
     fun serviceStarted(usage: LabCaptureUsage, bitrate: OpusBitrate, transport: LabTransport = LabTransport.Adb, udpPort: Int? = null) {
         captureUsage = usage
@@ -72,6 +75,7 @@ internal object LabStatus {
         senderTiming = null
         publishSenderInterval(null)
         publishSenderMuted(false)
+        publishSenderGain(DEFAULT_SENDER_GAIN)
         sessionObservers.toList().forEach { it(sessionConfig) }
         signalObservers.toList().forEach { it(null) }
         durationObservers.toList().forEach { it(null) }
@@ -82,6 +86,7 @@ internal object LabStatus {
         captureUsage = null
         captureAdmission.serviceFinished()
         publishSenderMuted(null)
+        publishSenderGain(null)
         if (hadCapture) {
             retryAvailable = true
             observers.toList().forEach { it(message) }
@@ -91,6 +96,21 @@ internal object LabStatus {
     fun observeSenderMuted(observer: (Boolean?) -> Unit) {
         muteObservers.add(observer)
         observer(senderMuted)
+    }
+
+    fun observeSenderGain(observer: (Int?) -> Unit) {
+        gainObservers.add(observer)
+        observer(senderGain)
+    }
+
+    fun removeSenderGain(observer: (Int?) -> Unit) {
+        gainObservers.remove(observer)
+    }
+
+    fun publishSenderGain(value: Int?) {
+        senderGain = value
+        if (value != null) lastSenderGain = value
+        gainObservers.toList().forEach { it(value) }
     }
 
     fun removeSenderMuted(observer: (Boolean?) -> Unit) {
@@ -235,6 +255,7 @@ internal object LabStatus {
         appendLine("Capture signal: ${signalState?.label ?: "—"}")
         appendLine("Capture duration: ${captureDurationSeconds?.let { "${it}s" } ?: "—"}")
         appendLine("Sending mute (last known): ${lastSenderMuted?.let { if (it) "on" else "off" } ?: "—"}")
+        appendLine("Sender gain (last known): ${lastSenderGain?.let { "$it%" } ?: "—"}")
         appendLine("Sender queue drops: ${senderQueueDrops ?: "—"}")
         appendLine("Media packets sent: ${sentPackets ?: "—"}")
         appendLine("Last local send interval: ${senderInterval?.let { "${it.packets} packets in ${it.millis} ms" } ?: "—"}")

@@ -334,6 +334,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   The Android lab also reports media packets successfully written to its TCP or
   UDP sender, separately from local sender-queue drops; this does not measure
   network delivery or desktop receipt and resets for the next capture.
+  Its live sender-gain slider scales audio before encoding from 0% to 200% and
+  resets to 100% for each capture; values above 100% can clip. Mute takes
+  precedence, and the capture-signal indicator remains based on unscaled input.
   It checks encoded Opus duration headers against the fixed 20 ms lab stream
   before enqueueing and reports incompatible output instead of sending it with
   misleading timestamps. Host tests exercise the duration check; Android codec

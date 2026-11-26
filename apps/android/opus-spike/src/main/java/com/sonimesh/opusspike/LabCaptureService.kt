@@ -32,6 +32,7 @@ import java.security.SecureRandom
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 
 internal fun incrementSaturated(value: Long): Long =
@@ -58,6 +59,7 @@ private enum class ForegroundConnectionStatus(val label: String) {
 class LabCaptureService : Service() {
     private val running = AtomicBoolean(false)
     private val senderMuted = AtomicBoolean(false)
+    private val senderGain = AtomicInteger(DEFAULT_SENDER_GAIN)
     private val socketLock = Any()
     private var socket: Socket? = null
     private val setupSocket = SetupSocket()
@@ -85,6 +87,16 @@ class LabCaptureService : Service() {
     @Suppress("DEPRECATION")
     @SuppressLint("WakelockTimeout") // Released when this foreground service is destroyed.
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_SET_GAIN) {
+            if (started && running.get()) {
+                val gain = intent.getIntExtra(EXTRA_GAIN, DEFAULT_SENDER_GAIN).coerceIn(0, MAX_SENDER_GAIN)
+                senderGain.set(gain)
+                LabStatus.publishSenderGain(gain)
+            } else if (!started) {
+                stopSelf()
+            }
+            return START_NOT_STICKY
+        }
         if (intent?.action == ACTION_SET_MUTED) {
             if (started && running.get()) {
                 val muted = intent.getBooleanExtra(EXTRA_MUTED, false)
@@ -310,6 +322,12 @@ class LabCaptureService : Service() {
             }
             val pcm = ShortArray(OpusEncoder.FRAME_SAMPLES)
             val silence = ShortArray(OpusEncoder.FRAME_SAMPLES)
+            val gainedPcm = ShortArray(OpusEncoder.FRAME_SAMPLES)
+            fun currentEncoderInput(): ShortArray {
+                val muted = senderMuted.get()
+                val input = if (muted) pcm else scaleSenderPcm(pcm, gainedPcm, senderGain.get())
+                return encoderInput(input, silence, muted)
+            }
             val signalMonitor = LabSignalMonitor()
             val encoderInputWait = EncoderInputWait()
             val captureReadWait = CaptureReadWait()
@@ -348,7 +366,7 @@ class LabCaptureService : Service() {
                     nowMillis = SystemClock::elapsedRealtime,
                     submitEnd = {
                         if (filled > 0) pcm.fill(0, filled, pcm.size)
-                        activeCodec.tryQueue(if (filled > 0) encoderInput(pcm, silence, senderMuted.get()) else null, frame * 20_000, end = true)
+                        activeCodec.tryQueue(if (filled > 0) currentEncoderInput() else null, frame * 20_000, end = true)
                     },
                     pollOutput = ::pollEncodedOutput,
                     idle = { Thread.sleep(2) },
@@ -395,7 +413,7 @@ class LabCaptureService : Service() {
                 }
                 var waitingForInput = false
                 if (filled == pcm.size) {
-                    if (activeCodec.tryQueue(encoderInput(pcm, silence, senderMuted.get()), frame * 20_000)) {
+                    if (activeCodec.tryQueue(currentEncoderInput(), frame * 20_000)) {
                         frame++
                         filled = 0
                         encoderInputWait.reset()
@@ -603,6 +621,7 @@ class LabCaptureService : Service() {
     private fun requestStop() {
         if (!running.getAndSet(false)) return
         LabStatus.publishSenderMuted(null)
+        LabStatus.publishSenderGain(null)
         setupSocket.cancel()
         synchronized(socketLock) {
             try { socket?.close() } catch (_: java.io.IOException) { }
@@ -642,6 +661,8 @@ class LabCaptureService : Service() {
         private const val PAIRED_STOP_TIMEOUT_MS = 6_500L
         const val ACTION_SET_MUTED = "com.sonimesh.opusspike.SET_MUTED"
         const val EXTRA_MUTED = "muted"
+        const val ACTION_SET_GAIN = "com.sonimesh.opusspike.SET_GAIN"
+        const val EXTRA_GAIN = "gain"
     }
 }
 

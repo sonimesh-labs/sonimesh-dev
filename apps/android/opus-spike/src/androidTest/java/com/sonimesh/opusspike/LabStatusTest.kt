@@ -317,6 +317,31 @@ class LabStatusTest {
     }
 
     @Test
+    fun senderGainIsRestoredAndResetsForNewCapture() {
+        ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+            try {
+                scenario.onActivity { activity ->
+                    LabStatus.serviceStarted(LabCaptureUsage.Media, OpusBitrate.STANDARD)
+                    LabStatus.publishSenderGain(150)
+                    assertTrue(hasStatus(activity.window.decorView, "Sender gain: 150%"))
+                    assertTrue(LabStatus.copyableEvidence().contains("Sender gain (last known): 150%"))
+                }
+                scenario.recreate()
+                scenario.onActivity { activity ->
+                    assertTrue(hasStatus(activity.window.decorView, "Sender gain: 150%"))
+                    LabStatus.serviceFinished()
+                    assertTrue(hasStatus(activity.window.decorView, "Sender gain: —"))
+                    assertTrue(LabStatus.copyableEvidence().contains("Sender gain (last known): 150%"))
+                    LabStatus.serviceStarted(LabCaptureUsage.Media, OpusBitrate.STANDARD)
+                    assertTrue(hasStatus(activity.window.decorView, "Sender gain: 100%"))
+                }
+            } finally {
+                scenario.onActivity { LabStatus.serviceFinished() }
+            }
+        }
+    }
+
+    @Test
     fun sentPacketStatusAllowsSaturatedLongValue() {
         ActivityScenario.launch(LabActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
