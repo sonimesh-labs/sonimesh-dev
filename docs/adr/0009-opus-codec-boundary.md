@@ -118,6 +118,11 @@ next decode or PLC operation; it is not silently treated as a successful reset.
 The isolated prototype may also exercise this decoder with the shell-neutral
 desktop scheduler, protected loopback UDP, and an in-memory output. Such a test
 does not enable the binding in the core or establish device playback evidence.
+The paired TLS integration starts with an unrelated placeholder media context,
+then installs a context from the pairing-derived root and authenticated
+StartStream identity before decoding. The same fixture can open the Windows
+default output and observe non-silent decoded samples in its callback; it does
+not establish audibility, continuous playback, or Android interoperability.
 
 ## Reliability and security implications
 

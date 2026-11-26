@@ -166,6 +166,10 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   the native Opus prototype additionally exercises scheduled protected UDP,
   decoding, PLC, and an in-memory output together on loopback. This is software
   integration evidence, not a platform host or audible playback result;
+  its paired TLS fixture also installs the StartStream media context from the
+  pairing-derived root at runtime. On 2026-11-26 the optional Windows output
+  variant observed decoded samples in one callback at 48 kHz, eight channels,
+  Float32; it does not demonstrate sustained or audible playback;
   after three concealed frames and an empty jitter buffer, the scheduled
   receiver resets at the next deadline and resumes from a later packet, while
   buffered future packets still receive their intervening PLC decisions;

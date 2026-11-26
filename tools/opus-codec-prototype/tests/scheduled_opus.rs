@@ -345,6 +345,7 @@ fn paired_tls_scheduler_output<O: AudioOutput>(
     .unwrap();
     let (mut client, client_root) = client_thread.join().unwrap();
     let context = MediaKeyContext::new(7, 1, 0, MediaDirection::AndroidToDesktop).unwrap();
+    let mut allocator = MediaSessionAllocator::new(root);
     let counters = Arc::new(StreamCounters::default());
     let (producer, _) = realtime_pcm_queue::<SAMPLES>(8).unwrap();
     let worker = StreamDecodeWorker::<_, 8, 1_148, SAMPLES>::new_for_opus(
@@ -356,8 +357,8 @@ fn paired_tls_scheduler_output<O: AudioOutput>(
     .unwrap();
     let pipeline = UdpReceiverPipeline::bind_with_worker(
         "127.0.0.1:0".parse().unwrap(),
-        &root,
-        context,
+        &SessionSecret::new([0x55; 32]),
+        MediaKeyContext::new(8, 1, 0, MediaDirection::AndroidToDesktop).unwrap(),
         worker,
         Arc::clone(&counters),
     )
@@ -382,6 +383,23 @@ fn paired_tls_scheduler_output<O: AudioOutput>(
         .install_authenticated_control_session()
         .unwrap();
     scheduler.attach_trusted_control(token, trusted).unwrap();
+    let mut prepare =
+        |token,
+         request: sonimesh_app::StreamStartRequest,
+         coordinator: &sonimesh_app::ControlStreamCoordinator,
+         pipeline: &mut UdpReceiverPipeline<lab_decoder::Decoder, 8, 1_148, SAMPLES>| {
+            let grant = allocator
+                .supply_for_authenticated_control_session(
+                    coordinator,
+                    token,
+                    request.identity,
+                    MediaDirection::AndroidToDesktop,
+                )
+                .map_err(|_| sonimesh_app::DesktopControlOwnerError::MediaContextMismatch)?;
+            pipeline
+                .install_fresh_session(grant.root(), grant.context(), 0)
+                .map_err(|_| sonimesh_app::DesktopControlOwnerError::MediaContextMismatch)
+        };
     for envelope in [
         Envelope {
             protocol_version: CONTROL_PROTOCOL_VERSION,
@@ -411,7 +429,7 @@ fn paired_tls_scheduler_output<O: AudioOutput>(
         client.flush().unwrap();
         let deadline = Instant::now() + Duration::from_secs(2);
         loop {
-            let tick = scheduler.tick_scheduled_at(0);
+            let tick = scheduler.tick_scheduled_at_with_prepare(0, &mut prepare);
             assert!(tick.packets.is_ok() && tick.pump.is_ok());
             match tick.control.unwrap() {
                 Some(ControlSessionPoll::Processed { .. }) => break,
@@ -429,6 +447,8 @@ fn paired_tls_scheduler_output<O: AudioOutput>(
             );
         }
     }
+    assert_eq!(allocator.issued_count(), 1);
+    assert_eq!(scheduler.receiver_mut().pipeline_mut().context(), context);
     let mut sender = MediaSessionSender::bind(
         "127.0.0.1:0".parse().unwrap(),
         &client_root,
