@@ -19,6 +19,7 @@ const discovering = ref(false)
 const busy = ref(false)
 const phase = ref<'idle' | 'waiting' | 'open'>('idle')
 const error = ref<string | null>(null)
+const statusError = ref<string | null>(null)
 const suggestPhoneInitiated = ref(false)
 const message = ref<string | null>(null)
 const loopback = ref<LoopbackSnapshot | null>(null)
@@ -45,6 +46,7 @@ function rememberLoopbackEndpoint(event: Event) {
 const loopbackEndpointId = ref(readLoopbackEndpointId())
 const loopbackBusy = ref(false)
 const loopbackError = ref<string | null>(null)
+const loopbackStatusError = ref<string | null>(null)
 const loopbackEndpointMessage = ref<string | null>(null)
 const loopbackToneBusy = ref(false)
 const loopbackToneMessage = ref<string | null>(null)
@@ -265,6 +267,7 @@ async function poll() {
   try {
     const state = await window.__TAURI__!.core.invoke<'idle' | 'waiting' | 'open'>('bluetooth_status')
     if (disposed || request !== statusRequest) return
+    statusError.value = null
     if (state === 'idle') {
       shouldContinue = false
       const recovery = await resumeBluetoothWait(request)
@@ -283,7 +286,7 @@ async function poll() {
       phase.value = state
     }
   } catch (cause) {
-    if (!disposed && request === statusRequest) error.value = String(cause)
+    if (!disposed && request === statusRequest) statusError.value = String(cause)
   }
   if (!disposed && request === statusRequest && shouldContinue) timer = setTimeout(poll, 1000)
 }
@@ -295,8 +298,10 @@ async function pollLoopback() {
     const snapshot = await window.__TAURI__!.core.invoke<LoopbackSnapshot>('loopback_status')
     if (disposed || request !== loopbackRequest) return
     loopback.value = snapshot
+    loopbackStatusError.value = null
     updateLoopbackWaitState(snapshot)
   } catch (cause) {
+    if (!disposed && request === loopbackRequest) loopbackStatusError.value = String(cause)
     if (!disposed && request === loopbackRequest && loopback.value) {
       loopback.value = { ...loopback.value, error: String(cause) }
     }
@@ -323,6 +328,7 @@ async function recoverLoopback() {
   clearTimeout(loopbackTimer)
   loopbackBusy.value = true
   loopbackError.value = null
+  loopbackStatusError.value = null
   try {
     loopback.value = await window.__TAURI__.core.invoke<LoopbackSnapshot>('loopback_stop')
     loopbackStartedAt = undefined
@@ -493,30 +499,42 @@ onMounted(async () => {
   const request = statusRequest
   try {
     recoverBluetoothWait = readBluetoothRecovery()
-    const state = await window.__TAURI__.core.invoke<'idle' | 'waiting' | 'open'>('bluetooth_status')
-    if (!disposed && request === statusRequest && state !== 'idle') {
-      phase.value = state
-      rememberBluetoothRecovery(true)
-      message.value = state === 'waiting'
-        ? 'Waiting for the phone to connect through Bluetooth.'
-        : 'System playback connection is open.'
-    } else if (!disposed && request === statusRequest && recoverBluetoothWait) {
-      phase.value = 'waiting'
-      message.value = 'Restoring phone-initiated Bluetooth wait.'
-    }
-    const loopbackState = await window.__TAURI__.core.invoke<LoopbackSnapshot>('loopback_status')
-    loopback.value = loopbackState
-    let hadCombinedMonitorOwnership = false
     try {
-      hadCombinedMonitorOwnership = sessionStorage.getItem(COMBINED_MONITOR_KEY) === 'true'
-    } catch {
-      // The backend snapshot remains authoritative when session storage is unavailable.
+      const state = await window.__TAURI__.core.invoke<'idle' | 'waiting' | 'open'>('bluetooth_status')
+      if (disposed || request !== statusRequest) return
+      statusError.value = null
+      if (state !== 'idle') {
+        phase.value = state
+        rememberBluetoothRecovery(true)
+        message.value = state === 'waiting'
+          ? 'Waiting for the phone to connect through Bluetooth.'
+          : 'System playback connection is open.'
+      } else if (recoverBluetoothWait) {
+        phase.value = 'waiting'
+        message.value = 'Restoring phone-initiated Bluetooth wait.'
+      }
+    } catch (cause) {
+      if (!disposed && request === statusRequest) statusError.value = String(cause)
     }
-    rememberCombinedMonitorOwnership(loopbackState.running && hadCombinedMonitorOwnership)
-    if (loopbackState.running) {
-      loopbackStartedAt = Date.now()
-      loopbackNoSamplesLong.value = false
-      void pollLoopback()
+    try {
+      const loopbackState = await window.__TAURI__.core.invoke<LoopbackSnapshot>('loopback_status')
+      if (disposed || request !== statusRequest) return
+      loopback.value = loopbackState
+      loopbackStatusError.value = null
+      let hadCombinedMonitorOwnership = false
+      try {
+        hadCombinedMonitorOwnership = sessionStorage.getItem(COMBINED_MONITOR_KEY) === 'true'
+      } catch {
+        // The backend snapshot remains authoritative when session storage is unavailable.
+      }
+      rememberCombinedMonitorOwnership(loopbackState.running && hadCombinedMonitorOwnership)
+      if (loopbackState.running) {
+        loopbackStartedAt = Date.now()
+        loopbackNoSamplesLong.value = false
+        void pollLoopback()
+      }
+    } catch (cause) {
+      if (!disposed && request === statusRequest) loopbackStatusError.value = String(cause)
     }
     await refresh()
     await refreshLoopbackEndpoints()
@@ -563,6 +581,7 @@ onBeforeUnmount(() => {
     <button v-if="names.length && phase === 'idle'" type="button" class="preview-action" :disabled="busy || loopbackBusy || selected === '' || !loopbackEndpointId" @click="toggle('connect', true, true)">Connect + monitor (auto wait fallback)</button>
     <p v-if="message" role="status">{{ message }}</p>
     <p v-if="error" class="command-error" role="alert">{{ error }}</p>
+    <p v-if="statusError" class="command-error" role="alert">Bluetooth status unavailable: {{ statusError }}</p>
     <p v-if="suggestPhoneInitiated" role="status">Try waiting for the phone to connect, then start playback from the phone.</p>
     <h3>System output PCM check</h3>
     <p class="preview-note">Measures the selected Windows playback mix; other apps' audio may also appear here.</p>
@@ -574,7 +593,7 @@ onBeforeUnmount(() => {
     </select>
     <p v-if="loopbackEndpointMessage" role="status">{{ loopbackEndpointMessage }}</p>
     <button type="button" class="preview-action" :disabled="loopbackBusy || loopbackToneBusy || (!loopback?.running && !loopbackEndpointId)" @click="toggleLoopback">{{ loopbackBusy ? 'Working...' : loopback?.running ? 'Stop PCM check' : 'Start PCM check' }}</button>
-    <button v-if="loopback?.error || loopbackError" type="button" class="preview-action" :disabled="loopbackBusy || loopbackToneBusy" @click="recoverLoopback">Recover PCM check</button>
+    <button v-if="loopback?.error || loopbackError || loopbackStatusError" type="button" class="preview-action" :disabled="loopbackBusy || loopbackToneBusy" @click="recoverLoopback">Recover PCM check</button>
     <button type="button" class="preview-action" :disabled="loopbackBusy || loopbackToneBusy || !loopback?.running" @click="playLoopbackTestTone">{{ loopbackToneBusy ? 'Playing...' : 'Play test tone' }}</button>
     <p v-if="loopbackToneMessage" role="status">{{ loopbackToneMessage }}</p>
     <p v-if="loopback?.running && loopback.samples === 0" role="status">{{ loopbackNoSamplesLong ? 'No Windows audio samples have arrived yet. Start playback and check the selected output endpoint.' : 'Waiting for Windows audio samples.' }}</p>
@@ -582,6 +601,6 @@ onBeforeUnmount(() => {
       <span :style="{ width: `${Math.min(100, loopback.peak * 100)}%` }"></span>
     </div>
     <p v-if="loopback && (loopback.running || loopback.sampleRate > 0)" role="status">{{ loopback.endpointName }} · {{ loopback.sampleRate }} Hz, {{ loopback.channels }} channels; {{ loopback.samples }} samples; recent peak {{ (loopback.peak * 100).toFixed(1) }}%; session peak {{ ((loopback.runPeak ?? loopback.peak) * 100).toFixed(1) }}%<template v-if="loopback.samples > 0">; {{ loopback.peak > 0.001 ? 'PCM activity detected recently' : 'No recent PCM activity' }}</template>.</p>
-    <p v-if="loopbackError || loopback?.error" class="command-error" role="alert">{{ loopbackError || loopback?.error }}</p>
+    <p v-if="loopbackStatusError || loopbackError || loopback?.error" class="command-error" role="alert">{{ loopbackStatusError || loopbackError || loopback?.error }}</p>
   </section>
 </template>

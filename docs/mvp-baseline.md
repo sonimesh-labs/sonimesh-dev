@@ -89,6 +89,8 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   The panel also provides a shortcut to Windows Bluetooth settings, automatic
   candidate discovery with visible search/refresh status, and refreshes
   candidates and idle output endpoints when returning to the probe.
+  Bluetooth status and system-output monitoring initialize independently, so
+  failure in one does not block loading the other's device list.
   The probe distinguishes candidates with duplicate display names and retains
   the selected device across panel reopens and refreshes using a window-scoped
   session ID; duplicate names use a stable name-and-ID order, and the ID is not

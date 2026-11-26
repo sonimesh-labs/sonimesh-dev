@@ -42,6 +42,46 @@ it('opens Windows Bluetooth settings from the probe', async () => {
   wrapper.unmount()
 })
 
+it('loads Bluetooth sources and output endpoints when Bluetooth status is unavailable', async () => {
+  const invoke = vi.fn((command: string) => {
+    if (command === 'bluetooth_status') return Promise.reject(new Error('Bluetooth status unavailable.'))
+    if (command === 'bluetooth_candidates') return Promise.resolve({ generation: 3, names: ['Phone'], ids: ['phone-id'], capability: 'SystemRouted' })
+    if (command === 'loopback_status') return Promise.resolve({ running: false, endpointName: '', sampleRate: 0, channels: 0, samples: 0, peak: 0, error: null })
+    if (command === 'loopback_endpoints') return Promise.resolve([{ id: 'default-output', name: 'Speakers', isDefault: true }])
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  expect(wrapper.get('#bluetooth-source').text()).toContain('Phone')
+  expect(wrapper.get('#loopback-endpoint').text()).toContain('Speakers')
+  expect(wrapper.text()).toContain('Bluetooth status unavailable.')
+  expect(invoke).toHaveBeenCalledWith('bluetooth_candidates')
+  expect(invoke).toHaveBeenCalledWith('loopback_endpoints')
+  wrapper.unmount()
+})
+
+it('loads Bluetooth sources and output endpoints when loopback status is unavailable', async () => {
+  const invoke = vi.fn((command: string) => {
+    if (command === 'bluetooth_status') return Promise.resolve('idle')
+    if (command === 'bluetooth_candidates') return Promise.resolve({ generation: 4, names: ['Phone'], ids: ['phone-id'], capability: 'SystemRouted' })
+    if (command === 'loopback_status') return Promise.reject(new Error('Output monitor status unavailable.'))
+    if (command === 'loopback_endpoints') return Promise.resolve([{ id: 'default-output', name: 'Speakers', isDefault: true }])
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  expect(wrapper.get('#bluetooth-source').text()).toContain('Phone')
+  expect(wrapper.get('#loopback-endpoint').text()).toContain('Speakers')
+  expect(wrapper.text()).toContain('Output monitor status unavailable.')
+  expect(invoke).toHaveBeenCalledWith('bluetooth_candidates')
+  expect(invoke).toHaveBeenCalledWith('loopback_endpoints')
+  wrapper.unmount()
+})
+
 it.each([
   ['ApplicationPcmSource', 'SoniMesh can access PCM from the source.'],
   ['SystemRouted', 'Windows routes playback through the system; application PCM is unavailable.'],
