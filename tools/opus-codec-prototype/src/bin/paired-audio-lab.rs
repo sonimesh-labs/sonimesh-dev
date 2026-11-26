@@ -520,6 +520,7 @@ fn negotiate_hello(
 }
 
 const SAMPLES: usize = 1_920;
+const JITTER_FRAMES: usize = 16;
 const PLAYOUT_PERIOD: Duration = Duration::from_millis(20);
 const STATUS_PERIOD: Duration = Duration::from_secs(5);
 const STOP_DRAIN_QUIET: Duration = Duration::from_millis(160);
@@ -529,7 +530,7 @@ const MAX_MEDIA_POLLS: usize = 32;
 const PLAYOUT_STALL: Duration = Duration::from_millis(160);
 const MEDIA_IDLE: Duration = Duration::from_secs(2);
 
-type Receiver = UdpReceiverPipeline<ObservedDecoder, 8, 1_148, SAMPLES>;
+type Receiver = UdpReceiverPipeline<ObservedDecoder, JITTER_FRAMES, 1_148, SAMPLES>;
 type PreparedReceiver = (Receiver, RealtimePcmConsumer<SAMPLES>, Arc<StreamCounters>);
 
 fn start_prepared<T, E>(
@@ -1377,7 +1378,10 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                             || request.channels != 2
                             || !matches!(request.frame_duration_ms, 10 | 20)
                             || options.startup_buffer
-                                > Duration::from_millis(u64::from(request.frame_duration_ms) * 7)
+                                > Duration::from_millis(
+                                    u64::from(request.frame_duration_ms)
+                                        * (JITTER_FRAMES as u64 - 1),
+                                )
                             || pending_receiver
                                 .as_ref()
                                 .is_some_and(|(identity, prepared)| {
@@ -1437,7 +1441,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                                                 AdaptiveTargetConfig::preset(
                                                     JitterMode::Balanced,
                                                     request.frame_duration_ms,
-                                                    8,
+                                                    JITTER_FRAMES,
                                                     1_000_000_000,
                                                 ),
                                             )?;
@@ -1730,7 +1734,12 @@ mod tests {
         use std::io::{Read, Write};
         use std::net::{TcpListener, TcpStream, UdpSocket};
 
-        for duration in [10_u32, 20] {
+        for (duration, startup_ms, adaptive) in [
+            (10_u32, 0, false),
+            (20, 0, false),
+            (10, 120, true),
+            (20, 120, true),
+        ] {
             let udp_probe = UdpSocket::bind("127.0.0.1:0").unwrap();
             let media_port = udp_probe.local_addr().unwrap().port();
             drop(udp_probe);
@@ -1771,8 +1780,8 @@ mod tests {
                 coordinator.accept(token, &hello).unwrap();
                 let options = Options {
                     media_port,
-                    startup_buffer: Duration::ZERO,
-                    adaptive: true,
+                    startup_buffer: Duration::from_millis(startup_ms),
+                    adaptive,
                     require_tone: true,
                     ..Options::default()
                 };
@@ -1827,7 +1836,7 @@ mod tests {
             let samples = vec![0.25; duration as usize * 96];
             let mut payload = [0; 1_148];
             let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
-            for index in 0..3 {
+            for index in 0..13 {
                 let length = encoder.encode_float(&samples, &mut payload).unwrap();
                 let packet = sealer
                     .seal(0, index * u64::from(duration) * 48, &payload[..length])
@@ -1836,6 +1845,7 @@ mod tests {
                     .send_to(&packet.datagram, ("127.0.0.1", media_port))
                     .unwrap();
             }
+            std::thread::sleep(Duration::from_millis(150));
             let stop = Envelope {
                 protocol_version: 1,
                 request_id: 3,
@@ -2915,7 +2925,7 @@ mod tests {
         let mut sealer = MediaSealer::new(&secret, context).unwrap();
         let mut observations = ResyncObservations::default();
         let now = Instant::now();
-        for sequence in 0..9 {
+        for sequence in 0..=JITTER_FRAMES as u64 {
             let packet = sealer.seal(0, sequence * 960, &[1]).unwrap();
             sender
                 .send_to(&packet.datagram, receiver.local_addr().unwrap())
@@ -2938,16 +2948,19 @@ mod tests {
                 std::thread::yield_now();
             }
         }
-        assert_eq!(metrics.snapshot().jitter_resync_dropped_frames, 8);
+        assert_eq!(
+            metrics.snapshot().jitter_resync_dropped_frames,
+            JITTER_FRAMES as u64
+        );
         assert_eq!(observations.total, 1);
         let event = observations.first[0].unwrap();
-        assert_eq!(event.dropped, 8);
+        assert_eq!(event.dropped, JITTER_FRAMES);
         assert_eq!(event.loop_gap, Some(Duration::from_millis(3)));
         assert_eq!(
             event.previous_decision,
-            Some((Duration::from_millis(13), Duration::from_millis(1)))
+            Some((Duration::from_millis(21), Duration::from_millis(1)))
         );
-        assert_eq!(event.batch_packet, 9);
+        assert_eq!(event.batch_packet, JITTER_FRAMES + 1);
         assert_eq!(event.previous_packet_gap, Some(Duration::from_millis(1)));
     }
 

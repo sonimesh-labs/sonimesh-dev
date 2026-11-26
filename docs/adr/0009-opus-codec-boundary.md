@@ -129,7 +129,10 @@ The UDP and local audio labs reset native decoder state when the worker retires 
 playout epoch, including output recovery. A reset failure is surfaced on the
 next decode or PLC operation; it is not silently treated as a successful reset.
 The paired desktop lab may accept either negotiated frame duration and schedules
-decode and stop-tail draining at that duration. Its Android MediaCodec sender
+decode and stop-tail draining at that duration. Its fixed 16-frame jitter storage
+allows the full 0–120 ms lab startup-buffer range for either duration. This also
+changes when a burst overflows that experimental buffer; it is not a latency or
+quality claim. Its Android MediaCodec sender
 still uses 20 ms; 10 ms interoperability and physical-device behavior require
 separate evidence before adding a sender option.
 An API 37 emulator test observed 20 ms packets from `c2.android.opus.encoder`
