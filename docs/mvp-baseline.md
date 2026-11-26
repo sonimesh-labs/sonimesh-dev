@@ -767,6 +767,12 @@ jitter, and output-backend ADRs using measured 10/20 ms and device results.
   request, picker, denied-permission failure, and same-device service found/lost
   callbacks under ADR 0014, but Android runtime provider wiring, physical
   discovery, and any concurrent-accept server loop remain open.
+- the paired desktop audio lab accepts negotiated 10 ms and 20 ms Opus frames;
+  its decode and stop-tail schedules use the negotiated duration. A local test
+  uses native Opus and protected UDP with a simulated trusted control state for
+  both durations. The Android lab sender remains fixed at 20 ms. With 10 ms,
+  the existing startup-buffer option must be at most 60 ms to fit the lab's
+  eight-frame jitter buffer; no 10 ms Android or physical-network result is claimed.
 - Windows output backend selection, physical device/power lifecycle evidence,
   and latency qualification. The independent direct-WASAPI prototype and
   controlled same-host callback comparison exist, but do not settle a backend;

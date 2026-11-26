@@ -462,7 +462,10 @@ fn negotiate_hello(
         .sock
         .set_write_timeout(Some(Duration::from_secs(30)))?;
     let mut framed = UntrustedControlStream::from_io(channel);
-    let mut coordinator = ControlStreamCoordinator::new(session, &[Capability::FrameDuration20Ms])?;
+    let mut coordinator = ControlStreamCoordinator::new(
+        session,
+        &[Capability::FrameDuration10Ms, Capability::FrameDuration20Ms],
+    )?;
     let token = coordinator.install_authenticated_control_session()?;
     let request = loop {
         match framed.poll()? {
@@ -484,7 +487,10 @@ fn negotiate_hello(
         request_id: request.request_id,
         payload: Some(envelope::Payload::Hello(Hello {
             supported_versions: vec![1],
-            capabilities: vec![Capability::FrameDuration20Ms as i32],
+            capabilities: vec![
+                Capability::FrameDuration10Ms as i32,
+                Capability::FrameDuration20Ms as i32,
+            ],
             display_name: "desktop lab".to_owned(),
         })),
     };
@@ -604,10 +610,10 @@ impl MediaActivity {
 }
 
 impl ScheduleObservations {
-    fn observe(&mut self, due: Instant, now: Instant) {
+    fn observe(&mut self, due: Instant, now: Instant, period: Duration) {
         let lateness = now.duration_since(due);
         self.decisions = self.decisions.saturating_add(1);
-        if lateness >= PLAYOUT_PERIOD {
+        if lateness >= period {
             self.frame_late = self.frame_late.saturating_add(1);
         }
         let micros = u64::try_from(lateness.as_micros()).unwrap_or(u64::MAX);
@@ -810,11 +816,11 @@ fn arm_playout(
     }
 }
 
-fn next_playout_deadline(deadline: Instant, now: Instant) -> Instant {
-    let phase = now.duration_since(deadline).as_nanos() % PLAYOUT_PERIOD.as_nanos();
-    let remaining_nanos = u64::try_from(PLAYOUT_PERIOD.as_nanos() - phase)
+fn next_playout_deadline(deadline: Instant, now: Instant, period: Duration) -> Instant {
+    let phase = now.duration_since(deadline).as_nanos() % period.as_nanos();
+    let remaining_nanos = u64::try_from(period.as_nanos() - phase)
         .expect("one playout period fits in u64 nanoseconds");
-    now + Duration::from_nanos(remaining_nanos).max(PLAYOUT_PERIOD / 2)
+    now + Duration::from_nanos(remaining_nanos).max(period / 2)
 }
 
 fn reset_expired_empty_playout(
@@ -875,6 +881,7 @@ fn drain_stop_tail(
     metrics: &StreamCounters,
     consumer: &mut Option<RealtimePcmConsumer<SAMPLES>>,
     next_playout: Option<Instant>,
+    period: Duration,
     decoded: &mut u64,
     peak: &mut f32,
 ) -> LabResult<()> {
@@ -907,7 +914,7 @@ fn drain_stop_tail(
                     *peak = peak.max(sample.abs());
                 }
             }
-            next = next_playout_deadline(next, now);
+            next = next_playout_deadline(next, now, period);
         }
         if metrics.snapshot().jitter_frames == 0
             && now.duration_since(last_activity) >= STOP_DRAIN_QUIET
@@ -1289,6 +1296,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
     let mut consumer = None;
     let mut counters = None;
     let mut next_playout = None;
+    let mut playout_period = PLAYOUT_PERIOD;
     let mut consecutive_plc = 0;
     let mut next_status = None;
     let mut retry_at = None;
@@ -1365,17 +1373,26 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                                 "test-injected receiver unavailable",
                             )?
                         } else if receiver.is_some()
-                            || (
-                                request.sample_rate_hz,
-                                request.channels,
-                                request.frame_duration_ms,
-                            ) != (48_000, 2, 20)
+                            || request.sample_rate_hz != 48_000
+                            || request.channels != 2
+                            || !matches!(request.frame_duration_ms, 10 | 20)
+                            || options.startup_buffer
+                                > Duration::from_millis(u64::from(request.frame_duration_ms) * 7)
+                            || pending_receiver
+                                .as_ref()
+                                .is_some_and(|(identity, prepared)| {
+                                    *identity == request.identity
+                                        && prepared.0.opus_frame_config().is_some_and(|frame| {
+                                            u32::from(frame.frame_duration_ms())
+                                                != request.frame_duration_ms
+                                        })
+                                })
                         {
                             coordinator.abort_pending(token)?;
                             ControlReply::error(
                                 sonimesh_protocol::ErrorCode::UnsupportedCapability,
                                 false,
-                                "lab requires one 48 kHz stereo 20 ms stream",
+                                "lab requires one 48 kHz stereo 10 or 20 ms stream with a fitting startup buffer",
                             )?
                         } else {
                             let prepared = start_prepared(
@@ -1401,7 +1418,11 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                                         },
                                         producer,
                                         0,
-                                        OpusFrameConfig::new(48_000, 2, 20)?,
+                                        OpusFrameConfig::new(
+                                            48_000,
+                                            2,
+                                            u16::try_from(request.frame_duration_ms)?,
+                                        )?,
                                     )?;
                                     let address =
                                         SocketAddrV4::new(options.bind, options.media_port).into();
@@ -1415,7 +1436,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                                                 Arc::clone(&metrics),
                                                 AdaptiveTargetConfig::preset(
                                                     JitterMode::Balanced,
-                                                    20,
+                                                    request.frame_duration_ms,
                                                     8,
                                                     1_000_000_000,
                                                 ),
@@ -1456,6 +1477,8 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                             };
                             let (pipeline, next_consumer, metrics) = *prepared;
                             playing = started;
+                            playout_period =
+                                Duration::from_millis(u64::from(request.frame_duration_ms));
                             retry_at = None;
                             last_output_state = None;
                             receiver = Some(Box::new(pipeline));
@@ -1484,6 +1507,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                                 metrics,
                                 &mut consumer,
                                 next_playout,
+                                playout_period,
                                 &mut decoded,
                                 &mut peak,
                             )?;
@@ -1618,7 +1642,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
             let now = Instant::now();
             activity.observe(now, metrics.snapshot().authenticated_packets);
             if let Some(due) = next_playout.filter(|due| now >= *due) {
-                schedule.observe(due, now);
+                schedule.observe(due, now, playout_period);
                 previous_decision = Some((now, now.duration_since(due)));
                 match decode_live_playout(pipeline, metrics, &mut consecutive_plc)? {
                     Some(DecodeStep::Decoded { .. }) => decoded += 1,
@@ -1635,7 +1659,7 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                         peak = peak.max(sample.abs());
                     }
                 }
-                next_playout = Some(next_playout_deadline(due, now));
+                next_playout = Some(next_playout_deadline(due, now, playout_period));
             }
             if next_status.is_some_and(|due| now >= due) {
                 let output = output_state(playing, retry_at);
@@ -1695,6 +1719,146 @@ mod tests {
         AudioOutput, OutputConfig, OutputDeviceId, OutputDeviceInfo, OutputError, OutputHealth,
         RenderSource, SampleFormat,
     };
+
+    #[test]
+    #[allow(clippy::too_many_lines)] // Runs control, protected UDP, native decoding, and stop in one fixture.
+    fn receiver_runs_negotiated_ten_and_twenty_ms_opus_on_udp_loopback() {
+        use sonimesh_protocol::{
+            MediaKeyContext, MediaSealer, StartStream, StopStream, decode_control_frame,
+            encode_control_frame,
+        };
+        use std::io::{Read, Write};
+        use std::net::{TcpListener, TcpStream, UdpSocket};
+
+        for duration in [10_u32, 20] {
+            let udp_probe = UdpSocket::bind("127.0.0.1:0").unwrap();
+            let media_port = udp_probe.local_addr().unwrap().port();
+            drop(udp_probe);
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = std::thread::spawn(move || {
+                let (socket, _) = listener.accept().unwrap();
+                socket.set_nonblocking(true).unwrap();
+                let mut framed = UntrustedControlStream::from_io(socket);
+                let mut state = SessionState::IDLE;
+                let mut pairing = PairingInvitationController::<1>::new();
+                pairing
+                    .begin(&mut state, PairingId::new([1; 16]), 100, 50, 1)
+                    .unwrap();
+                pairing
+                    .verify_proof(&mut state, 101, PairingSource::new([2; 16]), || {
+                        sonimesh_app::PairingProofVerification::Verified
+                    })
+                    .unwrap();
+                let mut coordinator = ControlStreamCoordinator::new(
+                    state,
+                    &[Capability::FrameDuration10Ms, Capability::FrameDuration20Ms],
+                )
+                .unwrap();
+                let token = coordinator.install_authenticated_control_session().unwrap();
+                let hello = Envelope {
+                    protocol_version: 1,
+                    request_id: 1,
+                    payload: Some(envelope::Payload::Hello(Hello {
+                        supported_versions: vec![1],
+                        capabilities: vec![
+                            Capability::FrameDuration10Ms as i32,
+                            Capability::FrameDuration20Ms as i32,
+                        ],
+                        display_name: "test".into(),
+                    })),
+                };
+                coordinator.accept(token, &hello).unwrap();
+                let options = Options {
+                    media_port,
+                    startup_buffer: Duration::ZERO,
+                    adaptive: true,
+                    require_tone: true,
+                    ..Options::default()
+                };
+                let mut playback = Playback::prepare(&options).unwrap();
+                receive_audio(
+                    1,
+                    &mut framed,
+                    &mut coordinator,
+                    token,
+                    SessionSecret::new([7; 32]),
+                    &options,
+                    &mut playback,
+                    &mut 0,
+                    &mut false,
+                    &mut 0,
+                )
+            });
+            let mut client = TcpStream::connect(address).unwrap();
+            client
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let start = Envelope {
+                protocol_version: 1,
+                request_id: 2,
+                payload: Some(envelope::Payload::StartStream(StartStream {
+                    media_session_id: 7,
+                    stream_id: 1,
+                    sample_rate_hz: 48_000,
+                    channels: 2,
+                    frame_duration_ms: duration,
+                    media_key_epoch: 0,
+                })),
+            };
+            client
+                .write_all(&encode_control_frame(&start).unwrap())
+                .unwrap();
+            let mut header = [0; 4];
+            client.read_exact(&mut header).unwrap();
+            let mut frame = vec![0; u32::from_be_bytes(header) as usize + 4];
+            frame[..4].copy_from_slice(&header);
+            client.read_exact(&mut frame[4..]).unwrap();
+            let reply = decode_control_frame(&frame).unwrap();
+            assert!(
+                matches!(reply.payload, Some(envelope::Payload::StreamStatus(status)) if status.state == StreamState::Streaming as i32)
+            );
+
+            let context = MediaKeyContext::new(7, 1, 0, MediaDirection::AndroidToDesktop).unwrap();
+            let mut sealer = MediaSealer::new(&SessionSecret::new([7; 32]), context).unwrap();
+            let mut encoder =
+                opus::Encoder::new(48_000, opus::Channels::Stereo, opus::Application::Audio)
+                    .unwrap();
+            let samples = vec![0.25; duration as usize * 96];
+            let mut payload = [0; 1_148];
+            let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+            for index in 0..3 {
+                let length = encoder.encode_float(&samples, &mut payload).unwrap();
+                let packet = sealer
+                    .seal(0, index * u64::from(duration) * 48, &payload[..length])
+                    .unwrap();
+                sender
+                    .send_to(&packet.datagram, ("127.0.0.1", media_port))
+                    .unwrap();
+            }
+            let stop = Envelope {
+                protocol_version: 1,
+                request_id: 3,
+                payload: Some(envelope::Payload::StopStream(StopStream {
+                    media_session_id: 7,
+                    stream_id: 1,
+                    media_key_epoch: 0,
+                })),
+            };
+            client
+                .write_all(&encode_control_frame(&stop).unwrap())
+                .unwrap();
+            client.read_exact(&mut header).unwrap();
+            let mut frame = vec![0; u32::from_be_bytes(header) as usize + 4];
+            frame[..4].copy_from_slice(&header);
+            client.read_exact(&mut frame[4..]).unwrap();
+            let reply = decode_control_frame(&frame).unwrap();
+            assert!(
+                matches!(reply.payload, Some(envelope::Payload::StreamStatus(status)) if status.state == StreamState::Stopped as i32)
+            );
+            server.join().unwrap().unwrap();
+        }
+    }
 
     #[cfg(all(windows, feature = "playback"))]
     #[test]
@@ -1839,6 +2003,7 @@ mod tests {
             &metrics,
             &mut Some(consumer),
             None,
+            PLAYOUT_PERIOD,
             &mut decoded,
             &mut peak,
         )
@@ -2683,9 +2848,9 @@ mod tests {
     fn schedule_observations_record_late_decisions_and_maximum() {
         let due = Instant::now();
         let mut observations = ScheduleObservations::default();
-        observations.observe(due, due + Duration::from_millis(19));
-        observations.observe(due, due + Duration::from_millis(20));
-        observations.observe(due, due + Duration::from_micros(41_500));
+        observations.observe(due, due + Duration::from_millis(19), PLAYOUT_PERIOD);
+        observations.observe(due, due + Duration::from_millis(20), PLAYOUT_PERIOD);
+        observations.observe(due, due + Duration::from_micros(41_500), PLAYOUT_PERIOD);
         assert_eq!(observations.decisions, 3);
         assert_eq!(observations.frame_late, 2);
         assert_eq!(observations.max_lateness_us, 41_500);
@@ -2840,9 +3005,27 @@ mod tests {
         let mut deadline = origin;
         for step in 1..=1_000 {
             let now = deadline + Duration::from_millis(2);
-            deadline = next_playout_deadline(deadline, now);
+            deadline = next_playout_deadline(deadline, now, PLAYOUT_PERIOD);
             assert_eq!(deadline, origin + PLAYOUT_PERIOD * step);
         }
+    }
+
+    #[test]
+    fn ten_ms_playout_uses_its_own_deadline_and_lateness_threshold() {
+        let period = Duration::from_millis(10);
+        let due = Instant::now();
+        assert_eq!(
+            next_playout_deadline(due, due + Duration::from_millis(2), period),
+            due + period
+        );
+        assert_eq!(
+            next_playout_deadline(due, due + Duration::from_millis(21), period),
+            due + period * 3
+        );
+        let mut observations = ScheduleObservations::default();
+        observations.observe(due, due + Duration::from_millis(9), period);
+        observations.observe(due, due + period, period);
+        assert_eq!(observations.frame_late, 1);
     }
 
     #[test]
@@ -2850,17 +3033,17 @@ mod tests {
         let deadline = Instant::now();
         let almost_next = deadline + Duration::from_millis(19);
         assert_eq!(
-            next_playout_deadline(deadline, almost_next),
+            next_playout_deadline(deadline, almost_next, PLAYOUT_PERIOD),
             almost_next + Duration::from_millis(10)
         );
         let late = deadline + Duration::from_millis(21);
         assert_eq!(
-            next_playout_deadline(deadline, late),
+            next_playout_deadline(deadline, late, PLAYOUT_PERIOD),
             deadline + Duration::from_millis(40)
         );
         let much_later = deadline + Duration::from_secs(5);
         assert_eq!(
-            next_playout_deadline(deadline, much_later),
+            next_playout_deadline(deadline, much_later, PLAYOUT_PERIOD),
             much_later + PLAYOUT_PERIOD
         );
     }
@@ -2874,7 +3057,7 @@ mod tests {
             .take(1_000)
         {
             let now = deadline + Duration::from_millis(delay_ms);
-            let next = next_playout_deadline(deadline, now);
+            let next = next_playout_deadline(deadline, now, PLAYOUT_PERIOD);
             assert!(next.duration_since(now) >= Duration::from_millis(10));
             assert!(next.duration_since(now) <= PLAYOUT_PERIOD);
             deadline = next;
