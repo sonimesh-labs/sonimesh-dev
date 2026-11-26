@@ -1260,6 +1260,14 @@ requests the usual recording permission and screen-capture consent. A cancelled
 scan or invalid invitation does not start capture. **Scan lab invitation**
 continues to apply the invitation without starting, so the operator can review
 or edit the addresses first.
+On 2026-11-26, an API 37 x86_64 emulator received a simulated scanner result
+containing `SONIMESH-LAB1:39094:<invitation>`, used ADB-reversed control and
+the emulator host alias for UDP, and completed capture and stop. The software
+listener on UDP port 39094 accepted and decoded 157 packets with a 0.104 peak
+and three PLC decisions. The `PairedCaptureTest#captures_after_scanned_invitation`
+instrumentation required `-e expectedMediaPort 39094` because the invitation,
+rather than the test's initial media-port field, sets the port. This did not
+test camera recognition, physical WLAN, or audible output.
 For a pasted invitation, **Apply invitation and start paired capture** follows
 the same one-step flow: a non-loopback control address also becomes the UDP
 destination, while a loopback invitation retains the separate UDP address for
