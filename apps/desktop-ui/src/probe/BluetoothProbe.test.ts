@@ -102,6 +102,39 @@ it('restores the old output after a failed default switch and retries on refresh
   wrapper.unmount()
 })
 
+it('keeps monitoring when the default is missing or output enumeration fails', async () => {
+  vi.useFakeTimers()
+  localStorage.setItem('sonimesh.bluetoothProbe.followDefault', 'true')
+  const snapshot = { running: true, endpointId: 'old', endpointName: 'old', sampleRate: 48000, channels: 2, samples: 10, peak: 0, runPeak: 0, error: null }
+  let state: 'normal' | 'missing' | 'error' = 'normal'
+  const invoke = vi.fn((command: string) => {
+    if (command === 'bluetooth_status') return Promise.resolve('idle')
+    if (command === 'bluetooth_candidates') return Promise.resolve({ generation: 1, names: [], capability: 'SystemRouted' })
+    if (command === 'loopback_endpoints') {
+      if (state === 'error') return Promise.reject(new Error('enumeration failed'))
+      return Promise.resolve([{ id: 'old', name: 'old', isDefault: state === 'normal' }])
+    }
+    if (command === 'loopback_status') return Promise.resolve(snapshot)
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  state = 'missing'
+  await vi.advanceTimersByTimeAsync(1000)
+  expect(wrapper.text()).toContain('Windows did not report a default output endpoint; the current PCM check continues.')
+  state = 'error'
+  await vi.advanceTimersByTimeAsync(1000)
+  expect(wrapper.text()).toContain('Windows output devices could not be checked: Error: enumeration failed')
+  expect(wrapper.text()).not.toContain('Bluetooth status unavailable')
+  expect(wrapper.find('.command-error').exists()).toBe(false)
+  state = 'normal'
+  await vi.advanceTimersByTimeAsync(1000)
+  expect(wrapper.text()).not.toContain('Windows output devices could not be checked')
+  expect(invoke).not.toHaveBeenCalledWith('loopback_stop')
+  wrapper.unmount()
+})
+
 it('does not switch after the monitor is stopped during default enumeration', async () => {
   vi.useFakeTimers()
   localStorage.setItem('sonimesh.bluetoothProbe.followDefault', 'true')
@@ -126,6 +159,44 @@ it('does not switch after the monitor is stopped during default enumeration', as
   finish([{ id: 'new', name: 'new', isDefault: true }])
   await flushPromises()
   expect(invoke).not.toHaveBeenCalledWith('loopback_start', { endpointId: 'new' })
+  wrapper.unmount()
+})
+
+it('stops a combined monitor after Bluetooth recovery fails during an automatic switch', async () => {
+  vi.useFakeTimers()
+  localStorage.setItem('sonimesh.bluetoothProbe.followDefault', 'true')
+  sessionStorage.setItem('sonimesh.bluetoothProbe.combinedMonitorOwned', 'true')
+  sessionStorage.setItem('sonimesh.bluetoothProbe.sourceId', 'phone')
+  const snapshot = (id: string, running = true) => ({ running, endpointId: id, endpointName: id, sampleRate: 48000, channels: 2, samples: 0, peak: 0, runPeak: 0, error: null })
+  let phase = 'open'
+  let active = 'old'
+  let defaultId = 'old'
+  let finishSwitch!: (value: object) => void
+  const invoke = vi.fn((command: string, args?: { endpointId?: string }) => {
+    if (command === 'bluetooth_status') return Promise.resolve(phase)
+    if (command === 'bluetooth_candidates') return Promise.resolve({ generation: 1, names: ['Phone'], ids: ['phone'], capability: 'SystemRouted' })
+    if (command === 'bluetooth_prepare') return Promise.reject(new Error('Phone unavailable'))
+    if (command === 'loopback_endpoints') return Promise.resolve(['old', 'new'].map(id => ({ id, name: id, isDefault: id === defaultId })))
+    if (command === 'loopback_status') return Promise.resolve(snapshot(active, !!active))
+    if (command === 'loopback_stop') { const previous = active; active = ''; return Promise.resolve(snapshot(previous, false)) }
+    if (command === 'loopback_start' && args?.endpointId === 'new') return new Promise(resolve => { finishSwitch = resolve })
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  defaultId = 'new'
+  await vi.advanceTimersByTimeAsync(1000)
+  expect(invoke).toHaveBeenCalledWith('loopback_start', { endpointId: 'new' })
+  phase = 'idle'
+  await vi.advanceTimersByTimeAsync(1000)
+  expect(invoke.mock.calls.filter(([command]) => command === 'loopback_stop')).toHaveLength(1)
+  active = 'new'
+  finishSwitch(snapshot('new'))
+  await flushPromises()
+  expect(invoke.mock.calls.filter(([command]) => command === 'loopback_stop')).toHaveLength(2)
+  expect(sessionStorage.getItem('sonimesh.bluetoothProbe.combinedMonitorOwned')).toBeNull()
+  expect(wrapper.text()).toContain('Phone unavailable')
   wrapper.unmount()
 })
 

@@ -372,7 +372,16 @@ async function pollLoopback() {
     loopbackStatusError.value = null
     updateLoopbackWaitState(snapshot)
     if (snapshot.running && followDefault.value && !loopbackBusy.value && !loopbackToneBusy.value && !busy.value) {
-      const endpoints = await window.__TAURI__!.core.invoke<LoopbackEndpoint[]>('loopback_endpoints') ?? []
+      let endpoints: LoopbackEndpoint[]
+      try {
+        endpoints = await window.__TAURI__!.core.invoke<LoopbackEndpoint[]>('loopback_endpoints') ?? []
+      } catch (cause) {
+        if (!disposed && request === loopbackRequest && followDefault.value) {
+          loopbackEndpointMessage.value = `Windows output devices could not be checked: ${String(cause)}. The current PCM check continues.`
+        }
+        if (!disposed && request === loopbackRequest && loopback.value?.running) loopbackTimer = setTimeout(pollLoopback, 1000)
+        return
+      }
       if (disposed || request !== loopbackRequest) return
       if (!followDefault.value || loopbackBusy.value || loopbackToneBusy.value || busy.value) {
         if (loopback.value?.running) loopbackTimer = setTimeout(pollLoopback, 1000)
