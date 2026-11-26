@@ -337,6 +337,8 @@ describe('desktop output probe', () => {
     window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
     const wrapper = mount(OutputProbe)
     await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'Copy session evidence')!.trigger('click')
+    expect(writeText.mock.calls[0][0]).toContain('Receiver controls (current): volume 50%; mute off')
     await wrapper.findAll('button').find(button => button.text() === 'Stop listener')!.trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('Last session observations')
@@ -344,10 +346,30 @@ describe('desktop output probe', () => {
     expect(wrapper.text()).toContain('Last reported: Active')
     await wrapper.findAll('button').find(button => button.text() === 'Copy session evidence')!.trigger('click')
     expect(writeText).toHaveBeenCalledWith(expect.stringContaining('Decoded frames: 115'))
+    expect(writeText.mock.calls[1][0]).not.toContain('Receiver controls (current)')
     await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
     await flushPromises()
     expect(wrapper.text()).not.toContain('Last session observations')
     expect(wrapper.text()).not.toContain('Session evidence copied.')
+    wrapper.unmount()
+  })
+
+  it('explains muted and zero-volume receiver states beside decoded activity', async () => {
+    vi.useFakeTimers()
+    const base = { running: true, sessionActive: true, status: 'Session active', invitation: null, events: [], metrics: null, signal: { decoded: 10, peak: 0.2 }, volume: 0, muted: true }
+    const invoke = vi.fn().mockResolvedValueOnce(base)
+      .mockResolvedValueOnce({ ...base, muted: false })
+      .mockResolvedValueOnce({ ...base, volume: 50, muted: false })
+    window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+    const wrapper = mount(OutputProbe)
+    await flushPromises()
+    expect(wrapper.text()).toContain('Receiver is muted; decoded signal is measured before mute.')
+    expect(wrapper.text()).not.toContain('Receiver volume is 0%')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(wrapper.text()).toContain('Receiver volume is 0%; decoded signal is measured before volume.')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(wrapper.text()).not.toContain('Receiver volume is 0%')
+    expect(wrapper.text()).not.toContain('Receiver is muted')
     wrapper.unmount()
   })
 

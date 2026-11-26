@@ -321,6 +321,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   not validate the Android encoder or a physical audio path.
   An optional paired-listener status report exposes in-session packet and decode
   counts, decoded peak, and output recovery state for controlled-lab diagnosis.
+  During a session, the desktop probe highlights receiver mute or zero volume
+  beside the decoded-signal observation and includes the confirmed current
+  receiver controls in copied or shared evidence when available.
   On normal stop it also reports a final post-drain snapshot; the desktop probe
   retains that snapshot, or the last available update after failure, until the
   next client attempt. These observations do not establish audible playback.

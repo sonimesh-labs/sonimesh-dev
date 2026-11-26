@@ -222,6 +222,9 @@ function labEvidenceText(): string | null {
   if (lab.value.settings) {
     lines.push(`Listener launch settings: ${lab.value.settings.startupBufferMs} ms startup buffer; ${lab.value.settings.adaptive ? 'adaptive' : 'fixed'} playout`)
   }
+  if (lab.value.running && lab.value.volume != null && lab.value.muted != null) {
+    lines.push(`Receiver controls (current): volume ${lab.value.volume}%; mute ${lab.value.muted ? 'on' : 'off'}`)
+  }
   if (signal) {
     lines.push(`Last decoded interval${lab.value.signalStale ? ' (stale: no update for at least 3 seconds)' : ''}: ${signal.decoded} frames${signal.peak === null ? '; no peak' : `; peak ${signal.peak.toFixed(6)}`} (before output gain; excludes concealment)`)
   }
@@ -690,6 +693,8 @@ onBeforeUnmount(() => { disposed = true; labRequest++; suggestRequest++; clearTi
       </div>
       <section v-if="lab.sessionActive" aria-labelledby="lab-signal-title">
         <h3 id="lab-signal-title">Last reported decoded interval</h3>
+        <p v-if="lab.muted" role="status">Receiver is muted; decoded signal is measured before mute.</p>
+        <p v-else-if="lab.volume === 0" role="status">Receiver volume is 0%; decoded signal is measured before volume.</p>
         <p v-if="!lab.signal">Waiting for a signal observation.</p>
         <p v-else-if="lab.signal.decoded === 0">No decoded frames in this interval.</p>
         <p v-else>{{ lab.signal.decoded }} decoded frames; peak {{ lab.signal.peak?.toFixed(6) }}.</p>
