@@ -326,6 +326,11 @@ identifies the active endpoint so a reopened panel sends its test tone to the
 monitored device, even when the saved endpoint preference differs. Missing format details do not
 hide an endpoint. This checks endpoint activity only; Bluetooth source capture
 remains unverified and the capability result stays unchanged.
+The operator can refresh the endpoint list and switch the monitor while a
+system playback connection remains open. Switching stops the current monitor
+before starting the newly selected endpoint, so there is a monitoring gap and
+the new run starts fresh counters. A failed start leaves monitoring stopped for
+an explicit retry; it does not change the system output or Bluetooth connection.
 The operator may instead leave the selected connection started while waiting for
 the remote source to initiate it; the waiting state does not claim playback.
 

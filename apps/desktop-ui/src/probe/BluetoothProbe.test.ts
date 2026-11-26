@@ -15,6 +15,79 @@ afterEach(() => {
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: originalClipboard })
 })
 
+it('switches the monitored output while keeping the Bluetooth connection open', async () => {
+  const old = { running: true, endpointId: 'old', endpointName: 'Speakers', sampleRate: 48000, channels: 2, samples: 100, peak: 0.2, runPeak: 0.2, error: null }
+  const next = { ...old, endpointId: 'new', endpointName: 'Headphones', samples: 0, peak: 0, runPeak: 0 }
+  let current = old
+  const invoke = vi.fn((command: string) => {
+    if (command === 'bluetooth_status') return Promise.resolve('open')
+    if (command === 'bluetooth_candidates') return Promise.resolve({ generation: 1, names: [], capability: 'SystemRouted' })
+    if (command === 'loopback_endpoints') return Promise.resolve([{ id: 'old', name: 'Speakers', isDefault: true }, { id: 'new', name: 'Headphones', isDefault: false }])
+    if (command === 'loopback_status') return Promise.resolve(current)
+    if (command === 'loopback_stop') return Promise.resolve({ ...old, running: false })
+    if (command === 'loopback_start') { current = next; return Promise.resolve(next) }
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  await wrapper.get('#loopback-endpoint').setValue('new')
+  await wrapper.findAll('button').find(button => button.text() === 'Switch PCM check to selected output')!.trigger('click')
+  await flushPromises()
+  expect(invoke).toHaveBeenCalledWith('loopback_start', { endpointId: 'new' })
+  expect(invoke).not.toHaveBeenCalledWith('bluetooth_disconnect')
+  expect(wrapper.text()).toContain('Headphones · 48000 Hz')
+  expect(wrapper.text()).toContain('0 samples')
+  wrapper.unmount()
+})
+
+it('shows a failed output switch and allows the selected endpoint to be retried', async () => {
+  const old = { running: true, endpointId: 'old', endpointName: 'Speakers', sampleRate: 48000, channels: 2, samples: 100, peak: 0, runPeak: 0, error: null }
+  const invoke = vi.fn((command: string) => {
+    if (command === 'bluetooth_status') return Promise.resolve('open')
+    if (command === 'bluetooth_candidates') return Promise.resolve({ generation: 1, names: [], capability: 'SystemRouted' })
+    if (command === 'loopback_endpoints') return Promise.resolve([{ id: 'old', name: 'Speakers', isDefault: true }, { id: 'new', name: 'Headphones', isDefault: false }])
+    if (command === 'loopback_status') return Promise.resolve(old)
+    if (command === 'loopback_stop') return Promise.resolve({ ...old, running: false })
+    if (command === 'loopback_start') return Promise.reject(new Error('Endpoint unavailable'))
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  await wrapper.get('#loopback-endpoint').setValue('new')
+  await wrapper.findAll('button').find(button => button.text() === 'Switch PCM check to selected output')!.trigger('click')
+  await flushPromises()
+  expect(wrapper.text()).toContain('Endpoint unavailable')
+  expect(wrapper.findAll('button').find(button => button.text() === 'Start PCM check')!.attributes('disabled')).toBeUndefined()
+  expect((wrapper.get('#loopback-endpoint').element as HTMLSelectElement).value).toBe('new')
+  expect(invoke).not.toHaveBeenCalledWith('bluetooth_disconnect')
+  wrapper.unmount()
+})
+
+it('keeps polling the old output when stopping it for a switch fails', async () => {
+  const old = { running: true, endpointId: 'old', endpointName: 'Speakers', sampleRate: 48000, channels: 2, samples: 100, peak: 0, runPeak: 0, error: null }
+  const invoke = vi.fn((command: string) => {
+    if (command === 'bluetooth_status') return Promise.resolve('open')
+    if (command === 'bluetooth_candidates') return Promise.resolve({ generation: 1, names: [], capability: 'SystemRouted' })
+    if (command === 'loopback_endpoints') return Promise.resolve([{ id: 'old', name: 'Speakers', isDefault: true }, { id: 'new', name: 'Headphones', isDefault: false }])
+    if (command === 'loopback_status') return Promise.resolve(old)
+    if (command === 'loopback_stop') return Promise.reject(new Error('Stop failed'))
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  await wrapper.get('#loopback-endpoint').setValue('new')
+  await wrapper.findAll('button').find(button => button.text() === 'Switch PCM check to selected output')!.trigger('click')
+  await flushPromises()
+  expect(wrapper.text()).toContain('Stop failed')
+  expect(wrapper.text()).toContain('Speakers · 48000 Hz')
+  expect(invoke).not.toHaveBeenCalledWith('loopback_start', { endpointId: 'new' })
+  expect(invoke.mock.calls.filter(([command]) => command === 'loopback_status').length).toBeGreaterThanOrEqual(3)
+  wrapper.unmount()
+})
+
 it('copies a source-neutral Bluetooth and system output observation', async () => {
   const writeText = vi.fn().mockResolvedValue(undefined)
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })

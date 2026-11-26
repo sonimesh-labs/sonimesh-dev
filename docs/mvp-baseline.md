@@ -116,6 +116,8 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   endpoint if it has reappeared.
   Reopening the panel while monitoring restores the active endpoint selection so
   its test tone targets the monitored output rather than a different saved preference.
+  The operator can switch the monitored endpoint while Bluetooth stays connected;
+  the meter restarts with fresh counters and reports a failed switch for retry.
   While monitoring, an integrated low-level test tone can be played on the
   selected endpoint to check that the meter responds. The probe also offers
   an explicit combined
