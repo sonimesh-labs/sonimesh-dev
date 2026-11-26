@@ -116,6 +116,14 @@ function rememberCombinedMonitorOwnership(owned: boolean) {
   }
 }
 
+function readCombinedMonitorOwnership() {
+  try {
+    return sessionStorage.getItem(COMBINED_MONITOR_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
+
 function playbackCapabilityDescription(capability: PlaybackCapability) {
   switch (capability) {
     case 'ApplicationPcmSource':
@@ -331,6 +339,7 @@ async function recoverLoopback() {
   loopbackStatusError.value = null
   try {
     loopback.value = await window.__TAURI__.core.invoke<LoopbackSnapshot>('loopback_stop')
+    loopbackStatusError.value = null
     loopbackStartedAt = undefined
     loopbackNoSamplesLong.value = false
     selectAvailableLoopbackEndpoint(await window.__TAURI__.core.invoke<LoopbackEndpoint[]>('loopback_endpoints') ?? [])
@@ -499,6 +508,8 @@ onMounted(async () => {
   const request = statusRequest
   try {
     recoverBluetoothWait = readBluetoothRecovery()
+    const hadCombinedMonitorOwnership = readCombinedMonitorOwnership()
+    rememberCombinedMonitorOwnership(hadCombinedMonitorOwnership)
     try {
       const state = await window.__TAURI__.core.invoke<'idle' | 'waiting' | 'open'>('bluetooth_status')
       if (disposed || request !== statusRequest) return
@@ -527,12 +538,6 @@ onMounted(async () => {
       if (disposed || request !== statusRequest) return
       loopback.value = loopbackState
       loopbackStatusError.value = null
-      let hadCombinedMonitorOwnership = false
-      try {
-        hadCombinedMonitorOwnership = sessionStorage.getItem(COMBINED_MONITOR_KEY) === 'true'
-      } catch {
-        // The backend snapshot remains authoritative when session storage is unavailable.
-      }
       rememberCombinedMonitorOwnership(loopbackState.running && hadCombinedMonitorOwnership)
       if (loopbackState.running) {
         loopbackStartedAt = Date.now()

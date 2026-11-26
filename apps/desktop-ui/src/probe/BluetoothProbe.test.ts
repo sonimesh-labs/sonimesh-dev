@@ -740,6 +740,34 @@ it('retries pending Bluetooth wait after the initial status query fails', async 
   wrapper.unmount()
 })
 
+it('stops an owned monitor when its status cannot be read and Bluetooth wait fails', async () => {
+  let monitoring = true
+  const invoke = vi.fn((command: string) => {
+    if (command === 'bluetooth_status') return Promise.resolve('idle')
+    if (command === 'bluetooth_candidates') return Promise.resolve({ generation: 24, names: ['Phone'], ids: ['phone-id'] })
+    if (command === 'loopback_endpoints') return Promise.resolve([{ id: 'default-endpoint', name: 'Default speakers', isDefault: true }])
+    if (command === 'loopback_status') return Promise.reject(new Error('Monitor status unavailable.'))
+    if (command === 'bluetooth_prepare') return Promise.reject(new Error('Phone wait failed.'))
+    if (command === 'loopback_stop') {
+      monitoring = false
+      return Promise.resolve({ running: false, endpointName: 'Default speakers', sampleRate: 48000, channels: 2, samples: 0, peak: 0, error: null })
+    }
+    return Promise.resolve()
+  })
+  sessionStorage.setItem('sonimesh.bluetoothProbe.sourceId', 'phone-id')
+  sessionStorage.setItem('sonimesh.bluetoothProbe.combinedMonitorOwned', 'true')
+  sessionStorage.setItem('sonimesh.bluetoothProbe.recoveryPending', 'true')
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  expect(invoke).toHaveBeenCalledWith('loopback_stop')
+  expect(monitoring).toBe(false)
+  expect(sessionStorage.getItem('sonimesh.bluetoothProbe.combinedMonitorOwned')).toBeNull()
+  expect(wrapper.text()).toContain('waiting could not restart: Error: Phone wait failed.')
+  wrapper.unmount()
+})
+
 it('stops a restored combined monitor when phone wait cannot resume', async () => {
   vi.useFakeTimers()
   let phase = 'idle'
