@@ -35,6 +35,15 @@ const emit = defineEmits<{
 }>()
 
 const selectedDevice = computed(() => props.devices.find((device) => device.id === props.selectedId) ?? null)
+const deviceLabels = computed(() => {
+  const labels = new Map<string, string>()
+  for (const device of props.devices) {
+    const matches = props.devices.filter((candidate) => candidate.label === device.label)
+      .map((candidate) => candidate.id).sort()
+    labels.set(device.id, matches.length > 1 ? `${device.label} (${matches.indexOf(device.id) + 1})` : device.label)
+  }
+  return labels
+})
 const volumeLabel = computed(() => (props.muted ? 'Muted' : `${Math.round(props.gain * 100)}%`))
 
 const healthLabels: Record<OutputHealth, string> = {
@@ -94,7 +103,7 @@ const displayStatus = computed<DisplayStatus>(() => {
     <div v-if="selectedDevice" class="selected-device">
       <span class="device-check"><Check :size="16" aria-hidden="true" /></span>
       <div>
-        <strong>{{ selectedDevice.label }}</strong>
+        <strong>{{ deviceLabels.get(selectedDevice.id) }}</strong>
         <span>{{ preview ? 'Synthetic preview · ' : '' }}{{ selectedDevice.sampleRateHz.toLocaleString() }} Hz · {{ selectedDevice.channels }} channels</span>
       </div>
     </div>
@@ -124,7 +133,7 @@ const displayStatus = computed<DisplayStatus>(() => {
         <select id="output-device" class="device-select" :value="selectedId ?? ''" :disabled="busy || devices.length === 0" @change="emit('select', ($event.target as HTMLSelectElement).value)">
           <option v-if="devices.length === 0" value="" disabled>No output devices available</option>
           <option v-for="device in devices" :key="device.id" :value="device.id">
-            {{ device.label }}{{ device.isDefault ? ' (default)' : '' }}
+            {{ deviceLabels.get(device.id) }}{{ device.isDefault ? ' (default)' : '' }}
           </option>
         </select>
       </div>

@@ -1849,7 +1849,10 @@ To keep the currently shown default or fallback device as an explicit preference
 choose **Keep this output**; the saved choice then remains fixed across refreshes.
 The output inventory is cached between low-rate session snapshots. Use the
 output panel's **Refresh output devices** control to re-enumerate endpoints after
-connecting or removing a device.
+connecting or removing a device. When multiple endpoints have the same name,
+the panel numbers them in device-ID order in both the list and selected-device
+card. The numbers distinguish the current list; adding or removing a same-named
+endpoint may change them, while the saved selection continues to use its ID.
 If the initial device enumeration fails, the shell retains that failure until an
 explicit retry instead of presenting an empty list as a successful enumeration.
 The loading screen provides **Retry output devices** for this situation.

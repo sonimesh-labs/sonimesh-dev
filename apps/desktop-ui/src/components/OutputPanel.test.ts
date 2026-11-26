@@ -15,6 +15,27 @@ function outputSnapshot(overrides: Partial<OutputSnapshot> = {}): OutputSnapshot
 }
 
 describe('OutputPanel', () => {
+  it('distinguishes same-named outputs consistently when the device list is reordered', async () => {
+    const devices = [
+      { id: 'device-b', label: 'Speakers', sampleRateHz: 48_000, channels: 2, isDefault: true },
+      { id: 'device-a', label: 'Speakers', sampleRateHz: 44_100, channels: 2, isDefault: false },
+      { id: 'headphones', label: 'Headphones', sampleRateHz: 48_000, channels: 2, isDefault: false },
+    ]
+    const wrapper = mount(OutputPanel, {
+      props: { devices, selectedId: 'device-b', output: outputSnapshot(), gain: 1, muted: false, busy: false },
+    })
+    expect(wrapper.get('.selected-device strong').text()).toBe('Speakers (2)')
+    expect(wrapper.get('option[value="device-b"]').text()).toBe('Speakers (2) (default)')
+    expect(wrapper.get('option[value="device-a"]').text()).toBe('Speakers (1)')
+    expect(wrapper.get('option[value="headphones"]').text()).toBe('Headphones')
+
+    await wrapper.setProps({ devices: [...devices].reverse() })
+    expect(wrapper.get('option[value="device-b"]').text()).toBe('Speakers (2) (default)')
+    expect(wrapper.get('.selected-device strong').text()).toBe('Speakers (2)')
+    await wrapper.get('#output-device').setValue('device-a')
+    expect(wrapper.emitted('select')).toEqual([['device-a']])
+  })
+
   it.each([
     { followsSystemDefault: true, selectionFallback: false },
     { followsSystemDefault: false, selectionFallback: true },
