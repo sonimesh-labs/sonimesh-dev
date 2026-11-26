@@ -25,6 +25,20 @@ const message = ref<string | null>(null)
 const loopback = ref<LoopbackSnapshot | null>(null)
 const loopbackEndpoints = ref<LoopbackEndpoint[]>([])
 const LOOPBACK_ENDPOINT_KEY = 'sonimesh.bluetoothProbe.loopbackEndpoint'
+const FOLLOW_DEFAULT_KEY = 'sonimesh.bluetoothProbe.followDefault'
+
+function readFollowDefault() {
+  try { return localStorage.getItem(FOLLOW_DEFAULT_KEY) === 'true' } catch { return false }
+}
+
+const followDefault = ref(readFollowDefault())
+let failedDefaultId: string | undefined
+
+function changeFollowDefault() {
+  try { localStorage.setItem(FOLLOW_DEFAULT_KEY, String(followDefault.value)) } catch { /* Optional preference. */ }
+  failedDefaultId = undefined
+  void refreshLoopbackEndpoints()
+}
 
 function readLoopbackEndpointId() {
   try {
@@ -157,6 +171,13 @@ function loopbackEndpointLabel(endpoint: LoopbackEndpoint) {
 function selectAvailableLoopbackEndpoint(endpoints: LoopbackEndpoint[]) {
   const previousId = loopbackEndpointId.value
   const activeId = loopback.value?.running ? loopback.value.endpointId : null
+  if (followDefault.value && !activeId) {
+    const defaultEndpoint = endpoints.find(endpoint => endpoint.isDefault)
+    loopbackEndpoints.value = endpoints
+    loopbackEndpointId.value = defaultEndpoint?.id ?? ''
+    loopbackEndpointMessage.value = defaultEndpoint ? null : 'Windows did not report a default output endpoint.'
+    return
+  }
   if (activeId) {
     loopbackEndpoints.value = endpoints
     if (!loopbackSelectionEdited || !endpoints.some(endpoint => endpoint.id === previousId)) {
@@ -350,6 +371,31 @@ async function pollLoopback() {
     loopback.value = snapshot
     loopbackStatusError.value = null
     updateLoopbackWaitState(snapshot)
+    if (snapshot.running && followDefault.value && !loopbackBusy.value && !loopbackToneBusy.value && !busy.value) {
+      const endpoints = await window.__TAURI__!.core.invoke<LoopbackEndpoint[]>('loopback_endpoints') ?? []
+      if (disposed || request !== loopbackRequest) return
+      if (!followDefault.value || loopbackBusy.value || loopbackToneBusy.value || busy.value) {
+        if (loopback.value?.running) loopbackTimer = setTimeout(pollLoopback, 1000)
+        return
+      }
+      loopbackEndpoints.value = endpoints
+      const target = endpoints.find(endpoint => endpoint.isDefault)
+      if (!target) {
+        failedDefaultId = undefined
+        loopbackEndpointMessage.value = 'Windows did not report a default output endpoint; the current PCM check continues.'
+      } else {
+        loopbackEndpointMessage.value = null
+        if (failedDefaultId && failedDefaultId !== target.id) failedDefaultId = undefined
+        if (target.id !== snapshot.endpointId && target.id !== failedDefaultId) {
+          loopbackEndpointId.value = target.id
+          loopbackSelectionEdited = true
+          failedDefaultId = target.id
+          await switchLoopbackEndpoint(true)
+          if (!disposed && loopback.value?.endpointId === target.id) failedDefaultId = undefined
+          return
+        }
+      }
+    }
   } catch (cause) {
     if (!disposed && request === loopbackRequest) loopbackStatusError.value = String(cause)
     if (!disposed && request === loopbackRequest && loopback.value) {
@@ -361,6 +407,7 @@ async function pollLoopback() {
 
 async function refreshLoopbackEndpoints() {
   if (!window.__TAURI__) return
+  failedDefaultId = undefined
   loopbackBusy.value = true
   loopbackError.value = null
   try {
@@ -415,6 +462,11 @@ async function toggleLoopback() {
     clearTimeout(loopbackTimer)
   }
   try {
+    if (!loopback.value?.running && followDefault.value) {
+      selectAvailableLoopbackEndpoint(await window.__TAURI__.core.invoke<LoopbackEndpoint[]>('loopback_endpoints') ?? [])
+      if (disposed) return
+      if (!loopbackEndpointId.value) throw new Error('Windows did not report a default output endpoint.')
+    }
     const result = loopback.value?.running
       ? await window.__TAURI__.core.invoke<LoopbackSnapshot>('loopback_stop')
       : await window.__TAURI__.core.invoke<LoopbackSnapshot>('loopback_start', { endpointId: loopbackEndpointId.value })
@@ -476,7 +528,7 @@ async function stopCombinedMonitor() {
   }
 }
 
-async function switchLoopbackEndpoint() {
+async function switchLoopbackEndpoint(automatic = false) {
   if (!window.__TAURI__ || !loopback.value?.running || !loopbackEndpointId.value || loopbackBusy.value) return
   const endpointId = loopbackEndpointId.value
   const previousEndpointId = loopback.value.endpointId
@@ -492,6 +544,7 @@ async function switchLoopbackEndpoint() {
       loopback.value = await window.__TAURI__!.core.invoke<LoopbackSnapshot>('loopback_stop')
       if (loopback.value.running) throw new Error('Windows output monitoring did not stop.')
       stopped = true
+      if (automatic && disposed) return
       loopbackStartedAt = undefined
       loopbackNoSamplesLong.value = false
       const result = await window.__TAURI__!.core.invoke<LoopbackSnapshot>('loopback_start', { endpointId })
@@ -551,6 +604,11 @@ async function toggle(mode: 'connect' | 'wait' = 'connect', monitorOutput = fals
       if (monitorOutput && !loopback.value?.running) {
         loopbackError.value = null
         try {
+          if (followDefault.value) {
+            selectAvailableLoopbackEndpoint(await window.__TAURI__.core.invoke<LoopbackEndpoint[]>('loopback_endpoints') ?? [])
+            if (disposed) return
+            if (!loopbackEndpointId.value) throw new Error('Windows did not report a default output endpoint.')
+          }
           loopback.value = await window.__TAURI__.core.invoke<LoopbackSnapshot>('loopback_start', { endpointId: loopbackEndpointId.value })
           if (!loopback.value.running) throw new Error('Windows output monitoring did not start.')
           loopbackStartedHere = true
@@ -699,14 +757,15 @@ onBeforeUnmount(() => {
     <h3>System output PCM check</h3>
     <p class="preview-note">Measures the selected Windows playback mix; other apps' audio may also appear here.</p>
     <button type="button" class="preview-action" :disabled="loopbackBusy || loopbackToneBusy" @click="refreshLoopbackEndpoints">Refresh output devices</button>
+    <label><input id="loopback-follow-default" v-model="followDefault" type="checkbox" :disabled="loopbackBusy || loopbackToneBusy" @change="changeFollowDefault"> Follow Windows default output</label>
     <label for="loopback-endpoint">Output endpoint</label>
-    <select id="loopback-endpoint" v-model="loopbackEndpointId" :disabled="loopbackBusy || loopbackToneBusy" @change="rememberLoopbackEndpoint">
+    <select id="loopback-endpoint" v-model="loopbackEndpointId" :disabled="followDefault || loopbackBusy || loopbackToneBusy" @change="rememberLoopbackEndpoint">
       <option value="" disabled>Select an output endpoint</option>
       <option v-for="endpoint in loopbackEndpoints" :key="endpoint.id" :value="endpoint.id">{{ loopbackEndpointLabel(endpoint) }}</option>
     </select>
     <p v-if="loopbackEndpointMessage" role="status">{{ loopbackEndpointMessage }}</p>
     <button type="button" class="preview-action" :disabled="loopbackBusy || loopbackToneBusy || (!loopback?.running && !loopbackEndpointId)" @click="toggleLoopback">{{ loopbackBusy ? 'Working...' : loopback?.running ? 'Stop PCM check' : 'Start PCM check' }}</button>
-    <button v-if="loopback?.running" type="button" class="preview-action" :disabled="loopbackBusy || loopbackToneBusy || !loopbackEndpointId || loopbackEndpointId === loopback.endpointId" @click="switchLoopbackEndpoint">Switch PCM check to selected output</button>
+    <button v-if="loopback?.running && !followDefault" type="button" class="preview-action" :disabled="loopbackBusy || loopbackToneBusy || !loopbackEndpointId || loopbackEndpointId === loopback.endpointId" @click="switchLoopbackEndpoint()">Switch PCM check to selected output</button>
     <button v-if="loopback?.error || loopbackError || loopbackStatusError" type="button" class="preview-action" :disabled="loopbackBusy || loopbackToneBusy" @click="recoverLoopback">Recover PCM check</button>
     <button type="button" class="preview-action" :disabled="loopbackBusy || loopbackToneBusy || !loopback?.running" @click="playLoopbackTestTone">{{ loopbackToneBusy ? 'Playing...' : 'Play test tone' }}</button>
     <p v-if="loopbackToneMessage" role="status">{{ loopbackToneMessage }}</p>

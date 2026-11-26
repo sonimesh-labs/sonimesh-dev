@@ -12,7 +12,121 @@ afterEach(() => {
   sessionStorage.removeItem('sonimesh.bluetoothProbe.combinedMonitorOwned')
   sessionStorage.removeItem('sonimesh.bluetoothProbe.recoveryPending')
   localStorage.removeItem('sonimesh.bluetoothProbe.loopbackEndpoint')
+  localStorage.removeItem('sonimesh.bluetoothProbe.followDefault')
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: originalClipboard })
+})
+
+it('follows default output only when enabled and remembers the preference', async () => {
+  vi.useFakeTimers()
+  const snapshot = (id: string, running = true) => ({ running, endpointId: id, endpointName: id, sampleRate: 48000, channels: 2, samples: 0, peak: 0, runPeak: 0, error: null })
+  let active = 'old'
+  let defaultId = 'old'
+  const invoke = vi.fn((command: string, args?: { endpointId?: string }) => {
+    if (command === 'bluetooth_status') return Promise.resolve('idle')
+    if (command === 'bluetooth_candidates') return Promise.resolve({ generation: 1, names: [], capability: 'SystemRouted' })
+    if (command === 'loopback_endpoints') return Promise.resolve(['old', 'new'].map(id => ({ id, name: id, isDefault: id === defaultId })))
+    if (command === 'loopback_status') return Promise.resolve(snapshot(active))
+    if (command === 'loopback_stop') return Promise.resolve(snapshot(active, false))
+    if (command === 'loopback_start') { active = args!.endpointId!; return Promise.resolve(snapshot(active)) }
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  defaultId = 'new'
+  await vi.advanceTimersByTimeAsync(1000)
+  expect(invoke).not.toHaveBeenCalledWith('loopback_start', { endpointId: 'new' })
+  await wrapper.get('#loopback-follow-default').setValue(true)
+  await flushPromises()
+  await vi.advanceTimersByTimeAsync(1000)
+  expect(invoke).toHaveBeenCalledWith('loopback_start', { endpointId: 'new' })
+  expect(localStorage.getItem('sonimesh.bluetoothProbe.followDefault')).toBe('true')
+  wrapper.unmount()
+  const reopened = mount(BluetoothProbe)
+  await flushPromises()
+  expect((reopened.get('#loopback-follow-default').element as HTMLInputElement).checked).toBe(true)
+  reopened.unmount()
+})
+
+it('resolves the current default when starting a PCM check', async () => {
+  localStorage.setItem('sonimesh.bluetoothProbe.followDefault', 'true')
+  let defaultId = 'old'
+  const stopped = { running: false, endpointId: null, endpointName: '', sampleRate: 0, channels: 0, samples: 0, peak: 0, runPeak: 0, error: null }
+  const invoke = vi.fn((command: string, args?: { endpointId?: string }) => {
+    if (command === 'bluetooth_status') return Promise.resolve('idle')
+    if (command === 'bluetooth_candidates') return Promise.resolve({ generation: 1, names: [], capability: 'SystemRouted' })
+    if (command === 'loopback_endpoints') return Promise.resolve(['old', 'new'].map(id => ({ id, name: id, isDefault: id === defaultId })))
+    if (command === 'loopback_status') return Promise.resolve(stopped)
+    if (command === 'loopback_start') return Promise.resolve({ ...stopped, running: true, endpointId: args?.endpointId })
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  defaultId = 'new'
+  await wrapper.findAll('button').find(button => button.text() === 'Start PCM check')!.trigger('click')
+  await flushPromises()
+  expect(invoke).toHaveBeenCalledWith('loopback_start', { endpointId: 'new' })
+  wrapper.unmount()
+})
+
+it('restores the old output after a failed default switch and retries on refresh', async () => {
+  vi.useFakeTimers()
+  localStorage.setItem('sonimesh.bluetoothProbe.followDefault', 'true')
+  const snapshot = (id: string, running = true) => ({ running, endpointId: id, endpointName: id, sampleRate: 48000, channels: 2, samples: 0, peak: 0, runPeak: 0, error: null })
+  let active = 'old'
+  let defaultId = 'old'
+  const invoke = vi.fn((command: string, args?: { endpointId?: string }) => {
+    if (command === 'bluetooth_status') return Promise.resolve('idle')
+    if (command === 'bluetooth_candidates') return Promise.resolve({ generation: 1, names: [], capability: 'SystemRouted' })
+    if (command === 'loopback_endpoints') return Promise.resolve(['old', 'new'].map(id => ({ id, name: id, isDefault: id === defaultId })))
+    if (command === 'loopback_status') return Promise.resolve(snapshot(active))
+    if (command === 'loopback_stop') return Promise.resolve(snapshot(active, false))
+    if (command === 'loopback_start') {
+      if (args?.endpointId === 'new') return Promise.reject(new Error('unavailable'))
+      active = 'old'; return Promise.resolve(snapshot(active))
+    }
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  defaultId = 'new'
+  await vi.advanceTimersByTimeAsync(3000)
+  expect(invoke.mock.calls.filter(([command, args]) => command === 'loopback_start' && args?.endpointId === 'new')).toHaveLength(1)
+  expect(wrapper.text()).toContain('Previous output monitoring resumed on old')
+  await wrapper.findAll('button').find(button => button.text() === 'Refresh output devices')!.trigger('click')
+  await flushPromises()
+  await vi.advanceTimersByTimeAsync(1000)
+  expect(invoke.mock.calls.filter(([command, args]) => command === 'loopback_start' && args?.endpointId === 'new')).toHaveLength(2)
+  wrapper.unmount()
+})
+
+it('does not switch after the monitor is stopped during default enumeration', async () => {
+  vi.useFakeTimers()
+  localStorage.setItem('sonimesh.bluetoothProbe.followDefault', 'true')
+  const snapshot = { running: true, endpointId: 'old', endpointName: 'old', sampleRate: 48000, channels: 2, samples: 0, peak: 0, runPeak: 0, error: null }
+  let defer = false
+  let finish!: (value: object[]) => void
+  const invoke = vi.fn((command: string) => {
+    if (command === 'bluetooth_status') return Promise.resolve('idle')
+    if (command === 'bluetooth_candidates') return Promise.resolve({ generation: 1, names: [], capability: 'SystemRouted' })
+    if (command === 'loopback_endpoints') return defer ? new Promise(resolve => { finish = resolve }) : Promise.resolve([{ id: 'old', name: 'old', isDefault: true }])
+    if (command === 'loopback_status') return Promise.resolve(snapshot)
+    if (command === 'loopback_stop') return Promise.resolve({ ...snapshot, running: false })
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  defer = true
+  await vi.advanceTimersByTimeAsync(1000)
+  await wrapper.findAll('button').find(button => button.text() === 'Stop PCM check')!.trigger('click')
+  await flushPromises()
+  finish([{ id: 'new', name: 'new', isDefault: true }])
+  await flushPromises()
+  expect(invoke).not.toHaveBeenCalledWith('loopback_start', { endpointId: 'new' })
+  wrapper.unmount()
 })
 
 it('switches the monitored output while keeping the Bluetooth connection open', async () => {

@@ -143,6 +143,11 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   When a monitored output switch fails to start the selected endpoint, the probe
   attempts to resume monitoring the previous endpoint and keeps the selected
   endpoint available for another attempt.
+  An optional, remembered follow-default mode checks the Windows default while
+  monitoring and switches the PCM check when it changes. A failed automatic
+  switch is not repeated until the default changes or the device list is
+  refreshed. If no default is reported, the current monitor stays in place.
+  This changes only the check's target, not Windows audio routing.
   On 2026-11-26, a Windows endpoint ID could
   be re-resolved and selected default and non-default endpoint loopback streams
   started and stopped. A combined Bluetooth-wait and default-output-loopback
