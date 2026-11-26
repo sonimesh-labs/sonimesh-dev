@@ -376,9 +376,11 @@ class LabCaptureService : Service() {
                     lastDurationPublication = now
                     val duration = (now - captureStartMillis) / 1_000
                     val clippedFrames = gainProcessor.clippedFrames
+                    val clippedInterval = gainProcessor.takeClippedInterval()
                     handler.post {
                         LabStatus.publishCaptureDuration(duration)
                         LabStatus.publishClippedFrames(clippedFrames)
+                        LabStatus.publishClippedInterval(clippedInterval)
                         updateForegroundDuration(duration)
                     }
                 }

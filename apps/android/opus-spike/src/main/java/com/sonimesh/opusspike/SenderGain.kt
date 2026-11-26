@@ -2,6 +2,7 @@ package com.sonimesh.opusspike
 
 internal const val DEFAULT_SENDER_GAIN = 100
 internal const val MAX_SENDER_GAIN = 200
+internal data class ClippingInterval(val clipped: Long, val accepted: Long)
 
 internal fun scaleSenderPcm(input: ShortArray, output: ShortArray, startGain: Int, endGain: Int, clipped: BooleanArray? = null): ShortArray {
     require(input.size == output.size)
@@ -29,6 +30,8 @@ internal class SenderGainProcessor(frameSamples: Int) {
     private val preparedClipped = booleanArrayOf(false)
     var clippedFrames = 0L
         private set
+    private var intervalClippedFrames = 0L
+    private var intervalAcceptedFrames = 0L
 
     fun prepare(input: ShortArray, muted: Boolean, targetGain: Int): ShortArray {
         require(input.size == output.size)
@@ -43,6 +46,17 @@ internal class SenderGainProcessor(frameSamples: Int) {
 
     fun accepted() {
         acceptedGain = preparedGain
-        if (preparedClipped[0] && clippedFrames < Long.MAX_VALUE) clippedFrames++
+        if (intervalAcceptedFrames < Long.MAX_VALUE) intervalAcceptedFrames++
+        if (preparedClipped[0]) {
+            if (clippedFrames < Long.MAX_VALUE) clippedFrames++
+            if (intervalClippedFrames < Long.MAX_VALUE) intervalClippedFrames++
+        }
+    }
+
+    fun takeClippedInterval(): ClippingInterval {
+        val count = ClippingInterval(intervalClippedFrames, intervalAcceptedFrames)
+        intervalClippedFrames = 0
+        intervalAcceptedFrames = 0
+        return count
     }
 }

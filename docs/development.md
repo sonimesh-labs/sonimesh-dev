@@ -648,6 +648,9 @@ The lab displays how many encoder-accepted frames were clipped by sender gain
 and includes the total in copied or shared evidence. The count resets for each
 capture and remains visible after it stops; it cannot detect clipping already
 present in the source or introduced later in the audio path.
+The clipped and accepted frame counts in the last completed approximately one-second interval are shown separately, so
+the operator can see whether clipping continues after changing gain. The last
+interval remains visible after stop; it is not a live post-stop measurement.
 
 **Last local send interval** reports packets successfully sent by the local
 sender in the latest completed sampling interval, which is at least one second

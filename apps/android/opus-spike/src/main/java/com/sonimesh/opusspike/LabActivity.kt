@@ -82,6 +82,7 @@ class LabActivity : Activity() {
     private lateinit var gainSlider: SeekBar
     private lateinit var gainLabel: TextView
     private lateinit var clipping: TextView
+    private lateinit var clippingInterval: TextView
     private lateinit var resetGainButton: Button
     private lateinit var invitationUsesUdpAddress: Switch
     private lateinit var toneButton: Button
@@ -112,6 +113,9 @@ class LabActivity : Activity() {
             0L -> "Frames clipped by sender gain: 0"
             else -> "Frames clipped by sender gain: $count. Lower sender gain if distortion is audible."
         }
+    }
+    private val clippingIntervalObserver: (ClippingInterval?) -> Unit = { interval ->
+        clippingInterval.text = "Clipped frames in last completed interval: ${interval?.let { "${it.clipped} of ${it.accepted}" } ?: "—"}"
     }
     private val statusObserver: (String) -> Unit = {
         val capturing = LabStatus.captureUsage != null
@@ -276,6 +280,8 @@ class LabActivity : Activity() {
         })
         clipping = TextView(this)
         layout.addView(clipping)
+        clippingInterval = TextView(this)
+        layout.addView(clippingInterval)
         toneButton = Button(this).apply {
             text = if (tone == null) "Start test tone" else "Stop test tone"
             setOnClickListener {
@@ -531,6 +537,7 @@ class LabActivity : Activity() {
         LabStatus.observeSenderMuted(muteObserver)
         LabStatus.observeSenderGain(gainObserver)
         LabStatus.observeClippedFrames(clippingObserver)
+        LabStatus.observeClippedInterval(clippingIntervalObserver)
     }
 
     override fun onStop() {
@@ -550,6 +557,7 @@ class LabActivity : Activity() {
         LabStatus.removeSenderMuted(muteObserver)
         LabStatus.removeSenderGain(gainObserver)
         LabStatus.removeClippedFrames(clippingObserver)
+        LabStatus.removeClippedInterval(clippingIntervalObserver)
         super.onStop()
     }
 

@@ -65,6 +65,8 @@ internal object LabStatus {
     private val gainObservers = mutableSetOf<(Int?) -> Unit>()
     private var clippedFrames: Long? = null
     private val clippingObservers = mutableSetOf<(Long?) -> Unit>()
+    private var clippedInterval: ClippingInterval? = null
+    private val clippingIntervalObservers = mutableSetOf<(ClippingInterval?) -> Unit>()
 
     fun serviceStarted(usage: LabCaptureUsage, bitrate: OpusBitrate, transport: LabTransport = LabTransport.Adb, udpPort: Int? = null) {
         captureUsage = usage
@@ -79,6 +81,7 @@ internal object LabStatus {
         publishSenderMuted(false)
         publishSenderGain(DEFAULT_SENDER_GAIN)
         publishClippedFrames(null)
+        publishClippedInterval(null)
         sessionObservers.toList().forEach { it(sessionConfig) }
         signalObservers.toList().forEach { it(null) }
         durationObservers.toList().forEach { it(null) }
@@ -118,6 +121,20 @@ internal object LabStatus {
     fun publishClippedFrames(value: Long?) {
         clippedFrames = value
         clippingObservers.toList().forEach { it(value) }
+    }
+
+    fun observeClippedInterval(observer: (ClippingInterval?) -> Unit) {
+        clippingIntervalObservers.add(observer)
+        observer(clippedInterval)
+    }
+
+    fun removeClippedInterval(observer: (ClippingInterval?) -> Unit) {
+        clippingIntervalObservers.remove(observer)
+    }
+
+    fun publishClippedInterval(value: ClippingInterval?) {
+        clippedInterval = value
+        clippingIntervalObservers.toList().forEach { it(value) }
     }
 
     fun removeSenderGain(observer: (Int?) -> Unit) {
@@ -274,6 +291,7 @@ internal object LabStatus {
         appendLine("Sending mute (last known): ${lastSenderMuted?.let { if (it) "on" else "off" } ?: "—"}")
         appendLine("Sender gain (last known): ${lastSenderGain?.let { "$it%" } ?: "—"}")
         appendLine("Frames clipped by sender gain: ${clippedFrames ?: "—"}")
+        appendLine("Clipped frames in last completed interval: ${clippedInterval?.let { "${it.clipped} of ${it.accepted}" } ?: "—"}")
         appendLine("Sender queue drops: ${senderQueueDrops ?: "—"}")
         appendLine("Media packets sent: ${sentPackets ?: "—"}")
         appendLine("Last local send interval: ${senderInterval?.let { "${it.packets} packets in ${it.millis} ms" } ?: "—"}")

@@ -348,16 +348,21 @@ class LabStatusTest {
                 scenario.onActivity { activity ->
                     LabStatus.serviceStarted(LabCaptureUsage.Media, OpusBitrate.STANDARD)
                     LabStatus.publishClippedFrames(3)
+                    LabStatus.publishClippedInterval(ClippingInterval(2, 50))
                     assertTrue(hasStatus(activity.window.decorView, "Frames clipped by sender gain: 3. Lower sender gain if distortion is audible."))
+                    assertTrue(hasStatus(activity.window.decorView, "Clipped frames in last completed interval: 2 of 50"))
                     assertTrue(LabStatus.copyableEvidence().contains("Frames clipped by sender gain: 3"))
                 }
                 scenario.recreate()
                 scenario.onActivity { activity ->
                     assertTrue(hasStatus(activity.window.decorView, "Frames clipped by sender gain: 3. Lower sender gain if distortion is audible."))
+                    assertTrue(hasStatus(activity.window.decorView, "Clipped frames in last completed interval: 2 of 50"))
                     LabStatus.serviceFinished()
                     assertTrue(LabStatus.copyableEvidence().contains("Frames clipped by sender gain: 3"))
+                    assertTrue(LabStatus.copyableEvidence().contains("Clipped frames in last completed interval: 2 of 50"))
                     LabStatus.serviceStarted(LabCaptureUsage.Media, OpusBitrate.STANDARD)
                     assertTrue(hasStatus(activity.window.decorView, "Frames clipped by sender gain: —"))
+                    assertTrue(hasStatus(activity.window.decorView, "Clipped frames in last completed interval: —"))
                 }
             } finally {
                 scenario.onActivity { LabStatus.serviceFinished() }

@@ -345,6 +345,8 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   The lab counts encoder-accepted frames where gain scaling exceeded the PCM16
   range, displays the session total, and includes it in copied evidence. This
   does not detect clipping already present in the captured source or codec output.
+  It also shows clipped frames in the last completed approximately one-second
+  interval so a gain adjustment can be evaluated without starting a new run.
   It checks encoded Opus duration headers against the fixed 20 ms lab stream
   before enqueueing and reports incompatible output instead of sending it with
   misleading timestamps. Host tests exercise the duration check; Android codec
