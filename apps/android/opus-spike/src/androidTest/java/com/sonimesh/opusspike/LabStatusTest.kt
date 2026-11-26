@@ -293,6 +293,30 @@ class LabStatusTest {
     }
 
     @Test
+    fun lastSendIntervalSurvivesRecreationAndStopButClearsForNewCapture() {
+        ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+            try {
+                scenario.onActivity { activity ->
+                    LabStatus.serviceStarted(LabCaptureUsage.Media, OpusBitrate.STANDARD)
+                    LabStatus.publishSenderInterval(SenderInterval(12, 1050))
+                    assertTrue(hasStatus(activity.window.decorView, "Last local send interval: 12 packets in 1050 ms"))
+                    assertTrue(LabStatus.copyableEvidence().contains("Last local send interval: 12 packets in 1050 ms"))
+                }
+                scenario.recreate()
+                scenario.onActivity { activity ->
+                    assertTrue(hasStatus(activity.window.decorView, "Last local send interval: 12 packets in 1050 ms"))
+                    LabStatus.serviceFinished()
+                    assertTrue(hasStatus(activity.window.decorView, "Last local send interval: 12 packets in 1050 ms"))
+                    LabStatus.serviceStarted(LabCaptureUsage.Media, OpusBitrate.STANDARD)
+                    assertTrue(hasStatus(activity.window.decorView, "Last local send interval: —"))
+                }
+            } finally {
+                scenario.onActivity { LabStatus.serviceFinished() }
+            }
+        }
+    }
+
+    @Test
     fun sentPacketStatusAllowsSaturatedLongValue() {
         ActivityScenario.launch(LabActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->

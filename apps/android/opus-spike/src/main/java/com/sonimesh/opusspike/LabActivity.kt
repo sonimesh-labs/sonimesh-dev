@@ -72,6 +72,7 @@ class LabActivity : Activity() {
     private lateinit var duration: TextView
     private lateinit var senderQueueDrops: TextView
     private lateinit var sentPackets: TextView
+    private lateinit var senderInterval: TextView
     private lateinit var encoderRate: TextView
     private lateinit var sessionConfig: TextView
     private lateinit var usage: Spinner
@@ -115,6 +116,10 @@ class LabActivity : Activity() {
     }
     private val sentPacketsObserver: (Long?) -> Unit = { count ->
         sentPackets.text = if (count == null) "Media packets sent: —" else "Media packets sent: $count"
+    }
+    private val senderIntervalObserver: (SenderInterval?) -> Unit = { interval ->
+        senderInterval.text = "Last local send interval: " +
+            (interval?.let { "${it.packets} packets in ${it.millis} ms" } ?: "—")
     }
     private val sessionObserver: (LabSessionConfig?) -> Unit = { config ->
         sessionConfig.text = if (config == null) "Session request: —" else
@@ -246,6 +251,9 @@ class LabActivity : Activity() {
         layout.addView(senderQueueDrops)
         sentPackets = TextView(this)
         layout.addView(sentPackets)
+        senderInterval = TextView(this)
+        layout.addView(senderInterval)
+        layout.addView(TextView(this).apply { text = "Local sends do not confirm desktop receipt." })
         encoderRate = TextView(this)
         layout.addView(encoderRate)
         sessionConfig = TextView(this)
@@ -456,6 +464,7 @@ class LabActivity : Activity() {
         LabStatus.observeCaptureDuration(durationObserver)
         LabStatus.observeSenderQueueDrops(dropsObserver)
         LabStatus.observeSentPackets(sentPacketsObserver)
+        LabStatus.observeSenderInterval(senderIntervalObserver)
         LabStatus.observeEncoderRate(rateObserver)
         LabStatus.observeSessionConfig(sessionObserver)
         LabStatus.observeSenderMuted(muteObserver)
@@ -472,6 +481,7 @@ class LabActivity : Activity() {
         LabStatus.removeCaptureDuration(durationObserver)
         LabStatus.removeSenderQueueDrops(dropsObserver)
         LabStatus.removeSentPackets(sentPacketsObserver)
+        LabStatus.removeSenderInterval(senderIntervalObserver)
         LabStatus.removeEncoderRate(rateObserver)
         LabStatus.removeSessionConfig(sessionObserver)
         LabStatus.removeSenderMuted(muteObserver)

@@ -71,6 +71,12 @@ signal-observed, or no-capturable-audio state as the activity, alongside elapsed
 capture time. This is a signal observation, not an explanation of source policy;
 the activity remains available for the fuller diagnostic context.
 
+The separate paired audio lab also displays the number of packets handed to its
+local sender during the most recent completed sampling interval. A zero interval
+can help identify a stalled sender or reconnection, but neither a positive count
+nor a socket send establishes desktop receipt or audible playback. The last
+completed interval remains visible after stop and is cleared for a new run.
+
 The latest observed capture format remains in the process-local evidence after
 stop or failure, so an operator can review or share it with the final counters.
 A fresh capture request clears it with the previous evidence. It is not persisted

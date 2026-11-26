@@ -313,6 +313,7 @@ class LabCaptureService : Service() {
             val signalMonitor = LabSignalMonitor()
             val encoderInputWait = EncoderInputWait()
             val captureReadWait = CaptureReadWait()
+            val sendInterval = SenderIntervalMeter(captureStartMillis)
             var filled = 0
             var frame = 0L
             var outputSequence = 0L
@@ -354,6 +355,9 @@ class LabCaptureService : Service() {
             }
             while (running.get()) {
                 val now = SystemClock.elapsedRealtime()
+                sendInterval.sample(now, sentPackets.get())?.let { interval ->
+                    handler.post { LabStatus.publishSenderInterval(interval) }
+                }
                 if (now - lastDurationPublication >= 1_000) {
                     lastDurationPublication = now
                     val duration = (now - captureStartMillis) / 1_000

@@ -47,6 +47,8 @@ internal object LabStatus {
     private var sentPackets: Long? = null
     private var senderTiming: SenderTimingSnapshot? = null
     private val sentPacketObservers = mutableSetOf<(Long?) -> Unit>()
+    private var senderInterval: SenderInterval? = null
+    private val senderIntervalObservers = mutableSetOf<(SenderInterval?) -> Unit>()
     private var sessionConfig: LabSessionConfig? = null
     val retryTransport: LabTransport?
         get() = if (retryAvailable) sessionConfig?.transport else null
@@ -68,6 +70,7 @@ internal object LabStatus {
         signalState = null
         captureDurationSeconds = null
         senderTiming = null
+        publishSenderInterval(null)
         publishSenderMuted(false)
         sessionObservers.toList().forEach { it(sessionConfig) }
         signalObservers.toList().forEach { it(null) }
@@ -202,6 +205,20 @@ internal object LabStatus {
         sentPacketObservers.toList().forEach { it(value) }
     }
 
+    fun observeSenderInterval(observer: (SenderInterval?) -> Unit) {
+        senderIntervalObservers.add(observer)
+        observer(senderInterval)
+    }
+
+    fun removeSenderInterval(observer: (SenderInterval?) -> Unit) {
+        senderIntervalObservers.remove(observer)
+    }
+
+    fun publishSenderInterval(value: SenderInterval?) {
+        senderInterval = value
+        senderIntervalObservers.toList().forEach { it(value) }
+    }
+
     fun publishSenderTiming(value: SenderTimingSnapshot?) {
         senderTiming = value
     }
@@ -220,6 +237,7 @@ internal object LabStatus {
         appendLine("Sending mute (last known): ${lastSenderMuted?.let { if (it) "on" else "off" } ?: "—"}")
         appendLine("Sender queue drops: ${senderQueueDrops ?: "—"}")
         appendLine("Media packets sent: ${sentPackets ?: "—"}")
+        appendLine("Last local send interval: ${senderInterval?.let { "${it.packets} packets in ${it.millis} ms" } ?: "—"}")
         appendLine("Send intervals under 10 ms: ${senderTiming?.let { "${it.underTenMillis} of ${it.intervals}" } ?: "—"}")
         appendLine("Encoded payload average: ${encoderRate?.let { "$it kbps" } ?: "—"}")
     }.trimEnd()

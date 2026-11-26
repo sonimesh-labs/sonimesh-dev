@@ -631,6 +631,13 @@ On 2026-11-23, separate API 37 x86_64 emulator paired-capture runs selected 64
 and 128 kbps and decoded 154 and 150 frames respectively on the software
 listener, with peaks 0.100 and 0.093. These are interoperability checks, not
 actual bitrate, quality, physical-device, or latency measurements.
+**Last local send interval** reports packets successfully sent by the local
+sender in the latest completed sampling interval, which is at least one second
+and displays its actual duration. It can show zero while capture continues
+during reconnection. It remains visible after stop and resets for a new run;
+it does not establish desktop receipt or audible playback. Sampling occurs in
+the capture loop, so a blocked loop cannot update this indicator.
+
 **Sender queue drops** counts encoded packets discarded locally when the bounded
 sender queue is full, for the current or most recent capture. It does not count
 network loss or confirm playback; it resets when the next capture starts.
