@@ -231,8 +231,10 @@ internal class PairedSessionSupervisor(
                 udp.connect(destination, destinationPort)
                 var previousSendNanos: Long? = null
                 while (sessionActive.get() && (!producerFinished.get() || packets.isNotEmpty())) {
-                    val packet = packets.poll(20, TimeUnit.MILLISECONDS) ?: continue
-                    if (!waitForPairedSendGap(previousSendNanos, sessionActive::get, SystemClock::elapsedRealtimeNanos, TimeUnit.NANOSECONDS::sleep)) break
+                    val packet = takePacedPacket(packets) {
+                        waitForPairedSendGap(previousSendNanos, sessionActive::get, SystemClock::elapsedRealtimeNanos, TimeUnit.NANOSECONDS::sleep)
+                    } ?: if (!sessionActive.get() || Thread.currentThread().isInterrupted) break else continue
+                    if (!sessionActive.get()) break
                     val datagram = sealer.seal(packet.sequence, packet.sequence * 960, 0, packet.bytes)
                     udp.send(DatagramPacket(datagram, datagram.size))
                     previousSendNanos = SystemClock.elapsedRealtimeNanos()
@@ -282,6 +284,11 @@ internal class PairedSessionSupervisor(
 
 internal fun pairedReconnectDelayMillis(failures: Int): Long =
     minOf(500L shl failures.coerceIn(0, 3), 4_000L)
+
+internal fun <T> takePacedPacket(queue: ArrayBlockingQueue<T>, waitForGap: () -> Boolean): T? {
+    if (!waitForGap()) return null
+    return queue.poll(20, TimeUnit.MILLISECONDS)
+}
 
 internal fun waitForPairedSendGap(
     previousSendNanos: Long?,

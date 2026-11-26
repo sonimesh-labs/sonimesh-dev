@@ -50,6 +50,8 @@ limited catch-up after encoder bursts without sending an entire queued burst at
 once. Its existing eight-packet queue continues to discard the oldest packet on
 overflow, and stop still drains within its existing deadline. This experimental
 minimum spacing can add queueing delay; it is not a latency or quality claim.
+The sender waits before taking the next packet from the queue, so packets
+arriving during a wait remain subject to the same oldest-drop policy.
 This is an experimental component, not yet an encoder selection or a change to
 the capture-only main application. Device and end-to-end validation remain open.
 The Android lab may request 64, 96, or 128 kb/s from MediaCodec for a new

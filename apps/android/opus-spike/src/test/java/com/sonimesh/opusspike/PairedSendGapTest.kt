@@ -4,8 +4,30 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.util.concurrent.ArrayBlockingQueue
 
 class PairedSendGapTest {
+    @Test
+    fun queuedPacketRemainsEligibleForOldestDropWhileWaiting() {
+        val queue = ArrayBlockingQueue<Int>(2)
+        queue.add(1)
+        queue.add(2)
+        val packet = takePacedPacket(queue) {
+            assertTrue(enqueueLatest(queue, 3))
+            true
+        }
+        assertEquals(2, packet)
+        assertEquals(3, queue.poll())
+    }
+
+    @Test
+    fun cancelledWaitLeavesQueuedPacketUntouched() {
+        val queue = ArrayBlockingQueue<Int>(2)
+        queue.add(1)
+        assertEquals(null, takePacedPacket(queue) { false })
+        assertEquals(1, queue.poll())
+    }
+
     @Test
     fun firstAndAlreadySpacedPacketsDoNotWait() {
         val sleep: (Long) -> Unit = { throw AssertionError("unexpected wait") }

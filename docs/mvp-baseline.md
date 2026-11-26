@@ -289,7 +289,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   UDP sender, separately from local sender-queue drops; this does not measure
   network delivery or desktop receipt and resets for the next capture.
   Its paired UDP sender limits consecutive sends to a minimum 10 ms gap while
-  retaining the existing bounded queue and stop drain. An API 37 paired-probe
+  retaining the existing bounded queue and stop drain. It waits before removing
+  the next packet, so queue overflow during that wait can still discard the oldest
+  frame; a unit test exercises overflow and cancellation. An API 37 paired-probe
   run observed one sub-10-ms interval among 420 sender observations; it does
   not establish physical network behavior or a quality improvement.
   The probe also reports whether the listener is waiting for its first accepted
