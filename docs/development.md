@@ -413,8 +413,9 @@ the experimental sender keeps its current projection, AudioRecord, and encoder
 running while it retries a new paired media session with a 500 ms to 4 s bounded
 backoff. Encoded packets from the retired session are discarded before sending
 under the new session. Twelve consecutive unsuccessful reconnect attempts end
-capture with an actionable status; a successfully started media session resets
-that count. Stop cancels an in-progress retry. Automatic recovery
+capture with an actionable status; a media session must stay established for
+at least ten seconds to reset that count. A shorter session counts as a failure.
+Stop cancels an in-progress retry. Automatic recovery
 requires the desktop lab to stay running with `--keep-listening`; otherwise the
 retry eventually ends. This behavior uses the public fixed lab fixture and is
 not the product pairing or reconnect policy.
@@ -487,17 +488,15 @@ physical WLAN reliability or audible playback.
 adb shell am instrument -w -e pairingInvitationHex $invitationHex -e mediaHost 10.0.2.2 -e reconnectTest true -e class 'com.sonimesh.opusspike.PairedCaptureTest#reconnects_after_desktop_disconnect_without_restarting_capture' com.sonimesh.opusspike.test/androidx.test.runner.AndroidJUnitRunner
 ~~~
 
-For repeated recovery, start the same listener with `--disconnect-after-ms 2000
---disconnect-count 13` and run
-`PairedCaptureTest#reconnects_repeatedly_without_exhausting_attempts` with
-`-e repeatedReconnectTest true`. The listener injects a disconnect into each of
-the first 13 established sessions; without `--disconnect-count`, it injects one.
-The test checks each recovery and continued media sending without restarting
-capture. The timer starts after control negotiation and disconnects once a
-receiver exists. On 2026-11-25, API 37 x86_64 instrumentation observed all 13
-recoveries; the final session received 154 packets and decoded 146 frames with
-a peak of 0.900. This is emulator loopback evidence, not physical WLAN or audible
-playback evidence, and the fixture is not a product reconnect policy.
+To check repeated short sessions, start the same listener with
+`--disconnect-after-ms 2000 --disconnect-count 13` and run
+`PairedCaptureTest#stops_after_repeated_short_sessions` with
+`-e repeatedReconnectTest true`. The test checks that capture ends and manual
+retry becomes available after the failure limit, rather than reconnecting
+indefinitely. The timer starts after control negotiation and disconnects once a
+receiver exists. A 2026-11-25 run observed 13 recoveries under the earlier
+policy that reset the count immediately; that result does not validate the
+current short-session limit. This fixture is not a product reconnect policy.
 
 To check cancellation during the reconnect window, use the same listener and
 run `PairedCaptureTest#stops_capture_during_reconnect_without_restarting_session`

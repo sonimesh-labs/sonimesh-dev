@@ -137,8 +137,8 @@ class PairedCaptureTest {
     }
 
     @Test
-    fun reconnects_repeatedly_without_exhausting_attempts() {
-        assumeTrue("repeated reconnect test requires 13 injected disconnects", InstrumentationRegistry.getArguments().getString("repeatedReconnectTest") == "true")
+    fun stops_after_repeated_short_sessions() {
+        assumeTrue("short-session test requires repeated injected disconnects", InstrumentationRegistry.getArguments().getString("repeatedReconnectTest") == "true")
         runCapture(repeatedReconnects = true)
     }
 
@@ -383,37 +383,41 @@ class PairedCaptureTest {
                 }
             }
             if (repeatedReconnects) {
+                var retryAvailable = false
                 var recoveries = 0
-                var waitingForRestore = false
-                val recoveryDeadline = SystemClock.elapsedRealtime() + 90_000
-                while (recoveries < 13 && SystemClock.elapsedRealtime() < recoveryDeadline) {
+                val reconnectObserver: (String) -> Unit = { message ->
+                    if (message.startsWith("Desktop connection restored.")) recoveries++
+                }
+                scenario.onActivity { LabStatus.observe(reconnectObserver) }
+                val recoveryDeadline = SystemClock.elapsedRealtime() + 120_000
+                while (!retryAvailable && SystemClock.elapsedRealtime() < recoveryDeadline) {
                     scenario.onActivity { activity ->
                         val root = activity.window.decorView
-                        assertTrue("capture stopped during repeated reconnects", !LabStatus.captureAdmission.canBegin())
-                        if (!waitingForRestore && containsStatus(root, "Status: Desktop connection lost. Reconnecting")) {
-                            waitingForRestore = true
-                        } else if (waitingForRestore && containsStatus(root, "Status: Desktop connection restored.")) {
-                            recoveries++
-                            waitingForRestore = false
-                        }
+                        retryAvailable = LabStatus.captureAdmission.canBegin() &&
+                            containsStatus(root, "Status: Desktop connection could not stay connected after 12 attempts") &&
+                            runCatching {
+                                find(root) { it is Button && it.text.toString() == "Retry capture with current setup" && it.visibility == View.VISIBLE }
+                            }.isSuccess
                     }
-                    if (recoveries < 13) SystemClock.sleep(50)
+                    if (!retryAvailable) SystemClock.sleep(100)
                 }
-                assertEquals("not all disconnected sessions recovered", 13, recoveries)
-                var before = 0L
-                scenario.onActivity { activity ->
-                    val sent = find(activity.window.decorView) {
-                        it is TextView && it.text.toString().matches(Regex("Media packets sent: [0-9]+"))
-                    } as TextView
-                    before = sent.text.toString().substringAfter(": ").toLong()
+                scenario.onActivity { LabStatus.remove(reconnectObserver) }
+                assertTrue("short sessions did not exhaust reconnect attempts", retryAvailable)
+                assertTrue("test did not observe repeated successful reconnections", recoveries >= 2)
+                val cleanupDeadline = SystemClock.elapsedRealtime() + 10_000
+                var stopped = false
+                while (!stopped && SystemClock.elapsedRealtime() < cleanupDeadline) {
+                    @Suppress("DEPRECATION")
+                    val services = instrumentation.targetContext.getSystemService(ActivityManager::class.java)
+                        .getRunningServices(Int.MAX_VALUE)
+                    stopped = services.none { it.service.className == LabCaptureService::class.java.name } &&
+                        Thread.getAllStackTraces().keys.none {
+                            it.name == "audio-lab-paired-session" || it.name == "audio-lab-paired-sender"
+                        }
+                    if (!stopped) SystemClock.sleep(100)
                 }
-                SystemClock.sleep(3_000)
-                scenario.onActivity { activity ->
-                    val sent = find(activity.window.decorView) {
-                        it is TextView && it.text.toString().matches(Regex("Media packets sent: [0-9]+"))
-                    } as TextView
-                    assertTrue("media did not continue after repeated reconnects", sent.text.toString().substringAfter(": ").toLong() > before)
-                }
+                assertTrue("capture service or paired worker remained alive after reconnect exhaustion", stopped)
+                return
             } else if (expectReconnect || stopDuringReconnect || retryAfterReconnectExhaustion) {
                 instrumentation.sendStatus(1, Bundle().apply { putString("pairedCapture", "ready") })
                 if (expectReconnect) automation.executeShellCommand("input keyevent KEYCODE_HOME").close()
