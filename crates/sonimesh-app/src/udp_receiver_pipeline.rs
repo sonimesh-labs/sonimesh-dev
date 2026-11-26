@@ -292,6 +292,18 @@ where
         self.pipeline.opus_frame_config()
     }
 
+    /// Checks the frame and adaptive jitter capacities for a fresh session.
+    ///
+    /// # Errors
+    ///
+    /// Returns a capacity error without changing the receiver state.
+    pub fn validate_fresh_opus_frame(
+        &self,
+        frame: sonimesh_audio::OpusFrameConfig,
+    ) -> Result<(), FreshSessionInstallError> {
+        self.pipeline.validate_fresh_opus_frame(frame)
+    }
+
     /// Returns the source endpoint pinned by the first protected packet outcome.
     ///
     /// A fresh pipeline or successfully installed fresh session is unbound

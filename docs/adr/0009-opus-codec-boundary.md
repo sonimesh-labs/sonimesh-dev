@@ -100,7 +100,9 @@ The generic codec-neutral worker retains its variable-length behavior.
 The desktop receiver owner checks a known Opus worker's frame policy against
 StartStream before admitting the stream or acknowledging a duplicate start.
 For a new start with a host preparation callback, it validates the requested
-10/20 ms shape and fixed PCM capacity before preparation. The host may install
+10/20 ms shape, fixed PCM capacity, and the pipeline's adaptive jitter capacity
+before preparation. This avoids consuming a media grant for an incompatible
+frame policy. The host may install
 that frame policy together with a fresh media session; the resulting policy is
 checked again before admission. This permits later sessions to select another
 supported duration without changing an active stream or reusing its queued PCM.

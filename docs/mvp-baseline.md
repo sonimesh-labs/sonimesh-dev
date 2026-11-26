@@ -21,7 +21,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   block on overflow, and emits initialized silence on underflow;
 - a fresh receiver session can select a 10 ms or 20 ms Opus frame within its
   reserved PCM capacity, rebuilding an enabled adaptive jitter target for the
-  selected duration. A paired TLS and protected UDP loopback test exercises a
+  selected duration. The desktop owner checks both capacities before the host
+  prepares media state, so an incompatible frame does not invoke preparation.
+  A paired TLS and protected UDP loopback test exercises a
   10 ms native Opus stream through the memory output; this is prototype evidence,
   not an end-to-end product or physical network claim;
 - a lock-free cross-thread PCM queue with non-cloneable logical endpoints,

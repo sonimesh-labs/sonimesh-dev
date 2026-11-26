@@ -24,6 +24,20 @@ pub trait ReceiverPcmProducerInstaller<const PCM_SAMPLES_PER_BLOCK: usize> {
     fn opus_frame_config(&self) -> Option<sonimesh_audio::OpusFrameConfig> {
         None
     }
+
+    /// Checks whether the pipeline can prepare a fresh Opus frame policy.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the reserved buffers cannot support the frame.
+    fn validate_fresh_opus_frame(
+        &self,
+        frame: sonimesh_audio::OpusFrameConfig,
+    ) -> Result<(), crate::FreshSessionInstallError> {
+        frame
+            .validate_pcm_block_capacity(PCM_SAMPLES_PER_BLOCK)
+            .map_err(crate::FreshSessionInstallError::Frame)
+    }
 }
 
 impl<
@@ -47,6 +61,13 @@ where
     fn opus_frame_config(&self) -> Option<sonimesh_audio::OpusFrameConfig> {
         ReceiverStreamPipeline::opus_frame_config(self)
     }
+
+    fn validate_fresh_opus_frame(
+        &self,
+        frame: sonimesh_audio::OpusFrameConfig,
+    ) -> Result<(), crate::FreshSessionInstallError> {
+        ReceiverStreamPipeline::validate_fresh_opus_frame(self, frame)
+    }
 }
 
 impl<
@@ -69,6 +90,13 @@ where
 
     fn opus_frame_config(&self) -> Option<sonimesh_audio::OpusFrameConfig> {
         UdpReceiverPipeline::opus_frame_config(self)
+    }
+
+    fn validate_fresh_opus_frame(
+        &self,
+        frame: sonimesh_audio::OpusFrameConfig,
+    ) -> Result<(), crate::FreshSessionInstallError> {
+        UdpReceiverPipeline::validate_fresh_opus_frame(self, frame)
     }
 }
 

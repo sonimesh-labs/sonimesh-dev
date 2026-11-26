@@ -552,6 +552,38 @@ where
         self.install_fresh_session_inner(secret, context, initial_sequence, None)
     }
 
+    /// Checks whether a fresh Opus session's frame fits the existing buffers.
+    ///
+    /// This does not check the session identity or derive media keys.
+    ///
+    /// # Errors
+    ///
+    /// Returns a frame or adaptive target capacity error without changing state.
+    pub fn validate_fresh_opus_frame(
+        &self,
+        frame: sonimesh_audio::OpusFrameConfig,
+    ) -> Result<(), FreshSessionInstallError> {
+        self.fresh_opus_target(frame).map(|_| ())
+    }
+
+    fn fresh_opus_target(
+        &self,
+        frame: sonimesh_audio::OpusFrameConfig,
+    ) -> Result<Option<AdaptiveJitterTarget>, FreshSessionInstallError> {
+        frame
+            .validate_pcm_block_capacity(PCM_SAMPLES_PER_BLOCK)
+            .map_err(FreshSessionInstallError::Frame)?;
+        self.adaptive_target
+            .as_ref()
+            .map(|adaptive| {
+                adaptive
+                    .target
+                    .with_frame_duration(u32::from(frame.frame_duration_ms()))
+                    .map_err(FreshSessionInstallError::Target)
+            })
+            .transpose()
+    }
+
     fn install_fresh_session_inner(
         &mut self,
         secret: &SessionSecret,
@@ -559,19 +591,9 @@ where
         initial_sequence: u32,
         frame: Option<sonimesh_audio::OpusFrameConfig>,
     ) -> Result<(), FreshSessionInstallError> {
-        if let Some(frame) = frame {
-            frame
-                .validate_pcm_block_capacity(PCM_SAMPLES_PER_BLOCK)
-                .map_err(FreshSessionInstallError::Frame)?;
-        }
-        let replacement_target = match (frame, self.adaptive_target.as_ref()) {
-            (Some(frame), Some(adaptive)) => Some(
-                adaptive
-                    .target
-                    .with_frame_duration(u32::from(frame.frame_duration_ms()))
-                    .map_err(FreshSessionInstallError::Target)?,
-            ),
-            _ => None,
+        let replacement_target = match frame {
+            Some(frame) => self.fresh_opus_target(frame)?,
+            None => None,
         };
         if context.session_id == self.ingress.context().session_id {
             return Err(FreshSessionInstallError::ReusedSessionId);

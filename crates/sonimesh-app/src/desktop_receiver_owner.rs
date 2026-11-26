@@ -28,16 +28,15 @@ pub(crate) type MediaPrepare<'a, P> = dyn FnMut(
     ) -> Result<(), DesktopControlOwnerError>
     + 'a;
 
-fn opus_request_fits(request: StreamStartRequest, capacity: usize) -> bool {
-    let frame = u16::try_from(request.channels).ok().and_then(|channels| {
+fn opus_request_frame(request: StreamStartRequest) -> Option<sonimesh_audio::OpusFrameConfig> {
+    u16::try_from(request.channels).ok().and_then(|channels| {
         u16::try_from(request.frame_duration_ms)
             .ok()
             .and_then(|duration| {
                 sonimesh_audio::OpusFrameConfig::new(request.sample_rate_hz, channels, duration)
                     .ok()
             })
-    });
-    frame.is_some_and(|frame| frame.validate_pcm_block_capacity(capacity).is_ok())
+    })
 }
 
 /// Result of one UDP media scheduler tick.
@@ -194,7 +193,8 @@ where
         if let ControlStreamAction::Start { token, request } = action {
             if prepare.is_some()
                 && self.pipeline.opus_frame_config().is_some()
-                && !opus_request_fits(request, PCM_SAMPLES_PER_BLOCK)
+                && opus_request_frame(request)
+                    .is_none_or(|frame| self.pipeline.validate_fresh_opus_frame(frame).is_err())
             {
                 let _ = self
                     .owner
@@ -597,8 +597,113 @@ mod tests {
             channels: 2,
             frame_duration_ms: 20,
         };
-        assert!(!super::opus_request_fits(request, 960));
-        assert!(super::opus_request_fits(request, 1920));
+        let frame = super::opus_request_frame(request).unwrap();
+        assert!(frame.validate_pcm_block_capacity(960).is_err());
+        assert!(frame.validate_pcm_block_capacity(1920).is_ok());
+    }
+
+    #[test]
+    fn adaptive_capacity_rejects_before_preparation_and_allows_a_fitting_retry() {
+        use crate::{AdaptiveTargetConfig, UdpReceiverPipeline};
+        use sonimesh_audio::{JitterMode, OpusFrameConfig, StreamDecodeWorker};
+
+        const PCM: usize = 1920;
+        let secret = SessionSecret::new([7; 32]);
+        let old_context = MediaKeyContext::new(8, 1, 0, MediaDirection::AndroidToDesktop).unwrap();
+        let (producer, _) = realtime_pcm_queue::<PCM>(8).unwrap();
+        let worker = StreamDecodeWorker::<_, 4, 256, PCM>::new_for_opus(
+            ByteDecoder,
+            producer,
+            0,
+            OpusFrameConfig::new(48_000, 2, 20).unwrap(),
+        )
+        .unwrap();
+        let counters = Arc::new(StreamCounters::default());
+        let pipeline = UdpReceiverPipeline::bind_with_worker_and_adaptive_target(
+            SocketAddr::from(([127, 0, 0, 1], 0)),
+            &secret,
+            old_context,
+            worker,
+            Arc::clone(&counters),
+            AdaptiveTargetConfig::preset(JitterMode::Balanced, 20, 4, 1_000),
+        )
+        .unwrap();
+        let bridge = ControlToMixerBridge::new(
+            SessionState::READY,
+            &[Capability::FrameDuration10Ms, Capability::FrameDuration20Ms],
+            TestOutput,
+            OutputSelection {
+                device: None,
+                config: OutputConfig {
+                    sample_rate_hz: 48_000,
+                    channels: 2,
+                    sample_format: SampleFormat::Float32,
+                    requested_callback_frames: Some(480),
+                    maximum_callback_frames: 1_024,
+                },
+            },
+            8,
+            8,
+        )
+        .unwrap();
+        let owner = DesktopControlOwner::new(bridge).unwrap();
+        let mut receiver: DesktopReceiverOwner<_, _, SLOTS, OUTPUT_SAMPLES, 1, PCM> =
+            DesktopReceiverOwner::new(owner, pipeline, Some(counters));
+        let session = receiver
+            .owner_mut()
+            .install_authenticated_control_session()
+            .unwrap();
+        let mut greeting = hello();
+        if let Some(envelope::Payload::Hello(hello)) = &mut greeting.payload {
+            hello
+                .capabilities
+                .push(Capability::FrameDuration20Ms as i32);
+        }
+        receiver.accept_and_execute(session, &greeting).unwrap();
+        let mut request = start();
+        if let Some(envelope::Payload::StartStream(start)) = &mut request.payload {
+            start.channels = 2;
+        }
+        let mut calls = 0;
+        let mut prepare =
+            |_,
+             request: crate::StreamStartRequest,
+             _: &_,
+             pipeline: &mut UdpReceiverPipeline<ByteDecoder, 4, 256, PCM>| {
+                calls += 1;
+                let frame = OpusFrameConfig::new(
+                    request.sample_rate_hz,
+                    u16::try_from(request.channels).unwrap(),
+                    u16::try_from(request.frame_duration_ms).unwrap(),
+                )
+                .unwrap();
+                let context = request
+                    .identity
+                    .media_key_context(MediaDirection::AndroidToDesktop)
+                    .unwrap();
+                pipeline
+                    .install_fresh_opus_session(&secret, context, 0, frame)
+                    .unwrap();
+                Ok(())
+            };
+        assert!(matches!(
+            receiver.accept_and_execute_with_prepare(session, &request, &mut prepare),
+            Err(crate::DesktopControlOwnerError::MediaFormatMismatch)
+        ));
+        assert!(!receiver.owner().bridge().coordinator().has_pending_change());
+        assert_eq!(receiver.pipeline_mut().context(), old_context);
+        if let Some(envelope::Payload::StartStream(start)) = &mut request.payload {
+            start.frame_duration_ms = 20;
+        }
+        assert!(matches!(
+            receiver.accept_and_execute_with_prepare(session, &request, &mut prepare),
+            Ok(ControlStreamAction::Start { .. })
+        ));
+        assert_eq!(calls, 1);
+        assert_eq!(
+            receiver.pipeline_mut().context().session_id,
+            identity().session_id
+        );
     }
 
     #[test]
