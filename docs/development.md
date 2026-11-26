@@ -443,6 +443,11 @@ resync drops, 977 output callbacks and no output errors. One of 422 sender
 intervals was under 10 ms. The capture test observed its local probe; the
 listener checked decoded signal, not probe correlation. This single emulator
 run does not demonstrate audible playback, physical WLAN quality, or latency.
+The `paired_lab_process` integration test launches the actual listener and uses
+TLS pairing, negotiated 10/20 ms streams, and protected UDP with native Opus in
+software. It checks process startup and clean completion without a sound device;
+on Windows it failed when the listener was temporarily returned to the smaller
+main-thread stack, reproducing the startup regression as a connection reset.
 After the paired lab's empty-stream recovery was moved before packet polling,
 an API 37 x86_64 emulator run of `plays_latency_probe_during_paired_capture`
 used Windows playback and a loopback relay configured with
