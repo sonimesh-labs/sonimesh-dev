@@ -138,6 +138,7 @@ class MainActivity : ComponentActivity() {
         if (!CaptureStateStore.state.value.status.isActive()) return
         stopTestTone()
         usageCheckResults.clear()
+        usageCheckEvidenceSummary = ""
         usageCheckSources = listOf(CaptureSource.Media, CaptureSource.Game, CaptureSource.Unknown)
         usageCheckSummary = getString(R.string.capture_usage_check_running)
         usageCheckRunning = true

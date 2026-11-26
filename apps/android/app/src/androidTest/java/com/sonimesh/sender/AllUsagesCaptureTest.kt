@@ -3,6 +3,7 @@ package com.sonimesh.sender
 import android.app.KeyguardManager
 import android.app.Notification
 import android.app.NotificationManager
+import android.content.ClipboardManager
 import android.content.Intent
 import android.graphics.Rect
 import android.media.AudioAttributes
@@ -296,6 +297,8 @@ class AllUsagesCaptureTest {
                         "Usage check: Media: signal observed; Game: signal observed; Other: signal observed",
                     ) == true
                 })
+                assertTrue("copy evidence control missing", clickText(automation, "Copy capture evidence", scroll = true))
+                assertTrue("completed usage check was not copied", clipboardText().contains("Usage check: Media: signal observed"))
                 assertTrue(
                     "second usage check could not start",
                     clickText(automation, "Check supported usages", scroll = true),
@@ -307,8 +310,17 @@ class AllUsagesCaptureTest {
                 assertTrue("usage check did not report cancellation", waitUntil(5_000) {
                     automation.rootInActiveWindow?.containsText("Usage check stopped") == true
                 })
+                scenario.recreate()
+                assertTrue("copy evidence control missing after cancellation", clickText(automation, "Copy capture evidence", scroll = true))
+                assertTrue("canceled check retained a previous result", !clipboardText().contains("Usage check:"))
                 assertTrue("cancellation did not stop the usage tone", waitUntil(8_000) {
                     CaptureStateStore.state.value.status is CaptureStatus.NoCapturableAudio
+                })
+                assertTrue("usage check could not restart after cancellation", clickText(automation, "Check supported usages", scroll = true))
+                assertTrue("usage check did not finish after cancellation", waitUntil(15_000) {
+                    automation.rootInActiveWindow?.containsText(
+                        "Usage check: Media: signal observed; Game: signal observed; Other: signal observed",
+                    ) == true
                 })
                 val backgroundTone = tone(AudioAttributes.USAGE_MEDIA)
                 try {
@@ -320,6 +332,8 @@ class AllUsagesCaptureTest {
                     assertTrue("background audio did not make the check inconclusive", waitUntil(10_000) {
                         automation.rootInActiveWindow?.containsText("Usage check inconclusive. Pause other audio, check capture, and try again.") == true
                     })
+                    assertTrue("copy evidence control missing after inconclusive check", clickText(automation, "Copy capture evidence", scroll = true))
+                    assertTrue("inconclusive check retained a previous result", !clipboardText().contains("Usage check:"))
                 } finally {
                     backgroundTone.stop()
                     backgroundTone.release()
@@ -330,6 +344,8 @@ class AllUsagesCaptureTest {
                         "Usage check: Media: signal observed; Game: signal observed; Other: signal observed",
                     ) == true
                 })
+                assertTrue("copy evidence control missing after retry", clickText(automation, "Copy capture evidence", scroll = true))
+                assertTrue("completed retry was not copied", clipboardText().contains("Usage check: Media: signal observed"))
                 assertEquals(0L, CaptureStateStore.state.value.evidence.readErrors)
             } finally {
                 instrumentation.targetContext.startService(
@@ -344,6 +360,12 @@ class AllUsagesCaptureTest {
     private fun nonSilentFrames(): Long {
         val evidence = CaptureStateStore.state.value.evidence
         return evidence.capturedFrames - evidence.silentFrames
+    }
+
+    private fun clipboardText(): String {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val clip = requireNotNull(context.getSystemService(ClipboardManager::class.java).primaryClip)
+        return clip.getItemAt(0).coerceToText(context).toString()
     }
 
     private fun captureNotificationText(): String? =

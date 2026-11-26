@@ -69,9 +69,10 @@ an inconclusive result with a continuous background tone, and retried successful
 after stopping it without restarting capture. Physical-device behavior remains open.
 This checks only SoniMesh's own playback under those usage tags; it does not
 predict another app's capture behavior. Copying or sharing capture evidence
-includes the most recently completed usage check result from that capture
-session. The completed result is retained through activity recreation; an
-in-progress sequence is canceled when the activity leaves the foreground.
+includes the completed usage check result from that capture session. The result
+is retained through activity recreation, and is cleared when another check starts.
+An in-progress sequence is canceled when the activity leaves the foreground;
+a canceled or inconclusive attempt does not retain the earlier result in evidence.
 The local observations also show the highest PCM sample magnitude seen during
 the current run as a percentage of full scale. It helps distinguish a very weak
 signal from silence, but is not an audible loudness or quality measurement. The

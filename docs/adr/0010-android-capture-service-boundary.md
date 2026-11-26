@@ -84,6 +84,9 @@ across process death and does not identify a source application.
 The same low-rate evidence includes the current run's maximum absolute PCM16
 sample as a percentage of full scale. No samples are retained for this summary;
 the value is a peak, not a loudness or audio-quality measurement.
+Starting a new local usage check clears the previous completed check from copied
+and shared evidence. A canceled or inconclusive new attempt therefore cannot
+be mistaken for the previous successful result.
 When an activity is opened during an active capture, its disabled usage selector
 shows the usage owned by that capture session. A newly opened activity also
 initializes its next choice from that usage; after capture stops, the operator
