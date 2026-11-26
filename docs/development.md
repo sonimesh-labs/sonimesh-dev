@@ -724,6 +724,12 @@ The desktop defaults to a software PCM check. On Windows, add `--features playba
 before `--` and pass `--play` after it to use the default output device; add
 `--select-output` to choose a device. `--require-tone` checks decoded audio,
 not whether it was audible. Output callback counts are not a listening test.
+On 2026-11-26, API 37 x86_64 paired-capture instrumentation passed with Windows
+default playback and background default-device checks enabled. The listener
+received 163 packets, decoded 139 frames with a 0.384 peak, and reported 533
+output callbacks, no output errors, 21 PLC decisions, 16 late packets, and eight
+resynchronization drops. This emulator run did not switch the default device or
+verify audible playback, physical WLAN, or latency.
 For controlled network experiments, `--startup-buffer-ms` selects the initial
 wait after the first packet, in 20 ms steps from 0 to 120 ms (default 60 ms).
 Zero removes the fixed wait; adaptive playout may still gate decoding. A shorter

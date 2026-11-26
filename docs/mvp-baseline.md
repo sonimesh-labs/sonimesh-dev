@@ -303,7 +303,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   to a different sample rate, unchanged defaults, and gain/mute retention.
   Default-device queries run on a background worker; a blocked-query test checks
   that polling remains nonblocking and stale results are discarded. On 2026-11-26
-  the worker resolved the local Windows default endpoint in a separate test.
+  the worker resolved the local Windows default endpoint in a separate test; an
+  API 37 emulator paired-capture run also passed with Windows playback and the
+  background checks enabled. It did not switch the default or establish audibility.
   Physical device removal and audible continuity across switches remain unverified.
   The probe retains the latest 32 bounded lifecycle events for the current
   listener snapshot. Session evidence copy/share includes those events, and
