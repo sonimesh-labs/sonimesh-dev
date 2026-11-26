@@ -364,6 +364,58 @@ describe('desktop output probe', () => {
     expect(wrapper.text()).not.toContain('Stale session')
     wrapper.unmount()
   })
+  it('lists desktop addresses and applies only the selected address', async () => {
+    const invoke = vi.fn((command: string) => {
+      if (command === 'probe_outputs') return Promise.resolve({ generation: 1, devices: [] })
+      if (command === 'list_lab_hosts') return Promise.resolve(['10.0.0.8', '192.168.1.2'])
+      return Promise.resolve({ running: true, status: 'Starting', invitation: null })
+    })
+    window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+    const wrapper = mountStoppedProbe()
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'List desktop addresses')!.trigger('click')
+    await flushPromises()
+    expect((wrapper.get('#lab-host').element as HTMLInputElement).value).toBe('127.0.0.1')
+    expect(wrapper.text()).toContain('VPN and virtual adapter addresses may appear')
+    await wrapper.findAll('button').find(button => button.text() === 'Use 192.168.1.2')!.trigger('click')
+    await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
+    expect(invoke).toHaveBeenCalledWith('start_lab', expect.objectContaining({ host: '192.168.1.2' }))
+    wrapper.unmount()
+  })
+
+  it('keeps manual address entry available if address listing fails', async () => {
+    const invoke = vi.fn((command: string) => {
+      if (command === 'probe_outputs') return Promise.resolve({ generation: 1, devices: [] })
+      if (command === 'list_lab_hosts') return Promise.reject('Could not list desktop addresses.')
+      return Promise.resolve({ running: false })
+    })
+    window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+    const wrapper = mountStoppedProbe()
+    await flushPromises()
+    await wrapper.get('#lab-host').setValue('10.0.0.4')
+    await wrapper.findAll('button').find(button => button.text() === 'List desktop addresses')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Could not list desktop addresses.')
+    expect((wrapper.get('#lab-host').element as HTMLInputElement).value).toBe('10.0.0.4')
+    wrapper.unmount()
+  })
+
+  it('reports an empty desktop address list', async () => {
+    const invoke = vi.fn((command: string) => {
+      if (command === 'probe_outputs') return Promise.resolve({ generation: 1, devices: [] })
+      if (command === 'list_lab_hosts') return Promise.resolve([])
+      return Promise.resolve({ running: false })
+    })
+    window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+    const wrapper = mountStoppedProbe()
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'List desktop addresses')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('No desktop IPv4 addresses found.')
+    expect((wrapper.get('#lab-host').element as HTMLInputElement).value).toBe('127.0.0.1')
+    wrapper.unmount()
+  })
+
   it('suggests a route address only when requested and applies it explicitly', async () => {
     const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [] })
       .mockResolvedValueOnce('192.168.1.10')

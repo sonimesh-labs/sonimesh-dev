@@ -374,6 +374,24 @@ async function suggestHost() {
   }
 }
 
+const localHosts = ref<string[] | null>(null)
+const localHostsBusy = ref(false)
+const localHostsError = ref<string | null>(null)
+async function listLocalHosts() {
+  if (!window.__TAURI__ || localHostsBusy.value) return
+  localHostsBusy.value = true
+  localHosts.value = null
+  localHostsError.value = null
+  try {
+    const addresses = await window.__TAURI__.core.invoke<string[]>('list_lab_hosts')
+    if (!disposed) localHosts.value = addresses
+  } catch (cause) {
+    if (!disposed) localHostsError.value = typeof cause === 'string' ? cause : 'Could not list desktop addresses.'
+  } finally {
+    if (!disposed) localHostsBusy.value = false
+  }
+}
+
 async function pollLab(retryUnknown = false) {
   const request = labRequest
   try {
@@ -606,6 +624,13 @@ onBeforeUnmount(() => { disposed = true; labRequest++; suggestRequest++; clearTi
       <label for="lab-host">Desktop address for Android control</label>
       <input id="lab-host" v-model="labHost" :disabled="lab.running || labBusy" autocomplete="off" />
       <p class="preview-note">For ADB reverse use 127.0.0.1 here; enter the UDP address separately in Android (typically 10.0.2.2 for an emulator).</p>
+      <button type="button" class="preview-action" :disabled="lab.running || labBusy || localHostsBusy" @click="listLocalHosts">{{ localHostsBusy ? 'Listing addresses…' : 'List desktop addresses' }}</button>
+      <p v-if="localHostsError" class="command-error" role="alert">{{ localHostsError }}</p>
+      <p v-if="localHosts && !localHosts.length" role="status">No desktop IPv4 addresses found.</p>
+      <div v-if="localHosts?.length">
+        <p class="preview-note">Choose an address reachable from Android. VPN and virtual adapter addresses may appear.</p>
+        <button v-for="address in localHosts" :key="address" type="button" class="preview-action" :disabled="lab.running || labBusy" @click="labHost = address">Use {{ address }}</button>
+      </div>
       <label for="android-host">Android device IPv4 (optional)</label>
       <input id="android-host" v-model="androidHost" :disabled="lab.running || labBusy || suggestBusy" autocomplete="off" @input="invalidateHostSuggestion" />
       <button type="button" class="preview-action" :disabled="lab.running || labBusy || suggestBusy" @click="suggestHost">{{ suggestBusy ? 'Checking route…' : 'Suggest desktop address' }}</button>

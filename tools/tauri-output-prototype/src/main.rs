@@ -152,6 +152,62 @@ fn spawn_lab_monitor(lab: &Arc<Mutex<lab::Lab>>) -> std::thread::JoinHandle<()> 
     })
 }
 
+#[cfg(any(windows, test))]
+fn usable_lab_addresses(addresses: impl IntoIterator<Item = std::net::Ipv4Addr>) -> Vec<String> {
+    let mut addresses: Vec<_> = addresses
+        .into_iter()
+        .filter(|address| {
+            !address.is_unspecified()
+                && !address.is_loopback()
+                && !address.is_multicast()
+                && !address.is_broadcast()
+        })
+        .collect();
+    addresses.sort_unstable();
+    addresses.dedup();
+    addresses
+        .into_iter()
+        .map(|address| address.to_string())
+        .collect()
+}
+
+#[tauri::command]
+fn list_lab_hosts() -> Result<Vec<String>, &'static str> {
+    #[cfg(windows)]
+    {
+        use windows::Networking::{Connectivity::NetworkInformation, HostNameType};
+        let hosts =
+            NetworkInformation::GetHostNames().map_err(|_| "Could not list desktop addresses.")?;
+        let count = hosts
+            .Size()
+            .map_err(|_| "Could not list desktop addresses.")?
+            .min(256);
+        let mut addresses = Vec::new();
+        for index in 0..count {
+            let host = hosts
+                .GetAt(index)
+                .map_err(|_| "Could not list desktop addresses.")?;
+            if host
+                .Type()
+                .map_err(|_| "Could not list desktop addresses.")?
+                == HostNameType::Ipv4
+            {
+                let name = host
+                    .CanonicalName()
+                    .map_err(|_| "Could not list desktop addresses.")?;
+                if let Ok(address) = name.to_string_lossy().parse() {
+                    addresses.push(address);
+                }
+            }
+        }
+        Ok(usable_lab_addresses(addresses))
+    }
+    #[cfg(not(windows))]
+    {
+        Err("Desktop address listing is available on Windows only.")
+    }
+}
+
 #[tauri::command]
 fn suggest_lab_host(android_host: &str) -> Result<String, &'static str> {
     use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
@@ -183,7 +239,38 @@ fn suggest_lab_host(android_host: &str) -> Result<String, &'static str> {
 
 #[cfg(test)]
 mod route_tests {
-    use super::{ProbeState, spawn_lab_monitor, suggest_lab_host};
+    use super::{ProbeState, spawn_lab_monitor, suggest_lab_host, usable_lab_addresses};
+
+    #[test]
+    fn desktop_addresses_are_filtered_sorted_and_deduplicated() {
+        let addresses = [
+            "192.168.1.4",
+            "127.0.0.1",
+            "10.0.0.2",
+            "0.0.0.0",
+            "224.0.0.1",
+            "255.255.255.255",
+            "192.168.1.4",
+        ];
+        let result = usable_lab_addresses(
+            addresses
+                .into_iter()
+                .map(|address| address.parse().unwrap()),
+        );
+        assert_eq!(result, ["10.0.0.2", "192.168.1.4"]);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "requires a Windows host with a local IPv4 address"]
+    fn windows_desktop_addresses_can_be_enumerated() {
+        let addresses = super::list_lab_hosts().unwrap();
+        assert!(!addresses.is_empty(), "no local IPv4 addresses returned");
+        assert_eq!(
+            usable_lab_addresses(addresses.iter().map(|address| address.parse().unwrap())),
+            addresses
+        );
+    }
 
     #[test]
     fn listener_output_is_drained_without_ui_polling() {
@@ -799,6 +886,7 @@ fn main() {
             probe_outputs,
             play_test_tone,
             suggest_lab_host,
+            list_lab_hosts,
             start_lab,
             lab_status,
             bluetooth_candidates,

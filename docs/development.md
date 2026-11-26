@@ -853,6 +853,11 @@ address it would route to that device. Review the suggestion before starting;
 VPNs, routing changes, firewalls, or client isolation can still prevent access.
 The suggestion does not send a packet or verify connectivity. Manual entry and
 the separate ADB reverse configuration remain available.
+Alternatively, **List desktop addresses** displays Windows-reported local IPv4
+addresses for explicit selection without entering the Android address. The list
+may include VPN and virtual adapters; choose an address reachable from Android.
+It examines at most the first 256 host entries; enumeration does not verify
+connectivity.
 The bind address applies to TCP port 47610 and UDP port 39093; the host is the
 exact address placed in the pairing invitation. Enter that same host in the
 Android **Paired control IPv4** field, and the reachable desktop IPv4 in the
