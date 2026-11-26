@@ -832,6 +832,7 @@ onBeforeUnmount(() => {
     </template>
     <button v-if="names.length || phase !== 'idle'" type="button" class="preview-action" :disabled="busy || loopbackBusy || (phase === 'idle' && selected === '')" @click="toggle('connect')">{{ phase === 'idle' ? 'Connect Bluetooth' : 'Disconnect Bluetooth' }}</button>
     <button v-if="phase === 'waiting'" type="button" class="preview-action" :disabled="busy || loopbackBusy || selected === ''" @click="retryBluetoothConnection">Retry Bluetooth connection</button>
+    <p v-if="phase === 'waiting' && loaded && selected === ''" role="status">The waiting source could not be identified in the current list. Disconnect, refresh Bluetooth sources, and select it again to retry.</p>
     <button v-if="names.length && phase === 'idle'" type="button" class="preview-action" :disabled="busy || selected === ''" @click="toggle('connect', false, true)">Connect or wait for phone</button>
     <button v-if="names.length && phase === 'idle'" type="button" class="preview-action" :disabled="busy || selected === ''" @click="toggle('wait')">Wait for phone to connect</button>
     <button v-if="names.length && phase === 'idle'" type="button" class="preview-action" :disabled="busy || loopbackBusy || selected === '' || (!followDefault && !loopbackEndpointId)" @click="toggle('wait', true)">Wait + monitor system output</button>

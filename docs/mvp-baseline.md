@@ -143,6 +143,8 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   While waiting, the operator can retry the direct connection; if it fails, the
   probe resumes phone-initiated wait. Existing output monitoring stays active,
   including if both attempts fail, and can then be stopped separately.
+  If the waiting source cannot be identified in the list after reopening the
+  panel, the probe explains how to disconnect and select it again.
   Reopening the probe restores the pending phone-wait intent and ownership of a
   combined-action monitor; if Windows closes an open connection while the probe
   is closed or open, it re-enters phone-initiated wait while preserving that

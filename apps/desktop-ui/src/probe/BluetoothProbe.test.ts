@@ -1185,6 +1185,20 @@ it('ignores a status reply from before a waiting connection retry', async () => 
   wrapper.unmount()
 })
 
+it('explains why retry is unavailable when the waiting source is missing', async () => {
+  const invoke = vi.fn((command: string) => {
+    if (command === 'bluetooth_status') return Promise.resolve('waiting')
+    if (command === 'bluetooth_candidates') return Promise.resolve({ generation: 8, names: [], ids: [] })
+    return Promise.resolve({ running: false, endpointName: '', sampleRate: 0, channels: 0, samples: 0, peak: 0, error: null })
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  expect(wrapper.findAll('button').find(button => button.text() === 'Retry Bluetooth connection')!.attributes('disabled')).toBeDefined()
+  expect(wrapper.text()).toContain('Disconnect, refresh Bluetooth sources, and select it again to retry.')
+  wrapper.unmount()
+})
+
 it('starts output monitoring before waiting for a phone connection', async () => {
   let waiting = false
   let monitoring = false
