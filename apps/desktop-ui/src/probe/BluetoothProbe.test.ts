@@ -568,6 +568,74 @@ it('defers the settings return refresh until an in-flight connection is disconne
   wrapper.unmount()
 })
 
+it('refreshes output choices after settings while Bluetooth and monitoring stay active', async () => {
+  let endpointRefreshes = 0
+  let candidateRefreshes = 0
+  const snapshot = { running: true, endpointId: 'old', endpointName: 'Speakers', sampleRate: 48000, channels: 2, samples: 20, peak: 0.1, runPeak: 0.1, error: null }
+  const invoke = vi.fn((command: string) => {
+    if (command === 'bluetooth_status') return Promise.resolve('open')
+    if (command === 'loopback_status') return Promise.resolve(snapshot)
+    if (command === 'bluetooth_candidates') {
+      candidateRefreshes++
+      return Promise.resolve({ generation: 1, names: ['Phone'], ids: ['phone'], capability: 'SystemRouted' })
+    }
+    if (command === 'loopback_endpoints') {
+      endpointRefreshes++
+      return Promise.resolve([
+        { id: 'old', name: 'Speakers', isDefault: true },
+        ...(endpointRefreshes > 1 ? [{ id: 'new', name: 'New headphones', isDefault: false }] : []),
+      ])
+    }
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  await wrapper.findAll('button').find(button => button.text() === 'Open Bluetooth settings')!.trigger('click')
+  window.dispatchEvent(new Event('focus'))
+  await flushPromises()
+  expect(endpointRefreshes).toBe(2)
+  expect(candidateRefreshes).toBe(1)
+  expect(wrapper.get('#loopback-endpoint').text()).toContain('New headphones')
+  expect((wrapper.get('#loopback-endpoint').element as HTMLSelectElement).value).toBe('old')
+  expect(invoke).not.toHaveBeenCalledWith('loopback_stop')
+  expect(invoke).not.toHaveBeenCalledWith('bluetooth_disconnect')
+  wrapper.unmount()
+})
+
+it('defers the settings output refresh until a PCM check finishes starting', async () => {
+  let finishStart!: () => void
+  let endpointRefreshes = 0
+  let started = false
+  const stopped = { running: false, endpointId: null, endpointName: '', sampleRate: 0, channels: 0, samples: 0, peak: 0, runPeak: 0, error: null }
+  const running = { ...stopped, running: true, endpointId: 'old', endpointName: 'Speakers', sampleRate: 48000, channels: 2 }
+  const invoke = vi.fn((command: string) => {
+    if (command === 'bluetooth_status') return Promise.resolve('idle')
+    if (command === 'bluetooth_candidates') return Promise.resolve({ generation: 1, names: [], capability: 'SystemRouted' })
+    if (command === 'loopback_status') return Promise.resolve(started ? running : stopped)
+    if (command === 'loopback_endpoints') {
+      endpointRefreshes++
+      return Promise.resolve([{ id: 'old', name: 'Speakers', isDefault: true }])
+    }
+    if (command === 'loopback_start') return new Promise(resolve => { finishStart = () => { started = true; resolve(running) } })
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  await wrapper.findAll('button').find(button => button.text() === 'Start PCM check')!.trigger('click')
+  await wrapper.findAll('button').find(button => button.text() === 'Open Bluetooth settings')!.trigger('click')
+  window.dispatchEvent(new Event('focus'))
+  await flushPromises()
+  expect(endpointRefreshes).toBe(1)
+  finishStart()
+  await flushPromises()
+  expect(endpointRefreshes).toBe(2)
+  expect(invoke).not.toHaveBeenCalledWith('loopback_stop')
+  expect(wrapper.text()).toContain('Stop PCM check')
+  wrapper.unmount()
+})
+
 it('loads Bluetooth sources and output endpoints when Bluetooth status is unavailable', async () => {
   const invoke = vi.fn((command: string) => {
     if (command === 'bluetooth_status') return Promise.reject(new Error('Bluetooth status unavailable.'))

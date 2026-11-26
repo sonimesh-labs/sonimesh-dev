@@ -80,6 +80,7 @@ let statusRequest = 0
 let loopbackRequest = 0
 let refreshOnFocus = false
 let focusRefreshPending = false
+let focusOutputRefreshPending = false
 let recoverBluetoothWait = false
 let loopbackSelectionEdited = false
 let loopbackSwitch: Promise<void> | undefined
@@ -331,17 +332,25 @@ function refreshCandidatesOnFocus() {
   if (disposed || !refreshOnFocus) return
   refreshOnFocus = false
   focusRefreshPending = true
+  focusOutputRefreshPending = true
   refreshAfterFocusWhenIdle()
+  refreshOutputAfterFocus()
 }
 
 function refreshAfterFocusWhenIdle() {
   if (disposed || !focusRefreshPending || busy.value || phase.value !== 'idle') return
   focusRefreshPending = false
   void refresh()
-  if (!loopback.value?.running && !loopbackBusy.value) void refreshLoopbackEndpoints()
+}
+
+function refreshOutputAfterFocus() {
+  if (disposed || !focusOutputRefreshPending || loopbackBusy.value || loopbackToneBusy.value) return
+  focusOutputRefreshPending = false
+  void refreshLoopbackEndpoints()
 }
 
 watch([busy, phase], refreshAfterFocusWhenIdle)
+watch([loopbackBusy, loopbackToneBusy], refreshOutputAfterFocus)
 
 async function poll() {
   if (disposed || phase.value === 'idle') return
@@ -754,6 +763,7 @@ onBeforeUnmount(() => {
   loopbackRequest++
   refreshOnFocus = false
   focusRefreshPending = false
+  focusOutputRefreshPending = false
   window.removeEventListener('focus', refreshCandidatesOnFocus)
   clearTimeout(timer)
   clearTimeout(loopbackTimer)

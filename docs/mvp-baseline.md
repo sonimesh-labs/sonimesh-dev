@@ -95,7 +95,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   platform path is unavailable) and does not claim an application PCM source.
   The panel also provides a shortcut to Windows Bluetooth settings, automatic
   candidate discovery with visible search/refresh status, and refreshes
-  candidates and idle output endpoints when returning to the probe.
+  candidates and output endpoints when returning to the probe. Output discovery
+  also works while connected or monitoring, preserving the monitored endpoint;
+  it waits for an in-progress PCM operation before refreshing.
   A return during a connection operation or active connection defers the source
   refresh until the probe is idle, preserving the selected candidate during use.
   Bluetooth status and system-output monitoring initialize independently, so
