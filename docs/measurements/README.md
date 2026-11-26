@@ -41,6 +41,7 @@ runs. Read the environment and limitations in each record before generalizing.
 
 - [Opus experiment matrix](./opus-build-and-experiment-matrix.md), [native preflight](./2026-07-20-opus-native-preflight.md), and [native build](./2026-08-16-windows-opus-native-build.md).
 - Codec experiments: [10 ms versus 20 ms](./2026-08-16-windows-opus-10ms-vs-20ms.md), [DTX](./2026-08-16-windows-opus-dtx.md), and [in-band FEC](./2026-08-16-windows-opus-inband-fec.md).
+- [Android MediaCodec input and packet duration](./2026-11-26-android-opus-input-duration.md) — API 37 emulator observation for 10 ms and 20 ms input buffers.
 - [Desktop preview viewport check](./2026-08-16-desktop-ui-viewport-check.md).
 
 When adding evidence, link the dated run from its protocol or matrix and this

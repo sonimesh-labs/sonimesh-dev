@@ -132,6 +132,9 @@ The paired desktop lab may accept either negotiated frame duration and schedules
 decode and stop-tail draining at that duration. Its Android MediaCodec sender
 still uses 20 ms; 10 ms interoperability and physical-device behavior require
 separate evidence before adding a sender option.
+An API 37 emulator test observed 20 ms packets from `c2.android.opus.encoder`
+even when given 10 ms PCM buffers; see the [measurement](../measurements/2026-11-26-android-opus-input-duration.md).
+Shortening input buffers alone therefore does not establish a 10 ms sender.
 The isolated prototype may also exercise this decoder with the shell-neutral
 desktop scheduler, protected loopback UDP, and an in-memory output. Such a test
 does not enable the binding in the core or establish device playback evidence.
