@@ -70,6 +70,64 @@ it('resolves the current default when starting a PCM check', async () => {
   wrapper.unmount()
 })
 
+it('rechecks a missing default on start and allows retry when an output appears', async () => {
+  localStorage.setItem('sonimesh.bluetoothProbe.followDefault', 'true')
+  let available = false
+  const stopped = { running: false, endpointId: null, endpointName: '', sampleRate: 0, channels: 0, samples: 0, peak: 0, runPeak: 0, error: null }
+  const invoke = vi.fn((command: string, args?: { endpointId?: string }) => {
+    if (command === 'bluetooth_status') return Promise.resolve('idle')
+    if (command === 'bluetooth_candidates') return Promise.resolve({ generation: 1, names: [], capability: 'SystemRouted' })
+    if (command === 'loopback_endpoints') return Promise.resolve(available ? [{ id: 'new', name: 'New output', isDefault: true }] : [])
+    if (command === 'loopback_status') return Promise.resolve(stopped)
+    if (command === 'loopback_start') return Promise.resolve({ ...stopped, running: true, endpointId: args?.endpointId })
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  const start = wrapper.findAll('button').find(button => button.text() === 'Start PCM check')!
+  expect(start.attributes('disabled')).toBeUndefined()
+  await start.trigger('click')
+  await flushPromises()
+  expect(wrapper.text()).toContain('Windows did not report a default output endpoint.')
+  expect(invoke).not.toHaveBeenCalledWith('loopback_start', expect.anything())
+  available = true
+  await start.trigger('click')
+  await flushPromises()
+  expect(invoke).toHaveBeenCalledWith('loopback_start', { endpointId: 'new' })
+  wrapper.unmount()
+})
+
+it('rechecks a missing default when starting combined Bluetooth monitoring', async () => {
+  localStorage.setItem('sonimesh.bluetoothProbe.followDefault', 'true')
+  let available = false
+  const stopped = { running: false, endpointId: null, endpointName: '', sampleRate: 0, channels: 0, samples: 0, peak: 0, runPeak: 0, error: null }
+  const invoke = vi.fn((command: string, args?: { endpointId?: string }) => {
+    if (command === 'bluetooth_status') return Promise.resolve('idle')
+    if (command === 'bluetooth_candidates') return Promise.resolve({ generation: 1, names: ['Phone'], capability: 'SystemRouted' })
+    if (command === 'loopback_endpoints') return Promise.resolve(available ? [{ id: 'new', name: 'New output', isDefault: true }] : [])
+    if (command === 'loopback_status') return Promise.resolve(stopped)
+    if (command === 'loopback_start') return Promise.resolve({ ...stopped, running: true, endpointId: args?.endpointId })
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  await wrapper.get('#bluetooth-source').setValue('0')
+  const start = wrapper.findAll('button').find(button => button.text() === 'Wait + monitor system output')!
+  expect(start.attributes('disabled')).toBeUndefined()
+  await start.trigger('click')
+  await flushPromises()
+  expect(invoke).not.toHaveBeenCalledWith('bluetooth_prepare', expect.anything())
+  expect(wrapper.text()).toContain('Windows did not report a default output endpoint.')
+  available = true
+  await start.trigger('click')
+  await flushPromises()
+  expect(invoke).toHaveBeenCalledWith('loopback_start', { endpointId: 'new' })
+  expect(invoke).toHaveBeenCalledWith('bluetooth_prepare', { generation: 1, index: 0 })
+  wrapper.unmount()
+})
+
 it('restores the old output after a failed default switch and retries on refresh', async () => {
   vi.useFakeTimers()
   localStorage.setItem('sonimesh.bluetoothProbe.followDefault', 'true')
