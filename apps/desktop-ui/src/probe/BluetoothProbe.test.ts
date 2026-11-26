@@ -1099,6 +1099,92 @@ it('waits for the phone to initiate a connection and can cancel waiting', async 
   wrapper.unmount()
 })
 
+it.each(['open', 'fallback', 'failure'])('retries a waiting connection with monitoring preserved: %s', async outcome => {
+  let phase = 'idle'
+  let monitoring = false
+  let prepareCalls = 0
+  const invoke = vi.fn((command: string) => {
+    if (command === 'bluetooth_status') return Promise.resolve(phase)
+    if (command === 'bluetooth_candidates') return Promise.resolve({ generation: 5, names: ['Phone'] })
+    if (command === 'loopback_endpoints') return Promise.resolve([{ id: 'default', name: 'Speakers', isDefault: true }])
+    if (command === 'loopback_status' || command === 'loopback_start' || command === 'loopback_stop') {
+      if (command === 'loopback_start') monitoring = true
+      if (command === 'loopback_stop') monitoring = false
+      return Promise.resolve({ running: monitoring, endpointName: 'Speakers', sampleRate: 48000, channels: 2, samples: 0, peak: 0, error: null })
+    }
+    if (command === 'bluetooth_disconnect') phase = 'idle'
+    if (command === 'bluetooth_connect') {
+      if (outcome !== 'open') return Promise.reject(new Error('direct failed'))
+      phase = 'open'
+    }
+    if (command === 'bluetooth_prepare') {
+      prepareCalls++
+      if (outcome === 'failure' && prepareCalls > 1) return Promise.reject(new Error('wait failed'))
+      phase = 'waiting'
+    }
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  await wrapper.get('#bluetooth-source').setValue('0')
+  await wrapper.findAll('button').find(button => button.text() === 'Wait + monitor system output')!.trigger('click')
+  await flushPromises()
+  await wrapper.findAll('button').find(button => button.text() === 'Retry Bluetooth connection')!.trigger('click')
+  await flushPromises()
+  const calls = invoke.mock.calls.map(([command]) => command)
+  expect(calls.indexOf('bluetooth_disconnect')).toBeLessThan(calls.indexOf('bluetooth_connect'))
+  expect(invoke).toHaveBeenCalledWith('bluetooth_connect', { generation: 5, index: 0 })
+  expect(invoke).not.toHaveBeenCalledWith('loopback_stop')
+  expect(wrapper.text()).toContain('Waiting for Windows audio samples.')
+  if (outcome === 'open') expect(wrapper.text()).toContain('System playback connection opened for Phone.')
+  if (outcome === 'fallback') expect(wrapper.text()).toContain('Waiting for the phone to connect to Phone')
+  if (outcome === 'failure') expect(wrapper.text()).toContain('Phone-initiated wait also failed: Error: wait failed')
+  if (outcome !== 'failure') {
+    await wrapper.findAll('button').find(button => button.text() === 'Disconnect Bluetooth')!.trigger('click')
+    await flushPromises()
+    expect(invoke).toHaveBeenCalledWith('loopback_stop')
+  }
+  wrapper.unmount()
+})
+
+it('ignores a status reply from before a waiting connection retry', async () => {
+  let phase = 'idle'
+  let finishPoll!: (state: string) => void
+  let delayPoll = false
+  const invoke = vi.fn((command: string) => {
+    if (command === 'bluetooth_candidates') return Promise.resolve({ generation: 7, names: ['Phone'] })
+    if (command === 'bluetooth_status') {
+      if (delayPoll) return new Promise<string>(resolve => { finishPoll = resolve })
+      return Promise.resolve(phase)
+    }
+    if (command === 'bluetooth_prepare') {
+      phase = 'waiting'
+      delayPoll = true
+    }
+    if (command === 'bluetooth_disconnect') phase = 'idle'
+    if (command === 'bluetooth_connect') {
+      phase = 'open'
+      delayPoll = false
+    }
+    return Promise.resolve({ running: false, endpointName: '', sampleRate: 0, channels: 0, samples: 0, peak: 0, error: null })
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  await wrapper.get('#bluetooth-source').setValue('0')
+  await wrapper.findAll('button').find(button => button.text() === 'Wait for phone to connect')!.trigger('click')
+  await flushPromises()
+  await wrapper.findAll('button').find(button => button.text() === 'Retry Bluetooth connection')!.trigger('click')
+  await flushPromises()
+  finishPoll('idle')
+  await flushPromises()
+  expect(wrapper.text()).toContain('System playback connection opened for Phone.')
+  expect(wrapper.findAll('button').some(button => button.text() === 'Retry Bluetooth connection')).toBe(false)
+  expect(invoke.mock.calls.filter(([command]) => command === 'bluetooth_prepare')).toHaveLength(1)
+  wrapper.unmount()
+})
+
 it('starts output monitoring before waiting for a phone connection', async () => {
   let waiting = false
   let monitoring = false

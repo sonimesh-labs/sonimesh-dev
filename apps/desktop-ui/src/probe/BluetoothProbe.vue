@@ -692,6 +692,49 @@ async function toggle(mode: 'connect' | 'wait' = 'connect', monitorOutput = fals
   }
 }
 
+async function retryBluetoothConnection() {
+  if (!window.__TAURI__ || phase.value !== 'waiting' || selected.value === '') return
+  busy.value = true
+  error.value = null
+  message.value = null
+  const request = ++statusRequest
+  clearTimeout(timer)
+  let disconnected = false
+  try {
+    await window.__TAURI__.core.invoke('bluetooth_disconnect')
+    disconnected = true
+    if (disposed || request !== statusRequest) return
+    try {
+      await window.__TAURI__.core.invoke('bluetooth_connect', { generation: generation.value, index: Number(selected.value) })
+      if (disposed || request !== statusRequest) return
+      phase.value = 'open'
+      message.value = `System playback connection opened for ${sourceName()}.`
+    } catch (directError) {
+      if (disposed || request !== statusRequest) return
+      try {
+        await window.__TAURI__.core.invoke('bluetooth_prepare', { generation: generation.value, index: Number(selected.value) })
+        if (disposed || request !== statusRequest) return
+        phase.value = 'waiting'
+        message.value = `Direct connection failed (${String(directError)}). Waiting for the phone to connect to ${sourceName()} through Bluetooth.`
+      } catch (waitError) {
+        if (disposed || request !== statusRequest) return
+        rememberBluetoothRecovery(false)
+        rememberCombinedMonitorOwnership(false)
+        phase.value = 'idle'
+        error.value = `Direct connection failed: ${String(directError)} Phone-initiated wait also failed: ${String(waitError)}. Any running output monitoring remains active.`
+        return
+      }
+    }
+    void poll()
+  } catch (cause) {
+    if (disposed || request !== statusRequest) return
+    error.value = `Could not restart the Bluetooth connection: ${String(cause)}`
+    if (!disconnected) void poll()
+  } finally {
+    if (!disposed && request === statusRequest) busy.value = false
+  }
+}
+
 onMounted(async () => {
   if (!window.__TAURI__) return
   window.addEventListener('focus', refreshCandidatesOnFocus)
@@ -788,6 +831,7 @@ onBeforeUnmount(() => {
       </select>
     </template>
     <button v-if="names.length || phase !== 'idle'" type="button" class="preview-action" :disabled="busy || loopbackBusy || (phase === 'idle' && selected === '')" @click="toggle('connect')">{{ phase === 'idle' ? 'Connect Bluetooth' : 'Disconnect Bluetooth' }}</button>
+    <button v-if="phase === 'waiting'" type="button" class="preview-action" :disabled="busy || loopbackBusy || selected === ''" @click="retryBluetoothConnection">Retry Bluetooth connection</button>
     <button v-if="names.length && phase === 'idle'" type="button" class="preview-action" :disabled="busy || selected === ''" @click="toggle('connect', false, true)">Connect or wait for phone</button>
     <button v-if="names.length && phase === 'idle'" type="button" class="preview-action" :disabled="busy || selected === ''" @click="toggle('wait')">Wait for phone to connect</button>
     <button v-if="names.length && phase === 'idle'" type="button" class="preview-action" :disabled="busy || loopbackBusy || selected === '' || (!followDefault && !loopbackEndpointId)" @click="toggle('wait', true)">Wait + monitor system output</button>
