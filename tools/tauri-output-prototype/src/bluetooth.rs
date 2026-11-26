@@ -5,6 +5,7 @@ use serde::Serialize;
 pub struct Candidates {
     generation: u32,
     names: Vec<String>,
+    ids: Vec<String>,
     capability: PlaybackCapability,
 }
 
@@ -42,6 +43,7 @@ mod capability_tests {
             let candidates = Candidates {
                 generation: 7,
                 names: vec!["Headset".into()],
+                ids: vec!["device-id".into()],
                 capability,
             };
             let value = serde_json::to_value(candidates).unwrap();
@@ -50,6 +52,7 @@ mod capability_tests {
                 serde_json::json!({
                     "generation": 7,
                     "names": ["Headset"],
+                    "ids": ["device-id"],
                     "capability": expected,
                 })
             );
@@ -104,9 +107,11 @@ mod platform {
             let count = collection.Size().map_err(|e| e.to_string())?.min(64);
             let mut devices = Vec::new();
             let mut names = Vec::new();
+            let mut ids = Vec::new();
             for index in 0..count {
                 let device = collection.GetAt(index).map_err(|e| e.to_string())?;
                 names.push(device.Name().map_err(|e| e.to_string())?.to_string_lossy());
+                ids.push(device.Id().map_err(|e| e.to_string())?.to_string_lossy());
                 devices.push(device);
             }
             self.devices = devices;
@@ -114,6 +119,7 @@ mod platform {
             Ok(Candidates {
                 generation: self.generation,
                 names,
+                ids,
                 capability: PlaybackCapability::SystemRouted,
             })
         }

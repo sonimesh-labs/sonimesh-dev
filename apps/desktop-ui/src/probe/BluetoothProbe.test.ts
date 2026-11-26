@@ -155,14 +155,18 @@ it('restores the remembered PCM endpoint when it reappears after refresh', async
   wrapper.unmount()
 })
 
-it('preserves the selected source by name when discovery order changes', async () => {
+it('preserves the selected source by identity when discovery order changes', async () => {
   let generation = 0
   const invoke = vi.fn((command: string) => {
     if (command === 'bluetooth_status') return Promise.resolve('idle')
     if (command === 'loopback_status') return Promise.resolve({ running: false, endpointName: '', sampleRate: 0, channels: 0, samples: 0, peak: 0, error: null })
     if (command === 'bluetooth_candidates') {
       generation++
-      return Promise.resolve({ generation, names: generation === 1 ? ['Phone', 'Headset'] : ['Headset', 'Phone'] })
+      return Promise.resolve({
+        generation,
+        names: generation === 1 ? ['Phone', 'Headset'] : ['Headset', 'Phone'],
+        ids: generation === 1 ? ['phone-id', 'headset-id'] : ['headset-id', 'phone-id'],
+      })
     }
     return Promise.resolve()
   })
@@ -177,14 +181,14 @@ it('preserves the selected source by name when discovery order changes', async (
   wrapper.unmount()
 })
 
-it('clears the selected source when duplicate names make refresh ambiguous', async () => {
+it('labels duplicate source names and preserves the selected device across refresh', async () => {
   let generation = 0
   const invoke = vi.fn((command: string) => {
     if (command === 'bluetooth_status') return Promise.resolve('idle')
     if (command === 'loopback_status') return Promise.resolve({ running: false, endpointName: '', sampleRate: 0, channels: 0, samples: 0, peak: 0, error: null })
     if (command === 'bluetooth_candidates') {
       generation++
-      return Promise.resolve({ generation, names: ['Phone', 'Phone'] })
+      return Promise.resolve({ generation, names: ['Phone', 'Phone'], ids: ['phone-a', 'phone-b'] })
     }
     return Promise.resolve()
   })
@@ -195,7 +199,32 @@ it('clears the selected source when duplicate names make refresh ambiguous', asy
   await refreshButton.trigger('click')
   await flushPromises()
   await wrapper.get('#bluetooth-source').setValue('1')
+  expect(wrapper.get('#bluetooth-source').text()).toContain('Phone (1)')
+  expect(wrapper.get('#bluetooth-source').text()).toContain('Phone (2)')
   await refreshButton.trigger('click')
+  await flushPromises()
+  expect((wrapper.get('#bluetooth-source').element as HTMLSelectElement).value).toBe('1')
+  wrapper.unmount()
+})
+
+it('clears a selected device when it disappears even if another device has the same name', async () => {
+  let generation = 0
+  const invoke = vi.fn((command: string) => {
+    if (command === 'bluetooth_status') return Promise.resolve('idle')
+    if (command === 'loopback_status') return Promise.resolve({ running: false, endpointName: '', sampleRate: 0, channels: 0, samples: 0, peak: 0, runPeak: 0, error: null })
+    if (command === 'bluetooth_candidates') {
+      generation++
+      return Promise.resolve(generation === 1
+        ? { generation, names: ['Phone', 'Phone'], ids: ['phone-a', 'phone-b'] }
+        : { generation, names: ['Phone'], ids: ['phone-b'] })
+    }
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  await wrapper.get('#bluetooth-source').setValue('0')
+  await wrapper.findAll('button').find(button => button.text() === 'Refresh Bluetooth sources')!.trigger('click')
   await flushPromises()
   expect((wrapper.get('#bluetooth-source').element as HTMLSelectElement).value).toBe('')
   wrapper.unmount()

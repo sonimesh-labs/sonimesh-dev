@@ -6,6 +6,7 @@ type LoopbackEndpoint = { id: string; name: string; isDefault: boolean; sampleRa
 type PlaybackCapability = 'ApplicationPcmSource' | 'SystemRouted' | 'Unsupported'
 
 const names = ref<string[]>([])
+const candidateIds = ref<string[]>([])
 const playbackCapability = ref<PlaybackCapability | null>(null)
 const LOOPBACK_NO_SAMPLES_DELAY_MS = 5000
 const generation = ref(0)
@@ -57,6 +58,11 @@ let recoverBluetoothWait = false
 
 function sourceName() {
   return names.value[Number(selected.value)] ?? 'selected source'
+}
+
+function sourceOptionLabel(index: number, name: string) {
+  const matchingIndexes = names.value.flatMap((candidate, candidateIndex) => candidate === name ? [candidateIndex] : [])
+  return matchingIndexes.length > 1 ? `${name} (${matchingIndexes.indexOf(index) + 1})` : name
 }
 
 function playbackCapabilityDescription(capability: PlaybackCapability) {
@@ -154,15 +160,20 @@ async function refresh() {
   error.value = null
   suggestPhoneInitiated.value = false
   const previousIndex = selected.value === '' ? -1 : Number(selected.value)
+  const previousId = candidateIds.value[previousIndex]
   const previousName = names.value[previousIndex]
   const previousNameCount = previousName === undefined ? 0 : names.value.filter(name => name === previousName).length
   try {
     if (!window.__TAURI__) throw new Error('Desktop probe unavailable')
-    const result = await window.__TAURI__.core.invoke<{ generation: number; names: string[]; capability: PlaybackCapability }>('bluetooth_candidates')
+    const result = await window.__TAURI__.core.invoke<{ generation: number; names: string[]; ids?: string[]; capability: PlaybackCapability }>('bluetooth_candidates')
     names.value = result.names
+    candidateIds.value = result.ids ?? []
     generation.value = result.generation
     playbackCapability.value = result.capability ?? 'Unsupported'
-    if (previousName === undefined) {
+    const idMatches = previousId === undefined ? [] : candidateIds.value.flatMap((id, index) => id === previousId ? [index] : [])
+    if (previousId !== undefined) {
+      selected.value = idMatches.length === 1 ? String(idMatches[0]) : ''
+    } else if (previousName === undefined) {
       selected.value = ''
     } else {
       const matches = result.names.flatMap((name, index) => name === previousName ? [index] : [])
@@ -481,7 +492,7 @@ onBeforeUnmount(() => {
       <label for="bluetooth-source">Playback source</label>
       <select id="bluetooth-source" v-model="selected" :disabled="busy || phase !== 'idle'">
         <option value="" disabled>Select a source</option>
-        <option v-for="(name, index) in names" :key="index" :value="String(index)">{{ name }}</option>
+        <option v-for="(name, index) in names" :key="index" :value="String(index)">{{ sourceOptionLabel(index, name) }}</option>
       </select>
     </template>
     <button v-if="names.length || phase !== 'idle'" type="button" class="preview-action" :disabled="busy || (phase === 'idle' && selected === '')" @click="toggle('connect')">{{ phase === 'idle' ? 'Connect Bluetooth' : 'Disconnect Bluetooth' }}</button>

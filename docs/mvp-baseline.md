@@ -89,6 +89,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   The panel also provides a shortcut to Windows Bluetooth settings, automatic
   candidate discovery with visible search/refresh status, and refreshes
   candidates and idle output endpoints when returning to the probe.
+  The probe distinguishes candidates with duplicate display names and retains
+  the selected device across refreshes using its in-memory Windows device ID;
+  the ID is not persisted or shown in the interface.
   Candidate discovery and
   connection setup run on Tauri's blocking task pool so WinRT waits do not occupy
   the UI runtime; status checks and disconnects use the same blocking pool. An
