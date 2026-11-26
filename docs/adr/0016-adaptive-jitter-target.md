@@ -77,8 +77,10 @@ recovery policy is provisional and is not an adaptive jitter target.
 
 The separate paired audio lab schedules Opus PLC at each live playout deadline,
 including when its jitter buffer is empty. After three consecutive concealed
-frames, it resets an empty stream on the next deadline and waits for a fresh
-packet; buffered later frames are still reached through PLC. This lab policy is
+frames, it resets an empty stream at the next deadline before polling arrivals,
+so a packet queued during the interruption can establish a fresh position. A
+newly admitted packet starts the configured startup wait again; buffered later
+frames are still reached through PLC. This lab policy is
 not an adaptive jitter target or a measured quality guarantee.
 When live playout's control loop stalls for at least eight 20 ms frames, the
 lab resets stream-local playout, drains the accumulated UDP in batches of at

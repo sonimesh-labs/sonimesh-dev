@@ -335,7 +335,8 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   deterministic virtual-network tests.
   During live playout the paired lab conceals short gaps even when no later
   packet is buffered, then resets an empty stream after three consecutive PLC
-  frames to permit fresh audio after an extended interruption. A real UDP and
+  frames before polling at the next deadline, so a queued recovery packet can
+  establish a fresh position and restart the startup wait. A real UDP and
   native Opus test covers the software path; physical listening remains open.
   After a control-loop stall of at least 160 ms, the paired lab also drops
   accumulated media in bounded batches and resumes with later packets, avoiding

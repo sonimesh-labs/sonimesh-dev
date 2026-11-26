@@ -817,6 +817,22 @@ fn next_playout_deadline(deadline: Instant, now: Instant) -> Instant {
     now + Duration::from_nanos(remaining_nanos).max(PLAYOUT_PERIOD / 2)
 }
 
+fn reset_expired_empty_playout(
+    receiver: &mut Receiver,
+    next_playout: &mut Option<Instant>,
+    consecutive_plc: &mut u8,
+    now: Instant,
+) {
+    if next_playout.is_some_and(|due| now >= due)
+        && *consecutive_plc >= MAX_CONSECUTIVE_PLC
+        && receiver.jitter_len() == 0
+    {
+        receiver.hard_resynchronize();
+        *next_playout = None;
+        *consecutive_plc = 0;
+    }
+}
+
 fn decode_playout(
     receiver: &mut Receiver,
     arrivals_pending: bool,
@@ -1568,6 +1584,12 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
             if draining_stale {
                 draining_stale = !drain_stale_media(pipeline)?;
             } else {
+                reset_expired_empty_playout(
+                    pipeline,
+                    &mut next_playout,
+                    &mut consecutive_plc,
+                    Instant::now(),
+                );
                 let mut batch_packet = 0;
                 for _ in 0..MAX_MEDIA_POLLS {
                     match poll_media(pipeline)? {
@@ -2509,14 +2531,32 @@ mod tests {
                 matches!(decode_live_playout(&mut receiver, &metrics, &mut consecutive_plc).unwrap(), Some(DecodeStep::Concealed { sequence: actual, .. }) if actual == sequence)
             );
         }
-        assert!(
-            decode_live_playout(&mut receiver, &metrics, &mut consecutive_plc)
-                .unwrap()
-                .is_none()
-        );
         let resumed = sealer.seal(0, 2880, &payload[..length]).unwrap();
         send(&resumed.datagram);
-        poll_media(&mut receiver).unwrap();
+        reset_expired_empty_playout(&mut receiver, &mut next_playout, &mut consecutive_plc, now);
+        assert_eq!(consecutive_plc, 3);
+        assert_eq!(next_playout, Some(now + PLAYOUT_PERIOD));
+        reset_expired_empty_playout(
+            &mut receiver,
+            &mut next_playout,
+            &mut consecutive_plc,
+            now + PLAYOUT_PERIOD,
+        );
+        assert_eq!(consecutive_plc, 0);
+        assert_eq!(next_playout, None);
+        let Some(UdpPollOutcome::Processed { admission, .. }) = poll_media(&mut receiver).unwrap()
+        else {
+            panic!("queued recovery packet was not received");
+        };
+        assert_eq!(admission, InsertOutcome::Inserted);
+        arm_playout(
+            &mut next_playout,
+            admission,
+            false,
+            now + PLAYOUT_PERIOD,
+            PLAYOUT_PERIOD,
+        );
+        assert_eq!(next_playout, Some(now + PLAYOUT_PERIOD * 2));
         assert!(matches!(
             decode_live_playout(&mut receiver, &metrics, &mut consecutive_plc).unwrap(),
             Some(DecodeStep::Decoded { sequence: 3, .. })
@@ -2535,6 +2575,14 @@ mod tests {
                 matches!(decode_live_playout(&mut receiver, &metrics, &mut consecutive_plc).unwrap(), Some(DecodeStep::Concealed { sequence: actual, .. }) if actual == sequence)
             );
         }
+        reset_expired_empty_playout(
+            &mut receiver,
+            &mut next_playout,
+            &mut consecutive_plc,
+            now + PLAYOUT_PERIOD * 2,
+        );
+        assert_eq!(consecutive_plc, 4);
+        assert_eq!(receiver.jitter_len(), 1);
         assert!(matches!(
             decode_live_playout(&mut receiver, &metrics, &mut consecutive_plc).unwrap(),
             Some(DecodeStep::Decoded { sequence: 8, .. })
