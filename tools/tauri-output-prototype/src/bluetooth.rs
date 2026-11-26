@@ -285,6 +285,22 @@ mod platform {
             let snapshot = bluetooth.refresh().unwrap();
             assert_eq!(snapshot.generation, 1);
             assert!(snapshot.names.len() <= 64);
+            assert_eq!(snapshot.ids.len(), snapshot.names.len());
+            let candidates = snapshot
+                .names
+                .iter()
+                .cloned()
+                .zip(snapshot.ids.iter().cloned())
+                .collect::<Vec<_>>();
+            let mut sorted = candidates.clone();
+            sorted.sort_by(|left, right| {
+                left.0
+                    .to_lowercase()
+                    .cmp(&right.0.to_lowercase())
+                    .then_with(|| left.0.cmp(&right.0))
+                    .then_with(|| left.1.cmp(&right.1))
+            });
+            assert_eq!(candidates, sorted);
             assert_eq!(snapshot.capability, PlaybackCapability::SystemRouted);
             assert!(bluetooth.connect(0, 0).is_err());
         }
