@@ -640,7 +640,8 @@ does not validate the entire Opus payload or prove a device is compatible.
 During lab capture, **Sender gain** adjusts the encoded signal from 0% to 200%
 in 5% steps. It starts at 100% for each capture; boosts can clip, and mute still
 silences the sender. Android system volume and desktop receiver gain are
-independent. The signal indicator observes capture before this adjustment.
+independent. **Reset sender gain to 100%** restores unity gain during capture.
+The signal indicator observes capture before this adjustment.
 
 **Last local send interval** reports packets successfully sent by the local
 sender in the latest completed sampling interval, which is at least one second

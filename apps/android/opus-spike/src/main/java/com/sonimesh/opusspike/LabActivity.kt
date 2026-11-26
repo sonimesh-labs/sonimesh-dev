@@ -81,12 +81,14 @@ class LabActivity : Activity() {
     private lateinit var muteSwitch: Switch
     private lateinit var gainSlider: SeekBar
     private lateinit var gainLabel: TextView
+    private lateinit var resetGainButton: Button
     private lateinit var invitationUsesUdpAddress: Switch
     private lateinit var toneButton: Button
     private lateinit var probeButton: Button
     private lateinit var retryButton: Button
     private lateinit var retryHint: TextView
     private var updatingMute = false
+    private var adjustingGain = false
     private var observedCapture = false
     private val muteObserver: (Boolean?) -> Unit = { muted ->
         updatingMute = true
@@ -96,11 +98,12 @@ class LabActivity : Activity() {
     }
     private val gainObserver: (Int?) -> Unit = { gain ->
         gainSlider.isEnabled = gain != null
-        gainLabel.text = "Sender gain: ${gain?.let { "$it%" } ?: "—"}"
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        resetGainButton.isEnabled = gain != null
+        if (!adjustingGain || gain == null) gainLabel.text = "Sender gain: ${gain?.let { "$it%" } ?: "—"}"
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && (!adjustingGain || gain == null)) {
             gainSlider.stateDescription = gain?.let { "$it percent" } ?: "Unavailable"
         }
-        if (gain != null) gainSlider.progress = gain / 5
+        if (gain != null && !adjustingGain) gainSlider.progress = gain / 5
     }
     private val statusObserver: (String) -> Unit = {
         val capturing = LabStatus.captureUsage != null
@@ -236,16 +239,30 @@ class LabActivity : Activity() {
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(seekBar: SeekBar, progress: Int, fromUser: Boolean) {
                     if (fromUser) {
+                        gainLabel.text = "Sender gain: ${progress * 5}%"
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                            gainSlider.stateDescription = "${progress * 5} percent"
+                        }
                         startService(Intent(this@LabActivity, LabCaptureService::class.java)
                             .setAction(LabCaptureService.ACTION_SET_GAIN)
                             .putExtra(LabCaptureService.EXTRA_GAIN, progress * 5))
                     }
                 }
-                override fun onStartTrackingTouch(seekBar: SeekBar) = Unit
-                override fun onStopTrackingTouch(seekBar: SeekBar) = Unit
+                override fun onStartTrackingTouch(seekBar: SeekBar) { adjustingGain = true }
+                override fun onStopTrackingTouch(seekBar: SeekBar) { adjustingGain = false }
             })
         }
         layout.addView(gainSlider)
+        resetGainButton = Button(this).apply {
+            text = "Reset sender gain to 100%"
+            isEnabled = false
+            setOnClickListener {
+                startService(Intent(this@LabActivity, LabCaptureService::class.java)
+                    .setAction(LabCaptureService.ACTION_SET_GAIN)
+                    .putExtra(LabCaptureService.EXTRA_GAIN, DEFAULT_SENDER_GAIN))
+            }
+        }
+        layout.addView(resetGainButton)
         layout.addView(TextView(this).apply {
             text = "Boosting above 100% may cause clipping. Buffered audio may continue briefly."
         })

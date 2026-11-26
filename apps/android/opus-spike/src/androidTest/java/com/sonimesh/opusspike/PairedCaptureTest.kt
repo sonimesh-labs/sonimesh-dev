@@ -16,6 +16,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.Button
 import android.widget.EditText
 import android.widget.Spinner
+import android.widget.SeekBar
 import android.widget.Switch
 import android.widget.TextView
 import androidx.test.core.app.ActivityScenario
@@ -161,12 +162,15 @@ class PairedCaptureTest {
     fun mutes_and_resumes_sending_during_capture() = runCapture(testMute = true)
 
     @Test
+    fun adjusts_and_resets_sender_gain_during_capture() = runCapture(testGain = true)
+
+    @Test
     fun notification_reports_local_capture_signal() = runCapture(testNotificationSignal = true)
 
     @Test
     fun plays_latency_probe_during_paired_capture() = runCapture(testLatencyProbe = true)
 
-    private fun runCapture(expectReconnect: Boolean = false, repeatedReconnects: Boolean = false, stopDuringReconnect: Boolean = false, retryAfterReconnectExhaustion: Boolean = false, screenOff: Boolean = false, notificationReturn: Boolean = false, startFromScan: Boolean = false, startFromPaste: Boolean = false, recreate: Boolean = false, changeUsage: Boolean = false, testMute: Boolean = false, expectConnectionRetry: Boolean = false, changeSetupDuringConsent: Boolean = false, changeManualPortDuringConsent: Boolean = false, testNotificationSignal: Boolean = false, testLatencyProbe: Boolean = false) {
+    private fun runCapture(expectReconnect: Boolean = false, repeatedReconnects: Boolean = false, stopDuringReconnect: Boolean = false, retryAfterReconnectExhaustion: Boolean = false, screenOff: Boolean = false, notificationReturn: Boolean = false, startFromScan: Boolean = false, startFromPaste: Boolean = false, recreate: Boolean = false, changeUsage: Boolean = false, testMute: Boolean = false, expectConnectionRetry: Boolean = false, changeSetupDuringConsent: Boolean = false, changeManualPortDuringConsent: Boolean = false, testNotificationSignal: Boolean = false, testLatencyProbe: Boolean = false, testGain: Boolean = false) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val args = InstrumentationRegistry.getArguments()
         var stopAcknowledgement = "unavailable"
@@ -296,6 +300,48 @@ class PairedCaptureTest {
                     } + "; test tone playing: ${activity.isTestTonePlaying()}"
                 }
                 throw AssertionError("capture did not start: $observation")
+            }
+            if (testGain) {
+                scenario.onActivity { activity ->
+                    val slider = find(activity.window.decorView) {
+                        it is SeekBar && it.contentDescription == "Sender gain"
+                    } as SeekBar
+                    assertTrue("sender gain slider unavailable", slider.isEnabled)
+                    assertEquals(20, slider.progress)
+                    val args = Bundle().apply {
+                        putFloat(android.view.accessibility.AccessibilityNodeInfo.ACTION_ARGUMENT_PROGRESS_VALUE, 30f)
+                    }
+                    assertTrue("gain adjustment was rejected", slider.performAccessibilityAction(
+                        android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction.ACTION_SET_PROGRESS.id, args,
+                    ))
+                }
+                var adjusted = false
+                val gainDeadline = SystemClock.elapsedRealtime() + 5_000
+                while (!adjusted && SystemClock.elapsedRealtime() < gainDeadline) {
+                    scenario.onActivity { activity ->
+                        adjusted = containsStatus(activity.window.decorView, "Sender gain: 150%") &&
+                            LabStatus.copyableEvidence().contains("Sender gain (last known): 150%")
+                    }
+                    if (!adjusted) SystemClock.sleep(50)
+                }
+                assertTrue("service did not apply sender gain", adjusted)
+                scenario.recreate()
+                scenario.onActivity { activity ->
+                    assertTrue(containsStatus(activity.window.decorView, "Sender gain: 150%"))
+                    find(activity.window.decorView) {
+                        it is Button && it.text.toString() == "Reset sender gain to 100%"
+                    }.performClick()
+                }
+                var reset = false
+                val resetDeadline = SystemClock.elapsedRealtime() + 5_000
+                while (!reset && SystemClock.elapsedRealtime() < resetDeadline) {
+                    scenario.onActivity { activity ->
+                        reset = containsStatus(activity.window.decorView, "Sender gain: 100%") &&
+                            LabStatus.copyableEvidence().contains("Sender gain (last known): 100%")
+                    }
+                    if (!reset) SystemClock.sleep(50)
+                }
+                assertTrue("service did not reset sender gain", reset)
             }
             if (testNotificationSignal) {
                 val manager = instrumentation.targetContext.getSystemService(NotificationManager::class.java)
