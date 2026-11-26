@@ -290,7 +290,12 @@ successful open does not establish that audio is audible or that PCM is
 available to the application. The prototype does not
 enter the WLAN MVP. While the experiment is open, it checks the system
 connection state outside any audio callback and reports a system closure before
-cleaning up; it does not automatically reconnect.
+cleaning up. The probe retains the user's pending Bluetooth wait intent for the
+window session. If Windows closes the system connection while the view is
+reopened or closed, the probe restores phone-initiated wait after it returns; it
+does not automatically reopen that connection. Window-session ownership of an
+output monitor started by the combined action is also restored so the probe can
+stop it when the Bluetooth operation ends.
 The separate desktop output probe may offer the same system-routed connection
 experiment with explicit selection and stop controls. It does not route this
 audio through the WLAN receiver or claim a supported PCM input. Its interface

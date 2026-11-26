@@ -12,6 +12,8 @@ const LOOPBACK_NO_SAMPLES_DELAY_MS = 5000
 const generation = ref(0)
 const selected = ref('')
 const BLUETOOTH_SOURCE_KEY = 'sonimesh.bluetoothProbe.sourceId'
+const COMBINED_MONITOR_KEY = 'sonimesh.bluetoothProbe.combinedMonitorOwned'
+const BLUETOOTH_RECOVERY_KEY = 'sonimesh.bluetoothProbe.recoveryPending'
 const loaded = ref(false)
 const discovering = ref(false)
 const busy = ref(false)
@@ -81,6 +83,34 @@ function rememberBluetoothSource() {
     else sessionStorage.removeItem(BLUETOOTH_SOURCE_KEY)
   } catch {
     // Session preference is optional; the current selection still works.
+  }
+}
+
+function rememberBluetoothRecovery(shouldRecover: boolean) {
+  recoverBluetoothWait = shouldRecover
+  try {
+    if (shouldRecover) sessionStorage.setItem(BLUETOOTH_RECOVERY_KEY, 'true')
+    else sessionStorage.removeItem(BLUETOOTH_RECOVERY_KEY)
+  } catch {
+    // Recovery preference is optional; the current panel still tracks it.
+  }
+}
+
+function readBluetoothRecovery() {
+  try {
+    return sessionStorage.getItem(BLUETOOTH_RECOVERY_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
+
+function rememberCombinedMonitorOwnership(owned: boolean) {
+  combinedMonitorOwned.value = owned
+  try {
+    if (owned) sessionStorage.setItem(COMBINED_MONITOR_KEY, 'true')
+    else sessionStorage.removeItem(COMBINED_MONITOR_KEY)
+  } catch {
+    // Session ownership is optional; the current panel still tracks it.
   }
 }
 
@@ -162,7 +192,7 @@ async function resumeBluetoothWait(request: number): Promise<'recovered' | 'fail
     message.value = `Windows closed the playback connection. Waiting for ${sourceName()} to reconnect through Bluetooth.${combinedMonitorOwned.value ? ' Windows output monitoring remains active.' : ''}`
   } catch (cause) {
     if (disposed || request !== statusRequest) return 'failed'
-    recoverBluetoothWait = false
+    rememberBluetoothRecovery(false)
     phase.value = 'idle'
     error.value = `Windows closed the playback connection, but waiting could not restart: ${String(cause)}`
     await stopCombinedMonitor()
@@ -242,7 +272,7 @@ async function poll() {
       if (recovery === 'recovered') {
         shouldContinue = true
       } else {
-        recoverBluetoothWait = false
+        rememberBluetoothRecovery(false)
         phase.value = 'idle'
         message.value = 'Windows closed the playback connection.'
         await stopCombinedMonitor()
@@ -337,7 +367,7 @@ async function toggleLoopback() {
       clearTimeout(loopbackTimer)
       loopbackStartedAt = undefined
       loopbackNoSamplesLong.value = false
-      combinedMonitorOwned.value = false
+      rememberCombinedMonitorOwnership(false)
     }
   } catch (cause) {
     loopbackError.value = String(cause)
@@ -371,7 +401,7 @@ async function stopCombinedMonitor() {
     loopback.value = await window.__TAURI__.core.invoke<LoopbackSnapshot>('loopback_stop')
     loopbackStartedAt = undefined
     loopbackNoSamplesLong.value = false
-    combinedMonitorOwned.value = false
+    rememberCombinedMonitorOwnership(false)
   } catch (cause) {
     loopbackError.value = String(cause)
     if (loopback.value?.running) void pollLoopback()
@@ -394,7 +424,7 @@ async function toggle(mode: 'connect' | 'wait' = 'connect', monitorOutput = fals
   let directError: unknown
   try {
     if (phase.value !== 'idle') {
-      recoverBluetoothWait = false
+      rememberBluetoothRecovery(false)
       await window.__TAURI__.core.invoke('bluetooth_disconnect')
       phase.value = 'idle'
       clearTimeout(timer)
@@ -407,7 +437,7 @@ async function toggle(mode: 'connect' | 'wait' = 'connect', monitorOutput = fals
           loopback.value = await window.__TAURI__.core.invoke<LoopbackSnapshot>('loopback_start', { endpointId: loopbackEndpointId.value })
           if (!loopback.value.running) throw new Error('Windows output monitoring did not start.')
           loopbackStartedHere = true
-          combinedMonitorOwned.value = true
+          rememberCombinedMonitorOwnership(true)
           loopbackStartedAt = Date.now()
           loopbackNoSamplesLong.value = false
         } catch (cause) {
@@ -429,7 +459,7 @@ async function toggle(mode: 'connect' | 'wait' = 'connect', monitorOutput = fals
         await window.__TAURI__.core.invoke(mode === 'wait' ? 'bluetooth_prepare' : 'bluetooth_connect', { generation: generation.value, index: Number(selected.value) })
       }
       phase.value = connectionMode === 'wait' ? 'waiting' : 'open'
-      recoverBluetoothWait = true
+      rememberBluetoothRecovery(true)
       message.value = connectionMode === 'wait'
         ? `${directError ? `Direct connection failed (${String(directError)}). ` : ''}Waiting for the phone to connect to ${sourceName()} through Bluetooth.${monitorOutput ? ' Windows output monitoring is active.' : ''}`
         : `System playback connection opened for ${sourceName()}.`
@@ -437,7 +467,7 @@ async function toggle(mode: 'connect' | 'wait' = 'connect', monitorOutput = fals
       void poll()
     }
   } catch (cause) {
-    recoverBluetoothWait = false
+    rememberBluetoothRecovery(false)
     if (loopbackStartedHere) {
       await stopCombinedMonitor()
     }
@@ -462,16 +492,27 @@ onMounted(async () => {
   busy.value = true
   const request = statusRequest
   try {
+    recoverBluetoothWait = readBluetoothRecovery()
     const state = await window.__TAURI__.core.invoke<'idle' | 'waiting' | 'open'>('bluetooth_status')
-    if (!disposed && request === statusRequest && (state === 'open' || state === 'waiting')) {
+    if (!disposed && request === statusRequest && state !== 'idle') {
       phase.value = state
+      rememberBluetoothRecovery(true)
       message.value = state === 'waiting'
         ? 'Waiting for the phone to connect through Bluetooth.'
         : 'System playback connection is open.'
-      void poll()
+    } else if (!disposed && request === statusRequest && recoverBluetoothWait) {
+      phase.value = 'waiting'
+      message.value = 'Restoring phone-initiated Bluetooth wait.'
     }
     const loopbackState = await window.__TAURI__.core.invoke<LoopbackSnapshot>('loopback_status')
     loopback.value = loopbackState
+    let hadCombinedMonitorOwnership = false
+    try {
+      hadCombinedMonitorOwnership = sessionStorage.getItem(COMBINED_MONITOR_KEY) === 'true'
+    } catch {
+      // The backend snapshot remains authoritative when session storage is unavailable.
+    }
+    rememberCombinedMonitorOwnership(loopbackState.running && hadCombinedMonitorOwnership)
     if (loopbackState.running) {
       loopbackStartedAt = Date.now()
       loopbackNoSamplesLong.value = false
@@ -479,6 +520,7 @@ onMounted(async () => {
     }
     await refresh()
     await refreshLoopbackEndpoints()
+    if (!disposed && request === statusRequest && phase.value !== 'idle') void poll()
   } catch (cause) {
     if (!disposed && request === statusRequest) error.value = String(cause)
   } finally {
