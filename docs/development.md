@@ -896,8 +896,9 @@ survive output recovery and successive sessions while the listener is running.
 When system-default output is selected, a reported output fault causes the paired
 listener to retry with the current default endpoint and its current format. A
 specific selected endpoint is retried by its original ID. An active stream that
-uses the system default also checks for a changed default at most once per second
-and switches to the new endpoint. A failed default query leaves the existing
+uses the system default also checks for a changed default endpoint or format at
+most once per second and recreates the output when either changes, including a
+format change on the same endpoint. A failed default query leaves the existing
 output running; a failed switch enters the normal retry path. Default-device
 queries run on a background worker, so a slow query does not block media polling.
 This is software-tested experimental behavior; physical device removal and audible

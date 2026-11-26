@@ -1261,7 +1261,7 @@ fn follow_default_output<O: sonimesh_platform::AudioOutput>(
     let Ok(current) = resolve(output.output()) else {
         return false;
     };
-    if current.device == selection.device {
+    if current == *selection {
         return false;
     }
     output.stop();
@@ -2349,7 +2349,7 @@ mod tests {
         ));
         assert!(output.output().source.is_some());
         let next_selection = sonimesh_app::OutputSelection {
-            device: Some(OutputDeviceId::new("later-default")),
+            device: selected.device.clone(),
             config: OutputConfig {
                 sample_rate_hz: 48_000,
                 ..selected.config
@@ -2379,6 +2379,10 @@ mod tests {
         ));
         assert!(retry.is_none());
         assert_eq!(selected, next_selection);
+        assert_eq!(
+            output.output().selection.as_ref().unwrap().1.sample_rate_hz,
+            48_000
+        );
         assert_eq!(output.gain_handle().snapshot(), controls.snapshot());
         let starts = output.output().starts;
         assert!(!follow_default_output(

@@ -119,7 +119,7 @@ the callback and preserves the local gain and mute settings. In the paired lab,
 the system-default choice re-probes the current default endpoint and its format
 on each recovery attempt. While a stream is healthy, the paired lab also checks
 the default at most once per second on a background worker and recreates output
-when the endpoint changes. If the new endpoint cannot start, it retries the
+when the endpoint or its default output format changes. If the new output cannot start, it retries the
 current default; a failed query leaves the existing output running. An explicitly
 selected endpoint remains pinned. This is experimental behavior, not Phase 2
 product output-device switching or physical device-removal evidence. Pending
