@@ -342,6 +342,30 @@ class LabStatusTest {
     }
 
     @Test
+    fun clippingCountSurvivesRecreationAndStopButResetsForNewCapture() {
+        ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+            try {
+                scenario.onActivity { activity ->
+                    LabStatus.serviceStarted(LabCaptureUsage.Media, OpusBitrate.STANDARD)
+                    LabStatus.publishClippedFrames(3)
+                    assertTrue(hasStatus(activity.window.decorView, "Frames clipped by sender gain: 3. Lower sender gain if distortion is audible."))
+                    assertTrue(LabStatus.copyableEvidence().contains("Frames clipped by sender gain: 3"))
+                }
+                scenario.recreate()
+                scenario.onActivity { activity ->
+                    assertTrue(hasStatus(activity.window.decorView, "Frames clipped by sender gain: 3. Lower sender gain if distortion is audible."))
+                    LabStatus.serviceFinished()
+                    assertTrue(LabStatus.copyableEvidence().contains("Frames clipped by sender gain: 3"))
+                    LabStatus.serviceStarted(LabCaptureUsage.Media, OpusBitrate.STANDARD)
+                    assertTrue(hasStatus(activity.window.decorView, "Frames clipped by sender gain: —"))
+                }
+            } finally {
+                scenario.onActivity { LabStatus.serviceFinished() }
+            }
+        }
+    }
+
+    @Test
     fun sentPacketStatusAllowsSaturatedLongValue() {
         ActivityScenario.launch(LabActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->

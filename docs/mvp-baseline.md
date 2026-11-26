@@ -342,6 +342,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   Its live sender-gain slider scales audio before encoding from 0% to 200% and
   resets to 100% for each capture; values above 100% can clip. Mute takes
   precedence, and the capture-signal indicator remains based on unscaled input.
+  The lab counts encoder-accepted frames where gain scaling exceeded the PCM16
+  range, displays the session total, and includes it in copied evidence. This
+  does not detect clipping already present in the captured source or codec output.
   It checks encoded Opus duration headers against the fixed 20 ms lab stream
   before enqueueing and reports incompatible output instead of sending it with
   misleading timestamps. Host tests exercise the duration check; Android codec

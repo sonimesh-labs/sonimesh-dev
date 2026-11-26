@@ -2,10 +2,27 @@ package com.sonimesh.opusspike
 
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class SenderGainTest {
+    @Test
+    fun countsOnlyAcceptedFramesClippedByGain() {
+        val input = shortArrayOf(20_000, -20_000, 20_000, -20_000)
+        val processor = SenderGainProcessor(input.size)
+        processor.prepare(input, false, 200)
+        processor.prepare(input, false, 200)
+        assertEquals(0L, processor.clippedFrames)
+        processor.accepted()
+        assertEquals(1L, processor.clippedFrames)
+        processor.prepare(input, true, 200)
+        processor.accepted()
+        assertEquals(1L, processor.clippedFrames)
+        processor.prepare(shortArrayOf(Short.MAX_VALUE, Short.MIN_VALUE, Short.MAX_VALUE, Short.MIN_VALUE), false, 100)
+        processor.accepted()
+        assertEquals(1L, processor.clippedFrames)
+    }
     @Test
     fun scalesAndClipsWithoutChangingCapturedInput() {
         val input = shortArrayOf(20_000, -20_000, 10_000, -10_000)

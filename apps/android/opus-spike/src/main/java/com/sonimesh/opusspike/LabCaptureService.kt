@@ -212,6 +212,7 @@ class LabCaptureService : Service() {
         val sentPackets = AtomicLong(0)
         val lastSentPublication = AtomicLong(0)
         val senderTiming = SenderTiming()
+        val gainProcessor = SenderGainProcessor(OpusEncoder.FRAME_SAMPLES)
         val packetSent: () -> Unit = {
             val count = sentPackets.updateAndGet(::incrementSaturated)
             val timing = senderTiming.record(SystemClock.elapsedRealtimeNanos())
@@ -314,11 +315,11 @@ class LabCaptureService : Service() {
                 if (running.get() && !terminalStatus) {
                     LabStatus.publishSenderQueueDrops(0)
                     LabStatus.publishSentPackets(0)
+                    LabStatus.publishClippedFrames(0)
                     publishCaptureStatus("Capturing audio and sending to desktop.")
                 }
             }
             val pcm = ShortArray(OpusEncoder.FRAME_SAMPLES)
-            val gainProcessor = SenderGainProcessor(OpusEncoder.FRAME_SAMPLES)
             fun currentEncoderInput(): ShortArray = gainProcessor.prepare(pcm, senderMuted.get(), senderGain.get())
             val signalMonitor = LabSignalMonitor()
             val encoderInputWait = EncoderInputWait()
@@ -374,8 +375,10 @@ class LabCaptureService : Service() {
                 if (now - lastDurationPublication >= 1_000) {
                     lastDurationPublication = now
                     val duration = (now - captureStartMillis) / 1_000
+                    val clippedFrames = gainProcessor.clippedFrames
                     handler.post {
                         LabStatus.publishCaptureDuration(duration)
+                        LabStatus.publishClippedFrames(clippedFrames)
                         updateForegroundDuration(duration)
                     }
                 }
@@ -452,9 +455,11 @@ class LabCaptureService : Service() {
             if (captureStarted) {
                 val count = senderQueueDrops
                 val rate = rateMeter?.averageKbps(SystemClock.elapsedRealtime())
+                val clippedFrames = gainProcessor.clippedFrames
                 handler.post {
                     LabStatus.publishSenderQueueDrops(count)
                     LabStatus.publishEncoderRate(rate)
+                    LabStatus.publishClippedFrames(clippedFrames)
                     val duration = (SystemClock.elapsedRealtime() - captureStartMillis) / 1_000
                     LabStatus.publishCaptureDuration(duration)
                     updateForegroundDuration(duration)

@@ -644,6 +644,10 @@ independent. **Reset sender gain to 100%** restores unity gain during capture.
 Gain changes ramp over one 20 ms frame; muting is immediate for newly encoded
 frames and unmuting ramps from silence after a muted frame is accepted. The
 signal indicator observes capture before this adjustment.
+The lab displays how many encoder-accepted frames were clipped by sender gain
+and includes the total in copied or shared evidence. The count resets for each
+capture and remains visible after it stops; it cannot detect clipping already
+present in the source or introduced later in the audio path.
 
 **Last local send interval** reports packets successfully sent by the local
 sender in the latest completed sampling interval, which is at least one second

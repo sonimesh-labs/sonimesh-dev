@@ -81,6 +81,7 @@ class LabActivity : Activity() {
     private lateinit var muteSwitch: Switch
     private lateinit var gainSlider: SeekBar
     private lateinit var gainLabel: TextView
+    private lateinit var clipping: TextView
     private lateinit var resetGainButton: Button
     private lateinit var invitationUsesUdpAddress: Switch
     private lateinit var toneButton: Button
@@ -104,6 +105,13 @@ class LabActivity : Activity() {
             gainSlider.stateDescription = gain?.let { "$it percent" } ?: "Unavailable"
         }
         if (gain != null && !adjustingGain) gainSlider.progress = gain / 5
+    }
+    private val clippingObserver: (Long?) -> Unit = { count ->
+        clipping.text = when (count) {
+            null -> "Frames clipped by sender gain: —"
+            0L -> "Frames clipped by sender gain: 0"
+            else -> "Frames clipped by sender gain: $count. Lower sender gain if distortion is audible."
+        }
     }
     private val statusObserver: (String) -> Unit = {
         val capturing = LabStatus.captureUsage != null
@@ -266,6 +274,8 @@ class LabActivity : Activity() {
         layout.addView(TextView(this).apply {
             text = "Boosting above 100% may cause clipping. Buffered audio may continue briefly."
         })
+        clipping = TextView(this)
+        layout.addView(clipping)
         toneButton = Button(this).apply {
             text = if (tone == null) "Start test tone" else "Stop test tone"
             setOnClickListener {
@@ -520,6 +530,7 @@ class LabActivity : Activity() {
         LabStatus.observeSessionConfig(sessionObserver)
         LabStatus.observeSenderMuted(muteObserver)
         LabStatus.observeSenderGain(gainObserver)
+        LabStatus.observeClippedFrames(clippingObserver)
     }
 
     override fun onStop() {
@@ -538,6 +549,7 @@ class LabActivity : Activity() {
         LabStatus.removeSessionConfig(sessionObserver)
         LabStatus.removeSenderMuted(muteObserver)
         LabStatus.removeSenderGain(gainObserver)
+        LabStatus.removeClippedFrames(clippingObserver)
         super.onStop()
     }
 
