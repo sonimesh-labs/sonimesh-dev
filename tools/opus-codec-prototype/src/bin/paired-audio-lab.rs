@@ -1095,12 +1095,12 @@ impl Playback {
                 } else {
                     selection.device.clone()
                 };
-                let worker = Some(default_output_probe::DefaultOutputProbe::new(move || {
-                    current_output_selection(
-                        &sonimesh_platform::CpalOutput::new(),
-                        pinned_device.as_ref(),
-                    )
-                })?);
+                let worker = Some(default_output_probe::DefaultOutputProbe::new(
+                    pinned_device,
+                    |target| {
+                        current_output_selection(&sonimesh_platform::CpalOutput::new(), target)
+                    },
+                )?);
                 return Ok(Self(Some(PlaybackState {
                     controller,
                     selection,
@@ -1159,6 +1159,11 @@ impl Playback {
         {
             let now = Instant::now();
             let worker = worker.as_mut().expect("playback has a probe worker");
+            worker.set_target(if *follow_default {
+                None
+            } else {
+                selection.device.as_ref()
+            });
             if retry_at.is_none()
                 && sonimesh_platform::AudioOutput::health(controller.output())
                     != sonimesh_platform::OutputHealth::Healthy
@@ -1910,8 +1915,8 @@ mod tests {
     #[test]
     #[ignore = "requires a Windows default output device"]
     fn background_probe_resolves_real_default_output() {
-        let mut worker = default_output_probe::DefaultOutputProbe::new(|| {
-            current_output_selection(&sonimesh_platform::CpalOutput::new(), None)
+        let mut worker = default_output_probe::DefaultOutputProbe::new(None, |target| {
+            current_output_selection(&sonimesh_platform::CpalOutput::new(), target)
         })
         .unwrap();
         let deadline = Instant::now() + Duration::from_secs(5);
@@ -1926,15 +1931,11 @@ mod tests {
             );
             std::thread::sleep(Duration::from_millis(10));
         };
-        let pinned_id = initial.device.clone().unwrap();
-        let expected_id = pinned_id.clone();
-        let mut pinned = default_output_probe::DefaultOutputProbe::new(move || {
-            current_output_selection(&sonimesh_platform::CpalOutput::new(), Some(&pinned_id))
-        })
-        .unwrap();
+        let expected_id = initial.device.clone().unwrap();
+        worker.set_target(Some(&expected_id));
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
-            if let Ok(selection) = pinned.poll() {
+            if let Ok(selection) = worker.poll() {
                 assert_eq!(selection.device, Some(expected_id));
                 break;
             }

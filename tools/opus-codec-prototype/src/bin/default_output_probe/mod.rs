@@ -1,26 +1,29 @@
 use sonimesh_app::OutputSelection;
+use sonimesh_platform::OutputDeviceId;
 use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError};
 
 type ProbeResult = Result<OutputSelection, String>;
 
 pub(crate) struct DefaultOutputProbe {
-    requests: SyncSender<u64>,
+    requests: SyncSender<(u64, Option<OutputDeviceId>)>,
     results: Receiver<(u64, ProbeResult)>,
     pending: Option<u64>,
     next_id: u64,
+    target: Option<OutputDeviceId>,
 }
 
 impl DefaultOutputProbe {
     pub(crate) fn new(
-        mut probe: impl FnMut() -> ProbeResult + Send + 'static,
+        target: Option<OutputDeviceId>,
+        mut probe: impl FnMut(Option<&OutputDeviceId>) -> ProbeResult + Send + 'static,
     ) -> std::io::Result<Self> {
-        let (requests, incoming) = mpsc::sync_channel(1);
+        let (requests, incoming) = mpsc::sync_channel::<(u64, Option<OutputDeviceId>)>(1);
         let (outgoing, results) = mpsc::sync_channel(1);
         std::thread::Builder::new()
             .name("lab-default-output-probe".into())
             .spawn(move || {
-                while let Ok(id) = incoming.recv() {
-                    if outgoing.send((id, probe())).is_err() {
+                while let Ok((id, target)) = incoming.recv() {
+                    if outgoing.send((id, probe(target.as_ref()))).is_err() {
                         break;
                     }
                 }
@@ -30,11 +33,19 @@ impl DefaultOutputProbe {
             results,
             pending: None,
             next_id: 0,
+            target,
         })
     }
 
     pub(crate) fn invalidate(&mut self) {
         self.pending = None;
+    }
+
+    pub(crate) fn set_target(&mut self, target: Option<&OutputDeviceId>) {
+        if self.target.as_ref() != target {
+            self.target = target.cloned();
+            self.invalidate();
+        }
     }
 
     pub(crate) fn poll(&mut self) -> ProbeResult {
@@ -52,7 +63,7 @@ impl DefaultOutputProbe {
         if self.pending.is_none() {
             let id = self.next_id;
             self.next_id = self.next_id.wrapping_add(1);
-            if self.requests.try_send(id).is_ok() {
+            if self.requests.try_send((id, self.target.clone())).is_ok() {
                 self.pending = Some(id);
             }
         }
@@ -63,7 +74,7 @@ impl DefaultOutputProbe {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sonimesh_platform::{OutputConfig, OutputDeviceId, SampleFormat};
+    use sonimesh_platform::{OutputConfig, SampleFormat};
     use std::time::Duration;
 
     #[test]
@@ -72,9 +83,9 @@ mod tests {
         let (release_tx, release_rx) = mpsc::channel();
         let (finished_tx, finished_rx) = mpsc::channel();
         let mut count = 0;
-        let mut worker = DefaultOutputProbe::new(move || {
+        let mut worker = DefaultOutputProbe::new(None, move |target| {
             count += 1;
-            started_tx.send(count).unwrap();
+            started_tx.send((count, target.cloned())).unwrap();
             if count == 1 {
                 release_rx.recv().unwrap();
             }
@@ -92,13 +103,19 @@ mod tests {
         })
         .unwrap();
         assert!(worker.poll().is_err());
-        assert_eq!(started_rx.recv_timeout(Duration::from_secs(2)).unwrap(), 1);
+        assert_eq!(
+            started_rx.recv_timeout(Duration::from_secs(2)).unwrap(),
+            (1, None)
+        );
         assert!(worker.poll().is_err());
-        worker.invalidate();
+        worker.set_target(Some(&OutputDeviceId::new("new-target")));
         assert!(worker.poll().is_err());
         release_tx.send(()).unwrap();
         assert_eq!(finished_rx.recv_timeout(Duration::from_secs(2)).unwrap(), 1);
-        assert_eq!(started_rx.recv_timeout(Duration::from_secs(2)).unwrap(), 2);
+        assert_eq!(
+            started_rx.recv_timeout(Duration::from_secs(2)).unwrap(),
+            (2, Some(OutputDeviceId::new("new-target")))
+        );
         assert_eq!(finished_rx.recv_timeout(Duration::from_secs(2)).unwrap(), 2);
         let deadline = std::time::Instant::now() + Duration::from_secs(2);
         let selection = loop {

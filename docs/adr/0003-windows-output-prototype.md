@@ -129,8 +129,11 @@ format are queried on a background worker before retrying. A failed query keeps
 the receiver in recovery rather than switching endpoints. This is experimental behavior, not Phase 2
 product output-device switching or physical device-removal evidence. Pending
 background observations are discarded when an output fault or new session makes
-them stale. Initial output setup and output recreation still run on the lab's
-media/control loop and their timing on real devices remains to be measured. If the session
+them stale. The background probe can also change its target without blocking the
+media loop; a result from an earlier target is discarded. This prepares for a
+manual switch but does not expose one to the operator yet. Initial output setup
+and output recreation still run on the lab's media/control loop and their timing
+on real devices remains to be measured. If the session
 ends while output recovery is pending, the lab reports an unsuccessful output
 result after acknowledging the stop request.
 If the first output start fails, the paired lab retains the prepared receiver
