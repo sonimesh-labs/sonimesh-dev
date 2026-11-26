@@ -12,6 +12,7 @@ afterEach(() => {
   vi.useRealTimers()
   delete window.__TAURI__
   localStorage.clear()
+  sessionStorage.clear()
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: originalClipboard })
   Object.defineProperty(navigator, 'share', { configurable: true, value: originalShare })
 })
@@ -601,6 +602,68 @@ describe('desktop output probe', () => {
     expect((wrapper.get('#lab-output').element as HTMLSelectElement).value).toBe('0')
     await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
     expect(invoke).toHaveBeenCalledWith('start_lab', { host: '127.0.0.1', generation: 5, index: 0, startupBufferMs: 60, adaptive: false, mediaPort: 39093, controlPort: 47610 })
+    wrapper.unmount()
+  })
+
+  it('restores the same endpoint after it disappears and the view reopens', async () => {
+    const chosen = { id: 'chosen-id', label: 'USB DAC', sampleRateHz: 48_000, channels: 2, isDefault: false }
+    const other = { id: 'other-id', label: 'USB DAC', sampleRateHz: 48_000, channels: 2, isDefault: true }
+    const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [chosen, other] })
+      .mockResolvedValueOnce({ generation: 2, devices: [other], selectedIndex: null })
+      .mockResolvedValueOnce({ generation: 3, devices: [other, chosen], selectedIndex: null })
+      .mockResolvedValueOnce({ running: true, status: 'Starting', invitation: null, metrics: null })
+    window.__TAURI__ = { core: { invoke } }
+    const first = mountStoppedProbe()
+    await flushPromises()
+    await first.get('#lab-output').setValue('0')
+    expect(sessionStorage.getItem('sonimesh.outputProbe.outputId')).toBe('chosen-id')
+    expect(localStorage.getItem('sonimesh.outputProbe.labSettings')).not.toContain('chosen-id')
+    await first.findAll('button').find(button => button.text() === 'Refresh devices')!.trigger('click')
+    await flushPromises()
+    expect((first.get('#lab-output').element as HTMLSelectElement).value).toBe('unavailable')
+    expect(first.findAll('button').find(button => button.text() === 'Start listener')!.attributes('disabled')).toBeDefined()
+    first.unmount()
+
+    const reopened = mountStoppedProbe()
+    await flushPromises()
+    expect((reopened.get('#lab-output').element as HTMLSelectElement).value).toBe('1')
+    await reopened.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
+    expect(invoke).toHaveBeenCalledWith('start_lab', expect.objectContaining({ generation: 3, index: 1 }))
+    reopened.unmount()
+  })
+
+  it('restores the chosen endpoint after a failed refresh and clears it on default selection', async () => {
+    const chosen = { id: 'chosen-id', label: 'Headphones', sampleRateHz: 48_000, channels: 2, isDefault: false }
+    const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [chosen] })
+      .mockRejectedValueOnce(new Error('Unavailable'))
+      .mockResolvedValueOnce({ generation: 2, devices: [chosen] })
+    window.__TAURI__ = { core: { invoke } }
+    const wrapper = mountStoppedProbe()
+    await flushPromises()
+    await wrapper.get('#lab-output').setValue('0')
+    await wrapper.findAll('button').find(button => button.text() === 'Refresh devices')!.trigger('click')
+    await flushPromises()
+    expect((wrapper.get('#lab-output').element as HTMLSelectElement).value).toBe('unavailable')
+    await wrapper.findAll('button').find(button => button.text() === 'Refresh devices')!.trigger('click')
+    await flushPromises()
+    expect((wrapper.get('#lab-output').element as HTMLSelectElement).value).toBe('0')
+    await wrapper.get('#lab-output').setValue('')
+    expect(sessionStorage.getItem('sonimesh.outputProbe.outputId')).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('does not restore an endpoint when its ID appears more than once', async () => {
+    const chosen = { id: 'chosen-id', label: 'Headphones', sampleRateHz: 48_000, channels: 2, isDefault: false }
+    const invoke = vi.fn().mockResolvedValueOnce({ generation: 1, devices: [chosen] })
+      .mockResolvedValueOnce({ generation: 2, devices: [chosen, chosen], selectedIndex: null })
+    window.__TAURI__ = { core: { invoke } }
+    const wrapper = mountStoppedProbe()
+    await flushPromises()
+    await wrapper.get('#lab-output').setValue('0')
+    await wrapper.findAll('button').find(button => button.text() === 'Refresh devices')!.trigger('click')
+    await flushPromises()
+    expect((wrapper.get('#lab-output').element as HTMLSelectElement).value).toBe('unavailable')
+    expect(wrapper.findAll('button').find(button => button.text() === 'Start listener')!.attributes('disabled')).toBeDefined()
     wrapper.unmount()
   })
 

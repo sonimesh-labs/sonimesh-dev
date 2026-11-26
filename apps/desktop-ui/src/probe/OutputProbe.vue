@@ -4,6 +4,7 @@ import QRCode from 'qrcode'
 import BluetoothProbe from './BluetoothProbe.vue'
 
 interface OutputDevice {
+  id?: string
   label: string
   sampleRateHz: number | null
   channels: number | null
@@ -95,7 +96,29 @@ function evidenceValue(value: unknown): string {
 }
 
 const LAB_SETTINGS_KEY = 'sonimesh.outputProbe.labSettings'
+const LAB_OUTPUT_ID_KEY = 'sonimesh.outputProbe.outputId'
 const startupBufferChoices = [0, 20, 40, 60, 80, 100, 120]
+
+function storedLabOutputId() {
+  try { return sessionStorage.getItem(LAB_OUTPUT_ID_KEY) || null } catch { return null }
+}
+
+let rememberedLabOutputId = storedLabOutputId()
+
+function rememberLabOutputId(id: string | null) {
+  rememberedLabOutputId = id
+  try {
+    if (id) sessionStorage.setItem(LAB_OUTPUT_ID_KEY, id)
+    else sessionStorage.removeItem(LAB_OUTPUT_ID_KEY)
+  } catch {
+    // The output selection remains usable without session storage.
+  }
+}
+
+function onLabOutputChange() {
+  const index = labOutput.value === '' || labOutput.value === 'unavailable' ? -1 : Number(labOutput.value)
+  rememberLabOutputId(devices.value[index]?.id ?? null)
+}
 
 interface StoredLabSettings {
   labHost?: string
@@ -141,6 +164,7 @@ function writeLabSettings(settings: StoredLabSettings) {
 }
 
 function clearLabSettings() {
+  rememberLabOutputId(null)
   try {
     localStorage.removeItem(LAB_SETTINGS_KEY)
   } catch {
@@ -446,7 +470,12 @@ async function refresh() {
     const snapshot = await window.__TAURI__.core.invoke<{ generation: number; devices: OutputDevice[]; selectedIndex?: number | null }>('probe_outputs', { generation: generation.value, selectedIndex })
     generation.value = snapshot.generation
     devices.value = snapshot.devices
-    if (!loaded.value && labOutputDevice.value) {
+    const rememberedId = labOutput.value === '' ? null : rememberedLabOutputId
+    if (rememberedId) {
+      const matches = snapshot.devices.flatMap((device, index) => device.id === rememberedId ? [index] : [])
+      const match = matches.length === 1 ? matches[0] : undefined
+      labOutput.value = match !== undefined && snapshot.devices[match]?.sampleRateHz != null ? String(match) : 'unavailable'
+    } else if (!loaded.value && labOutputDevice.value) {
       const matches = snapshot.devices.flatMap((device, index) =>
         device.label === labOutputDevice.value?.label &&
         device.sampleRateHz === labOutputDevice.value?.sampleRateHz &&
@@ -457,6 +486,7 @@ async function refresh() {
       )
       if (matches.length === 1) {
         labOutput.value = String(matches[0])
+        rememberLabOutputId(snapshot.devices[matches[0]]?.id ?? null)
       } else {
         labOutputDevice.value = null
         labOutput.value = 'unavailable'
@@ -477,7 +507,7 @@ async function refresh() {
     devices.value = []
     loaded.value = false
     if (labOutput.value !== '') {
-      labOutputDevice.value = null
+      if (!rememberedLabOutputId) labOutputDevice.value = null
       labOutput.value = 'unavailable'
     }
     error.value = 'Could not inspect output devices. Try refreshing.'
@@ -545,7 +575,7 @@ onBeforeUnmount(() => { disposed = true; labRequest++; suggestRequest++; clearTi
       <p v-if="restoredLab" class="preview-note">Listener settings below apply to the next start; the running listener may use different settings.</p>
       <p v-if="lab.running && lab.mediaPort != null" class="preview-note">Running listener UDP port: {{ lab.mediaPort }}</p>
       <label for="lab-output">Playback output</label>
-      <select id="lab-output" v-model="labOutput" :disabled="lab.running || labBusy || busy">
+      <select id="lab-output" v-model="labOutput" :disabled="lab.running || labBusy || busy" @change="onLabOutputChange">
         <option value="">System default output</option>
         <option v-if="labOutput === 'unavailable'" value="unavailable" disabled>Previously selected output unavailable</option>
         <option v-for="(device, index) in devices" :key="index" :value="String(index)" :disabled="device.sampleRateHz === null">{{ device.label }}{{ device.isDefault ? ' (default)' : '' }}</option>

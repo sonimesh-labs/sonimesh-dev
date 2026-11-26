@@ -1280,9 +1280,11 @@ invitation switches the next capture to the manual lab setup. The lab
 plays through the selected output, or the default output when no device is
 selected. Refreshing the device list retains an explicitly selected output when
 the same endpoint remains available. If it disappears or its format is unavailable,
-choose another output or the system default before starting the listener. This
-reselection requirement persists when the probe view is reopened if local storage
-is available; an unavailable selection does not silently become the system default.
+the listener cannot start with that selection. The probe remembers the endpoint ID
+for the window session and restores it after a refresh when that same endpoint is
+uniquely available again, including after reopening the view. Otherwise choose
+another output or the system default; an unavailable selection does not silently
+become the system default. The ID is not written into the saved lab settings.
 On 2026-11-25, an API 37 x86_64 emulator used a port 47612 invitation and ADB
 reverse to pair, capture a test tone, send UDP audio, and stop; the software
 listener verified the decoded signal. A separate manual-SPKI run on the same

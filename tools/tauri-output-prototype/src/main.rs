@@ -451,6 +451,7 @@ struct OutputSnapshot {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct OutputDevice {
+    id: String,
     label: String,
     sample_rate_hz: Option<u32>,
     channels: Option<u16>,
@@ -669,6 +670,7 @@ fn map_devices(
                 .map(|(rate, channels)| (Some(rate), Some(channels)))
                 .unwrap_or((None, None));
             OutputDevice {
+                id: device.id.as_str().to_owned(),
                 label: device.display_name,
                 sample_rate_hz,
                 channels,
@@ -694,6 +696,8 @@ mod tests {
             (id.as_str() == "working").then_some((48_000, 2))
         });
         assert_eq!(mapped.len(), 2);
+        assert_eq!(mapped[0].id, "unavailable");
+        assert_eq!(mapped[1].id, "working");
         assert_eq!(mapped[0].label, "unavailable");
         assert_eq!(mapped[0].sample_rate_hz, None);
         assert_eq!(mapped[0].channels, None);

@@ -609,6 +609,8 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   It can also start and stop the separately built paired-audio lab process and
   display its public test invitation, session status, and periodic packet,
   decode, and output-recovery observations. That process can use a selected output;
+  the probe can restore an unavailable selected endpoint after it reappears during
+  the same window session, matching its ID rather than its display name;
   the probe also retains a bounded ordered history of listener lifecycle events
   for session diagnosis. The probe does not own a product receiver session or
   change the system default output. The observations are not evidence of audible
