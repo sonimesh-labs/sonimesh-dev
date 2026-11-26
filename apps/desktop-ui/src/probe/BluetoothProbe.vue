@@ -416,6 +416,8 @@ async function playLoopbackTestTone() {
   try {
     await window.__TAURI__.core.invoke('loopback_test_tone', { endpointId })
     loopbackToneMessage.value = 'Test tone finished.'
+    loopbackRequest++
+    clearTimeout(loopbackTimer)
     void pollLoopback()
   } catch (cause) {
     loopbackError.value = String(cause)

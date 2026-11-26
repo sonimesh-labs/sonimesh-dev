@@ -1174,6 +1174,28 @@ it('plays a short tone on the monitored endpoint and refreshes its meter', async
   wrapper.unmount()
 })
 
+it('keeps a single meter polling loop after repeated test tones', async () => {
+  vi.useFakeTimers()
+  const invoke = vi.fn((command: string) => {
+    if (command === 'bluetooth_status') return Promise.resolve('idle')
+    if (command === 'loopback_endpoints') return Promise.resolve([{ id: 'default-endpoint', name: 'Default speakers', isDefault: true }])
+    if (command === 'loopback_status') return Promise.resolve({ running: true, endpointId: 'default-endpoint', endpointName: 'Default speakers', sampleRate: 48000, channels: 2, samples: 10, peak: 0, error: null })
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  for (let count = 0; count < 2; count++) {
+    await wrapper.findAll('button').find(button => button.text() === 'Play test tone')!.trigger('click')
+    await flushPromises()
+  }
+  const statusCalls = () => invoke.mock.calls.filter(([command]) => command === 'loopback_status').length
+  const before = statusCalls()
+  await vi.advanceTimersByTimeAsync(2000)
+  expect(statusCalls() - before).toBe(2)
+  wrapper.unmount()
+})
+
 it('keeps the output monitor running until its test tone finishes', async () => {
   let finishTone!: () => void
   let running = false
