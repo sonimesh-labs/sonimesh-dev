@@ -59,8 +59,38 @@ it('shows a failed output switch and allows the selected endpoint to be retried'
   await wrapper.findAll('button').find(button => button.text() === 'Switch PCM check to selected output')!.trigger('click')
   await flushPromises()
   expect(wrapper.text()).toContain('Endpoint unavailable')
+  expect(wrapper.text()).toContain('Previous output monitoring could not be restored')
+  expect(invoke).toHaveBeenCalledWith('loopback_start', { endpointId: 'old' })
   expect(wrapper.findAll('button').find(button => button.text() === 'Start PCM check')!.attributes('disabled')).toBeUndefined()
   expect((wrapper.get('#loopback-endpoint').element as HTMLSelectElement).value).toBe('new')
+  expect(invoke).not.toHaveBeenCalledWith('bluetooth_disconnect')
+  wrapper.unmount()
+})
+
+it('restores the previous output when a switch fails and keeps the new selection for retry', async () => {
+  const old = { running: true, endpointId: 'old', endpointName: 'Speakers', sampleRate: 48000, channels: 2, samples: 100, peak: 0.2, runPeak: 0.2, error: null }
+  const restarted = { ...old, samples: 0, peak: 0, runPeak: 0 }
+  sessionStorage.setItem('sonimesh.bluetoothProbe.combinedMonitorOwned', 'true')
+  const invoke = vi.fn((command: string, args?: { endpointId?: string }) => {
+    if (command === 'bluetooth_status') return Promise.resolve('open')
+    if (command === 'bluetooth_candidates') return Promise.resolve({ generation: 1, names: [], capability: 'SystemRouted' })
+    if (command === 'loopback_endpoints') return Promise.resolve([{ id: 'old', name: 'Speakers', isDefault: true }, { id: 'new', name: 'Headphones', isDefault: false }])
+    if (command === 'loopback_status') return Promise.resolve(old)
+    if (command === 'loopback_stop') return Promise.resolve({ ...old, running: false })
+    if (command === 'loopback_start') return args?.endpointId === 'new' ? Promise.reject(new Error('Endpoint unavailable')) : Promise.resolve(restarted)
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  await wrapper.get('#loopback-endpoint').setValue('new')
+  await wrapper.findAll('button').find(button => button.text() === 'Switch PCM check to selected output')!.trigger('click')
+  await flushPromises()
+  expect(invoke).toHaveBeenCalledWith('loopback_start', { endpointId: 'old' })
+  expect(wrapper.text()).toContain('Previous output monitoring resumed on Speakers')
+  expect((wrapper.get('#loopback-endpoint').element as HTMLSelectElement).value).toBe('new')
+  expect(wrapper.findAll('button').find(button => button.text() === 'Switch PCM check to selected output')!.attributes('disabled')).toBeUndefined()
+  expect(sessionStorage.getItem('sonimesh.bluetoothProbe.combinedMonitorOwned')).toBe('true')
   expect(invoke).not.toHaveBeenCalledWith('bluetooth_disconnect')
   wrapper.unmount()
 })

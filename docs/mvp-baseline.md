@@ -140,6 +140,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   combined-action monitor; if Windows closes an open connection while the probe
   is closed or open, it re-enters phone-initiated wait while preserving that
   monitor. This does not automatically reopen the system connection.
+  When a monitored output switch fails to start the selected endpoint, the probe
+  attempts to resume monitoring the previous endpoint and keeps the selected
+  endpoint available for another attempt.
   On 2026-11-26, a Windows endpoint ID could
   be re-resolved and selected default and non-default endpoint loopback streams
   started and stopped. A combined Bluetooth-wait and default-output-loopback

@@ -479,6 +479,7 @@ async function stopCombinedMonitor() {
 async function switchLoopbackEndpoint() {
   if (!window.__TAURI__ || !loopback.value?.running || !loopbackEndpointId.value || loopbackBusy.value) return
   const endpointId = loopbackEndpointId.value
+  const previousEndpointId = loopback.value.endpointId
   loopbackRequest++
   clearTimeout(loopbackTimer)
   loopbackBusy.value = true
@@ -486,8 +487,11 @@ async function switchLoopbackEndpoint() {
   loopbackStatusError.value = null
   loopbackToneMessage.value = null
   loopbackSwitch = (async () => {
+    let stopped = false
     try {
       loopback.value = await window.__TAURI__!.core.invoke<LoopbackSnapshot>('loopback_stop')
+      if (loopback.value.running) throw new Error('Windows output monitoring did not stop.')
+      stopped = true
       loopbackStartedAt = undefined
       loopbackNoSamplesLong.value = false
       const result = await window.__TAURI__!.core.invoke<LoopbackSnapshot>('loopback_start', { endpointId })
@@ -497,7 +501,20 @@ async function switchLoopbackEndpoint() {
       loopbackStartedAt = Date.now()
       void pollLoopback()
     } catch (cause) {
-      loopbackError.value = String(cause)
+      let detail = String(cause)
+      if (stopped && previousEndpointId) {
+        try {
+          const restored = await window.__TAURI__!.core.invoke<LoopbackSnapshot>('loopback_start', { endpointId: previousEndpointId })
+          if (!restored.running) throw new Error('Windows output monitoring did not restart.')
+          loopback.value = restored
+          loopbackStartedAt = Date.now()
+          loopbackNoSamplesLong.value = false
+          detail += ` Previous output monitoring resumed on ${restored.endpointName}.`
+        } catch (restoreCause) {
+          detail += ` Previous output monitoring could not be restored: ${String(restoreCause)}`
+        }
+      }
+      loopbackError.value = detail
       if (loopback.value?.running) void pollLoopback()
       else rememberCombinedMonitorOwnership(false)
     }
