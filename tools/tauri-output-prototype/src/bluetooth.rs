@@ -25,6 +25,38 @@ pub enum PlaybackState {
     Open,
 }
 
+#[cfg(test)]
+mod capability_tests {
+    use super::{Candidates, PlaybackCapability};
+
+    #[test]
+    fn candidates_serialize_capability_names_and_shape() {
+        for (capability, expected) in [
+            (
+                PlaybackCapability::ApplicationPcmSource,
+                "ApplicationPcmSource",
+            ),
+            (PlaybackCapability::SystemRouted, "SystemRouted"),
+            (PlaybackCapability::Unsupported, "Unsupported"),
+        ] {
+            let candidates = Candidates {
+                generation: 7,
+                names: vec!["Headset".into()],
+                capability,
+            };
+            let value = serde_json::to_value(candidates).unwrap();
+            assert_eq!(
+                value,
+                serde_json::json!({
+                    "generation": 7,
+                    "names": ["Headset"],
+                    "capability": expected,
+                })
+            );
+        }
+    }
+}
+
 #[cfg(windows)]
 mod platform {
     use super::{Candidates, PlaybackCapability, PlaybackState};
