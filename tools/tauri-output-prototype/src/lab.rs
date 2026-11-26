@@ -30,6 +30,21 @@ pub struct LabSnapshot {
     pub media_port: Option<u16>,
     pub control_port: Option<u16>,
     pub settings: Option<LabSettings>,
+    pub output_id: Option<String>,
+    pub output_switch: Option<OutputSwitch>,
+    #[serde(skip)]
+    pending_output: Option<Option<String>>,
+    #[serde(skip)]
+    next_output_request: u64,
+    #[serde(skip)]
+    output_session: Option<u64>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OutputSwitch {
+    id: String,
+    status: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -93,6 +108,11 @@ impl Default for LabSnapshot {
             media_port: None,
             control_port: None,
             settings: None,
+            output_id: None,
+            output_switch: None,
+            pending_output: None,
+            next_output_request: 0,
+            output_session: None,
         }
     }
 }
@@ -248,6 +268,11 @@ impl Lab {
                 startup_buffer_ms,
                 adaptive,
             }),
+            output_id: output_id.map(str::to_owned),
+            output_switch: None,
+            pending_output: None,
+            next_output_request: 0,
+            output_session: None,
         };
         Ok(self.snapshot.clone())
     }
@@ -267,6 +292,7 @@ impl Lab {
                     self.snapshot.volume = None;
                     self.snapshot.muted = None;
                     self.snapshot.session_active = false;
+                    cancel_output_switch(&mut self.snapshot);
                     self.snapshot.media_port = None;
                     self.snapshot.control_port = None;
                     self.snapshot.signal = None;
@@ -303,6 +329,7 @@ impl Lab {
         self.snapshot.volume = None;
         self.snapshot.muted = None;
         self.snapshot.session_active = false;
+        cancel_output_switch(&mut self.snapshot);
         self.snapshot.media_port = None;
         self.snapshot.control_port = None;
         self.snapshot.signal = None;
@@ -329,7 +356,12 @@ impl Lab {
             let Some(line) = line else { break };
             record_event(&mut self.snapshot, &line.text);
             let valid_signal = self.snapshot.session_active && parse_signal(&line.text).is_some();
+            let was_active = self.snapshot.session_active;
             update_snapshot(&mut self.snapshot, &line.text);
+            update_output_switch(&mut self.snapshot, &line.text);
+            if was_active && !self.snapshot.session_active {
+                cancel_output_switch(&mut self.snapshot);
+            }
             if valid_signal {
                 self.signal_received_at = Some(line.received_at);
             } else if self.snapshot.signal.is_none() {
@@ -354,6 +386,113 @@ impl Lab {
             .write_all(command.as_bytes())
             .map_err(|_| "Could not send audio control.")
     }
+
+    pub fn switch_output(&mut self, output_id: Option<&str>) -> Result<LabSnapshot, &'static str> {
+        self.refresh();
+        if !self.snapshot.session_active {
+            return Err("An active audio session is required to switch output.");
+        }
+        let session = self
+            .snapshot
+            .output_session
+            .ok_or("Output switching is unavailable for this session.")?;
+        if self.snapshot.pending_output.is_some() {
+            return Err("An output switch is already pending.");
+        }
+        let bytes = output_id.unwrap_or("").as_bytes();
+        if bytes.len() > 4096 || output_id.is_some_and(str::is_empty) {
+            return Err("Invalid output selection.");
+        }
+        let child = self.child.as_mut().ok_or("Listener is not running.")?;
+        let input = child
+            .stdin
+            .as_mut()
+            .ok_or("Audio control is unavailable.")?;
+        let id = self.snapshot.next_output_request.wrapping_add(1);
+        writeln!(input, "output {id} {session} {}", bytes.len())
+            .and_then(|()| input.write_all(bytes))
+            .map_err(|_| "Could not send output selection.")?;
+        self.snapshot.next_output_request = id;
+        self.snapshot.pending_output = Some(output_id.map(str::to_owned));
+        self.snapshot.output_switch = Some(OutputSwitch {
+            id: id.to_string(),
+            status: "pending".into(),
+        });
+        Ok(self.snapshot.clone())
+    }
+}
+
+fn cancel_output_switch(snapshot: &mut LabSnapshot) {
+    snapshot.output_session = None;
+    if snapshot.pending_output.take().is_some()
+        && let Some(result) = &mut snapshot.output_switch
+    {
+        result.status = "stale".into();
+    }
+}
+
+fn update_output_switch(snapshot: &mut LabSnapshot, line: &str) {
+    let words = line.split_whitespace().collect::<Vec<_>>();
+    if let ["OUTPUT-SESSION", session] = words.as_slice() {
+        snapshot.output_session = session.parse::<u64>().ok().filter(|id| *id != 0);
+        return;
+    }
+    let ["OUTPUT-SWITCH", id, status] = words.as_slice() else {
+        return;
+    };
+    let Some(result) = &mut snapshot.output_switch else {
+        return;
+    };
+    if result.id != *id
+        || result.status != "pending"
+        || !matches!(
+            *status,
+            "applied" | "unavailable" | "restored" | "recovering" | "stale" | "inactive" | "busy"
+        )
+    {
+        return;
+    }
+    if let Some(target) = snapshot.pending_output.take() {
+        if *status == "applied" {
+            snapshot.output_id = target;
+        }
+        result.status = (*status).into();
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn output_switch_acknowledges_only_the_current_request() {
+    let mut snapshot = LabSnapshot {
+        output_id: Some("old".into()),
+        output_switch: Some(OutputSwitch {
+            id: "2".into(),
+            status: "pending".into(),
+        }),
+        pending_output: Some(Some("new".into())),
+        ..LabSnapshot::default()
+    };
+    update_output_switch(&mut snapshot, "OUTPUT-SWITCH 1 applied");
+    assert_eq!(snapshot.output_id.as_deref(), Some("old"));
+    update_output_switch(&mut snapshot, "OUTPUT-SWITCH 2 restored");
+    assert_eq!(snapshot.output_id.as_deref(), Some("old"));
+    assert_eq!(snapshot.output_switch.as_ref().unwrap().status, "restored");
+    snapshot.output_switch = Some(OutputSwitch {
+        id: "3".into(),
+        status: "pending".into(),
+    });
+    snapshot.pending_output = Some(None);
+    cancel_output_switch(&mut snapshot);
+    update_output_switch(&mut snapshot, "OUTPUT-SWITCH 3 applied");
+    assert_eq!(snapshot.output_id.as_deref(), Some("old"));
+    assert_eq!(snapshot.output_switch.as_ref().unwrap().status, "stale");
+    snapshot.output_switch = Some(OutputSwitch {
+        id: "4".into(),
+        status: "pending".into(),
+    });
+    snapshot.pending_output = Some(None);
+    update_output_switch(&mut snapshot, "OUTPUT-SWITCH 4 applied");
+    assert!(snapshot.output_id.is_none());
 }
 
 impl Drop for Lab {

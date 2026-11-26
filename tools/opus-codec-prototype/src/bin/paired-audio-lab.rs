@@ -993,6 +993,27 @@ struct PlaybackState {
     follow_default: bool,
     next_check: Option<Instant>,
     worker: Option<default_output_probe::DefaultOutputProbe>,
+    requests_tx: std::sync::mpsc::SyncSender<lab_control::OutputRequest>,
+    requests: std::sync::mpsc::Receiver<lab_control::OutputRequest>,
+    active_session: Arc<std::sync::atomic::AtomicU64>,
+    next_session: u64,
+    pending_switch: Option<lab_control::OutputRequest>,
+}
+
+#[cfg(all(windows, feature = "playback"))]
+impl PlaybackState {
+    fn cancel_switch(&mut self) {
+        self.active_session.store(0, Ordering::Release);
+        if let Some(request) = self.pending_switch.take() {
+            lab_println!("OUTPUT-SWITCH {} stale", request.id);
+        }
+        while let Ok(request) = self.requests.try_recv() {
+            lab_println!("OUTPUT-SWITCH {} stale", request.id);
+        }
+        if let Some(worker) = &mut self.worker {
+            worker.invalidate();
+        }
+    }
 }
 
 #[cfg(not(all(windows, feature = "playback")))]
@@ -1024,8 +1045,12 @@ fn current_output_selection(
 impl Playback {
     fn start_controls(&self) -> LabResult<()> {
         #[cfg(all(windows, feature = "playback"))]
-        if let Some(PlaybackState { controller, .. }) = &self.0 {
-            lab_control::start_console_control(controller.gain_handle());
+        if let Some(state) = &self.0 {
+            lab_control::start_console_control_with_output(
+                state.controller.gain_handle(),
+                state.requests_tx.clone(),
+                Arc::clone(&state.active_session),
+            );
             return Ok(());
         }
         Err("console control requires Windows playback".into())
@@ -1033,8 +1058,9 @@ impl Playback {
 
     fn abort(&mut self) {
         #[cfg(all(windows, feature = "playback"))]
-        if let Some(PlaybackState { controller, .. }) = &mut self.0 {
-            controller.stop();
+        if let Some(state) = &mut self.0 {
+            state.cancel_switch();
+            state.controller.stop();
         }
     }
 
@@ -1101,12 +1127,18 @@ impl Playback {
                         current_output_selection(&sonimesh_platform::CpalOutput::new(), target)
                     },
                 )?);
+                let (requests_tx, requests) = std::sync::mpsc::sync_channel(1);
                 return Ok(Self(Some(PlaybackState {
                     controller,
                     selection,
                     follow_default,
                     next_check: None,
                     worker,
+                    requests_tx,
+                    requests,
+                    active_session: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+                    next_session: 0,
+                    pending_switch: None,
                 })));
             }
             Ok(Self(None))
@@ -1128,6 +1160,9 @@ impl Playback {
             follow_default,
             next_check,
             worker,
+            active_session,
+            next_session,
+            ..
         }) = &mut self.0
         {
             if let Some(worker) = worker {
@@ -1140,6 +1175,9 @@ impl Playback {
             };
             *selection = current_output_selection(controller.output(), device)?;
             controller.start(selection.clone(), receiver)?;
+            *next_session = next_session.wrapping_add(1).max(1);
+            active_session.store(*next_session, Ordering::Release);
+            lab_println!("OUTPUT-SESSION {}", *next_session);
             *next_check = Some(Instant::now() + Duration::from_secs(1));
             return Ok(true);
         }
@@ -1147,6 +1185,7 @@ impl Playback {
         Ok(false)
     }
 
+    #[allow(clippy::too_many_lines)] // Coordinates requests and recovery for one lab output.
     fn monitor(&mut self, receiver: &mut Receiver, retry_at: &mut Option<Instant>) -> bool {
         #[cfg(all(windows, feature = "playback"))]
         if let Some(PlaybackState {
@@ -1155,10 +1194,69 @@ impl Playback {
             follow_default,
             next_check,
             worker,
+            requests,
+            active_session,
+            pending_switch,
+            ..
         }) = &mut self.0
         {
             let now = Instant::now();
             let worker = worker.as_mut().expect("playback has a probe worker");
+            if let Ok(request) = requests.try_recv() {
+                if request.session != active_session.load(Ordering::Acquire) {
+                    lab_println!("OUTPUT-SWITCH {} stale", request.id);
+                } else if pending_switch.is_some() || retry_at.is_some() {
+                    lab_println!("OUTPUT-SWITCH {} busy", request.id);
+                } else {
+                    worker.set_target(
+                        request
+                            .device
+                            .as_ref()
+                            .map(|id| sonimesh_platform::OutputDeviceId::new(id.clone()))
+                            .as_ref(),
+                    );
+                    worker.invalidate();
+                    *pending_switch = Some(request);
+                }
+            }
+            if pending_switch.is_some() {
+                if let Some(health) = controller.monitor() {
+                    let request = pending_switch.take().expect("pending switch");
+                    worker.invalidate();
+                    *retry_at = Some(now + Duration::from_secs(1));
+                    eprintln!("Output failed ({health:?}); retrying the selected device.");
+                    lab_println!("OUTPUT-SWITCH {} recovering", request.id);
+                    return true;
+                }
+                if pending_switch
+                    .as_ref()
+                    .is_some_and(|request| now >= request.deadline)
+                {
+                    let request = pending_switch.take().expect("pending switch");
+                    worker.invalidate();
+                    lab_println!("OUTPUT-SWITCH {} unavailable", request.id);
+                    return false;
+                }
+                match worker.poll_result() {
+                    None => return false,
+                    Some(Err(_)) => {
+                        let request = pending_switch.take().expect("pending switch");
+                        lab_println!("OUTPUT-SWITCH {} unavailable", request.id);
+                    }
+                    Some(Ok(target)) => {
+                        let request = pending_switch.take().expect("pending switch");
+                        let follow = request.device.is_none();
+                        let (outcome, interrupted) =
+                            switch_output(controller, receiver, selection, target, retry_at, now);
+                        if outcome == "applied" {
+                            *follow_default = follow;
+                            *next_check = Some(now + Duration::from_secs(1));
+                        }
+                        lab_println!("OUTPUT-SWITCH {} {}", request.id, outcome);
+                        return interrupted;
+                    }
+                }
+            }
             worker.set_target(if *follow_default {
                 None
             } else {
@@ -1181,9 +1279,18 @@ impl Playback {
                     |_| worker.poll(),
                 );
             }
-            return maintain_output(controller, receiver, retry_at, now, |_| {
-                worker.poll().map(Some)
+            let mut resolved = None;
+            let interrupted = maintain_output(controller, receiver, retry_at, now, |_| {
+                let current = worker.poll()?;
+                resolved = Some(current.clone());
+                Ok(Some(current))
             });
+            if retry_at.is_none() {
+                if let Some(current) = resolved {
+                    *selection = current;
+                }
+            }
+            return interrupted;
         }
         let _ = (receiver, retry_at);
         false
@@ -1191,9 +1298,10 @@ impl Playback {
 
     fn stop(&mut self) -> LabResult<()> {
         #[cfg(all(windows, feature = "playback"))]
-        if let Some(PlaybackState { controller, .. }) = &mut self.0 {
-            let status = controller.output().status();
-            controller.stop();
+        if let Some(state) = &mut self.0 {
+            state.cancel_switch();
+            let status = state.controller.output().status();
+            state.controller.stop();
             lab_println!(
                 "RESULT output callbacks {} stream errors {} oversized {}",
                 status.callback_count,
@@ -1209,6 +1317,30 @@ impl Playback {
         }
         Ok(())
     }
+}
+
+#[cfg(any(test, all(windows, feature = "playback")))]
+fn switch_output<O: sonimesh_platform::AudioOutput>(
+    output: &mut sonimesh_app::ReceiverOutputController<O, SAMPLES>,
+    receiver: &mut Receiver,
+    selection: &mut sonimesh_app::OutputSelection,
+    target: sonimesh_app::OutputSelection,
+    retry_at: &mut Option<Instant>,
+    now: Instant,
+) -> (&'static str, bool) {
+    if target == *selection {
+        return ("applied", false);
+    }
+    output.stop();
+    if output.start(target.clone(), receiver).is_ok() {
+        *selection = target;
+        return ("applied", true);
+    }
+    if output.recover(receiver).is_ok() {
+        return ("restored", true);
+    }
+    *retry_at = Some(now + Duration::from_secs(1));
+    ("recovering", true)
 }
 
 #[cfg(any(test, all(windows, feature = "playback")))]
@@ -2544,6 +2676,67 @@ mod tests {
             output.output().selection.as_ref().unwrap().0.as_ref(),
             Some(&OutputDeviceId::new("final-default"))
         );
+        let manual_target = sonimesh_app::OutputSelection {
+            device: Some(OutputDeviceId::new("manual-output")),
+            config: OutputConfig {
+                sample_rate_hz: 48_000,
+                ..selected.config
+            },
+        };
+        output.output_mut().reject_sample_rate = Some(48_000);
+        assert_eq!(
+            switch_output(
+                &mut output,
+                &mut receiver,
+                &mut selected,
+                manual_target.clone(),
+                &mut retry,
+                now
+            ),
+            ("restored", true)
+        );
+        assert_eq!(selected, final_selection);
+        assert_eq!(output.gain_handle().snapshot(), controls.snapshot());
+        output.output_mut().reject_sample_rate = None;
+        assert_eq!(
+            switch_output(
+                &mut output,
+                &mut receiver,
+                &mut selected,
+                manual_target.clone(),
+                &mut retry,
+                now
+            ),
+            ("applied", true)
+        );
+        assert_eq!(selected, manual_target);
+        assert_eq!(
+            switch_output(
+                &mut output,
+                &mut receiver,
+                &mut selected,
+                manual_target,
+                &mut retry,
+                now
+            ),
+            ("applied", false)
+        );
+        output.output_mut().reject_start = true;
+        assert_eq!(
+            switch_output(
+                &mut output,
+                &mut receiver,
+                &mut selected,
+                final_selection.clone(),
+                &mut retry,
+                now
+            ),
+            ("recovering", true)
+        );
+        assert_eq!(selected.device, Some(OutputDeviceId::new("manual-output")));
+        assert!(retry.is_some());
+        output.output_mut().reject_start = false;
+        output.recover(&mut receiver).unwrap();
         lab_control::apply_control("mute", &controls).unwrap();
         output.stop();
         output

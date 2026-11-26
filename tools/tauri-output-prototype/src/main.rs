@@ -479,6 +479,30 @@ fn control_lab(
         .control(volume, muted)
 }
 
+#[tauri::command]
+fn switch_lab_output(
+    state: tauri::State<'_, ProbeState>,
+    generation: u32,
+    index: Option<usize>,
+) -> Result<lab::LabSnapshot, String> {
+    let output = match index {
+        Some(index) => Some(
+            state
+                .snapshot
+                .lock()
+                .map_err(|_| "Could not select output.")?
+                .select(generation, index)?,
+        ),
+        None => None,
+    };
+    state
+        .lab
+        .lock()
+        .map_err(|_| "Could not access listener state.")?
+        .switch_output(output.as_ref().map(|id| id.as_str()))
+        .map_err(str::to_owned)
+}
+
 #[derive(Default)]
 struct SelectionSnapshot {
     generation: u32,
@@ -903,7 +927,8 @@ fn main() {
             loopback_status,
             loopback_stop,
             stop_lab,
-            control_lab
+            control_lab,
+            switch_lab_output
         ])
         .build(tauri::generate_context!())
         .expect("desktop output probe failed")

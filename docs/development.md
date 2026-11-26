@@ -1394,6 +1394,14 @@ for the window session and restores it after a refresh when that same endpoint i
 uniquely available again, including after reopening the view. Otherwise choose
 another output or the system default; an unavailable selection does not silently
 become the system default. The ID is not written into the saved lab settings.
+During an active session, choose another output (or the system default) and use
+**Apply output**. The probe waits for the listener's result; a failed query leaves
+the current output running, and a failed start attempts to restore it. The output
+selector is disabled while the request is pending. Use **Refresh devices** to
+update the list, including after reopening a running listener. If the session
+ends, start a new session before trying again. A 2026-11-26 Windows process test
+confirmed default-output and unavailable-device responses during a paired session;
+it did not establish a physical endpoint switch or audible continuity.
 On 2026-11-25, an API 37 x86_64 emulator used a port 47612 invitation and ADB
 reverse to pair, capture a test tone, send UDP audio, and stop; the software
 listener verified the decoded signal. A separate manual-SPKI run on the same

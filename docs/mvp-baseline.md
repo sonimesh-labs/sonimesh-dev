@@ -359,6 +359,12 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   the worker resolved the local Windows default endpoint in a separate test; an
   API 37 emulator paired-capture run also passed with Windows playback and the
   background checks enabled. It did not switch the default or establish audibility.
+  During an active session, the desktop probe can request a selected endpoint or
+  the system default without restarting the listener. It shows pending, applied,
+  and failed results from the child; a failed start attempts the previous output.
+  A Windows process test exercised a default-output request and an unavailable
+  endpoint while paired; software tests cover rollback and gain/mute retention.
+  The process test did not switch between physical endpoints or establish audibility.
   Physical device removal and audible continuity across switches remain unverified.
   The probe retains the latest 32 bounded lifecycle events for the current
   listener snapshot. Session evidence copy/share includes those events, and

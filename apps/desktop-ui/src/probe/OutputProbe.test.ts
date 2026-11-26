@@ -32,6 +32,47 @@ function mountStoppedProbe() {
 }
 
 describe('desktop output probe', () => {
+  it('waits for the listener to confirm a running output switch', async () => {
+    vi.useFakeTimers()
+    const devices = [
+      { id: 'a', label: 'Speakers', sampleRateHz: 48000, channels: 2, isDefault: true },
+      { id: 'b', label: 'Headphones', sampleRateHz: 48000, channels: 2, isDefault: false },
+    ]
+    let current = { running: true, sessionActive: true, status: 'Session active', invitation: null, metrics: null, volume: 50, muted: false, outputId: 'a', outputSwitch: null as { id: string; status: string } | null }
+    let requestId = 0
+    const invoke = vi.fn((command: string) => {
+      if (command === 'probe_outputs') return Promise.resolve({ generation: 1, devices })
+      if (command === 'switch_lab_output') {
+        current = { ...current, outputSwitch: { id: String(++requestId), status: 'pending' } }
+      }
+      return Promise.resolve(current)
+    })
+    window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+    const wrapper = mount(OutputProbe)
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'Refresh devices')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Current output: Speakers')
+    await wrapper.get('#lab-output').setValue('1')
+    await wrapper.findAll('button').find(button => button.text() === 'Apply output')!.trigger('click')
+    await flushPromises()
+    expect(invoke).toHaveBeenCalledWith('switch_lab_output', { generation: 1, index: 1 })
+    expect(wrapper.text()).toContain('Switching output')
+    expect(wrapper.text()).toContain('Current output: Speakers')
+    expect(wrapper.get('#lab-output').attributes('disabled')).toBeDefined()
+    current = { ...current, outputId: 'b', outputSwitch: { id: '1', status: 'applied' } }
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(wrapper.text()).toContain('Current output: Headphones')
+    expect(wrapper.text()).toContain('Output switched.')
+    await wrapper.get('#lab-output').setValue('')
+    await wrapper.findAll('button').find(button => button.text() === 'Apply output')!.trigger('click')
+    await flushPromises()
+    current = { ...current, outputSwitch: { id: '2', status: 'restored' } }
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(wrapper.text()).toContain('previous output was restored')
+    expect(wrapper.text()).toContain('Current output: Headphones')
+    wrapper.unmount()
+  })
   it('restores and resets the saved control port', async () => {
     localStorage.setItem('sonimesh.outputProbe.labSettings', JSON.stringify({ controlPort: 47612 }))
     const invoke = vi.fn((command: string) => command === 'probe_outputs'
@@ -687,7 +728,7 @@ describe('desktop output probe', () => {
     expect(invoke).toHaveBeenCalledWith('start_lab', { host: '127.0.0.1', generation: 4, index: 1, startupBufferMs: 0, adaptive: true, mediaPort: 39093, controlPort: 47610, initialVolume: 100 })
     expect(wrapper.get('#lab-buffer').attributes('disabled')).toBeDefined()
     expect(wrapper.get('#lab-output').attributes('disabled')).toBeDefined()
-    expect(wrapper.get('button').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('button').attributes('disabled')).toBeUndefined()
     await wrapper.findAll('button').find(button => button.text() === 'Stop listener')!.trigger('click')
     await flushPromises()
     await wrapper.get('button').trigger('click')

@@ -42,7 +42,7 @@ interface LabMetrics {
   playout: 'fixed' | 'adaptive' | null
   adaptive: { target: number; min: number; max: number; jitterMs: number; gated: string; forced: string; resets: string } | null
 }
-interface LabSnapshot { running: boolean; sessionActive: boolean; status: string; invitation: string | null; events?: string[]; metrics: LabMetrics | null; signal?: { decoded: number; peak: number | null } | null; signalStale?: boolean; volume: number | null; muted: boolean | null; mediaPort?: number | null; controlPort?: number | null; settings?: { startupBufferMs: number; adaptive: boolean } | null }
+interface LabSnapshot { running: boolean; sessionActive: boolean; status: string; invitation: string | null; events?: string[]; metrics: LabMetrics | null; signal?: { decoded: number; peak: number | null } | null; signalStale?: boolean; volume: number | null; muted: boolean | null; mediaPort?: number | null; controlPort?: number | null; settings?: { startupBufferMs: number; adaptive: boolean } | null; outputId?: string | null; outputSwitch?: { id: string; status: string } | null }
 const lab = ref<LabSnapshot>({ running: false, sessionActive: false, status: 'Checking listener…', invitation: null, metrics: null, volume: null, muted: null })
 const invitationQr = ref<string | null>(null)
 const invitationQrError = ref(false)
@@ -154,6 +154,7 @@ function rememberLabOutputId(id: string | null) {
 }
 
 function onLabOutputChange() {
+  if (lab.value.running) return
   const index = labOutput.value === '' || labOutput.value === 'unavailable' ? -1 : Number(labOutput.value)
   rememberLabOutputId(devices.value[index]?.id ?? null)
 }
@@ -320,6 +321,25 @@ const labBusy = ref(true)
 let labKnown = false
 const restoredLab = ref(false)
 const labError = ref<string | null>(null)
+const switchError = ref<string | null>(null)
+const switchBusy = ref(false)
+const currentOutputLabel = computed(() => {
+  if (lab.value.outputId == null) return 'System default output'
+  const matches = devices.value.flatMap((device, index) => device.id === lab.value.outputId ? [index] : [])
+  return matches.length === 1 ? deviceLabels.value[matches[0]] : 'Selected output unavailable in current list'
+})
+const switchMessage = computed(() => {
+  switch (lab.value.outputSwitch?.status) {
+    case 'pending': return 'Switching output…'
+    case 'applied': return 'Output switched.'
+    case 'unavailable': return 'Could not inspect the requested output; the current output remains active.'
+    case 'restored': return 'Could not start the requested output; the previous output was restored.'
+    case 'recovering': return 'Could not start the requested output; output recovery is in progress.'
+    case 'stale': case 'inactive': return 'The session ended before the switch completed.'
+    case 'busy': return 'Output is busy. Try again.'
+    default: return null
+  }
+})
 const controlError = ref<string | null>(null)
 const controlBusy = ref(false)
 const volumeSelection = ref<number | null>(null)
@@ -434,6 +454,7 @@ async function pollLab(retryUnknown = false) {
     const wasSessionActive = lab.value.sessionActive
     const hadMetrics = lab.value.metrics !== null
     lab.value = snapshot
+    if (snapshot.outputSwitch?.status === 'applied') rememberLabOutputId(snapshot.outputId ?? null)
     if (!snapshot.running) resetDirectPort()
     if ((snapshot.sessionActive && !wasSessionActive) || (snapshot.metrics === null && hadMetrics)) {
       labEvidenceMessage.value = null
@@ -448,6 +469,10 @@ async function pollLab(retryUnknown = false) {
       labKnown = true
       restoredLab.value = snapshot.running
       labBusy.value = false
+      if (snapshot.running) {
+        rememberLabOutputId(snapshot.outputId ?? null)
+        labOutput.value = snapshot.outputId == null ? '' : 'unavailable'
+      }
       if (!snapshot.running) void refresh()
     } else if (wasRunning && !snapshot.running) {
       restoredLab.value = false
@@ -459,6 +484,26 @@ async function pollLab(retryUnknown = false) {
       labError.value = 'Could not check the listener. Retrying…'
       if (retryUnknown || !labKnown || lab.value.running) timer = setTimeout(() => pollLab(retryUnknown), 1000)
     }
+  }
+}
+
+async function switchLabOutput() {
+  if (!window.__TAURI__ || switchBusy.value || busy.value || !lab.value.sessionActive || labOutput.value === 'unavailable') return
+  switchBusy.value = true
+  switchError.value = null
+  const request = ++labRequest
+  clearTimeout(timer)
+  try {
+    const snapshot = await window.__TAURI__.core.invoke<LabSnapshot>('switch_lab_output', {
+      generation: generation.value,
+      index: labOutput.value === '' ? null : Number(labOutput.value),
+    })
+    if (!disposed && request === labRequest) lab.value = snapshot
+  } catch (cause) {
+    if (!disposed && request === labRequest) switchError.value = typeof cause === 'string' ? cause : 'Could not request an output switch.'
+  } finally {
+    switchBusy.value = false
+    if (!disposed && request === labRequest && lab.value.running) timer = setTimeout(pollLab, 1000)
   }
 }
 
@@ -532,17 +577,18 @@ const playbackErrors = new Set([
 ])
 
 async function refresh() {
-  if (busy.value || lab.value.running || labBusy.value) return
+  if (busy.value || labBusy.value || switchBusy.value || lab.value.outputSwitch?.status === 'pending') return
   busy.value = true
   error.value = null
   message.value = null
   try {
     if (!window.__TAURI__) throw new Error('Desktop probe unavailable')
     const selectedIndex = loaded.value && labOutput.value !== '' && labOutput.value !== 'unavailable' ? Number(labOutput.value) : null
+    const selectedId = selectedIndex === null ? null : devices.value[selectedIndex]?.id
     const snapshot = await window.__TAURI__.core.invoke<{ generation: number; devices: OutputDevice[]; selectedIndex?: number | null }>('probe_outputs', { generation: generation.value, selectedIndex })
     generation.value = snapshot.generation
     devices.value = snapshot.devices
-    const rememberedId = labOutput.value === '' ? null : rememberedLabOutputId
+    const rememberedId = lab.value.running && selectedIndex !== null ? selectedId : labOutput.value === '' ? null : rememberedLabOutputId
     if (rememberedId) {
       const matches = snapshot.devices.flatMap((device, index) => device.id === rememberedId ? [index] : [])
       const match = matches.length === 1 ? matches[0] : undefined
@@ -620,7 +666,7 @@ onBeforeUnmount(() => { disposed = true; labRequest++; suggestRequest++; clearTi
           <p class="preview-note">Inspect outputs and play a short test tone.</p>
         </div>
       </div>
-      <button type="button" class="preview-action" :disabled="busy || playing !== null || lab.running || labBusy" @click="refresh">
+      <button type="button" class="preview-action" :disabled="busy || playing !== null || labBusy || switchBusy || lab.outputSwitch?.status === 'pending'" @click="refresh">
         {{ busy ? 'Inspecting…' : 'Refresh devices' }}
       </button>
       <p v-if="error" class="command-error" role="alert">{{ error }}</p>
@@ -644,16 +690,20 @@ onBeforeUnmount(() => { disposed = true; labRequest++; suggestRequest++; clearTi
       <p class="eyebrow">Controlled network experiment</p>
       <h2 id="lab-title">Paired audio lab</h2>
       <p class="preview-note">Uses a public test invitation. Use only on a controlled network; this is not product pairing.</p>
-      <p v-if="restoredLab" class="preview-note">Listener settings below apply to the next start; the running listener may use different settings.</p>
+      <p v-if="restoredLab" class="preview-note">Other listener settings below apply to the next start; the running listener may use different settings.</p>
       <p v-if="lab.running && lab.mediaPort != null" class="preview-note">Running listener UDP port: {{ lab.mediaPort }}</p>
       <p v-if="lab.settings" class="preview-note">{{ lab.running ? 'Running listener' : 'Last listener' }} launch settings: {{ lab.settings.startupBufferMs }} ms startup buffer, {{ lab.settings.adaptive ? 'adaptive' : 'fixed' }} playout.</p>
       <label for="lab-output">Playback output</label>
-      <select id="lab-output" v-model="labOutput" :disabled="lab.running || labBusy || busy" @change="onLabOutputChange">
+      <select id="lab-output" v-model="labOutput" :disabled="labBusy || busy || switchBusy || lab.outputSwitch?.status === 'pending' || (lab.running && !lab.sessionActive)" @change="onLabOutputChange">
         <option value="">System default output</option>
         <option v-if="labOutput === 'unavailable'" value="unavailable" disabled>Previously selected output unavailable</option>
         <option v-for="(device, index) in devices" :key="index" :value="String(index)" :disabled="device.sampleRateHz === null">{{ deviceLabels[index] }}{{ device.isDefault ? ' (default)' : '' }}</option>
       </select>
-      <p v-if="labOutput === 'unavailable'" role="status">Select an available output before starting the listener.</p>
+      <p v-if="lab.running" class="preview-note">Current output: {{ currentOutputLabel }}</p>
+      <button v-if="lab.running" type="button" class="preview-action" :disabled="!lab.sessionActive || labBusy || busy || switchBusy || lab.outputSwitch?.status === 'pending' || labOutput === 'unavailable'" @click="switchLabOutput">Apply output</button>
+      <p v-if="lab.running && switchMessage" role="status">{{ switchMessage }}</p>
+      <p v-if="switchError" class="command-error" role="alert">{{ switchError }}</p>
+      <p v-if="labOutput === 'unavailable'" role="status">Select an available output {{ lab.running ? 'before applying a switch' : 'before starting the listener' }}.</p>
       <label for="lab-host">Desktop address for Android control</label>
       <input id="lab-host" v-model="labHost" :disabled="lab.running || labBusy" autocomplete="off" />
       <p class="preview-note">For ADB reverse use 127.0.0.1 here; enter the UDP address separately in Android (typically 10.0.2.2 for an emulator).</p>

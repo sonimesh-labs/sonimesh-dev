@@ -43,16 +43,23 @@ fn send(stream: &mut impl Write, envelope: &Envelope) {
 
 #[test]
 fn executable_pairs_and_receives_both_frame_durations() {
-    exercise_listener(&[10, 20], false);
+    exercise_listener(&[10, 20], false, false);
 }
 
 #[test]
 fn executable_detects_probe_after_protected_udp_and_decode() {
-    exercise_listener(&[20], true);
+    exercise_listener(&[20], true, false);
+}
+
+#[cfg(all(windows, feature = "playback"))]
+#[test]
+#[ignore = "requires a Windows output device"]
+fn executable_acknowledges_output_switches_during_a_session() {
+    exercise_listener(&[20], false, true);
 }
 
 #[allow(clippy::too_many_lines)] // Keep the pairing and media exchange in one visible scenario.
-fn exercise_listener(durations: &[u32], check_probe: bool) {
+fn exercise_listener(durations: &[u32], check_probe: bool, playback_control: bool) {
     for &duration in durations {
         let tcp = TcpListener::bind("127.0.0.1:0").unwrap();
         let control_port = tcp.local_addr().unwrap().port();
@@ -74,6 +81,9 @@ fn exercise_listener(durations: &[u32], check_probe: bool) {
         ]);
         if check_probe {
             command.arg("--check-probe");
+        }
+        if playback_control {
+            command.args(["--play", "--control"]).stdin(Stdio::piped());
         }
         let mut child = Listener(
             command
@@ -177,6 +187,52 @@ fn exercise_listener(durations: &[u32], check_probe: bool) {
         assert!(
             matches!(reply(&mut channel).payload, Some(envelope::Payload::StreamStatus(status)) if status.state == StreamState::Streaming as i32)
         );
+        if playback_control {
+            let session = loop {
+                let line = receiver
+                    .recv_timeout(Duration::from_secs(10))
+                    .expect("output session");
+                if let Some(session) = line.strip_prefix("OUTPUT-SESSION ") {
+                    break session.parse::<u64>().unwrap();
+                }
+            };
+            let input = child.0.stdin.as_mut().unwrap();
+            writeln!(input, "output 9 {} 0", session + 1).unwrap();
+            input.flush().unwrap();
+            loop {
+                let line = receiver
+                    .recv_timeout(Duration::from_secs(10))
+                    .expect("stale acknowledgement");
+                if line.starts_with("OUTPUT-SWITCH 9 ") {
+                    assert_eq!(line, "OUTPUT-SWITCH 9 inactive");
+                    break;
+                }
+            }
+            let input = child.0.stdin.as_mut().unwrap();
+            writeln!(input, "output 1 {session} 0").unwrap();
+            input.flush().unwrap();
+            loop {
+                let line = receiver
+                    .recv_timeout(Duration::from_secs(10))
+                    .expect("switch acknowledgement");
+                if line.starts_with("OUTPUT-SWITCH 1 ") {
+                    assert_eq!(line, "OUTPUT-SWITCH 1 applied");
+                    break;
+                }
+            }
+            let input = child.0.stdin.as_mut().unwrap();
+            write!(input, "output 2 {session} 7\ninvalid").unwrap();
+            input.flush().unwrap();
+            loop {
+                let line = receiver
+                    .recv_timeout(Duration::from_secs(12))
+                    .expect("failed switch acknowledgement");
+                if line.starts_with("OUTPUT-SWITCH 2 ") {
+                    assert_eq!(line, "OUTPUT-SWITCH 2 unavailable");
+                    break;
+                }
+            }
+        }
         let context = MediaKeyContext::new(7, 1, 0, MediaDirection::AndroidToDesktop).unwrap();
         let mut sender = MediaSessionSender::bind(
             "127.0.0.1:0".parse().unwrap(),
