@@ -133,7 +133,7 @@ impl std::error::Error for UntrustedControlError {
 /// Result of one non-blocking control frame write.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UntrustedControlWrite {
-    /// The complete frame was accepted by the operating system.
+    /// The complete frame was accepted and flushed by the underlying stream.
     Complete,
     /// The frame remains buffered and requires another flush.
     Pending,
@@ -223,7 +223,7 @@ impl<S: Read + Write> UntrustedControlStream<S> {
         if self.terminated {
             return Ok(UntrustedControlWrite::Closed);
         }
-        if self.write_offset < self.write_len {
+        if self.write_len != 0 {
             return Err(UntrustedControlError::WritePending);
         }
 
@@ -251,8 +251,12 @@ impl<S: Read + Write> UntrustedControlStream<S> {
         if self.terminated {
             return Ok(UntrustedControlWrite::Closed);
         }
-        if self.write_offset == self.write_len {
+        if self.write_len == 0 {
             return Ok(UntrustedControlWrite::Complete);
+        }
+
+        if self.write_offset == self.write_len {
+            return self.flush_transport();
         }
 
         match self
@@ -271,9 +275,7 @@ impl<S: Read + Write> UntrustedControlStream<S> {
                 }
                 self.write_offset += written;
                 if self.write_offset == self.write_len {
-                    self.write_len = 0;
-                    self.write_offset = 0;
-                    Ok(UntrustedControlWrite::Complete)
+                    self.flush_transport()
                 } else {
                     Ok(UntrustedControlWrite::Pending)
                 }
@@ -282,6 +284,25 @@ impl<S: Read + Write> UntrustedControlStream<S> {
                 Ok(UntrustedControlWrite::Pending)
             }
             Err(error) if error.kind() == io::ErrorKind::Interrupted => {
+                Ok(UntrustedControlWrite::Pending)
+            }
+            Err(error) => self.io_failure(error),
+        }
+    }
+
+    fn flush_transport(&mut self) -> Result<UntrustedControlWrite, UntrustedControlError> {
+        match self.stream.flush() {
+            Ok(()) => {
+                self.write_len = 0;
+                self.write_offset = 0;
+                Ok(UntrustedControlWrite::Complete)
+            }
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
+                ) =>
+            {
                 Ok(UntrustedControlWrite::Pending)
             }
             Err(error) => self.io_failure(error),
@@ -553,6 +574,68 @@ mod debug_tests {
         assert_eq!(
             format!("{error:?}"),
             format!("InvalidWriteLength {{ written: {written}, expected: {expected} }}")
+        );
+    }
+
+    struct BufferedWriter {
+        bytes: Vec<u8>,
+        flushes: usize,
+    }
+
+    impl io::Read for BufferedWriter {
+        fn read(&mut self, _buffer: &mut [u8]) -> io::Result<usize> {
+            Err(io::ErrorKind::WouldBlock.into())
+        }
+    }
+
+    impl io::Write for BufferedWriter {
+        fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+            self.bytes.extend_from_slice(buffer);
+            Ok(buffer.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            self.flushes += 1;
+            if self.flushes == 1 {
+                Err(io::ErrorKind::WouldBlock.into())
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    #[test]
+    fn accepted_frame_remains_pending_until_transport_flushes() {
+        let envelope = Envelope {
+            protocol_version: 1,
+            request_id: 1,
+            payload: Some(envelope::Payload::Hello(Hello {
+                supported_versions: vec![1],
+                capabilities: vec![],
+                display_name: String::new(),
+            })),
+        };
+        let mut stream = super::UntrustedControlStream::from_io(BufferedWriter {
+            bytes: Vec::new(),
+            flushes: 0,
+        });
+        assert_eq!(
+            stream.send(&envelope).unwrap(),
+            super::UntrustedControlWrite::Pending
+        );
+        assert!(matches!(
+            stream.send(&envelope),
+            Err(UntrustedControlError::WritePending)
+        ));
+        assert_eq!(
+            stream.flush_write().unwrap(),
+            super::UntrustedControlWrite::Complete
+        );
+        let writer = stream.into_inner();
+        assert_eq!(writer.flushes, 2);
+        assert_eq!(
+            writer.bytes,
+            sonimesh_protocol::encode_control_frame(&envelope).unwrap()
         );
     }
 

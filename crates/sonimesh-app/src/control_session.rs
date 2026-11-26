@@ -74,6 +74,9 @@ where
     ///
     /// The pairing exporter is no longer needed after proof verification and is
     /// dropped here through its zeroizing wrapper.
+    ///
+    /// Call [`TrustedControlChannel::set_nonblocking`] first when polling on a
+    /// scheduling thread, or use [`Self::try_from_trusted_channel`].
     #[must_use]
     pub fn from_trusted_channel(
         receiver: &'a mut DesktopReceiverOwner<
@@ -89,6 +92,27 @@ where
     ) -> Self {
         let (channel, _exporter) = trusted.into_parts();
         Self::new(receiver, session, channel)
+    }
+
+    /// Builds a control session with a non-blocking trusted socket.
+    ///
+    /// # Errors
+    ///
+    /// Returns the socket error if non-blocking mode cannot be enabled.
+    pub fn try_from_trusted_channel(
+        receiver: &'a mut DesktopReceiverOwner<
+            O,
+            P,
+            SLOTS,
+            OUTPUT_SAMPLES_PER_BLOCK,
+            MAX_SOURCES,
+            PCM_SAMPLES_PER_BLOCK,
+        >,
+        session: ControlSessionToken,
+        trusted: TrustedControlChannel,
+    ) -> std::io::Result<Self> {
+        trusted.set_nonblocking()?;
+        Ok(Self::from_trusted_channel(receiver, session, trusted))
     }
 }
 

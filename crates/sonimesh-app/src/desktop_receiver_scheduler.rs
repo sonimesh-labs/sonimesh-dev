@@ -81,6 +81,8 @@ pub enum ScheduledPlayoutError<DecoderError> {
 pub enum DesktopReceiverSchedulerError {
     /// A control channel is already attached to this scheduler.
     ControlAlreadyAttached,
+    /// The trusted channel could not be configured for non-blocking I/O.
+    Socket(std::io::ErrorKind),
 }
 
 impl core::fmt::Display for DesktopReceiverSchedulerError {
@@ -89,6 +91,7 @@ impl core::fmt::Display for DesktopReceiverSchedulerError {
             Self::ControlAlreadyAttached => {
                 formatter.write_str("desktop receiver already has a control channel")
             }
+            Self::Socket(kind) => write!(formatter, "control socket setup failed: {kind:?}"),
         }
     }
 }
@@ -102,6 +105,8 @@ pub enum DesktopReceiverSchedulerReconnectError {
     ControlAlreadyAttached,
     /// The receiver lifecycle could not return to a fresh ready session.
     Lifecycle(DesktopControlOwnerError),
+    /// The trusted channel could not be configured for non-blocking I/O.
+    Socket(std::io::ErrorKind),
 }
 
 impl core::fmt::Display for DesktopReceiverSchedulerReconnectError {
@@ -113,6 +118,7 @@ impl core::fmt::Display for DesktopReceiverSchedulerReconnectError {
             Self::Lifecycle(error) => {
                 write!(formatter, "desktop receiver reconnect failed: {error}")
             }
+            Self::Socket(kind) => write!(formatter, "control socket setup failed: {kind:?}"),
         }
     }
 }
@@ -120,7 +126,7 @@ impl core::fmt::Display for DesktopReceiverSchedulerReconnectError {
 impl std::error::Error for DesktopReceiverSchedulerReconnectError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::ControlAlreadyAttached => None,
+            Self::ControlAlreadyAttached | Self::Socket(_) => None,
             Self::Lifecycle(error) => Some(error),
         }
     }
@@ -1981,7 +1987,7 @@ where
     /// # Errors
     ///
     /// Returns [`DesktopReceiverSchedulerError::ControlAlreadyAttached`] when
-    /// another channel is active.
+    /// another channel is active, or `Socket` if non-blocking setup fails.
     pub fn attach_trusted_control(
         &mut self,
         session: ControlSessionToken,
@@ -1990,6 +1996,12 @@ where
     where
         S: From<PinnedServerChannel>,
     {
+        if self.control.is_some() {
+            return Err(DesktopReceiverSchedulerError::ControlAlreadyAttached);
+        }
+        trusted
+            .set_nonblocking()
+            .map_err(|error| DesktopReceiverSchedulerError::Socket(error.kind()))?;
         let (channel, _exporter) = trusted.into_parts();
         self.attach_control(session, S::from(channel))
     }
@@ -1999,7 +2011,7 @@ where
     /// # Errors
     ///
     /// Returns an attachment or lifecycle error when the previous transport
-    /// was not retired or the owner cannot complete reconnection.
+    /// was not retired, non-blocking setup fails, or the owner cannot complete reconnection.
     pub fn attach_trusted_reconnected_control(
         &mut self,
         trusted: TrustedControlChannel,
@@ -2007,6 +2019,12 @@ where
     where
         S: From<PinnedServerChannel>,
     {
+        if self.control.is_some() {
+            return Err(DesktopReceiverSchedulerReconnectError::ControlAlreadyAttached);
+        }
+        trusted
+            .set_nonblocking()
+            .map_err(|error| DesktopReceiverSchedulerReconnectError::Socket(error.kind()))?;
         let (channel, _exporter) = trusted.into_parts();
         self.attach_reconnected_control(S::from(channel))
     }

@@ -86,7 +86,9 @@ replies and do not retire the authenticated transport. A successful Hello gets a
 correlated Hello response containing the negotiated version and capabilities.
 Completed duplicate start/stop commands receive correlated status replies;
 pending duplicates receive a retryable error. Received status/error envelopes are
-ignored. The adapter exposes explicit flush/closed states and
+ignored. Trusted channels attached to the polling scheduler are configured for
+non-blocking I/O, and a reply remains pending until the underlying stream flushes.
+The adapter exposes explicit flush/closed states and
 does not enter the realtime output callback. A software integration test drives
 the scheduler over loopback TCP control alongside protected UDP and native
 Opus; its trusted session is supplied by the test, without TLS pairing or a

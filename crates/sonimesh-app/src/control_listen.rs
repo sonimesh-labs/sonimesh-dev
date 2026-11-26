@@ -233,6 +233,15 @@ pub struct TrustedControlChannel {
 }
 
 impl TrustedControlChannel {
+    /// Configures the trusted channel for a non-blocking control polling loop.
+    ///
+    /// # Errors
+    ///
+    /// Returns the socket error if non-blocking mode cannot be enabled.
+    pub fn set_nonblocking(&self) -> std::io::Result<()> {
+        self.channel.sock.set_nonblocking(true)
+    }
+
     /// Hands the framed TLS channel to the ADR 0020 wrapper.
     #[must_use]
     pub fn into_parts(

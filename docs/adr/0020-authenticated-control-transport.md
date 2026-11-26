@@ -115,6 +115,16 @@ lag the caller's millisecond clock by less than one millisecond. The blocking
 `accept_pairing_connection` compatibility helper remains available for one
 connection per call.
 
+The trusted pairing result retains its blocking socket for callers that need
+it. The receiver scheduler and `DesktopControlSession::try_from_trusted_channel`
+instead configure the socket as non-blocking before polling; failure is
+returned before the channel is attached. The existing direct constructor requires
+the caller to configure the socket before using it in a polling loop. Bounded framing also waits for the
+underlying stream's flush after accepting a frame, retrying transient backpressure
+before accepting another reply. This allows a TLS transport to finish writing
+buffered ciphertext even when no further command arrives. Completion means the
+transport accepted the bytes, not that the peer processed them.
+
 ## Security implications
 
 The type-state split makes an unauthenticated control channel unrepresentable:

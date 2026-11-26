@@ -11,20 +11,29 @@
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::sync::Arc;
+use std::sync::mpsc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use rcgen::generate_simple_self_signed;
 use rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
 use zeroize::{Zeroize, Zeroizing};
 
 use sonimesh_app::{
-    ControlListenError, ControlStreamAction, ControlStreamCoordinator, InvitationInputs, PairingId,
+    ControlListenError, ControlSessionPoll, ControlToMixerBridge, DesktopControlOwner,
+    DesktopReceiverOwner, DesktopReceiverScheduler, InvitationInputs, OutputSelection, PairingId,
     PairingInvitationController, PairingListener, PairingQrInvitation, PairingRecordState,
-    PairingSource, SessionState, accept_pairing_stream, begin_from_rendered_payload,
+    PairingSource, ReceiverPcmProducerInstaller, SessionState, accept_pairing_stream,
+    begin_from_rendered_payload,
 };
+use sonimesh_audio::RealtimePcmProducer;
 use sonimesh_network::{
-    UntrustedControlStream, client_config, connect_pinned_client, server_config,
+    PinnedServerChannel, UntrustedControlStream, client_config, connect_pinned_client,
+    server_config,
+};
+use sonimesh_platform::{
+    AudioOutput, OutputConfig, OutputDeviceId, OutputDeviceInfo, OutputError, OutputHealth,
+    RenderSource, SampleFormat,
 };
 use sonimesh_protocol::{
     CONTROL_PROTOCOL_VERSION, Capability, Envelope, Hello, MAX_QR_PAYLOAD_LEN, PROOF_FRAME_LEN,
@@ -36,6 +45,31 @@ const HOST: &str = "localhost";
 const LAB_PAIRING_SECRET: [u8; 32] = [0xC9_u8; 32];
 
 type TestResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
+
+struct TestOutput;
+
+impl AudioOutput for TestOutput {
+    fn devices(&self) -> Result<Vec<OutputDeviceInfo>, OutputError> {
+        Ok(Vec::new())
+    }
+    fn start(
+        &mut self,
+        _: Option<&OutputDeviceId>,
+        _: OutputConfig,
+        _: Box<dyn RenderSource>,
+    ) -> Result<(), OutputError> {
+        Ok(())
+    }
+    fn stop(&mut self) {}
+    fn health(&self) -> OutputHealth {
+        OutputHealth::Healthy
+    }
+}
+
+struct TestPipeline;
+impl ReceiverPcmProducerInstaller<480> for TestPipeline {
+    fn replace_pcm_producer(&mut self, _: RealtimePcmProducer<480>) {}
+}
 
 #[test]
 fn valid_proof_received_after_invitation_expiry_is_rejected() -> TestResult<()> {
@@ -169,6 +203,7 @@ fn the_listener_completes_one_trusted_pairing_exchange() -> TestResult<()> {
     // install the authenticated control session and negotiate hello over
     // the trusted channel's bounded framing.
     let desktop_payload = payload_out.clone();
+    let (idle_tx, idle_rx) = mpsc::channel();
     let desktop = thread::spawn(move || -> TestResult<()> {
         let stream = loop {
             if let Some(stream) = listener.try_accept()? {
@@ -189,33 +224,50 @@ fn the_listener_completes_one_trusted_pairing_exchange() -> TestResult<()> {
                 scanned_payload: &desktop_payload,
             }),
         )?;
-        let (channel, _exporter) = trusted.into_parts();
-        assert_eq!(channel.sock.read_timeout()?, None);
-        assert_eq!(channel.sock.write_timeout()?, None);
+        let bridge = ControlToMixerBridge::<TestOutput, 1, 256>::new(
+            session,
+            &[Capability::FrameDuration20Ms],
+            TestOutput,
+            OutputSelection {
+                device: None,
+                config: OutputConfig {
+                    sample_rate_hz: 48_000,
+                    channels: 2,
+                    sample_format: SampleFormat::Float32,
+                    requested_callback_frames: Some(480),
+                    maximum_callback_frames: 1_024,
+                },
+            },
+            8,
+            8,
+        )?;
+        let owner = DesktopControlOwner::<_, 1, 256, 1>::new(bridge)?;
+        let receiver = DesktopReceiverOwner::<_, _, 1, 256, 1, 480>::new(owner, TestPipeline, None);
+        let mut scheduler: DesktopReceiverScheduler<_, _, 1, 256, 1, 480, PinnedServerChannel> =
+            DesktopReceiverScheduler::new(receiver);
+        let token = scheduler
+            .receiver_mut()
+            .owner_mut()
+            .install_authenticated_control_session()?;
+        scheduler.attach_trusted_control(token, trusted)?;
 
-        // Trust is already established; the framing boundary is the only
-        // remaining wrapper before coordinator envelopes.
-        let mut coordinator =
-            ControlStreamCoordinator::new(session, &[Capability::FrameDuration20Ms])
-                .expect("coordinator constructs after trust");
-        let token = coordinator
-            .install_authenticated_control_session()
-            .expect("a READY session issues its transport token");
-        let mut framed = UntrustedControlStream::from_io(channel);
-
-        // Negotiate hello over the live TLS-framed control channel.
-        let mut poll = framed.poll()?;
-        while matches!(poll, sonimesh_network::UntrustedControlPoll::Empty) {
-            thread::yield_now();
-            poll = framed.poll()?;
-        }
-        let sonimesh_network::UntrustedControlPoll::Frame(hello) = poll else {
-            return Err("desktop did not receive a hello frame".into());
-        };
         assert!(matches!(
-            coordinator.accept(token, &hello),
-            Ok(ControlStreamAction::Negotiated(_))
+            scheduler.poll_control_once()?,
+            Some(ControlSessionPoll::Empty)
         ));
+        idle_tx.send(())?;
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            match scheduler.poll_control_once()? {
+                Some(ControlSessionPoll::Processed {
+                    replied: true,
+                    write: Some(sonimesh_network::UntrustedControlWrite::Complete),
+                }) => break,
+                Some(ControlSessionPoll::Empty) if Instant::now() < deadline => thread::yield_now(),
+                other => return Err(format!("unexpected scheduler result: {other:?}").into()),
+            }
+        }
         Ok(())
     });
 
@@ -249,8 +301,13 @@ fn the_listener_completes_one_trusted_pairing_exchange() -> TestResult<()> {
     assert_eq!(reply.role, PairingRole::DesktopServer);
     assert!(binding.verify_peer_proof(PairingRole::AndroidClient, &reply.proof)?);
 
+    idle_rx.recv_timeout(Duration::from_secs(2))?;
+
     // With trust on both sides, send hello through the bounded framing so
     // the desktop coordinator negotiates it over the live TLS channel.
+    channel
+        .sock
+        .set_read_timeout(Some(Duration::from_secs(2)))?;
     let mut framed = UntrustedControlStream::from_io(channel);
     let hello = Envelope {
         protocol_version: CONTROL_PROTOCOL_VERSION,
@@ -265,6 +322,15 @@ fn the_listener_completes_one_trusted_pairing_exchange() -> TestResult<()> {
         framed.send(&hello)?,
         sonimesh_network::UntrustedControlWrite::Complete
     ));
+    let reply = loop {
+        let poll = framed.poll()?;
+        if !matches!(poll, sonimesh_network::UntrustedControlPoll::Empty) {
+            break poll;
+        }
+    };
+    assert!(
+        matches!(reply, sonimesh_network::UntrustedControlPoll::Frame(ref frame) if frame.request_id == 7 && matches!(frame.payload, Some(envelope::Payload::Hello(_))))
+    );
 
     desktop.join().expect("desktop thread joins")?;
     Ok(())
