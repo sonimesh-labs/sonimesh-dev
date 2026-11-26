@@ -886,16 +886,41 @@ describe('desktop output probe', () => {
     vi.useFakeTimers()
     await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
     await vi.advanceTimersByTimeAsync(1000)
-    expect((wrapper.get('#lab-invitation').element as HTMLTextAreaElement).value).toBe('01ab')
-    await wrapper.get('#lab-direct-port').setValue(true)
-    await flushPromises()
+    expect((wrapper.get('#lab-direct-port').element as HTMLInputElement).checked).toBe(true)
     expect((wrapper.get('#lab-invitation').element as HTMLTextAreaElement).value).toBe('SONIMESH-LAB1:39094:01ab')
     await wrapper.findAll('button').find(button => button.text() === 'Copy invitation')!.trigger('click')
     await wrapper.findAll('button').find(button => button.text() === 'Share invitation')!.trigger('click')
     expect(writeText).toHaveBeenCalledWith('SONIMESH-LAB1:39094:01ab')
     expect(share).toHaveBeenCalledWith({ title: 'SoniMesh lab invitation', text: 'SONIMESH-LAB1:39094:01ab' })
     expect(wrapper.get('.lab-invitation-qr').attributes('src')).toMatch(/^data:image\/svg\+xml,/)
+    await wrapper.get('#lab-direct-port').setValue(false)
+    expect((wrapper.get('#lab-invitation').element as HTMLTextAreaElement).value).toBe('01ab')
+    await wrapper.findAll('button').find(button => button.text() === 'Copy invitation')!.trigger('click')
+    expect(writeText).toHaveBeenLastCalledWith('01ab')
     wrapper.unmount()
+  })
+
+  it('retains relay mode on reopening and resets it after the listener stops', async () => {
+    const running = { running: true, sessionActive: false, status: 'Waiting', invitation: '01ab', metrics: null, volume: null, muted: null, mediaPort: 39094 }
+    const stopped = { ...running, running: false, invitation: null }
+    const invoke = vi.fn((command: string) => {
+      if (command === 'probe_outputs') return Promise.resolve({ generation: 1, devices: [] })
+      return Promise.resolve(command === 'stop_lab' ? stopped : running)
+    })
+    window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+    const first = mount(OutputProbe)
+    await flushPromises()
+    await first.get('#lab-direct-port').setValue(false)
+    first.unmount()
+    const reopened = mount(OutputProbe)
+    await flushPromises()
+    expect((reopened.get('#lab-invitation').element as HTMLTextAreaElement).value).toBe('01ab')
+    await reopened.findAll('button').find(button => button.text() === 'Stop listener')!.trigger('click')
+    await flushPromises()
+    await reopened.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
+    await flushPromises()
+    expect((reopened.get('#lab-invitation').element as HTMLTextAreaElement).value).toBe('SONIMESH-LAB1:39094:01ab')
+    reopened.unmount()
   })
 
   it('copies the displayed invitation for Android setup', async () => {

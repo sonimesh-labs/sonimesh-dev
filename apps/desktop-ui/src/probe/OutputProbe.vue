@@ -47,8 +47,18 @@ const lab = ref<LabSnapshot>({ running: false, sessionActive: false, status: 'Ch
 const invitationQr = ref<string | null>(null)
 const invitationQrError = ref(false)
 const invitationCopyMessage = ref<string | null>(null)
-const includeDirectPort = ref(false)
-watch(() => lab.value.running, (running) => { if (!running) includeDirectPort.value = false })
+const DIRECT_PORT_KEY = 'sonimesh.outputProbe.directPort'
+function savedDirectPort(): boolean {
+  try { return sessionStorage.getItem(DIRECT_PORT_KEY) !== 'false' } catch { return true }
+}
+const includeDirectPort = ref(savedDirectPort())
+function rememberDirectPort() {
+  try { sessionStorage.setItem(DIRECT_PORT_KEY, String(includeDirectPort.value)) } catch { /* Optional window storage. */ }
+}
+function resetDirectPort() {
+  includeDirectPort.value = true
+  try { sessionStorage.removeItem(DIRECT_PORT_KEY) } catch { /* Optional window storage. */ }
+}
 const displayedInvitation = computed(() => {
   const invitation = lab.value.invitation
   if (!invitation) return null
@@ -374,6 +384,7 @@ async function pollLab(retryUnknown = false) {
     const wasSessionActive = lab.value.sessionActive
     const hadMetrics = lab.value.metrics !== null
     lab.value = snapshot
+    if (!snapshot.running) resetDirectPort()
     if ((snapshot.sessionActive && !wasSessionActive) || (snapshot.metrics === null && hadMetrics)) {
       labEvidenceMessage.value = null
     }
@@ -414,6 +425,7 @@ async function toggleLab() {
     lab.value = lab.value.running
       ? await window.__TAURI__.core.invoke<LabSnapshot>('stop_lab')
       : await window.__TAURI__.core.invoke<LabSnapshot>('start_lab', { host: labHost.value.trim(), generation: generation.value, index: labOutput.value === '' ? null : Number(labOutput.value), startupBufferMs: startupBufferMs.value, adaptive: adaptive.value, mediaPort: Number(mediaPort.value), controlPort: Number(controlPort.value) })
+    if (!lab.value.running) resetDirectPort()
     if (starting) labEvidenceMessage.value = null
     restoredLab.value = false
     if (!disposed && lab.value.running) timer = setTimeout(pollLab, 1000)
@@ -681,8 +693,8 @@ onBeforeUnmount(() => { disposed = true; labRequest++; suggestRequest++; clearTi
         <p class="preview-note">The probe retains the latest 32 lifecycle transitions in arrival order.</p>
       </section>
       <template v-if="lab.invitation">
-        <label v-if="lab.running && lab.mediaPort != null"><input id="lab-direct-port" v-model="includeDirectPort" type="checkbox" /> Include UDP port for direct connection</label>
-        <p class="preview-note">For a relay, leave the port out and configure the Android UDP destination separately.</p>
+        <label v-if="lab.running && lab.mediaPort != null"><input id="lab-direct-port" v-model="includeDirectPort" type="checkbox" @change="rememberDirectPort" /> Include UDP port for direct connection</label>
+        <p class="preview-note">For a relay, clear this option and configure the Android UDP destination separately.</p>
         <img v-if="invitationQr" class="lab-invitation-qr" :src="invitationQr" alt="QR code for the public lab invitation" />
         <p v-if="invitationQrError" class="command-error" role="alert">Could not display the QR code. Copy the invitation below instead.</p>
         <label for="lab-invitation">Lab invitation payload</label>
