@@ -42,28 +42,41 @@ fn send(stream: &mut impl Write, envelope: &Envelope) {
 }
 
 #[test]
-#[allow(clippy::too_many_lines)] // Keep the pairing and media exchange in one visible scenario.
 fn executable_pairs_and_receives_both_frame_durations() {
-    for duration in [10_u32, 20] {
+    exercise_listener(&[10, 20], false);
+}
+
+#[test]
+fn executable_detects_probe_after_protected_udp_and_decode() {
+    exercise_listener(&[20], true);
+}
+
+#[allow(clippy::too_many_lines)] // Keep the pairing and media exchange in one visible scenario.
+fn exercise_listener(durations: &[u32], check_probe: bool) {
+    for &duration in durations {
         let tcp = TcpListener::bind("127.0.0.1:0").unwrap();
         let control_port = tcp.local_addr().unwrap().port();
         let udp = UdpSocket::bind("127.0.0.1:0").unwrap();
         let media_port = udp.local_addr().unwrap().port();
         drop((tcp, udp));
 
+        let mut command = Command::new(env!("CARGO_BIN_EXE_paired-audio-lab"));
+        command.args([
+            "--control-port",
+            &control_port.to_string(),
+            "--media-port",
+            &media_port.to_string(),
+            "--startup-buffer-ms",
+            "120",
+            "--adaptive",
+            "--require-tone",
+            "--status",
+        ]);
+        if check_probe {
+            command.arg("--check-probe");
+        }
         let mut child = Listener(
-            Command::new(env!("CARGO_BIN_EXE_paired-audio-lab"))
-                .args([
-                    "--control-port",
-                    &control_port.to_string(),
-                    "--media-port",
-                    &media_port.to_string(),
-                    "--startup-buffer-ms",
-                    "120",
-                    "--adaptive",
-                    "--require-tone",
-                    "--status",
-                ])
+            command
                 .stdout(Stdio::piped())
                 .stderr(Stdio::inherit())
                 .spawn()
@@ -174,13 +187,35 @@ fn executable_pairs_and_receives_both_frame_durations() {
         .unwrap();
         let mut encoder =
             opus::Encoder::new(48_000, opus::Channels::Stereo, opus::Application::Audio).unwrap();
-        let pcm = vec![0.2_f32; duration as usize * 96];
         let mut packet = [0; 1_148];
-        for sequence in 0..13 {
-            let length = encoder.encode_float(&pcm, &mut packet).unwrap();
-            sender
-                .send_frame(0, sequence * u64::from(duration) * 48, &packet[..length])
-                .unwrap();
+        if check_probe {
+            let reference = sonimesh_latency_measurement::test_signal(48_000, 3, 7);
+            let start_time = Instant::now();
+            for (sequence, frame) in reference.chunks_exact(duration as usize * 48).enumerate() {
+                let pcm: Vec<_> = frame
+                    .iter()
+                    .flat_map(|sample| [sample * 0.0915; 2])
+                    .collect();
+                let length = encoder.encode_float(&pcm, &mut packet).unwrap();
+                let deadline =
+                    start_time + Duration::from_millis(sequence as u64 * u64::from(duration));
+                std::thread::sleep(deadline.saturating_duration_since(Instant::now()));
+                sender
+                    .send_frame(
+                        0,
+                        sequence as u64 * u64::from(duration) * 48,
+                        &packet[..length],
+                    )
+                    .unwrap();
+            }
+        } else {
+            let pcm = vec![0.2_f32; duration as usize * 96];
+            for sequence in 0..13 {
+                let length = encoder.encode_float(&pcm, &mut packet).unwrap();
+                sender
+                    .send_frame(0, sequence * u64::from(duration) * 48, &packet[..length])
+                    .unwrap();
+            }
         }
         std::thread::sleep(Duration::from_millis(150));
         let stop = Envelope {
@@ -196,7 +231,7 @@ fn executable_pairs_and_receives_both_frame_durations() {
         assert!(
             matches!(reply(&mut channel).payload, Some(envelope::Payload::StreamStatus(status)) if status.state == StreamState::Stopped as i32)
         );
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(30);
         loop {
             if let Some(status) = child.0.try_wait().unwrap() {
                 assert!(status.success(), "listener failed: {status}");
@@ -204,6 +239,17 @@ fn executable_pairs_and_receives_both_frame_durations() {
             }
             assert!(Instant::now() < deadline, "listener did not exit");
             std::thread::sleep(Duration::from_millis(10));
+        }
+        if check_probe {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                let line = receiver
+                    .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                    .expect("listener did not report probe detection");
+                if line == "RESULT latency probe detected" {
+                    break;
+                }
+            }
         }
     }
 }

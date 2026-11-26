@@ -448,6 +448,10 @@ TLS pairing, negotiated 10/20 ms streams, and protected UDP with native Opus in
 software. It checks process startup and clean completion without a sound device;
 on Windows it failed when the listener was temporarily returned to the smaller
 main-thread stack, reproducing the startup regression as a connection reset.
+It also sends a paced 20 ms native-Opus probe through the real paired listener
+with 120 ms startup buffering and adaptive playout, and requires correlation at
+the decoded output. This host-generated signal does not test Android capture or
+MediaCodec, a physical network, audible playback, or physical latency.
 After the paired lab's empty-stream recovery was moved before packet polling,
 an API 37 x86_64 emulator run of `plays_latency_probe_during_paired_capture`
 used Windows playback and a loopback relay configured with
