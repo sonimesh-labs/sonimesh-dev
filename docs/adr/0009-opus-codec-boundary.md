@@ -69,6 +69,9 @@ The lab also allows live sender gain from 0% to 200%, reset to 100% for each
 capture. It scales PCM before encoding in a reusable buffer and clamps samples
 to PCM16 range; boosts can clip. Mute takes precedence. This changes the sent
 signal, not Android system volume or the desktop's independent receiver gain.
+Gain changes ramp across one 20 ms frame, and the ramp advances only when that
+frame is accepted by the encoder. Mute sends silence immediately; after muted
+audio is accepted, unmuting ramps up from silence over one frame.
 The capture-signal indicator still observes the unscaled input.
 The lab may report a cumulative average of encoded Opus payload bytes divided by
 monotonic elapsed time since capture started, including the bounded encoder tail

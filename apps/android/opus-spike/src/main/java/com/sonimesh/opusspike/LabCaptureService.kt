@@ -38,9 +38,6 @@ import java.util.concurrent.atomic.AtomicLong
 internal fun incrementSaturated(value: Long): Long =
     if (value == Long.MAX_VALUE) value else value + 1
 
-internal fun encoderInput(pcm: ShortArray, silence: ShortArray, muted: Boolean): ShortArray =
-    if (muted) silence else pcm
-
 internal fun foregroundNotificationText(transport: String, connection: String?, muted: Boolean, signal: String): Pair<String, String> {
     val compact = buildList {
         add("Transport: $transport")
@@ -321,13 +318,8 @@ class LabCaptureService : Service() {
                 }
             }
             val pcm = ShortArray(OpusEncoder.FRAME_SAMPLES)
-            val silence = ShortArray(OpusEncoder.FRAME_SAMPLES)
-            val gainedPcm = ShortArray(OpusEncoder.FRAME_SAMPLES)
-            fun currentEncoderInput(): ShortArray {
-                val muted = senderMuted.get()
-                val input = if (muted) pcm else scaleSenderPcm(pcm, gainedPcm, senderGain.get())
-                return encoderInput(input, silence, muted)
-            }
+            val gainProcessor = SenderGainProcessor(OpusEncoder.FRAME_SAMPLES)
+            fun currentEncoderInput(): ShortArray = gainProcessor.prepare(pcm, senderMuted.get(), senderGain.get())
             val signalMonitor = LabSignalMonitor()
             val encoderInputWait = EncoderInputWait()
             val captureReadWait = CaptureReadWait()
@@ -366,7 +358,9 @@ class LabCaptureService : Service() {
                     nowMillis = SystemClock::elapsedRealtime,
                     submitEnd = {
                         if (filled > 0) pcm.fill(0, filled, pcm.size)
-                        activeCodec.tryQueue(if (filled > 0) currentEncoderInput() else null, frame * 20_000, end = true)
+                        val queued = activeCodec.tryQueue(if (filled > 0) currentEncoderInput() else null, frame * 20_000, end = true)
+                        if (queued && filled > 0) gainProcessor.accepted()
+                        queued
                     },
                     pollOutput = ::pollEncodedOutput,
                     idle = { Thread.sleep(2) },
@@ -414,6 +408,7 @@ class LabCaptureService : Service() {
                 var waitingForInput = false
                 if (filled == pcm.size) {
                     if (activeCodec.tryQueue(currentEncoderInput(), frame * 20_000)) {
+                        gainProcessor.accepted()
                         frame++
                         filled = 0
                         encoderInputWait.reset()
