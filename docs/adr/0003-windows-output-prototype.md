@@ -110,13 +110,14 @@ its media session remains connected. Recovery recreates the PCM endpoint outside
 the callback and preserves the local gain and mute settings. In the paired lab,
 the system-default choice re-probes the current default endpoint and its format
 on each recovery attempt. While a stream is healthy, the paired lab also checks
-the default at most once per second on its control thread and recreates output
+the default at most once per second on a background worker and recreates output
 when the endpoint changes. If the new endpoint cannot start, it retries the
 current default; a failed query leaves the existing output running. An explicitly
 selected endpoint remains pinned. This is experimental behavior, not Phase 2
-product output-device switching or physical device-removal evidence. The query
-runs on the lab's media/control loop, so a slow platform probe can delay playout;
-its timing on real devices remains to be measured. If the session
+product output-device switching or physical device-removal evidence. Pending
+background observations are discarded when an output fault or new session makes
+them stale. Initial output setup and output recreation still run on the lab's
+media/control loop and their timing on real devices remains to be measured. If the session
 ends while output recovery is pending, the lab reports an unsuccessful output
 result after acknowledging the stop request.
 If the first output start fails, the paired lab retains the prepared receiver

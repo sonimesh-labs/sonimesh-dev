@@ -4,6 +4,8 @@
 #[allow(dead_code)]
 mod common;
 #[cfg(any(test, all(windows, feature = "playback")))]
+mod default_output_probe;
+#[cfg(any(test, all(windows, feature = "playback")))]
 mod lab_control;
 mod lab_decoder;
 mod lab_probe;
@@ -946,14 +948,16 @@ impl FrameDecoder for ObservedDecoder {
 }
 
 #[cfg(all(windows, feature = "playback"))]
-struct Playback(
-    Option<(
-        sonimesh_app::ReceiverOutputController<sonimesh_platform::CpalOutput, SAMPLES>,
-        sonimesh_app::OutputSelection,
-        bool,
-        Option<Instant>,
-    )>,
-);
+struct Playback(Option<PlaybackState>);
+
+#[cfg(all(windows, feature = "playback"))]
+struct PlaybackState {
+    controller: sonimesh_app::ReceiverOutputController<sonimesh_platform::CpalOutput, SAMPLES>,
+    selection: sonimesh_app::OutputSelection,
+    follow_default: bool,
+    next_check: Option<Instant>,
+    worker: Option<default_output_probe::DefaultOutputProbe>,
+}
 
 #[cfg(not(all(windows, feature = "playback")))]
 struct Playback;
@@ -981,7 +985,7 @@ fn current_default_selection(
 impl Playback {
     fn start_controls(&self) -> LabResult<()> {
         #[cfg(all(windows, feature = "playback"))]
-        if let Some((controller, _, _, _)) = &self.0 {
+        if let Some(PlaybackState { controller, .. }) = &self.0 {
             lab_control::start_console_control(controller.gain_handle());
             return Ok(());
         }
@@ -990,7 +994,7 @@ impl Playback {
 
     fn abort(&mut self) {
         #[cfg(all(windows, feature = "playback"))]
-        if let Some((controller, _, _, _)) = &mut self.0 {
+        if let Some(PlaybackState { controller, .. }) = &mut self.0 {
             controller.stop();
         }
     }
@@ -1047,7 +1051,20 @@ impl Playback {
                         .gain_handle()
                         .set_gain(f32::from(volume) / 100.0)?;
                 }
-                return Ok(Self(Some((controller, selection, follow_default, None))));
+                let worker = if follow_default {
+                    Some(default_output_probe::DefaultOutputProbe::new(|| {
+                        current_default_selection(&sonimesh_platform::CpalOutput::new())
+                    })?)
+                } else {
+                    None
+                };
+                return Ok(Self(Some(PlaybackState {
+                    controller,
+                    selection,
+                    follow_default,
+                    next_check: None,
+                    worker,
+                })));
             }
             Ok(Self(None))
         }
@@ -1062,7 +1079,17 @@ impl Playback {
 
     fn start(&mut self, receiver: &mut Receiver) -> LabResult<bool> {
         #[cfg(all(windows, feature = "playback"))]
-        if let Some((controller, selection, follow_default, next_check)) = &mut self.0 {
+        if let Some(PlaybackState {
+            controller,
+            selection,
+            follow_default,
+            next_check,
+            worker,
+        }) = &mut self.0
+        {
+            if let Some(worker) = worker {
+                worker.invalidate();
+            }
             if *follow_default {
                 *selection = current_default_selection(controller.output())?;
             }
@@ -1076,9 +1103,23 @@ impl Playback {
 
     fn monitor(&mut self, receiver: &mut Receiver, retry_at: &mut Option<Instant>) -> bool {
         #[cfg(all(windows, feature = "playback"))]
-        if let Some((controller, selection, follow_default, next_check)) = &mut self.0 {
+        if let Some(PlaybackState {
+            controller,
+            selection,
+            follow_default,
+            next_check,
+            worker,
+        }) = &mut self.0
+        {
             let now = Instant::now();
             if *follow_default {
+                let worker = worker.as_mut().expect("default output has a probe worker");
+                if retry_at.is_none()
+                    && sonimesh_platform::AudioOutput::health(controller.output())
+                        != sonimesh_platform::OutputHealth::Healthy
+                {
+                    worker.invalidate();
+                }
                 return follow_default_output(
                     controller,
                     receiver,
@@ -1086,7 +1127,7 @@ impl Playback {
                     next_check,
                     retry_at,
                     now,
-                    current_default_selection,
+                    |_| worker.poll(),
                 );
             }
             return maintain_output(controller, receiver, retry_at, now, |_| Ok(None));
@@ -1097,7 +1138,7 @@ impl Playback {
 
     fn stop(&mut self) -> LabResult<()> {
         #[cfg(all(windows, feature = "playback"))]
-        if let Some((controller, _, _, _)) = &mut self.0 {
+        if let Some(PlaybackState { controller, .. }) = &mut self.0 {
             let status = controller.output().status();
             controller.stop();
             lab_println!(
@@ -1160,7 +1201,7 @@ fn follow_default_output<O: sonimesh_platform::AudioOutput>(
     next_check: &mut Option<Instant>,
     retry_at: &mut Option<Instant>,
     now: Instant,
-    resolve: impl Fn(&O) -> Result<sonimesh_app::OutputSelection, String>,
+    mut resolve: impl FnMut(&O) -> Result<sonimesh_app::OutputSelection, String>,
 ) -> bool {
     let mut recovered_selection = None;
     let interrupted = maintain_output(output, receiver, retry_at, now, |backend| {
@@ -1632,6 +1673,28 @@ mod tests {
         AudioOutput, OutputConfig, OutputDeviceId, OutputDeviceInfo, OutputError, OutputHealth,
         RenderSource, SampleFormat,
     };
+
+    #[cfg(all(windows, feature = "playback"))]
+    #[test]
+    #[ignore = "requires a Windows default output device"]
+    fn background_probe_resolves_real_default_output() {
+        let mut worker = default_output_probe::DefaultOutputProbe::new(|| {
+            current_default_selection(&sonimesh_platform::CpalOutput::new())
+        })
+        .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Ok(selection) = worker.poll() {
+                assert!(selection.device.is_some());
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "default output probe did not complete"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
 
     #[test]
     fn stalled_playout_discards_udp_backlog_and_decodes_fresh_audio() {
