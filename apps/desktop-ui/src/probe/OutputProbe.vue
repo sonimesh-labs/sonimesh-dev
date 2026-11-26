@@ -42,7 +42,7 @@ interface LabMetrics {
   playout: 'fixed' | 'adaptive' | null
   adaptive: { target: number; min: number; max: number; jitterMs: number; gated: string; forced: string; resets: string } | null
 }
-interface LabSnapshot { running: boolean; sessionActive: boolean; status: string; invitation: string | null; events?: string[]; metrics: LabMetrics | null; signal?: { decoded: number; peak: number | null } | null; signalStale?: boolean; volume: number | null; muted: boolean | null; mediaPort?: number | null; controlPort?: number | null }
+interface LabSnapshot { running: boolean; sessionActive: boolean; status: string; invitation: string | null; events?: string[]; metrics: LabMetrics | null; signal?: { decoded: number; peak: number | null } | null; signalStale?: boolean; volume: number | null; muted: boolean | null; mediaPort?: number | null; controlPort?: number | null; settings?: { startupBufferMs: number; adaptive: boolean } | null }
 const lab = ref<LabSnapshot>({ running: false, sessionActive: false, status: 'Checking listener…', invitation: null, metrics: null, volume: null, muted: null })
 const invitationQr = ref<string | null>(null)
 const invitationQrError = ref(false)
@@ -219,6 +219,9 @@ function labEvidenceText(): string | null {
     `Status: ${evidenceValue(lab.value.status)}`,
     `Session: ${lab.value.sessionActive ? 'active' : 'last reported'}`,
   ]
+  if (lab.value.settings) {
+    lines.push(`Listener launch settings: ${lab.value.settings.startupBufferMs} ms startup buffer; ${lab.value.settings.adaptive ? 'adaptive' : 'fixed'} playout`)
+  }
   if (signal) {
     lines.push(`Last decoded interval${lab.value.signalStale ? ' (stale: no update for at least 3 seconds)' : ''}: ${signal.decoded} frames${signal.peak === null ? '; no peak' : `; peak ${signal.peak.toFixed(6)}`} (before output gain; excludes concealment)`)
   }
@@ -622,6 +625,7 @@ onBeforeUnmount(() => { disposed = true; labRequest++; suggestRequest++; clearTi
       <p class="preview-note">Uses a public test invitation. Use only on a controlled network; this is not product pairing.</p>
       <p v-if="restoredLab" class="preview-note">Listener settings below apply to the next start; the running listener may use different settings.</p>
       <p v-if="lab.running && lab.mediaPort != null" class="preview-note">Running listener UDP port: {{ lab.mediaPort }}</p>
+      <p v-if="lab.settings" class="preview-note">{{ lab.running ? 'Running listener' : 'Last listener' }} launch settings: {{ lab.settings.startupBufferMs }} ms startup buffer, {{ lab.settings.adaptive ? 'adaptive' : 'fixed' }} playout.</p>
       <label for="lab-output">Playback output</label>
       <select id="lab-output" v-model="labOutput" :disabled="lab.running || labBusy || busy" @change="onLabOutputChange">
         <option value="">System default output</option>

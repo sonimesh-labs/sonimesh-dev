@@ -193,11 +193,14 @@ describe('desktop output probe', () => {
 
   it('restores a running listener and stops it before inspecting outputs', async () => {
     vi.useFakeTimers()
-    localStorage.setItem('sonimesh.outputProbe.labSettings', JSON.stringify({ mediaPort: 39093 }))
+    localStorage.setItem('sonimesh.outputProbe.labSettings', JSON.stringify({ mediaPort: 39093, startupBufferMs: 20, adaptive: false }))
+    const settings = { startupBufferMs: 80, adaptive: true }
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
     const invoke = vi.fn()
-      .mockResolvedValueOnce({ running: true, sessionActive: true, status: 'Session active', invitation: '01ab', metrics: null, volume: 60, muted: false, mediaPort: 39094 })
-      .mockResolvedValueOnce({ running: true, sessionActive: false, status: 'Waiting for Android', invitation: '01ab', metrics: null, volume: 60, muted: false, mediaPort: 39094 })
-      .mockResolvedValueOnce({ running: false, sessionActive: false, status: 'Stopped', invitation: null, metrics: null, volume: null, muted: null })
+      .mockResolvedValueOnce({ running: true, sessionActive: true, status: 'Session active', invitation: '01ab', metrics: null, events: ['started'], volume: 60, muted: false, mediaPort: 39094, settings })
+      .mockResolvedValueOnce({ running: true, sessionActive: false, status: 'Waiting for Android', invitation: '01ab', metrics: null, events: ['started'], volume: 60, muted: false, mediaPort: 39094, settings })
+      .mockResolvedValueOnce({ running: false, sessionActive: false, status: 'Stopped', invitation: null, metrics: null, events: ['started'], volume: null, muted: null, settings })
       .mockResolvedValueOnce({ generation: 1, devices: [] })
     window.__TAURI__ = { core: { invoke } }
     const wrapper = mount(OutputProbe)
@@ -205,6 +208,10 @@ describe('desktop output probe', () => {
     expect(wrapper.text()).toContain('Session active')
     expect(wrapper.text()).toContain('running listener may use different settings')
     expect(wrapper.text()).toContain('Running listener UDP port: 39094')
+    expect(wrapper.text()).toContain('Running listener launch settings: 80 ms startup buffer, adaptive playout.')
+    expect((wrapper.get('#lab-buffer').element as HTMLSelectElement).value).toBe('20')
+    await wrapper.findAll('button').find(button => button.text() === 'Copy session evidence')!.trigger('click')
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining('Listener launch settings: 80 ms startup buffer; adaptive playout'))
     expect((wrapper.get('#lab-media-port').element as HTMLInputElement).value).toBe('39093')
     expect(wrapper.get('#lab-media-port-help').text()).toContain('use the running listener UDP port on Android')
     expect(invoke).not.toHaveBeenCalledWith('probe_outputs', expect.anything())
@@ -214,6 +221,7 @@ describe('desktop output probe', () => {
     await flushPromises()
     expect(invoke).toHaveBeenCalledWith('stop_lab')
     expect(wrapper.text()).not.toContain('Running listener UDP port:')
+    expect(wrapper.text()).toContain('Last listener launch settings: 80 ms startup buffer, adaptive playout.')
     expect(invoke).toHaveBeenCalledWith('probe_outputs', { generation: 0, selectedIndex: null })
     wrapper.unmount()
   })

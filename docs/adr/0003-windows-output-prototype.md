@@ -105,6 +105,9 @@ to 120 ms in 20 ms steps; changing it requires restarting the listener. Zero
 starts playout at the first accepted frame without an additional fixed wait.
 Adaptive playout can still gate decoding. This is an experiment setting, not an
 end-to-end latency measurement.
+The probe retains the requested startup wait and playout mode in its listener
+snapshot, including after exit until the next listener starts. These are launch
+settings, not measurements of the resulting delay.
 The same control-domain pipe carries bounded local gain and mute commands after
 startup. The probe displays values acknowledged by the child; its per-stream
 gain handle retains these values through output recovery and successive sessions.

@@ -29,6 +29,14 @@ pub struct LabSnapshot {
     pub session_active: bool,
     pub media_port: Option<u16>,
     pub control_port: Option<u16>,
+    pub settings: Option<LabSettings>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LabSettings {
+    startup_buffer_ms: u16,
+    adaptive: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -84,6 +92,7 @@ impl Default for LabSnapshot {
             session_active: false,
             media_port: None,
             control_port: None,
+            settings: None,
         }
     }
 }
@@ -235,6 +244,10 @@ impl Lab {
             session_active: false,
             media_port: Some(media_port),
             control_port: Some(control_port),
+            settings: Some(LabSettings {
+                startup_buffer_ms,
+                adaptive,
+            }),
         };
         Ok(self.snapshot.clone())
     }
@@ -1343,6 +1356,13 @@ mod tests {
             .unwrap();
         assert_eq!(started.media_port, Some(39094));
         assert_eq!(started.control_port, Some(47612));
+        assert_eq!(
+            started.settings,
+            Some(LabSettings {
+                startup_buffer_ms: 0,
+                adaptive: false
+            })
+        );
         let deadline = Instant::now() + Duration::from_secs(10);
         let snapshot = loop {
             let snapshot = lab.refresh();
@@ -1357,6 +1377,7 @@ mod tests {
         assert!(snapshot.running, "{}", snapshot.status);
         assert_eq!(snapshot.media_port, Some(39094));
         assert_eq!(snapshot.control_port, Some(47612));
+        assert_eq!(snapshot.settings, started.settings);
         assert_eq!(snapshot.volume, Some(42));
         assert_eq!(snapshot.muted, Some(false));
         assert!(
@@ -1405,6 +1426,7 @@ mod tests {
         let stopped = lab.stop();
         assert!(!stopped.running);
         assert_eq!(stopped.media_port, None);
+        assert_eq!(stopped.settings, started.settings);
         assert!(stopped.invitation.is_none());
         assert!(
             stopped
@@ -1428,6 +1450,13 @@ mod tests {
         assert!(restarted.events.is_empty());
         assert!(restarted.metrics.is_none());
         assert_eq!(restarted.media_port, Some(39093));
+        assert_eq!(
+            restarted.settings,
+            Some(LabSettings {
+                startup_buffer_ms: 60,
+                adaptive: false
+            })
+        );
         let deadline = Instant::now() + Duration::from_secs(10);
         while lab.refresh().running && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(25));
