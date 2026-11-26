@@ -782,6 +782,9 @@ jitter, and output-backend ADRs using measured 10/20 ms and device results.
   lab uses a fixed 16-frame jitter buffer so its 0–120 ms startup options fit
   either duration. The Android lab sender remains fixed at 20 ms; no 10 ms
   Android or physical-network result is claimed.
+  A Windows main-thread stack overflow found during a 20 ms emulator pairing run
+  was resolved by running the listener loop on a 4 MiB stack; the repeated run
+  reached decoded audio and output callbacks. See the development guide for scope.
 - Windows output backend selection, physical device/power lifecycle evidence,
   and latency qualification. The independent direct-WASAPI prototype and
   controlled same-host callback comparison exist, but do not settle a backend;

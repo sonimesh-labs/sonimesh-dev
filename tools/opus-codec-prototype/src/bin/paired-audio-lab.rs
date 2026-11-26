@@ -44,6 +44,7 @@ use zeroize::{Zeroize, Zeroizing};
 const LAB_ID: [u8; 16] = [0x71; 16];
 const LAB_SECRET: [u8; 32] = [0x42; 32];
 type LabResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
+const LISTENER_STACK_BYTES: usize = 4 * 1024 * 1024;
 
 macro_rules! lab_println {
     ($($argument:tt)*) => {{
@@ -53,7 +54,18 @@ macro_rules! lab_println {
 }
 
 fn main() {
-    if let Err(error) = run() {
+    let result = std::thread::Builder::new()
+        .name("paired-audio-lab".into())
+        .stack_size(LISTENER_STACK_BYTES)
+        .spawn(run)
+        .map_err(|error| error.to_string())
+        .and_then(|thread| {
+            thread
+                .join()
+                .map_err(|_| "listener thread panicked".to_owned())?
+                .map_err(|error| error.to_string())
+        });
+    if let Err(error) = result {
         eprintln!("pairing-lab: {error}");
         std::process::exit(1);
     }
@@ -1745,60 +1757,63 @@ mod tests {
             drop(udp_probe);
             let listener = TcpListener::bind("127.0.0.1:0").unwrap();
             let address = listener.local_addr().unwrap();
-            let server = std::thread::spawn(move || {
-                let (socket, _) = listener.accept().unwrap();
-                socket.set_nonblocking(true).unwrap();
-                let mut framed = UntrustedControlStream::from_io(socket);
-                let mut state = SessionState::IDLE;
-                let mut pairing = PairingInvitationController::<1>::new();
-                pairing
-                    .begin(&mut state, PairingId::new([1; 16]), 100, 50, 1)
+            let server = std::thread::Builder::new()
+                .stack_size(LISTENER_STACK_BYTES)
+                .spawn(move || {
+                    let (socket, _) = listener.accept().unwrap();
+                    socket.set_nonblocking(true).unwrap();
+                    let mut framed = UntrustedControlStream::from_io(socket);
+                    let mut state = SessionState::IDLE;
+                    let mut pairing = PairingInvitationController::<1>::new();
+                    pairing
+                        .begin(&mut state, PairingId::new([1; 16]), 100, 50, 1)
+                        .unwrap();
+                    pairing
+                        .verify_proof(&mut state, 101, PairingSource::new([2; 16]), || {
+                            sonimesh_app::PairingProofVerification::Verified
+                        })
+                        .unwrap();
+                    let mut coordinator = ControlStreamCoordinator::new(
+                        state,
+                        &[Capability::FrameDuration10Ms, Capability::FrameDuration20Ms],
+                    )
                     .unwrap();
-                pairing
-                    .verify_proof(&mut state, 101, PairingSource::new([2; 16]), || {
-                        sonimesh_app::PairingProofVerification::Verified
-                    })
-                    .unwrap();
-                let mut coordinator = ControlStreamCoordinator::new(
-                    state,
-                    &[Capability::FrameDuration10Ms, Capability::FrameDuration20Ms],
-                )
+                    let token = coordinator.install_authenticated_control_session().unwrap();
+                    let hello = Envelope {
+                        protocol_version: 1,
+                        request_id: 1,
+                        payload: Some(envelope::Payload::Hello(Hello {
+                            supported_versions: vec![1],
+                            capabilities: vec![
+                                Capability::FrameDuration10Ms as i32,
+                                Capability::FrameDuration20Ms as i32,
+                            ],
+                            display_name: "test".into(),
+                        })),
+                    };
+                    coordinator.accept(token, &hello).unwrap();
+                    let options = Options {
+                        media_port,
+                        startup_buffer: Duration::from_millis(startup_ms),
+                        adaptive,
+                        require_tone: true,
+                        ..Options::default()
+                    };
+                    let mut playback = Playback::prepare(&options).unwrap();
+                    receive_audio(
+                        1,
+                        &mut framed,
+                        &mut coordinator,
+                        token,
+                        SessionSecret::new([7; 32]),
+                        &options,
+                        &mut playback,
+                        &mut 0,
+                        &mut false,
+                        &mut 0,
+                    )
+                })
                 .unwrap();
-                let token = coordinator.install_authenticated_control_session().unwrap();
-                let hello = Envelope {
-                    protocol_version: 1,
-                    request_id: 1,
-                    payload: Some(envelope::Payload::Hello(Hello {
-                        supported_versions: vec![1],
-                        capabilities: vec![
-                            Capability::FrameDuration10Ms as i32,
-                            Capability::FrameDuration20Ms as i32,
-                        ],
-                        display_name: "test".into(),
-                    })),
-                };
-                coordinator.accept(token, &hello).unwrap();
-                let options = Options {
-                    media_port,
-                    startup_buffer: Duration::from_millis(startup_ms),
-                    adaptive,
-                    require_tone: true,
-                    ..Options::default()
-                };
-                let mut playback = Playback::prepare(&options).unwrap();
-                receive_audio(
-                    1,
-                    &mut framed,
-                    &mut coordinator,
-                    token,
-                    SessionSecret::new([7; 32]),
-                    &options,
-                    &mut playback,
-                    &mut 0,
-                    &mut false,
-                    &mut 0,
-                )
-            });
             let mut client = TcpStream::connect(address).unwrap();
             client
                 .set_read_timeout(Some(Duration::from_secs(5)))

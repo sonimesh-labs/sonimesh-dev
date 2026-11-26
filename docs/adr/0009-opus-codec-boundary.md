@@ -132,7 +132,9 @@ The paired desktop lab may accept either negotiated frame duration and schedules
 decode and stop-tail draining at that duration. Its fixed 16-frame jitter storage
 allows the full 0–120 ms lab startup-buffer range for either duration. This also
 changes when a burst overflows that experimental buffer; it is not a latency or
-quality claim. Its Android MediaCodec sender
+quality claim. The standalone listener runs its control and media loop on a
+thread with a 4 MiB stack: the Windows main-thread stack overflowed when preparing
+the larger receiver in an Android emulator pairing test. Its Android MediaCodec sender
 still uses 20 ms; 10 ms interoperability and physical-device behavior require
 separate evidence before adding a sender option.
 An API 37 emulator test observed 20 ms packets from `c2.android.opus.encoder`

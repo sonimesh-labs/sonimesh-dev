@@ -434,6 +434,15 @@ sub-10-ms interval out of 425; the receiver decoded 399 of 426 packets and
 reported 24 PLC decisions, 19 late packets and eight resynchronization drops.
 This uncontrolled run did not reproduce the previous run's clean late/drop
 counters, and does not identify the cause or establish a quality comparison.
+After increasing the paired listener's jitter storage to 16 frames, a 2026-11-26
+API 37 emulator run initially caused a Windows main-thread stack overflow during
+stream startup. With the listener loop moved to a 4 MiB stack, the same paired
+capture test passed using 120 ms startup buffering, adaptive playout, and Windows
+output. It reported 423 accepted and decoded frames, zero late packets, PLC or
+resync drops, 977 output callbacks and no output errors. One of 422 sender
+intervals was under 10 ms. The capture test observed its local probe; the
+listener checked decoded signal, not probe correlation. This single emulator
+run does not demonstrate audible playback, physical WLAN quality, or latency.
 After the paired lab's empty-stream recovery was moved before packet polling,
 an API 37 x86_64 emulator run of `plays_latency_probe_during_paired_capture`
 used Windows playback and a loopback relay configured with
