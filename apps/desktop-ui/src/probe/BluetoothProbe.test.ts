@@ -1074,6 +1074,43 @@ it('starts and stops the Windows system-output PCM check', async () => {
   wrapper.unmount()
 })
 
+it('continues monitoring after a failed stop and allows another stop', async () => {
+  vi.useFakeTimers()
+  let running = true
+  let samples = 0
+  let stopCalls = 0
+  const invoke = vi.fn((command: string) => {
+    if (command === 'bluetooth_status') return Promise.resolve('idle')
+    if (command === 'bluetooth_candidates') return Promise.resolve({ generation: 1, names: [] })
+    if (command === 'loopback_endpoints') return Promise.resolve([{ id: 'output', name: 'Speakers', isDefault: true }])
+    if (command === 'loopback_status') return Promise.resolve({ running, endpointId: 'output', endpointName: 'Speakers', sampleRate: 48000, channels: 2, samples, peak: samples ? 0.04 : 0, error: null })
+    if (command === 'loopback_stop') {
+      if (++stopCalls === 1) return Promise.reject(new Error('Stop failed'))
+      running = false
+      return Promise.resolve({ running, endpointName: 'Speakers', sampleRate: 48000, channels: 2, samples, peak: 0.04, error: null })
+    }
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  await vi.advanceTimersByTimeAsync(5000)
+  expect(wrapper.text()).toContain('No Windows audio samples have arrived yet.')
+  await wrapper.findAll('button').find(button => button.text() === 'Stop PCM check')!.trigger('click')
+  await flushPromises()
+  expect(wrapper.text()).toContain('Stop failed')
+  expect(wrapper.text()).toContain('No Windows audio samples have arrived yet.')
+  samples = 4096
+  await vi.advanceTimersByTimeAsync(1000)
+  expect(wrapper.text()).toContain('4096 samples; recent peak 4.0%')
+  expect(wrapper.text()).not.toContain('No Windows audio samples have arrived yet.')
+  await wrapper.findAll('button').find(button => button.text() === 'Stop PCM check')!.trigger('click')
+  await flushPromises()
+  expect(stopCalls).toBe(2)
+  expect(wrapper.text()).toContain('Start PCM check')
+  wrapper.unmount()
+})
+
 it('shows output endpoint format when Windows provides it', async () => {
   const invoke = vi.fn((command: string) => {
     if (command === 'bluetooth_status') return Promise.resolve('idle')

@@ -407,8 +407,6 @@ async function toggleLoopback() {
   if (loopback.value?.running) {
     loopbackRequest++
     clearTimeout(loopbackTimer)
-    loopbackStartedAt = undefined
-    loopbackNoSamplesLong.value = false
   }
   try {
     const result = loopback.value?.running
@@ -428,6 +426,7 @@ async function toggleLoopback() {
     }
   } catch (cause) {
     loopbackError.value = String(cause)
+    if (loopback.value?.running) void pollLoopback()
   } finally {
     loopbackBusy.value = false
   }
