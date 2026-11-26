@@ -43,12 +43,17 @@ fn send(stream: &mut impl Write, envelope: &Envelope) {
 
 #[test]
 fn executable_pairs_and_receives_both_frame_durations() {
-    exercise_listener(&[10, 20], false, false);
+    exercise_listener(&[10, 20], false, false, false);
 }
 
 #[test]
 fn executable_detects_probe_after_protected_udp_and_decode() {
-    exercise_listener(&[20], true, false);
+    exercise_listener(&[20], true, false, false);
+}
+
+#[test]
+fn executable_receives_media_on_an_automatically_assigned_port() {
+    exercise_listener(&[20], false, false, true);
 }
 
 #[test]
@@ -119,16 +124,21 @@ fn executable_reserves_media_port_until_listener_exits() {
 #[test]
 #[ignore = "requires a Windows output device"]
 fn executable_acknowledges_output_switches_during_a_session() {
-    exercise_listener(&[20], false, true);
+    exercise_listener(&[20], false, true, false);
 }
 
 #[allow(clippy::too_many_lines)] // Keep the pairing and media exchange in one visible scenario.
-fn exercise_listener(durations: &[u32], check_probe: bool, playback_control: bool) {
+fn exercise_listener(
+    durations: &[u32],
+    check_probe: bool,
+    playback_control: bool,
+    automatic_port: bool,
+) {
     for &duration in durations {
         let tcp = TcpListener::bind("127.0.0.1:0").unwrap();
         let control_port = tcp.local_addr().unwrap().port();
         let udp = UdpSocket::bind("127.0.0.1:0").unwrap();
-        let media_port = udp.local_addr().unwrap().port();
+        let mut media_port = udp.local_addr().unwrap().port();
         drop((tcp, udp));
 
         let mut command = Command::new(env!("CARGO_BIN_EXE_paired-audio-lab"));
@@ -136,7 +146,11 @@ fn exercise_listener(durations: &[u32], check_probe: bool, playback_control: boo
             "--control-port",
             &control_port.to_string(),
             "--media-port",
-            &media_port.to_string(),
+            &if automatic_port {
+                "0".to_owned()
+            } else {
+                media_port.to_string()
+            },
             "--startup-buffer-ms",
             "120",
             "--adaptive",
@@ -171,6 +185,15 @@ fn exercise_listener(durations: &[u32], check_probe: bool, playback_control: boo
             let line = receiver
                 .recv_timeout(deadline.saturating_duration_since(Instant::now()))
                 .expect("listener did not become ready");
+            if let Some(port) = line.strip_prefix("MEDIA-PORT ") {
+                let reported = port.parse::<u16>().unwrap();
+                assert_ne!(reported, 0);
+                if automatic_port {
+                    media_port = reported;
+                } else {
+                    assert_eq!(reported, media_port);
+                }
+            }
             if let Some(hex) = line.strip_prefix("SPKI_HEX ") {
                 pin = Some(
                     hex.as_bytes()

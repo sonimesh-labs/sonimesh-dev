@@ -6,6 +6,8 @@
 The paired-audio lab reserves its UDP media socket before announcing listener
 readiness and shares that bound socket with successive receiver pipelines. A
 new media session still creates its own decoder and authenticated ingress state.
+The lab can request an OS-assigned media port and reports the bound port before
+presenting an invitation; the operator must use that port for the actual route.
 This is a lab lifecycle choice, not a production availability guarantee.
 
 ## Context

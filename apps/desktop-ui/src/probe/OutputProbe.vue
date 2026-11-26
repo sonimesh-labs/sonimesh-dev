@@ -75,6 +75,7 @@ function resetDirectPort() {
 const displayedInvitation = computed(() => {
   const invitation = lab.value.invitation
   if (!invitation) return null
+  if (includeDirectPort.value && lab.value.running && lab.value.mediaPort === null) return null
   if (includeDirectPort.value && lab.value.running && lab.value.mediaPort != null) {
     return `SONIMESH-LAB1:${lab.value.mediaPort}:${invitation}`
   }
@@ -187,7 +188,7 @@ function readLabSettings(): StoredLabSettings {
         ? parsed.labOutputDevice as StoredLabSettings['labOutputDevice'] : undefined,
       startupBufferMs: typeof parsed.startupBufferMs === 'number' && startupBufferChoices.includes(parsed.startupBufferMs) ? parsed.startupBufferMs : undefined,
       adaptive: typeof parsed.adaptive === 'boolean' ? parsed.adaptive : undefined,
-      mediaPort: typeof parsed.mediaPort === 'number' && Number.isInteger(parsed.mediaPort) && parsed.mediaPort >= 1 && parsed.mediaPort <= 65535 ? parsed.mediaPort : undefined,
+      mediaPort: typeof parsed.mediaPort === 'number' && Number.isInteger(parsed.mediaPort) && parsed.mediaPort >= 0 && parsed.mediaPort <= 65535 ? parsed.mediaPort : undefined,
       controlPort: typeof parsed.controlPort === 'number' && Number.isInteger(parsed.controlPort) && parsed.controlPort >= 1 && parsed.controlPort <= 65535 ? parsed.controlPort : undefined,
       initialVolume: typeof parsed.initialVolume === 'number' && Number.isInteger(parsed.initialVolume) && parsed.initialVolume >= 0 && parsed.initialVolume <= 100 ? parsed.initialVolume : undefined,
     }
@@ -313,7 +314,7 @@ const labOutput = ref(storedLabSettings.labOutput ?? '')
 const startupBufferMs = ref(storedLabSettings.startupBufferMs ?? 60)
 const adaptive = ref(storedLabSettings.adaptive ?? false)
 const mediaPort = ref(String(storedLabSettings.mediaPort ?? 39093))
-const mediaPortValid = computed(() => /^\d{1,5}$/.test(mediaPort.value) && Number(mediaPort.value) >= 1 && Number(mediaPort.value) <= 65535)
+const mediaPortValid = computed(() => /^\d{1,5}$/.test(mediaPort.value) && Number(mediaPort.value) <= 65535)
 const controlPort = ref(String(storedLabSettings.controlPort ?? 47610))
 const initialVolume = ref(storedLabSettings.initialVolume ?? 100)
 const controlPortValid = computed(() => /^\d{1,5}$/.test(controlPort.value) && Number(controlPort.value) >= 1 && Number(controlPort.value) <= 65535)
@@ -729,8 +730,8 @@ onBeforeUnmount(() => { disposed = true; labRequest++; suggestRequest++; clearTi
       <p v-if="!controlPortValid" class="command-error" role="alert">Enter a control TCP port from 1 to 65535.</p>
       <label for="lab-media-port">Receiver UDP port</label>
       <input id="lab-media-port" v-model="mediaPort" inputmode="numeric" maxlength="5" :disabled="lab.running || labBusy" :aria-invalid="!mediaPortValid" aria-describedby="lab-media-port-help" />
-      <p id="lab-media-port-help" class="preview-note">{{ lab.running ? "For direct capture, use the running listener UDP port on Android. With a relay, use its listen port on Android." : "For direct capture, set Android's Desktop UDP port to this value. With a relay, use its forwarding port here and its listen port on Android." }}</p>
-      <p v-if="!mediaPortValid" class="command-error" role="alert">Enter a receiver UDP port from 1 to 65535.</p>
+      <p id="lab-media-port-help" class="preview-note">{{ lab.running ? "For direct capture, use the running listener UDP port on Android. With a relay, use its listen port on Android." : "Enter 0 to choose an available port automatically. For direct capture, set Android's Desktop UDP port to the running port. With a relay, use the relay's forwarding port here and its listen port on Android." }}</p>
+      <p v-if="!mediaPortValid" class="command-error" role="alert">Enter 0 for automatic selection or a receiver UDP port from 1 to 65535.</p>
       <label for="lab-buffer">Startup buffer</label>
       <select id="lab-buffer" v-model.number="startupBufferMs" :disabled="lab.running || labBusy">
         <option v-for="value in startupBufferChoices" :key="value" :value="value">{{ value }} ms</option>

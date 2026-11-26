@@ -98,6 +98,12 @@ fn run() -> LabResult<()> {
             },
         )?,
     ));
+    options.media_port = options
+        .media_socket
+        .as_ref()
+        .expect("media socket just bound")
+        .local_addr()?
+        .port();
     let address = listener.local_addr()?;
     let key = generate_simple_self_signed(vec!["localhost".to_owned()])?;
     let pin = key.key_pair.public_key_der();
@@ -112,6 +118,7 @@ fn run() -> LabResult<()> {
         write!(pin_hex, "{byte:02x}")?;
     }
     let invitation = render_lab_invitation(pin.as_ref(), options.host, options.control_port)?;
+    lab_println!("MEDIA-PORT {}", options.media_port);
     lab_println!("SPKI_HEX {pin_hex}");
     lab_println!("INVITATION_HEX {}", bytes_to_hex(&invitation));
     lab_println!("LISTENING {address}");
@@ -378,9 +385,6 @@ impl Options {
                 "--media-port" if !media_port_set => {
                     result.media_port =
                         args.next().ok_or("--media-port requires a port")?.parse()?;
-                    if result.media_port == 0 {
-                        return Err("media port must be nonzero".into());
-                    }
                     media_port_set = true;
                 }
                 "--startup-buffer-ms" if !startup_buffer_set => {
@@ -3466,12 +3470,18 @@ mod tests {
         assert!(Options::parse(args(&["--control-port", "1", "--control-port", "2"])).is_err());
         assert_eq!(Options::parse(args(&[])).unwrap().media_port, 39093);
         assert_eq!(
+            Options::parse(args(&["--media-port", "0"]))
+                .unwrap()
+                .media_port,
+            0
+        );
+        assert_eq!(
             Options::parse(args(&["--media-port", "39094"]))
                 .unwrap()
                 .media_port,
             39094
         );
-        for value in ["0", "65536", "invalid"] {
+        for value in ["65536", "invalid"] {
             assert!(Options::parse(args(&["--media-port", value])).is_err());
         }
         assert!(Options::parse(args(&["--media-port"])).is_err());

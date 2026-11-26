@@ -168,7 +168,11 @@ cargo run -p opus-codec-prototype --bin paired-audio-lab -- --require-tone
 ~~~
 
 The listener prints `SPKI_HEX` and a complete lab-only `INVITATION_HEX`. In the
-Android lab activity, paste `INVITATION_HEX` into **Lab invitation payload** and
+listener's `--media-port 0` mode, `MEDIA-PORT` reports the selected UDP port;
+the desktop probe can request this mode and includes the port in its direct
+invitation. Manual clients must use that reported port.
+
+In the Android lab activity, paste `INVITATION_HEX` into **Lab invitation payload** and
 tap **Apply invitation payload** to fill the SPKI and paired control address.
 The desktop output probe provides **Copy invitation** and **Share invitation**
 beside the displayed payload. Sharing uses the system share API when available
