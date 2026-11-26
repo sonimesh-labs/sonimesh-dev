@@ -146,7 +146,7 @@ describe('desktop output probe', () => {
     await flushPromises()
     const port = wrapper.get('#lab-control-port')
     const start = wrapper.findAll('button').find(button => button.text() === 'Start listener')!
-    for (const invalid of ['', '0', '65536', '12x']) {
+    for (const invalid of ['', '65536', '12x']) {
       await port.setValue(invalid)
       expect(start.attributes('disabled')).toBeDefined()
       expect(port.attributes('aria-invalid')).toBe('true')
@@ -192,9 +192,9 @@ describe('desktop output probe', () => {
     wrapper.unmount()
   })
 
-  it('uses the assigned UDP port in the invitation after automatic selection', async () => {
+  it('uses automatically assigned ports after listener startup', async () => {
     vi.useFakeTimers()
-    let status = { running: true, sessionActive: false, status: 'Starting', invitation: '01ab', mediaPort: null as number | null }
+    let status = { running: true, sessionActive: false, status: 'Starting', invitation: '01ab', mediaPort: null as number | null, controlPort: null as number | null }
     const invoke = vi.fn((command: string) => {
       if (command === 'probe_outputs') return Promise.resolve({ generation: 1, devices: [] })
       return Promise.resolve(status)
@@ -203,15 +203,18 @@ describe('desktop output probe', () => {
     const wrapper = mountStoppedProbe()
     await flushPromises()
     await wrapper.get('#lab-media-port').setValue('0')
+    await wrapper.get('#lab-control-port').setValue('0')
     expect(JSON.parse(localStorage.getItem('sonimesh.outputProbe.labSettings')!).mediaPort).toBe(0)
+    expect(JSON.parse(localStorage.getItem('sonimesh.outputProbe.labSettings')!).controlPort).toBe(0)
     await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
     await flushPromises()
-    expect(invoke).toHaveBeenCalledWith('start_lab', expect.objectContaining({ mediaPort: 0 }))
+    expect(invoke).toHaveBeenCalledWith('start_lab', expect.objectContaining({ mediaPort: 0, controlPort: 0 }))
     expect((wrapper.get('#lab-invitation').element as HTMLTextAreaElement).value).toBe('')
-    status = { ...status, status: 'Waiting for Android', mediaPort: 54321 }
+    status = { ...status, status: 'Waiting for Android', mediaPort: 54321, controlPort: 54322 }
     await vi.advanceTimersByTimeAsync(1000)
     await flushPromises()
     expect(wrapper.text()).toContain('Running listener UDP port: 54321')
+    expect(wrapper.get('#lab-control-port-help').text()).toContain('Running listener port: 54322')
     expect((wrapper.get('#lab-invitation').element as HTMLTextAreaElement).value).toBe('SONIMESH-LAB1:54321:01ab')
     wrapper.unmount()
   })

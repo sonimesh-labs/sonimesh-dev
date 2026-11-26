@@ -189,7 +189,7 @@ function readLabSettings(): StoredLabSettings {
       startupBufferMs: typeof parsed.startupBufferMs === 'number' && startupBufferChoices.includes(parsed.startupBufferMs) ? parsed.startupBufferMs : undefined,
       adaptive: typeof parsed.adaptive === 'boolean' ? parsed.adaptive : undefined,
       mediaPort: typeof parsed.mediaPort === 'number' && Number.isInteger(parsed.mediaPort) && parsed.mediaPort >= 0 && parsed.mediaPort <= 65535 ? parsed.mediaPort : undefined,
-      controlPort: typeof parsed.controlPort === 'number' && Number.isInteger(parsed.controlPort) && parsed.controlPort >= 1 && parsed.controlPort <= 65535 ? parsed.controlPort : undefined,
+      controlPort: typeof parsed.controlPort === 'number' && Number.isInteger(parsed.controlPort) && parsed.controlPort >= 0 && parsed.controlPort <= 65535 ? parsed.controlPort : undefined,
       initialVolume: typeof parsed.initialVolume === 'number' && Number.isInteger(parsed.initialVolume) && parsed.initialVolume >= 0 && parsed.initialVolume <= 100 ? parsed.initialVolume : undefined,
     }
   } catch {
@@ -317,7 +317,7 @@ const mediaPort = ref(String(storedLabSettings.mediaPort ?? 39093))
 const mediaPortValid = computed(() => /^\d{1,5}$/.test(mediaPort.value) && Number(mediaPort.value) <= 65535)
 const controlPort = ref(String(storedLabSettings.controlPort ?? 47610))
 const initialVolume = ref(storedLabSettings.initialVolume ?? 100)
-const controlPortValid = computed(() => /^\d{1,5}$/.test(controlPort.value) && Number(controlPort.value) >= 1 && Number(controlPort.value) <= 65535)
+const controlPortValid = computed(() => /^\d{1,5}$/.test(controlPort.value) && Number(controlPort.value) <= 65535)
 const labBusy = ref(true)
 let labKnown = false
 const restoredLab = ref(false)
@@ -726,8 +726,8 @@ onBeforeUnmount(() => { disposed = true; labRequest++; suggestRequest++; clearTi
       <p class="preview-note">The suggestion follows the current route to Android; it does not verify connectivity.</p>
       <label for="lab-control-port">Control TCP port</label>
       <input id="lab-control-port" v-model="controlPort" inputmode="numeric" maxlength="5" :disabled="lab.running || labBusy" :aria-invalid="!controlPortValid" aria-describedby="lab-control-port-help" />
-      <p id="lab-control-port-help" class="preview-note">{{ lab.running && lab.controlPort != null ? `Running listener port: ${lab.controlPort}. The invitation includes this port.` : 'The invitation includes this port. For an emulator, configure the matching ADB reverse mapping.' }}</p>
-      <p v-if="!controlPortValid" class="command-error" role="alert">Enter a control TCP port from 1 to 65535.</p>
+      <p id="lab-control-port-help" class="preview-note">{{ lab.running && lab.controlPort != null ? `Running listener port: ${lab.controlPort}. The invitation includes this port.` : 'Enter 0 to choose an available port automatically. For an emulator, configure the matching ADB reverse mapping.' }}</p>
+      <p v-if="!controlPortValid" class="command-error" role="alert">Enter 0 for automatic selection or a control TCP port from 1 to 65535.</p>
       <label for="lab-media-port">Receiver UDP port</label>
       <input id="lab-media-port" v-model="mediaPort" inputmode="numeric" maxlength="5" :disabled="lab.running || labBusy" :aria-invalid="!mediaPortValid" aria-describedby="lab-media-port-help" />
       <p id="lab-media-port-help" class="preview-note">{{ lab.running ? "For direct capture, use the running listener UDP port on Android. With a relay, use its listen port on Android." : "Enter 0 to choose an available port automatically. For direct capture, set Android's Desktop UDP port to the running port. With a relay, use the relay's forwarding port here and its listen port on Android." }}</p>

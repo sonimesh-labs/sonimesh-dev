@@ -105,6 +105,7 @@ fn run() -> LabResult<()> {
         .local_addr()?
         .port();
     let address = listener.local_addr()?;
+    options.control_port = address.port();
     let key = generate_simple_self_signed(vec!["localhost".to_owned()])?;
     let pin = key.key_pair.public_key_der();
     let mut private = Zeroizing::new(key.key_pair.serialize_der());
@@ -118,6 +119,7 @@ fn run() -> LabResult<()> {
         write!(pin_hex, "{byte:02x}")?;
     }
     let invitation = render_lab_invitation(pin.as_ref(), options.host, options.control_port)?;
+    lab_println!("CONTROL-PORT {}", options.control_port);
     lab_println!("MEDIA-PORT {}", options.media_port);
     lab_println!("SPKI_HEX {pin_hex}");
     lab_println!("INVITATION_HEX {}", bytes_to_hex(&invitation));
@@ -377,9 +379,6 @@ impl Options {
                         .next()
                         .ok_or("--control-port requires a port")?
                         .parse()?;
-                    if result.control_port == 0 {
-                        return Err("control port must be nonzero".into());
-                    }
                     control_port_set = true;
                 }
                 "--media-port" if !media_port_set => {
@@ -3463,7 +3462,13 @@ mod tests {
                 .control_port,
             47611
         );
-        for value in ["0", "65536", "invalid"] {
+        assert_eq!(
+            Options::parse(args(&["--control-port", "0"]))
+                .unwrap()
+                .control_port,
+            0
+        );
+        for value in ["65536", "invalid"] {
             assert!(Options::parse(args(&["--control-port", value])).is_err());
         }
         assert!(Options::parse(args(&["--control-port"])).is_err());

@@ -8,6 +8,8 @@ readiness and shares that bound socket with successive receiver pipelines. A
 new media session still creates its own decoder and authenticated ingress state.
 The lab can request an OS-assigned media port and reports the bound port before
 presenting an invitation; the operator must use that port for the actual route.
+It can also request an OS-assigned control port and includes the bound port in
+the lab invitation.
 This is a lab lifecycle choice, not a production availability guarantee.
 
 ## Context

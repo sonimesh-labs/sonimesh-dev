@@ -174,9 +174,6 @@ impl Lab {
         if startup_buffer_ms > 120 || !startup_buffer_ms.is_multiple_of(20) {
             return Err("Startup buffer must be 0 to 120 ms in 20 ms steps.".into());
         }
-        if control_port == 0 {
-            return Err("Control TCP port must be between 1 and 65535.".into());
-        }
         if initial_volume > 100 {
             return Err("Initial volume must be between 0 and 100.".into());
         }
@@ -261,7 +258,7 @@ impl Lab {
             muted: None,
             session_active: false,
             media_port: (media_port != 0).then_some(media_port),
-            control_port: Some(control_port),
+            control_port: (control_port != 0).then_some(control_port),
             settings: Some(LabSettings {
                 startup_buffer_ms,
                 adaptive,
@@ -548,6 +545,10 @@ fn update_snapshot(snapshot: &mut LabSnapshot, line: &str) {
         snapshot.status = CONTROL_PORT_IN_USE.into();
     } else if line == "STARTUP media-port-in-use" {
         snapshot.status = MEDIA_PORT_IN_USE.into();
+    } else if let Some(port) = line.strip_prefix("CONTROL-PORT ") {
+        if let Ok(port @ 1..=u16::MAX) = port.parse::<u16>() {
+            snapshot.control_port = Some(port);
+        }
     } else if let Some(port) = line.strip_prefix("MEDIA-PORT ") {
         if let Ok(port @ 1..=u16::MAX) = port.parse::<u16>() {
             snapshot.media_port = Some(port);
@@ -948,10 +949,6 @@ mod tests {
             );
         }
         assert!(
-            lab.start("127.0.0.1", None, 60, false, 39093, 0, 100)
-                .is_err()
-        );
-        assert!(
             lab.start("127.0.0.1", None, 60, false, 39093, 47610, 101)
                 .is_err()
         );
@@ -971,6 +968,21 @@ mod tests {
         }
         update_snapshot(&mut snapshot, "MEDIA-PORT 54321");
         assert_eq!(snapshot.media_port, Some(54321));
+    }
+
+    #[test]
+    fn accepts_only_a_nonzero_reported_control_port() {
+        let mut snapshot = LabSnapshot::default();
+        for line in [
+            "CONTROL-PORT 0",
+            "CONTROL-PORT 65536",
+            "CONTROL-PORT invalid",
+        ] {
+            update_snapshot(&mut snapshot, line);
+            assert!(snapshot.control_port.is_none());
+        }
+        update_snapshot(&mut snapshot, "CONTROL-PORT 54321");
+        assert_eq!(snapshot.control_port, Some(54321));
     }
 
     #[test]

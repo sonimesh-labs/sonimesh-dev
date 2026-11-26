@@ -399,6 +399,8 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   before an Android device attempts to connect.
   The operator may instead request an OS-assigned UDP port; the listener reports
   the bound port and the probe includes it in the direct-connection invitation.
+  The control TCP port can also be assigned by the OS and is included in the
+  invitation after binding.
   Its fixed startup wait is configurable from 0 to 120 ms for network experiments;
   the desktop probe exposes this setting before listener startup. An opt-in
   experimental Balanced adaptive target gates live playout with bounded waits;

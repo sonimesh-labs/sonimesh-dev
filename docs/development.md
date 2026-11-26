@@ -171,6 +171,9 @@ The listener prints `SPKI_HEX` and a complete lab-only `INVITATION_HEX`. In the
 listener's `--media-port 0` mode, `MEDIA-PORT` reports the selected UDP port;
 the desktop probe can request this mode and includes the port in its direct
 invitation. Manual clients must use that reported port.
+The listener also accepts `--control-port 0` to choose a TCP port; it reports
+`CONTROL-PORT` and includes that port in the invitation. An emulator using ADB
+reverse still needs a matching mapping for the selected port.
 
 In the Android lab activity, paste `INVITATION_HEX` into **Lab invitation payload** and
 tap **Apply invitation payload** to fill the SPKI and paired control address.

@@ -136,7 +136,7 @@ fn exercise_listener(
 ) {
     for &duration in durations {
         let tcp = TcpListener::bind("127.0.0.1:0").unwrap();
-        let control_port = tcp.local_addr().unwrap().port();
+        let mut control_port = tcp.local_addr().unwrap().port();
         let udp = UdpSocket::bind("127.0.0.1:0").unwrap();
         let mut media_port = udp.local_addr().unwrap().port();
         drop((tcp, udp));
@@ -144,7 +144,11 @@ fn exercise_listener(
         let mut command = Command::new(env!("CARGO_BIN_EXE_paired-audio-lab"));
         command.args([
             "--control-port",
-            &control_port.to_string(),
+            &if automatic_port {
+                "0".to_owned()
+            } else {
+                control_port.to_string()
+            },
             "--media-port",
             &if automatic_port {
                 "0".to_owned()
@@ -181,10 +185,32 @@ fn exercise_listener(
         });
         let deadline = Instant::now() + Duration::from_secs(10);
         let mut pin = None;
+        let mut invitation_port = None;
         loop {
             let line = receiver
                 .recv_timeout(deadline.saturating_duration_since(Instant::now()))
                 .expect("listener did not become ready");
+            if let Some(port) = line.strip_prefix("CONTROL-PORT ") {
+                let reported = port.parse::<u16>().unwrap();
+                assert_ne!(reported, 0);
+                if automatic_port {
+                    control_port = reported;
+                } else {
+                    assert_eq!(reported, control_port);
+                }
+            }
+            if let Some(hex) = line.strip_prefix("INVITATION_HEX ") {
+                let bytes = hex
+                    .as_bytes()
+                    .chunks_exact(2)
+                    .map(|pair| u8::from_str_radix(std::str::from_utf8(pair).unwrap(), 16).unwrap())
+                    .collect::<Vec<_>>();
+                invitation_port = Some(
+                    sonimesh_protocol::parse_pairing_qr_payload(&bytes)
+                        .unwrap()
+                        .control_port,
+                );
+            }
             if let Some(port) = line.strip_prefix("MEDIA-PORT ") {
                 let reported = port.parse::<u16>().unwrap();
                 assert_ne!(reported, 0);
@@ -208,6 +234,7 @@ fn exercise_listener(
                 break;
             }
         }
+        assert_eq!(invitation_port, Some(control_port));
         let id = [0x71; 16];
         let socket = TcpStream::connect(("127.0.0.1", control_port)).unwrap();
         socket
