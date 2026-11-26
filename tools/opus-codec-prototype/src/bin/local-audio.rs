@@ -31,7 +31,7 @@ const PACED_FRAMES_PER_SECOND: u32 = 50;
 const MAX_PACED_SECONDS: u32 = 3_600;
 const MAX_CAPTURE_SECONDS: u32 = 30;
 #[cfg(windows)]
-const MAX_CAPTURE_RESAMPLE_SAMPLES: usize = SAMPLES * 3;
+const MAX_CAPTURE_RESAMPLE_SAMPLES: usize = local_audio_capture::BLOCK_SAMPLES * 3;
 const FRAME_INTERVAL: Duration = Duration::from_millis(20);
 const STARTUP_BUFFER: Duration = Duration::from_millis(60);
 type LabResult<T> = Result<T, Box<dyn Error>>;
@@ -351,7 +351,7 @@ fn capture_check(endpoint_id: Option<&str>, seconds: u32) -> LabResult<()> {
     );
     let mut encoder = opus::Encoder::new(48_000, opus::Channels::Stereo, opus::Application::Audio)?;
     let mut pcm = [0.0_f32; SAMPLES];
-    let mut capture_pcm = [0.0_f32; SAMPLES];
+    let mut capture_pcm = vec![0.0_f32; local_audio_capture::BLOCK_SAMPLES].into_boxed_slice();
     let mut packet = [0_u8; 1_148];
     let deadline = Instant::now() + Duration::from_secs(u64::from(seconds));
     let mut sent = 0_u32;
@@ -387,7 +387,7 @@ fn capture_check(endpoint_id: Option<&str>, seconds: u32) -> LabResult<()> {
         } else if samples != SAMPLES {
             return Err("48 kHz loopback produced an incomplete PCM frame".into());
         } else {
-            pcm.copy_from_slice(&capture_pcm);
+            pcm.copy_from_slice(&capture_pcm[..samples]);
         }
         process_capture_frame(
             &pcm,
@@ -733,6 +733,63 @@ mod tests {
             );
             assert!(output.iter().all(|sample| sample.is_finite()));
             assert!(output.iter().any(|sample| sample.abs() > 0.1));
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[allow(clippy::cast_precision_loss)]
+    fn high_rate_capture_blocks_reach_opus_and_software_output() {
+        use super::LabOutput;
+        for rate in [88_200, 96_000, 176_400, 192_000] {
+            let mut resampler = super::CaptureResampler::new(rate).unwrap();
+            let (mut producer, mut consumer) = sonimesh_audio::realtime_pcm_queue::<
+                { super::local_audio_capture::BLOCK_SAMPLES },
+            >(8)
+            .unwrap();
+            let mut captured = vec![0.0_f32; super::local_audio_capture::BLOCK_SAMPLES];
+            let (mut receiver, mut sender, mut output) = super::create_capture_path().unwrap();
+            let mut encoder =
+                opus::Encoder::new(48_000, opus::Channels::Stereo, opus::Application::Audio)
+                    .unwrap();
+            let mut packet = [0_u8; 1_148];
+            let mut pcm = [0.0_f32; super::SAMPLES];
+            let samples_per_block = usize::try_from(rate / 50).unwrap() * 2;
+            let mut sent = 0;
+            for block in 0..50 {
+                let input: Vec<f32> = (0..samples_per_block / 2)
+                    .flat_map(|frame| {
+                        let time = (block * (samples_per_block / 2) + frame) as f32 / rate as f32;
+                        let sample = (std::f32::consts::TAU * 1_000.0 * time).sin() * 0.25;
+                        [sample, sample]
+                    })
+                    .collect();
+                assert_eq!(
+                    producer.push(&input),
+                    sonimesh_audio::RealtimePcmPushOutcome::Inserted
+                );
+                let sonimesh_audio::RealtimePcmPopOutcome::Filled { samples, .. } =
+                    consumer.pop_into(&mut captured)
+                else {
+                    panic!("capture block missing at {rate} Hz");
+                };
+                assert_eq!(samples, samples_per_block);
+                if resampler.push(&captured[..samples], &mut pcm).unwrap() {
+                    super::process_capture_frame(
+                        &pcm,
+                        &mut packet,
+                        &mut encoder,
+                        &mut sender,
+                        &mut receiver,
+                        &mut output,
+                        sent,
+                    )
+                    .unwrap();
+                    sent += 1;
+                }
+            }
+            assert_eq!(sent, 49, "{rate} Hz");
+            output.output_mut().finish().unwrap();
         }
     }
 

@@ -7,11 +7,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::time::Duration;
 
-const BLOCK_SAMPLES: usize = 1_920;
+pub const BLOCK_SAMPLES: usize = 7_680;
 const QUEUE_BLOCKS: usize = 8;
 const CAPTURE_BLOCK_DURATION_MS: u32 = 20;
 const MIN_CAPTURE_RATE_HZ: u32 = 8_000;
-const MAX_CAPTURE_RATE_HZ: u32 = 48_000;
+const MAX_CAPTURE_RATE_HZ: u32 = 192_000;
 
 fn samples_per_capture_block(sample_rate_hz: u32) -> Option<usize> {
     if !(MIN_CAPTURE_RATE_HZ..=MAX_CAPTURE_RATE_HZ).contains(&sample_rate_hz)
@@ -68,7 +68,7 @@ where
     T: SizedSample + Copy + 'static,
     f32: FromSample<T>,
 {
-    let mut block = [0.0_f32; BLOCK_SAMPLES];
+    let mut block = vec![0.0_f32; BLOCK_SAMPLES].into_boxed_slice();
     let mut offset = 0;
     let callback_stats = Arc::clone(&stats);
     Ok(device.build_input_stream(
@@ -188,7 +188,7 @@ impl Capture {
         let sample_rate_hz = supported.sample_rate();
         let Some(samples_per_block) = samples_per_capture_block(sample_rate_hz) else {
             return Err(format!(
-                "selected endpoint uses {sample_rate_hz} Hz; this lab supports 8-48 kHz rates with whole 20 ms blocks"
+                "selected endpoint uses {sample_rate_hz} Hz; this lab supports 8-192 kHz rates with whole 20 ms blocks"
             )
             .into());
         };
@@ -258,14 +258,16 @@ mod tests {
 
     #[test]
     fn capture_rates_fit_the_bounded_stereo_block() {
-        for rate in [8_000, 16_000, 24_000, 32_000, 44_100, 48_000] {
+        for rate in [
+            8_000, 16_000, 24_000, 32_000, 44_100, 48_000, 88_200, 96_000, 176_400, 192_000,
+        ] {
             let samples = samples_per_capture_block(rate).unwrap();
             assert_eq!(samples, usize::try_from(rate / 50).unwrap() * 2);
             assert!(samples <= BLOCK_SAMPLES);
         }
         assert_eq!(samples_per_capture_block(7_950), None);
         assert_eq!(samples_per_capture_block(11_025), None);
-        assert_eq!(samples_per_capture_block(48_050), None);
+        assert_eq!(samples_per_capture_block(192_050), None);
     }
 
     #[test]

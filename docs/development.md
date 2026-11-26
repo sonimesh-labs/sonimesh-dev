@@ -1193,7 +1193,7 @@ sample count, and recent peak. Stop the check when finished. It reports only agg
 the endpoint mix can include audio from other applications and does not identify
 the Bluetooth source. No PCM is retained by the probe.
 The Windows loopback capture lab accepts default endpoint rates from 8 to
-48 kHz when the rate forms an integer 20 ms stereo block; it converts captured
+192 kHz when the rate forms an integer 20 ms stereo block; it converts captured
 audio to the lab's 48 kHz Opus format. This remains system-mix capture and does
 not expose a source-specific Bluetooth PCM stream.
 On 2026-11-26, hardware checks started and stopped loopback on the selected
@@ -1669,12 +1669,13 @@ check the same endpoint. `--capture-check` reads the default endpoint or selecte
 one for at most 30 seconds, then passes
 captured PCM through the same Opus, UDP, decode and software-render check. Start
 non-silent playback on that endpoint first. The endpoint must currently report
-8-48 kHz and form an integer 20 ms stereo block; other rates are rejected.
+8-192 kHz and form an integer 20 ms stereo block; other rates are rejected.
 Rates other than 48 kHz are converted to the lab's 48 kHz Opus rate. Mono input
 is duplicated and inputs with more than two channels use their first two
 channels. This is a local feasibility check, not a Bluetooth-specific
 PCM source or an audible output test. Software tests cover 8, 16, 24, 32, 44.1,
-and 48 kHz block sizing and resampling; on 2026-11-26, the ToDesk virtual endpoint returned
+48, 88.2, 96, 176.4 and 192 kHz block sizing and resampling. High-rate endpoints
+have not been validated with hardware. On 2026-11-26, the ToDesk virtual endpoint returned
 captured blocks but only a 0.0001 peak during its test tone, so signal capture
 on that endpoint remains unverified. On 2026-11-26, the default Windows endpoint
 captured the prototype's own two-second test tone (226,560 samples, source peak
