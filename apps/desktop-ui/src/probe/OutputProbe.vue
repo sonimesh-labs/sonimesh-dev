@@ -668,11 +668,15 @@ onBeforeUnmount(() => { disposed = true; labRequest++; suggestRequest++; clearTi
         <option :value="true">Adaptive (experimental)</option>
       </select>
       <p class="preview-note">Adaptive mode may pause audio while buffering; restart the listener to change modes.</p>
+      <div v-if="!lab.running">
+        <label for="lab-initial-volume">Starting receiver volume: {{ initialVolume }}%</label>
+        <input id="lab-initial-volume" v-model.number="initialVolume" type="range" min="0" max="100" :disabled="labBusy" aria-describedby="lab-initial-volume-help" />
+        <p id="lab-initial-volume-help" class="preview-note">Applied when the listener starts; system volume is unchanged.</p>
+      </div>
       <button type="button" class="preview-action" :disabled="lab.running || labBusy || busy" @click="clearLabSettings">Reset lab settings</button>
       <button type="button" class="preview-action" :disabled="labBusy || suggestBusy || (!lab.running && (playing !== null || busy || labOutput === 'unavailable' || !mediaPortValid || !controlPortValid))" @click="toggleLab">{{ lab.running ? 'Stop listener' : 'Start listener' }}</button>
       <p v-if="playing !== null" class="preview-note">Wait for the test sound to finish before starting the listener.</p>
       <p v-else-if="lab.running" class="preview-note">Stop the listener before testing an output.</p>
-      <p v-else class="preview-note">Starting receiver volume: {{ initialVolume }}%. The last confirmed volume is remembered.</p>
       <p role="status">{{ lab.status }}</p>
       <p v-if="labError" class="command-error" role="alert">{{ labError }}</p>
       <div v-if="lab.running && lab.volume != null && lab.muted != null">

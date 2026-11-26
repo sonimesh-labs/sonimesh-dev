@@ -519,7 +519,7 @@ describe('desktop output probe', () => {
     wrapper.unmount()
   })
 
-  it('restores confirmed volume at startup and resets it with lab settings', async () => {
+  it('sets and remembers startup volume, and resets it with lab settings', async () => {
     localStorage.setItem('sonimesh.outputProbe.labSettings', JSON.stringify({ initialVolume: 35 }))
     const stopped = { running: false, sessionActive: false, status: 'Stopped', invitation: null, metrics: null, volume: null, muted: null }
     const invoke = vi.fn((command: string) => {
@@ -531,14 +531,21 @@ describe('desktop output probe', () => {
     const wrapper = mountStoppedProbe()
     await flushPromises()
     expect(wrapper.text()).toContain('Starting receiver volume: 35%')
-    await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
-    expect(invoke).toHaveBeenCalledWith('start_lab', expect.objectContaining({ initialVolume: 35 }))
-    await wrapper.findAll('button').find(button => button.text() === 'Stop listener')!.trigger('click')
-    await wrapper.findAll('button').find(button => button.text() === 'Reset lab settings')!.trigger('click')
-    expect(wrapper.text()).toContain('Starting receiver volume: 100%')
-    await wrapper.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
-    expect(invoke).toHaveBeenLastCalledWith('start_lab', expect.objectContaining({ initialVolume: 100 }))
+    await wrapper.get('#lab-initial-volume').setValue('20')
+    expect(JSON.parse(localStorage.getItem('sonimesh.outputProbe.labSettings') ?? '{}').initialVolume).toBe(20)
     wrapper.unmount()
+    const reopened = mountStoppedProbe()
+    await flushPromises()
+    expect((reopened.get('#lab-initial-volume').element as HTMLInputElement).value).toBe('20')
+    await reopened.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
+    expect(invoke).toHaveBeenCalledWith('start_lab', expect.objectContaining({ initialVolume: 20 }))
+    expect(reopened.find('#lab-initial-volume').exists()).toBe(false)
+    await reopened.findAll('button').find(button => button.text() === 'Stop listener')!.trigger('click')
+    await reopened.findAll('button').find(button => button.text() === 'Reset lab settings')!.trigger('click')
+    expect(reopened.text()).toContain('Starting receiver volume: 100%')
+    await reopened.findAll('button').find(button => button.text() === 'Start listener')!.trigger('click')
+    expect(invoke).toHaveBeenLastCalledWith('start_lab', expect.objectContaining({ initialVolume: 100 }))
+    reopened.unmount()
   })
 
   it('shows the selected volume while adjusting without sending it before commit', async () => {

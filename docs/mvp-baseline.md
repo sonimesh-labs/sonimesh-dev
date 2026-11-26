@@ -255,8 +255,10 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   adjust the receiver's local gain and mute during and across those sessions.
   The desktop output probe also controls this lab receiver's gain and mute,
   showing values confirmed by the listener without changing system volume.
-  It remembers the last confirmed volume for the next listener start; the
-  listener applies it before accepting clients. Mute is not persisted.
+  The operator can set the starting volume before launching the listener. The
+  probe remembers that selection and subsequent confirmed volume adjustments;
+  the listener applies the starting value before accepting clients. Mute is not
+  persisted.
   The UDP lab also retries its selected output after a reported runtime fault;
   simulated recovery is tested, while physical device-removal behavior remains open.
   If initial output startup fails, it retains the prepared receiver for a retry
