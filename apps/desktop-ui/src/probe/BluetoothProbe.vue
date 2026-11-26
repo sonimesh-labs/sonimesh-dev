@@ -3,7 +3,7 @@ let pendingLoopbackSwitch: Promise<void> | undefined
 </script>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 type LoopbackSnapshot = { running: boolean; endpointId?: string | null; endpointName: string; sampleRate: number; channels: number; samples: number; peak: number; runPeak: number; error: string | null }
 type LoopbackEndpoint = { id: string; name: string; isDefault: boolean; sampleRate?: number | null; channels?: number | null }
@@ -79,6 +79,7 @@ let disposed = false
 let statusRequest = 0
 let loopbackRequest = 0
 let refreshOnFocus = false
+let focusRefreshPending = false
 let recoverBluetoothWait = false
 let loopbackSelectionEdited = false
 let loopbackSwitch: Promise<void> | undefined
@@ -329,11 +330,18 @@ async function openBluetoothSettings() {
 function refreshCandidatesOnFocus() {
   if (disposed || !refreshOnFocus) return
   refreshOnFocus = false
-  if (phase.value === 'idle') {
-    void refresh()
-    if (!loopback.value?.running && !loopbackBusy.value) void refreshLoopbackEndpoints()
-  }
+  focusRefreshPending = true
+  refreshAfterFocusWhenIdle()
 }
+
+function refreshAfterFocusWhenIdle() {
+  if (disposed || !focusRefreshPending || busy.value || phase.value !== 'idle') return
+  focusRefreshPending = false
+  void refresh()
+  if (!loopback.value?.running && !loopbackBusy.value) void refreshLoopbackEndpoints()
+}
+
+watch([busy, phase], refreshAfterFocusWhenIdle)
 
 async function poll() {
   if (disposed || phase.value === 'idle') return
@@ -745,6 +753,7 @@ onBeforeUnmount(() => {
   statusRequest++
   loopbackRequest++
   refreshOnFocus = false
+  focusRefreshPending = false
   window.removeEventListener('focus', refreshCandidatesOnFocus)
   clearTimeout(timer)
   clearTimeout(loopbackTimer)

@@ -531,6 +531,43 @@ it('opens Windows Bluetooth settings from the probe', async () => {
   wrapper.unmount()
 })
 
+it('defers the settings return refresh until an in-flight connection is disconnected', async () => {
+  let finishConnect!: () => void
+  let state = 'idle'
+  let refreshes = 0
+  const invoke = vi.fn((command: string) => {
+    if (command === 'bluetooth_status') return Promise.resolve(state)
+    if (command === 'loopback_status') return Promise.resolve({ running: false, endpointName: '', sampleRate: 0, channels: 0, samples: 0, peak: 0, error: null })
+    if (command === 'loopback_endpoints') return Promise.resolve([])
+    if (command === 'bluetooth_candidates') {
+      refreshes++
+      return Promise.resolve({ generation: refreshes, names: ['Phone'], ids: ['phone'], capability: 'SystemRouted' })
+    }
+    if (command === 'bluetooth_connect') return new Promise<void>(resolve => { finishConnect = () => { state = 'open'; resolve() } })
+    if (command === 'bluetooth_disconnect') { state = 'idle'; return Promise.resolve() }
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  await wrapper.get('#bluetooth-source').setValue('0')
+  await wrapper.findAll('button').find(button => button.text() === 'Open Bluetooth settings')!.trigger('click')
+  await flushPromises()
+  await wrapper.findAll('button').find(button => button.text() === 'Connect Bluetooth')!.trigger('click')
+  window.dispatchEvent(new Event('focus'))
+  await flushPromises()
+  expect(refreshes).toBe(1)
+  expect(wrapper.findAll('button').find(button => button.text() === 'Connect Bluetooth')!.attributes('disabled')).toBeDefined()
+  finishConnect()
+  await flushPromises()
+  expect(refreshes).toBe(1)
+  await wrapper.findAll('button').find(button => button.text() === 'Disconnect Bluetooth')!.trigger('click')
+  await flushPromises()
+  expect(refreshes).toBe(2)
+  expect((wrapper.get('#bluetooth-source').element as HTMLSelectElement).value).toBe('0')
+  wrapper.unmount()
+})
+
 it('loads Bluetooth sources and output endpoints when Bluetooth status is unavailable', async () => {
   const invoke = vi.fn((command: string) => {
     if (command === 'bluetooth_status') return Promise.reject(new Error('Bluetooth status unavailable.'))
