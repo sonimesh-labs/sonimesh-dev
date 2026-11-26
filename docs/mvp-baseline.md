@@ -83,10 +83,12 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   open and close a selected system-routed connection. Local enumeration found
   one candidate, but Windows failed to open it in a later test. The separate desktop output
   probe exposes refresh, connect, wait for phone connection, disconnect, and
-  system closure status for the same experiment, with a shortcut to Windows
-  Bluetooth settings, automatic Bluetooth candidate discovery on probe entry
-  with visible search/refresh status, and refresh of Bluetooth candidates and
-  idle output endpoints when returning to the probe.
+  system closure status for the same experiment. It reports the playback
+  capability (`SystemRouted` on Windows, `Unsupported` when the prototype
+  platform path is unavailable) and does not claim an application PCM source.
+  The panel also provides a shortcut to Windows Bluetooth settings, automatic
+  candidate discovery with visible search/refresh status, and refreshes
+  candidates and idle output endpoints when returning to the probe.
   Candidate discovery and
   connection setup run on Tauri's blocking task pool so WinRT waits do not occupy
   the UI runtime; status checks and disconnects use the same blocking pool. An

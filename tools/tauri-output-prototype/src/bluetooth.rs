@@ -5,6 +5,16 @@ use serde::Serialize;
 pub struct Candidates {
     generation: u32,
     names: Vec<String>,
+    capability: PlaybackCapability,
+}
+
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "PascalCase")]
+pub enum PlaybackCapability {
+    ApplicationPcmSource,
+    SystemRouted,
+    Unsupported,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
@@ -17,7 +27,7 @@ pub enum PlaybackState {
 
 #[cfg(windows)]
 mod platform {
-    use super::{Candidates, PlaybackState};
+    use super::{Candidates, PlaybackCapability, PlaybackState};
     use windows::Devices::Enumeration::DeviceInformation;
     use windows::Media::Audio::{
         AudioPlaybackConnection, AudioPlaybackConnectionOpenResultStatus,
@@ -72,6 +82,7 @@ mod platform {
             Ok(Candidates {
                 generation: self.generation,
                 names,
+                capability: PlaybackCapability::SystemRouted,
             })
         }
 
@@ -296,7 +307,7 @@ mod platform {
 
 #[cfg(not(windows))]
 mod platform {
-    use super::{Candidates, PlaybackState};
+    use super::{Candidates, PlaybackCapability, PlaybackState};
     #[derive(Default)]
     pub struct Bluetooth;
     impl Bluetooth {
@@ -305,7 +316,11 @@ mod platform {
         }
 
         pub fn refresh(&mut self) -> Result<Candidates, String> {
-            Err("Bluetooth playback experiment requires Windows.".into())
+            Ok(Candidates {
+                generation: 0,
+                names: Vec::new(),
+                capability: PlaybackCapability::Unsupported,
+            })
         }
         pub fn connect(&mut self, _: u32, _: usize) -> Result<(), String> {
             Err("Bluetooth playback experiment requires Windows.".into())

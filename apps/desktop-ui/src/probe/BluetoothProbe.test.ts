@@ -39,6 +39,22 @@ it('opens Windows Bluetooth settings from the probe', async () => {
   wrapper.unmount()
 })
 
+it('shows the reported system-routed capability without claiming application PCM', async () => {
+  const invoke = vi.fn((command: string) => {
+    if (command === 'bluetooth_status') return Promise.resolve('idle')
+    if (command === 'loopback_status') return Promise.resolve({ running: false, endpointName: '', sampleRate: 0, channels: 0, samples: 0, peak: 0, error: null })
+    if (command === 'bluetooth_candidates') return Promise.resolve({ generation: 1, names: [], capability: 'SystemRouted' })
+    if (command === 'loopback_endpoints') return Promise.resolve([])
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  expect(wrapper.text()).toContain('Capability: SystemRouted. Windows routes playback through the system; application PCM is unavailable.')
+  expect(wrapper.text()).not.toContain('Capability: ApplicationPcmSource')
+  wrapper.unmount()
+})
+
 it('shows discovery progress until Bluetooth candidates return', async () => {
   let finishDiscovery!: (result: { generation: number; names: string[] }) => void
   const invoke = vi.fn((command: string) => {

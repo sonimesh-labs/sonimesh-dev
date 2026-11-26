@@ -3,8 +3,10 @@ import { onBeforeUnmount, onMounted, ref } from 'vue'
 
 type LoopbackSnapshot = { running: boolean; endpointName: string; sampleRate: number; channels: number; samples: number; peak: number; runPeak: number; error: string | null }
 type LoopbackEndpoint = { id: string; name: string; isDefault: boolean; sampleRate?: number | null; channels?: number | null }
+type PlaybackCapability = 'ApplicationPcmSource' | 'SystemRouted' | 'Unsupported'
 
 const names = ref<string[]>([])
+const playbackCapability = ref<PlaybackCapability | null>(null)
 const LOOPBACK_NO_SAMPLES_DELAY_MS = 5000
 const generation = ref(0)
 const selected = ref('')
@@ -138,9 +140,10 @@ async function refresh() {
   const previousNameCount = previousName === undefined ? 0 : names.value.filter(name => name === previousName).length
   try {
     if (!window.__TAURI__) throw new Error('Desktop probe unavailable')
-    const result = await window.__TAURI__.core.invoke<{ generation: number; names: string[] }>('bluetooth_candidates')
+    const result = await window.__TAURI__.core.invoke<{ generation: number; names: string[]; capability: PlaybackCapability }>('bluetooth_candidates')
     names.value = result.names
     generation.value = result.generation
+    playbackCapability.value = result.capability ?? 'Unsupported'
     if (previousName === undefined) {
       selected.value = ''
     } else {
@@ -451,6 +454,7 @@ onBeforeUnmount(() => {
     <p class="eyebrow">Windows experiment</p>
     <h2 id="bluetooth-title">Bluetooth system playback</h2>
     <p class="preview-note">Connect a paired source through Windows. Audio is played by the system and does not enter the SoniMesh mixer.</p>
+    <p v-if="playbackCapability" role="status">Capability: {{ playbackCapability }}<template v-if="playbackCapability === 'SystemRouted'">. Windows routes playback through the system; application PCM is unavailable.</template></p>
     <button type="button" class="preview-action" :disabled="busy" @click="openBluetoothSettings">Open Bluetooth settings</button>
     <button type="button" class="preview-action" :disabled="busy || phase !== 'idle'" @click="refresh">Refresh Bluetooth sources</button>
     <p v-if="discovering" role="status">{{ loaded ? 'Refreshing Bluetooth sources...' : 'Searching for Bluetooth sources...' }}</p>
