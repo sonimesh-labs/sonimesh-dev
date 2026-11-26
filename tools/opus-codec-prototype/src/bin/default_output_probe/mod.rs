@@ -48,15 +48,15 @@ impl DefaultOutputProbe {
         }
     }
 
-    pub(crate) fn poll(&mut self) -> ProbeResult {
+    pub(crate) fn poll_result(&mut self) -> Option<ProbeResult> {
         loop {
             match self.results.try_recv() {
                 Ok((id, result)) if self.pending == Some(id) => {
                     self.pending = None;
-                    return result;
+                    return Some(result);
                 }
                 Ok(_) => continue,
-                Err(TryRecvError::Disconnected) => return Err("output probe stopped".into()),
+                Err(TryRecvError::Disconnected) => return Some(Err("output probe stopped".into())),
                 Err(TryRecvError::Empty) => break,
             }
         }
@@ -67,7 +67,12 @@ impl DefaultOutputProbe {
                 self.pending = Some(id);
             }
         }
-        Err("output probe pending".into())
+        None
+    }
+
+    pub(crate) fn poll(&mut self) -> ProbeResult {
+        self.poll_result()
+            .unwrap_or_else(|| Err("output probe pending".into()))
     }
 }
 
@@ -126,5 +131,27 @@ mod tests {
             std::thread::yield_now();
         };
         assert_eq!(selection.device, Some(OutputDeviceId::new("device-2")));
+    }
+
+    #[test]
+    fn pending_probe_is_distinct_from_query_failure() {
+        let (release_tx, release_rx) = mpsc::channel();
+        let mut worker = DefaultOutputProbe::new(None, move |_| {
+            release_rx.recv().unwrap();
+            Err("device unavailable".into())
+        })
+        .unwrap();
+        assert!(worker.poll_result().is_none());
+        assert!(worker.poll_result().is_none());
+        release_tx.send(()).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            if let Some(result) = worker.poll_result() {
+                assert_eq!(result.unwrap_err(), "device unavailable");
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::yield_now();
+        }
     }
 }
