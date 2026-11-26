@@ -762,7 +762,7 @@ onBeforeUnmount(() => { disposed = true; labRequest++; suggestRequest++; clearTi
         <template v-if="!includeDirectPort">
           <label for="lab-relay-port">Relay listen port (optional)</label>
           <input id="lab-relay-port" v-model="relayPort" inputmode="numeric" maxlength="5" :aria-invalid="!relayPortValid" aria-describedby="lab-relay-port-help" @input="rememberRelayPort" />
-          <p id="lab-relay-port-help" class="preview-note">Leave blank to enter the port on Android. If the relay is on another host, turn off “Use invitation address for UDP when scanning” on Android and enter its address.</p>
+          <p id="lab-relay-port-help" class="preview-note">Leave blank to enter the port on Android. If the relay is on another host, turn off “Use invitation address for UDP when scanning or starting” on Android and enter its address.</p>
           <p v-if="!relayPortValid" class="command-error" role="alert">Enter a relay listen port from 1 to 65535, or leave it blank.</p>
         </template>
         <p v-else class="preview-note">For a relay, clear this option and configure its UDP destination.</p>

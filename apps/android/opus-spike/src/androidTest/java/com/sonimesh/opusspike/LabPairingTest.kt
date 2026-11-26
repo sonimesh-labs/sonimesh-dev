@@ -253,7 +253,7 @@ class LabPairingTest {
         ActivityScenario.launch(LabActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
                 val root = activity.window.decorView
-                val toggle = requireNotNull(findSwitch(root, "Use invitation address for UDP when scanning"))
+                val toggle = requireNotNull(findSwitch(root, "Use invitation address for UDP when scanning or starting"))
                 assertTrue(toggle.isChecked)
                 toggle.isChecked = false
                 requireNotNull(findField(root, "Desktop IPv4 address for UDP")).setText("192.168.1.9")
@@ -262,7 +262,7 @@ class LabPairingTest {
             scenario.recreate()
             scenario.onActivity { activity ->
                 val root = activity.window.decorView
-                assertFalse(requireNotNull(findSwitch(root, "Use invitation address for UDP when scanning")).isChecked)
+                assertFalse(requireNotNull(findSwitch(root, "Use invitation address for UDP when scanning or starting")).isChecked)
                 activity.applyScannedInvitation(payload)
                 assertEquals("192.168.1.9", requireNotNull(findField(root, "Desktop IPv4 address for UDP")).text.toString())
                 assertEquals("192.168.1.7", requireNotNull(findField(root, "Paired control IPv4 address")).text.toString())
@@ -274,6 +274,33 @@ class LabPairingTest {
                 assertTrue(hasText(root, "Status: Enter a valid desktop IPv4 address for UDP."))
                 assertEquals("39094", requireNotNull(findField(root, "Desktop UDP port")).text.toString())
                 assertTrue(LabStatus.captureAdmission.canBegin())
+            }
+        }
+    }
+
+    @Test
+    fun pasted_invitation_start_uses_selected_udp_address_behavior() {
+        val payload = "SONIMESH-LAB1:39094:${labHex(labInvitation("AB".repeat(32), "192.168.1.7"))}"
+        ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                val root = activity.window.decorView
+                val toggle = requireNotNull(findSwitch(root, "Use invitation address for UDP when scanning or starting"))
+                val udp = requireNotNull(findField(root, "Desktop IPv4 address for UDP"))
+                val invitation = requireNotNull(findField(root, "Lab invitation payload"))
+                val start = requireNotNull(findButton(root, "Apply invitation and start paired capture"))
+                toggle.isChecked = false
+                udp.setText("")
+                invitation.setText(payload)
+                start.performClick()
+                assertEquals("", udp.text.toString())
+                assertEquals("192.168.1.7", requireNotNull(findField(root, "Paired control IPv4 address")).text.toString())
+                assertEquals("39094", requireNotNull(findField(root, "Desktop UDP port")).text.toString())
+                assertTrue(hasText(root, "Status: Enter a valid desktop IPv4 address for UDP."))
+                assertTrue(LabStatus.captureAdmission.canBegin())
+                // Explicit apply-with-address remains independent of the switch.
+                invitation.setText(payload)
+                requireNotNull(findButton(root, "Apply invitation and use address for UDP")).performClick()
+                assertEquals("192.168.1.7", udp.text.toString())
             }
         }
     }

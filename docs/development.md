@@ -1300,10 +1300,12 @@ it is not the production binary QR representation from ADR 0018. A scan from a
 non-loopback address also fills the UDP destination by default; a loopback
 invitation keeps the separately configured UDP destination for ADB reverse.
 For a relay on a different host, enter its UDP address and turn off **Use
-invitation address for UDP when scanning** before scanning, including when
-using scan and start. This choice survives activity recreation and defaults to
-on when opening a new lab activity. It controls only the address: an invitation
-containing a UDP port still applies that port.
+invitation address for UDP when scanning or starting** before scanning or
+using **Apply invitation and start paired capture**. This choice survives
+activity recreation and defaults to on when opening a new lab activity. It
+controls only the address: an invitation containing a UDP port still applies
+that port. The separate **Apply invitation payload** and **Apply invitation
+and use address for UDP** actions keep their explicit address behavior.
 For a direct connection, the probe wraps the lab invitation by default with the
 running listener's UDP port as `SONIMESH-LAB1:<port>:<hex>`. Android
 accepts this experimental text in scan, paste, and share flows and applies the
@@ -1350,10 +1352,11 @@ and three PLC decisions. The `PairedCaptureTest#captures_after_scanned_invitatio
 instrumentation required `-e expectedMediaPort 39094` because the invitation,
 rather than the test's initial media-port field, sets the port. This did not
 test camera recognition, physical WLAN, or audible output.
-For a pasted invitation, **Apply invitation and start paired capture** follows
-the same one-step flow: a non-loopback control address also becomes the UDP
-destination, while a loopback invitation retains the separate UDP address for
-ADB reverse. Invalid input or an already active capture does not start a session.
+For a pasted or shared invitation, **Apply invitation and start paired capture**
+follows the same address option as scanning. By default, a non-loopback control
+address also becomes the UDP destination, while a loopback invitation retains
+the separate UDP address for ADB reverse. Invalid input or an already active
+capture does not start a session.
 The manual SPKI path also has **Paste desktop SPKI**, which validates the copied
 hex key before filling the pairing field.
 On 2026-11-23, an API 37 emulator test exercised the pasted-invitation flow;
