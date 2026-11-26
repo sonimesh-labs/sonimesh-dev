@@ -203,7 +203,7 @@ mod platform {
 
     #[cfg(test)]
     mod tests {
-        use super::{Bluetooth, PlaybackState, open_error};
+        use super::{Bluetooth, PlaybackCapability, PlaybackState, open_error};
         use windows::Media::Audio::AudioPlaybackConnectionOpenResultStatus;
 
         #[test]
@@ -245,6 +245,7 @@ mod platform {
             let snapshot = bluetooth.refresh().unwrap();
             assert_eq!(snapshot.generation, 1);
             assert!(snapshot.names.len() <= 64);
+            assert_eq!(snapshot.capability, PlaybackCapability::SystemRouted);
             assert!(bluetooth.connect(0, 0).is_err());
         }
 
