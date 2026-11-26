@@ -1,3 +1,7 @@
+<script lang="ts">
+let pendingLoopbackSwitch: Promise<void> | undefined
+</script>
+
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 
@@ -399,7 +403,7 @@ async function pollLoopback() {
           loopbackEndpointId.value = target.id
           loopbackSelectionEdited = true
           failedDefaultId = target.id
-          await switchLoopbackEndpoint(true)
+          await switchLoopbackEndpoint()
           if (!disposed && loopback.value?.endpointId === target.id) failedDefaultId = undefined
           return
         }
@@ -537,7 +541,7 @@ async function stopCombinedMonitor() {
   }
 }
 
-async function switchLoopbackEndpoint(automatic = false) {
+async function switchLoopbackEndpoint() {
   if (!window.__TAURI__ || !loopback.value?.running || !loopbackEndpointId.value || loopbackBusy.value) return
   const endpointId = loopbackEndpointId.value
   const previousEndpointId = loopback.value.endpointId
@@ -553,7 +557,6 @@ async function switchLoopbackEndpoint(automatic = false) {
       loopback.value = await window.__TAURI__!.core.invoke<LoopbackSnapshot>('loopback_stop')
       if (loopback.value.running) throw new Error('Windows output monitoring did not stop.')
       stopped = true
-      if (automatic && disposed) return
       loopbackStartedAt = undefined
       loopbackNoSamplesLong.value = false
       const result = await window.__TAURI__!.core.invoke<LoopbackSnapshot>('loopback_start', { endpointId })
@@ -581,9 +584,11 @@ async function switchLoopbackEndpoint(automatic = false) {
       else rememberCombinedMonitorOwnership(false)
     }
   })()
+  pendingLoopbackSwitch = loopbackSwitch
   try {
     await loopbackSwitch
   } finally {
+    if (pendingLoopbackSwitch === loopbackSwitch) pendingLoopbackSwitch = undefined
     loopbackSwitch = undefined
     loopbackBusy.value = false
   }
@@ -676,6 +681,15 @@ onMounted(async () => {
   busy.value = true
   const request = statusRequest
   try {
+    if (pendingLoopbackSwitch) {
+      loopbackBusy.value = true
+      try {
+        await pendingLoopbackSwitch
+      } finally {
+        loopbackBusy.value = false
+      }
+      if (disposed || request !== statusRequest) return
+    }
     recoverBluetoothWait = readBluetoothRecovery()
     const hadCombinedMonitorOwnership = readCombinedMonitorOwnership()
     rememberCombinedMonitorOwnership(hadCombinedMonitorOwnership)

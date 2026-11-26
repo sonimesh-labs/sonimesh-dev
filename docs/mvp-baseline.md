@@ -147,6 +147,8 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   monitoring and switches the PCM check when it changes. A failed automatic
   switch is not repeated until the default changes or the device list is
   refreshed. If no default is reported, the current monitor stays in place.
+  If the panel is reopened during an output switch, it waits for the switch to
+  finish before restoring the monitor state and combined-action ownership.
   Starting a check in follow-default mode rechecks the default even if none was
   available when the panel opened; if it is still unavailable, the check reports
   the problem and can be retried when an output appears.

@@ -258,6 +258,55 @@ it('stops a combined monitor after Bluetooth recovery fails during an automatic 
   wrapper.unmount()
 })
 
+it.each(['stop', 'start'] as const)('restores combined monitoring after reopening during switch %s', async delayedStage => {
+  vi.useFakeTimers()
+  localStorage.setItem('sonimesh.bluetoothProbe.followDefault', 'true')
+  sessionStorage.setItem('sonimesh.bluetoothProbe.combinedMonitorOwned', 'true')
+  const snapshot = (id: string, running = true) => ({ running, endpointId: id, endpointName: id, sampleRate: 48000, channels: 2, samples: 0, peak: 0, runPeak: 0, error: null })
+  let active = 'old'
+  let defaultId = 'old'
+  let release!: () => void
+  const invoke = vi.fn((command: string, args?: { endpointId?: string }) => {
+    if (command === 'bluetooth_status') return Promise.resolve('open')
+    if (command === 'bluetooth_candidates') return Promise.resolve({ generation: 1, names: [], capability: 'SystemRouted' })
+    if (command === 'loopback_endpoints') return Promise.resolve(['old', 'new'].map(id => ({ id, name: id, isDefault: id === defaultId })))
+    if (command === 'loopback_status') return Promise.resolve(snapshot(active, !!active))
+    if (command === 'loopback_stop') {
+      const previous = active
+      active = ''
+      if (delayedStage === 'stop' && previous === 'old') return new Promise(resolve => { release = () => resolve(snapshot(previous, false)) })
+      return Promise.resolve(snapshot(previous, false))
+    }
+    if (command === 'loopback_start') {
+      if (delayedStage === 'start' && args?.endpointId === 'new') return new Promise(resolve => { release = () => { active = 'new'; resolve(snapshot(active)) } })
+      active = args!.endpointId!
+      return Promise.resolve(snapshot(active))
+    }
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const first = mount(BluetoothProbe)
+  await flushPromises()
+  defaultId = 'new'
+  await vi.advanceTimersByTimeAsync(1000)
+  expect(release).toBeTypeOf('function')
+  first.unmount()
+  const statusCalls = invoke.mock.calls.filter(([command]) => command === 'loopback_status').length
+  const reopened = mount(BluetoothProbe)
+  await flushPromises()
+  expect(invoke.mock.calls.filter(([command]) => command === 'loopback_status')).toHaveLength(statusCalls)
+  expect(reopened.findAll('button').find(button => button.text() === 'Working...')?.attributes('disabled')).toBeDefined()
+  release()
+  await flushPromises()
+  expect(reopened.text()).toContain('new · 48000 Hz')
+  expect(sessionStorage.getItem('sonimesh.bluetoothProbe.combinedMonitorOwned')).toBe('true')
+  await reopened.findAll('button').find(button => button.text() === 'Disconnect Bluetooth')!.trigger('click')
+  await flushPromises()
+  expect(active).toBe('')
+  expect(sessionStorage.getItem('sonimesh.bluetoothProbe.combinedMonitorOwned')).toBeNull()
+  reopened.unmount()
+})
+
 it('switches the monitored output while keeping the Bluetooth connection open', async () => {
   const old = { running: true, endpointId: 'old', endpointName: 'Speakers', sampleRate: 48000, channels: 2, samples: 100, peak: 0.2, runPeak: 0.2, error: null }
   const next = { ...old, endpointId: 'new', endpointName: 'Headphones', samples: 0, peak: 0, runPeak: 0 }
