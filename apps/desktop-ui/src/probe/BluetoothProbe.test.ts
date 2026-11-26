@@ -705,6 +705,41 @@ it('restores combined wait and monitor ownership after reopening the panel', asy
   reopened.unmount()
 })
 
+it('retries pending Bluetooth wait after the initial status query fails', async () => {
+  let statusCalls = 0
+  let phase = 'idle'
+  let monitoring = true
+  const invoke = vi.fn((command: string) => {
+    if (command === 'bluetooth_status') {
+      statusCalls++
+      return statusCalls === 1
+        ? Promise.reject(new Error('Temporary status failure.'))
+        : Promise.resolve(phase)
+    }
+    if (command === 'bluetooth_candidates') return Promise.resolve({ generation: 23, names: ['Phone'], ids: ['phone-id'] })
+    if (command === 'loopback_endpoints') return Promise.resolve([{ id: 'default-endpoint', name: 'Default speakers', isDefault: true }])
+    if (command === 'loopback_status') return Promise.resolve({ running: monitoring, endpointName: 'Default speakers', sampleRate: 48000, channels: 2, samples: 0, peak: 0, error: null })
+    if (command === 'bluetooth_prepare') phase = 'waiting'
+    if (command === 'loopback_stop') {
+      monitoring = false
+      return Promise.resolve({ running: false, endpointName: 'Default speakers', sampleRate: 48000, channels: 2, samples: 0, peak: 0, error: null })
+    }
+    return Promise.resolve()
+  })
+  sessionStorage.setItem('sonimesh.bluetoothProbe.sourceId', 'phone-id')
+  sessionStorage.setItem('sonimesh.bluetoothProbe.combinedMonitorOwned', 'true')
+  sessionStorage.setItem('sonimesh.bluetoothProbe.recoveryPending', 'true')
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  expect(invoke).toHaveBeenCalledWith('bluetooth_prepare', { generation: 23, index: 0 })
+  expect(wrapper.text()).toContain('Waiting for Phone to reconnect through Bluetooth.')
+  expect(wrapper.text()).not.toContain('Temporary status failure.')
+  expect(statusCalls).toBe(2)
+  wrapper.unmount()
+})
+
 it('stops a restored combined monitor when phone wait cannot resume', async () => {
   vi.useFakeTimers()
   let phase = 'idle'

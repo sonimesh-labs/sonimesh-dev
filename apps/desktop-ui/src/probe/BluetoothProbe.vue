@@ -514,7 +514,13 @@ onMounted(async () => {
         message.value = 'Restoring phone-initiated Bluetooth wait.'
       }
     } catch (cause) {
-      if (!disposed && request === statusRequest) statusError.value = String(cause)
+      if (!disposed && request === statusRequest) {
+        statusError.value = String(cause)
+        if (recoverBluetoothWait) {
+          phase.value = 'waiting'
+          message.value = 'Restoring phone-initiated Bluetooth wait.'
+        }
+      }
     }
     try {
       const loopbackState = await window.__TAURI__.core.invoke<LoopbackSnapshot>('loopback_status')
