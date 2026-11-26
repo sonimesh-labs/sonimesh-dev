@@ -8,7 +8,7 @@ use std::thread;
 use sonimesh_app::{ReceiverPipelineError, UdpPollOutcome, UdpReceiverError, UdpReceiverPipeline};
 use sonimesh_audio::{
     DecodeStep, DecodeWorkerError, FrameDecoder, FrameError, RealtimePcmPopOutcome,
-    realtime_pcm_queue,
+    StreamDecodeWorker, realtime_pcm_queue,
 };
 use sonimesh_diagnostics::StreamCounters;
 use sonimesh_network::{IngressError, UdpReceiveError};
@@ -76,6 +76,48 @@ fn poll_until_datagram(
         }
     }
     panic!("loopback datagram was not delivered");
+}
+
+#[test]
+fn reserved_socket_supports_successive_sessions_without_trusting_old_packets() {
+    let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let secret = SessionSecret::new([0xA5; 32]);
+    let old_context = context();
+    let new_context = MediaKeyContext::new(42, 9, 1, MediaDirection::AndroidToDesktop).unwrap();
+    let mut old_sealer = MediaSealer::new(&secret, old_context).unwrap();
+    let old_packet = old_sealer.seal(0, 0, &[7]).unwrap();
+    let make_receiver = |context| {
+        let (producer, _consumer) = realtime_pcm_queue::<4>(4).unwrap();
+        Pipeline::from_socket_with_worker(
+            socket.try_clone().unwrap(),
+            &secret,
+            context,
+            StreamDecodeWorker::new(ByteDecoder, producer, 0),
+            Arc::new(StreamCounters::default()),
+        )
+        .unwrap()
+    };
+    let mut first = make_receiver(old_context);
+    send(&sender, &first, &old_packet.datagram);
+    assert!(matches!(
+        poll_until_datagram(&mut first),
+        Ok(UdpPollOutcome::Processed { .. })
+    ));
+    drop(first);
+    sender
+        .send_to(&old_packet.datagram, socket.local_addr().unwrap())
+        .unwrap();
+    let mut second = make_receiver(new_context);
+    assert!(poll_until_datagram(&mut second).is_err());
+    assert_eq!(second.pinned_source(), None);
+    let mut new_sealer = MediaSealer::new(&secret, new_context).unwrap();
+    let new_packet = new_sealer.seal(0, 0, &[8]).unwrap();
+    send(&sender, &second, &new_packet.datagram);
+    assert!(matches!(
+        poll_until_datagram(&mut second),
+        Ok(UdpPollOutcome::Processed { .. })
+    ));
 }
 
 #[test]

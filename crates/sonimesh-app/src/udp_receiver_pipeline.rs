@@ -1,6 +1,6 @@
 use core::fmt;
 use std::io;
-use std::net::SocketAddr;
+use std::net::{SocketAddr, UdpSocket};
 use std::sync::Arc;
 
 use sonimesh_audio::TargetGatedPlayoutConfig;
@@ -200,7 +200,24 @@ where
         worker: StreamDecodeWorker<D, JITTER_CAPACITY, MAX_ENCODED_BYTES, PCM_SAMPLES_PER_BLOCK>,
         counters: Arc<StreamCounters>,
     ) -> Result<Self, UdpReceiverSetupError> {
-        let receiver = UdpMediaReceiver::bind(address).map_err(UdpReceiverSetupError::Socket)?;
+        let socket = UdpSocket::bind(address).map_err(UdpReceiverSetupError::Socket)?;
+        Self::from_socket_with_worker(socket, secret, context, worker, counters)
+    }
+
+    /// Creates a protected receiver from an already-bound UDP socket.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if socket configuration or media key setup fails.
+    pub fn from_socket_with_worker(
+        socket: UdpSocket,
+        secret: &SessionSecret,
+        context: MediaKeyContext,
+        worker: StreamDecodeWorker<D, JITTER_CAPACITY, MAX_ENCODED_BYTES, PCM_SAMPLES_PER_BLOCK>,
+        counters: Arc<StreamCounters>,
+    ) -> Result<Self, UdpReceiverSetupError> {
+        let receiver =
+            UdpMediaReceiver::from_socket(socket).map_err(UdpReceiverSetupError::Socket)?;
         let pipeline = ReceiverStreamPipeline::with_worker(secret, context, worker, counters)
             .map_err(UdpReceiverSetupError::Pipeline)?;
         Ok(Self {
@@ -258,7 +275,27 @@ where
         counters: Arc<StreamCounters>,
         adaptive: AdaptiveTargetConfig,
     ) -> Result<Self, UdpReceiverSetupError> {
-        let receiver = UdpMediaReceiver::bind(address).map_err(UdpReceiverSetupError::Socket)?;
+        let socket = UdpSocket::bind(address).map_err(UdpReceiverSetupError::Socket)?;
+        Self::from_socket_with_worker_and_adaptive_target(
+            socket, secret, context, worker, counters, adaptive,
+        )
+    }
+
+    /// Creates an adaptive receiver from an already-bound UDP socket.
+    ///
+    /// # Errors
+    ///
+    /// Returns a socket, media key, or adaptive controller setup error.
+    pub fn from_socket_with_worker_and_adaptive_target(
+        socket: UdpSocket,
+        secret: &SessionSecret,
+        context: MediaKeyContext,
+        worker: StreamDecodeWorker<D, JITTER_CAPACITY, MAX_ENCODED_BYTES, PCM_SAMPLES_PER_BLOCK>,
+        counters: Arc<StreamCounters>,
+        adaptive: AdaptiveTargetConfig,
+    ) -> Result<Self, UdpReceiverSetupError> {
+        let receiver =
+            UdpMediaReceiver::from_socket(socket).map_err(UdpReceiverSetupError::Socket)?;
         let pipeline = ReceiverStreamPipeline::with_worker_and_adaptive_target(
             secret, context, worker, counters, adaptive,
         )

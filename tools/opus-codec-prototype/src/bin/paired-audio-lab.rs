@@ -12,7 +12,7 @@ mod lab_probe;
 
 use std::fmt::Write;
 use std::io::Write as IoWrite;
-use std::net::{Ipv4Addr, SocketAddrV4};
+use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -72,7 +72,7 @@ fn main() {
 }
 
 fn run() -> LabResult<()> {
-    let options = Options::parse(std::env::args().skip(1))?;
+    let mut options = Options::parse(std::env::args().skip(1))?;
     let mut disconnects_remaining = options
         .disconnect_count
         .unwrap_or(u8::from(options.disconnect_after_ms.is_some()));
@@ -89,6 +89,15 @@ fn run() -> LabResult<()> {
                 lab_println!("STARTUP control-port-in-use");
             }
         })?;
+    options.media_socket = Some(Arc::new(
+        UdpSocket::bind(SocketAddrV4::new(options.bind, options.media_port)).inspect_err(
+            |error| {
+                if error.kind() == std::io::ErrorKind::AddrInUse {
+                    lab_println!("STARTUP media-port-in-use");
+                }
+            },
+        )?,
+    ));
     let address = listener.local_addr()?;
     let key = generate_simple_self_signed(vec!["localhost".to_owned()])?;
     let pin = key.key_pair.public_key_der();
@@ -258,6 +267,7 @@ struct Options {
     host: Ipv4Addr,
     control_port: u16,
     media_port: u16,
+    media_socket: Option<Arc<UdpSocket>>,
 }
 
 impl Default for Options {
@@ -283,6 +293,7 @@ impl Default for Options {
             host: Ipv4Addr::LOCALHOST,
             control_port: 47610,
             media_port: 39093,
+            media_socket: None,
         }
     }
 }
@@ -1598,12 +1609,17 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                                             u16::try_from(request.frame_duration_ms)?,
                                         )?,
                                     )?;
-                                    let address =
-                                        SocketAddrV4::new(options.bind, options.media_port).into();
+                                    let socket = match &options.media_socket {
+                                        Some(socket) => socket.try_clone()?,
+                                        None => UdpSocket::bind(SocketAddrV4::new(
+                                            options.bind,
+                                            options.media_port,
+                                        ))?,
+                                    };
                                     let pipeline = if options.adaptive {
                                         let mut pipeline =
-                                            Receiver::bind_with_worker_and_adaptive_target(
-                                                address,
+                                            Receiver::from_socket_with_worker_and_adaptive_target(
+                                                socket,
                                                 grant.root(),
                                                 grant.context(),
                                                 worker,
@@ -1620,8 +1636,8 @@ fn receive_audio<S: std::io::Read + std::io::Write>(
                                         )?;
                                         pipeline
                                     } else {
-                                        Receiver::bind_with_worker(
-                                            address,
+                                        Receiver::from_socket_with_worker(
+                                            socket,
                                             grant.root(),
                                             grant.context(),
                                             worker,

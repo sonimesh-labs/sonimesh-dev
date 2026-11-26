@@ -11,6 +11,7 @@ const SIGNAL_STALE_AFTER: Duration = Duration::from_secs(3);
 const OUTPUT_DRAIN_TIMEOUT: Duration = Duration::from_millis(200);
 const OUTPUT_DRAIN_LIMIT: usize = 2048;
 const CONTROL_PORT_IN_USE: &str = "Listener exited: control TCP port is already in use. Choose another control port and start again.";
+const MEDIA_PORT_IN_USE: &str = "Listener exited: receiver UDP port is already in use. Choose another receiver UDP port and start again.";
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -297,7 +298,9 @@ impl Lab {
                     self.snapshot.control_port = None;
                     self.snapshot.signal = None;
                     self.signal_received_at = None;
-                    if self.snapshot.status != CONTROL_PORT_IN_USE {
+                    if self.snapshot.status != CONTROL_PORT_IN_USE
+                        && self.snapshot.status != MEDIA_PORT_IN_USE
+                    {
                         self.snapshot.status = "Listener exited. Rebuild it and check the selected output device and whether the control TCP port is in use.".into();
                     }
                     self.child = None;
@@ -546,6 +549,8 @@ fn read_output(output: impl Read + Send + 'static, sender: SyncSender<ObservedLi
 fn update_snapshot(snapshot: &mut LabSnapshot, line: &str) {
     if line == "STARTUP control-port-in-use" {
         snapshot.status = CONTROL_PORT_IN_USE.into();
+    } else if line == "STARTUP media-port-in-use" {
+        snapshot.status = MEDIA_PORT_IN_USE.into();
     } else if let ["CONTROL", "volume", volume, "muted", muted] =
         line.split_whitespace().collect::<Vec<_>>().as_slice()
     {
@@ -979,6 +984,38 @@ mod tests {
         assert_eq!(snapshot.metrics, Some(metrics));
         assert!(parse_metrics(&status.replace("0.250", "NaN")).is_none());
         assert!(parse_metrics(&status.replace("recovering", "unknown")).is_none());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn media_port_conflict_survives_listener_exit() {
+        let mut child = Command::new("cmd.exe")
+            .args(["/C", "exit", "1"])
+            .spawn()
+            .unwrap();
+        child.wait().unwrap();
+        let (sender, events) = mpsc::sync_channel(1);
+        sender
+            .send(ObservedLine {
+                text: "STARTUP media-port-in-use".into(),
+                received_at: Instant::now(),
+            })
+            .unwrap();
+        drop(sender);
+        let mut lab = Lab {
+            child: Some(child),
+            events: Some(events),
+            snapshot: LabSnapshot {
+                running: true,
+                media_port: Some(39093),
+                ..LabSnapshot::default()
+            },
+            signal_received_at: None,
+        };
+        let snapshot = lab.refresh();
+        assert!(!snapshot.running);
+        assert_eq!(snapshot.status, MEDIA_PORT_IN_USE);
+        assert!(snapshot.media_port.is_none());
     }
 
     #[cfg(windows)]

@@ -3,6 +3,11 @@
 - Status: Provisional pending native build and quality evidence
 - Date: 2026-07-17
 
+The paired-audio lab reserves its UDP media socket before announcing listener
+readiness and shares that bound socket with successive receiver pipelines. A
+new media session still creates its own decoder and authenticated ingress state.
+This is a lab lifecycle choice, not a production availability guarantee.
+
 ## Context
 
 The Rust core now provides a `FrameDecoder` boundary that schedules ordinary

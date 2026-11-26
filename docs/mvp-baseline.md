@@ -394,6 +394,9 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   If its listener cannot bind the control TCP port because it is already in use,
   the probe reports that specific startup failure and suggests choosing another
   port; other listener failures retain the general troubleshooting message.
+  The listener also binds its UDP media port before announcing readiness and
+  keeps that socket across successive lab sessions. A port conflict is reported
+  before an Android device attempts to connect.
   Its fixed startup wait is configurable from 0 to 120 ms for network experiments;
   the desktop probe exposes this setting before listener startup. An opt-in
   experimental Balanced adaptive target gates live playout with bounded waits;

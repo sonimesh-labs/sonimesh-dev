@@ -51,6 +51,70 @@ fn executable_detects_probe_after_protected_udp_and_decode() {
     exercise_listener(&[20], true, false);
 }
 
+#[test]
+fn executable_rejects_an_occupied_media_port_before_ready() {
+    let occupied = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let control = TcpListener::bind("127.0.0.1:0").unwrap();
+    let control_port = control.local_addr().unwrap().port();
+    drop(control);
+    let output = Command::new(env!("CARGO_BIN_EXE_paired-audio-lab"))
+        .args([
+            "--control-port",
+            &control_port.to_string(),
+            "--media-port",
+            &occupied.local_addr().unwrap().port().to_string(),
+        ])
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(!output.status.success());
+    assert!(stdout.contains("STARTUP media-port-in-use"));
+    assert!(!stdout.lines().any(|line| line == "READY"));
+}
+
+#[test]
+fn executable_reserves_media_port_until_listener_exits() {
+    let udp = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let media_port = udp.local_addr().unwrap().port();
+    let tcp = TcpListener::bind("127.0.0.1:0").unwrap();
+    let control_port = tcp.local_addr().unwrap().port();
+    drop((udp, tcp));
+    let mut child = Listener(
+        Command::new(env!("CARGO_BIN_EXE_paired-audio-lab"))
+            .args([
+                "--control-port",
+                &control_port.to_string(),
+                "--media-port",
+                &media_port.to_string(),
+                "--keep-listening",
+            ])
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap(),
+    );
+    let (sender, receiver) = mpsc::channel();
+    let output = child.0.stdout.take().unwrap();
+    std::thread::spawn(move || {
+        for line in BufReader::new(output).lines().map_while(Result::ok) {
+            if sender.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let line = receiver
+            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+            .expect("listener did not become ready");
+        if line == "READY" {
+            break;
+        }
+    }
+    assert!(UdpSocket::bind(("127.0.0.1", media_port)).is_err());
+    drop(child);
+    assert!(UdpSocket::bind(("127.0.0.1", media_port)).is_ok());
+}
+
 #[cfg(all(windows, feature = "playback"))]
 #[test]
 #[ignore = "requires a Windows output device"]
