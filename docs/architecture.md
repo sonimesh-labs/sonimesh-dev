@@ -283,7 +283,8 @@ after an explicit operator selection, start, open, and close a system-routed
 connection. The operator can refresh the candidate list before selection; a
 selection always refers to the last displayed enumeration. Candidate device IDs
 are used only in memory to keep the same selection across refreshes; duplicate
-display names receive ordinal labels. Enumeration or a
+display names receive ordinal labels in a deterministic name-and-ID order.
+Enumeration or a
 successful open does not establish that audio is audible or that PCM is
 available to the application. The prototype does not
 enter the WLAN MVP. While the experiment is open, it checks the system

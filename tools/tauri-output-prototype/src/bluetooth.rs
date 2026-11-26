@@ -69,6 +69,17 @@ mod platform {
         AudioPlaybackConnectionState,
     };
 
+    fn sort_candidates<T>(mut candidates: Vec<(String, String, T)>) -> Vec<(String, String, T)> {
+        candidates.sort_by(|left, right| {
+            left.0
+                .to_lowercase()
+                .cmp(&right.0.to_lowercase())
+                .then_with(|| left.0.cmp(&right.0))
+                .then_with(|| left.1.cmp(&right.1))
+        });
+        candidates
+    }
+
     fn open_error(status: AudioPlaybackConnectionOpenResultStatus, code: i32) -> String {
         let message = if status == AudioPlaybackConnectionOpenResultStatus::RequestTimedOut {
             "Windows timed out connecting. Check that the source is nearby and try again."
@@ -105,15 +116,20 @@ mod platform {
                 .join()
                 .map_err(|e| e.to_string())?;
             let count = collection.Size().map_err(|e| e.to_string())?.min(64);
-            let mut devices = Vec::new();
-            let mut names = Vec::new();
-            let mut ids = Vec::new();
+            let mut candidates = Vec::new();
             for index in 0..count {
                 let device = collection.GetAt(index).map_err(|e| e.to_string())?;
-                names.push(device.Name().map_err(|e| e.to_string())?.to_string_lossy());
-                ids.push(device.Id().map_err(|e| e.to_string())?.to_string_lossy());
-                devices.push(device);
+                let name = device.Name().map_err(|e| e.to_string())?.to_string_lossy();
+                let id = device.Id().map_err(|e| e.to_string())?.to_string_lossy();
+                candidates.push((name, id, device));
             }
+            let candidates = sort_candidates(candidates);
+            let names = candidates.iter().map(|(name, _, _)| name.clone()).collect();
+            let ids = candidates.iter().map(|(_, id, _)| id.clone()).collect();
+            let devices = candidates
+                .into_iter()
+                .map(|(_, _, device)| device)
+                .collect();
             self.devices = devices;
             self.generation = self.generation.wrapping_add(1);
             Ok(Candidates {
@@ -209,8 +225,26 @@ mod platform {
 
     #[cfg(test)]
     mod tests {
-        use super::{Bluetooth, PlaybackCapability, PlaybackState, open_error};
+        use super::{Bluetooth, PlaybackCapability, PlaybackState, open_error, sort_candidates};
         use windows::Media::Audio::AudioPlaybackConnectionOpenResultStatus;
+
+        #[test]
+        fn duplicate_names_have_stable_id_order() {
+            let candidates = vec![
+                ("Phone".into(), "device-b".into(), 2),
+                ("Headset".into(), "headset".into(), 3),
+                ("Phone".into(), "device-a".into(), 1),
+            ];
+            let sorted = sort_candidates(candidates);
+            assert_eq!(
+                sorted,
+                vec![
+                    ("Headset".into(), "headset".into(), 3),
+                    ("Phone".into(), "device-a".into(), 1),
+                    ("Phone".into(), "device-b".into(), 2),
+                ]
+            );
+        }
 
         #[test]
         fn open_failures_explain_what_happened() {
