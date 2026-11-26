@@ -349,8 +349,11 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   current default endpoint and its format on each retry; an explicitly selected
   endpoint remains pinned. The paired lab also checks for a changed system default
   during healthy playback at most once per second and switches its output when
-  the endpoint changes. A software test covers failed probes and starts, a switch
-  to a different sample rate, unchanged defaults, and gain/mute retention.
+  the endpoint changes. If the new endpoint fails to start, it attempts to resume
+  the previous output and waits five seconds before retrying the default; if that
+  also fails, normal output recovery continues. A software test covers failed
+  probes and starts, a switch to a different sample rate, unchanged defaults,
+  and gain/mute retention.
   Default-device queries run on a background worker; a blocked-query test checks
   that polling remains nonblocking and stale results are discarded. On 2026-11-26
   the worker resolved the local Windows default endpoint in a separate test; an

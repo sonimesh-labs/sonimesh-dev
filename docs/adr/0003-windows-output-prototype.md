@@ -119,9 +119,12 @@ the callback and preserves the local gain and mute settings. In the paired lab,
 the system-default choice re-probes the current default endpoint and its format
 on each recovery attempt. While a stream is healthy, the paired lab also checks
 the default at most once per second on a background worker and recreates output
-when the endpoint or its default output format changes. If the new output cannot start, it retries the
-current default; a failed query leaves the existing output running. An explicitly
-selected endpoint remains pinned; after an output fault its ID and current default
+when the endpoint or its default output format changes. If the new output cannot
+start, it tries to restart the previous output and checks the default again after
+five seconds. If the previous output cannot restart either, it retries the current
+default through the existing recovery path. A failed query leaves the existing
+output running. An explicitly selected endpoint remains pinned; after an output
+fault its ID and current default
 format are queried on a background worker before retrying. A failed query keeps
 the receiver in recovery rather than switching endpoints. This is experimental behavior, not Phase 2
 product output-device switching or physical device-removal evidence. Pending

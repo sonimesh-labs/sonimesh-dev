@@ -1284,7 +1284,16 @@ fn follow_default_output<O: sonimesh_platform::AudioOutput>(
         }
         Err(error) => {
             eprintln!("Output switch failed: {error}");
-            *retry_at = Some(now + Duration::from_secs(1));
+            match output.recover(receiver) {
+                Ok(()) => {
+                    eprintln!("Previous output restored; retrying the default later.");
+                    *next_check = Some(now + Duration::from_secs(5));
+                }
+                Err(error) => {
+                    eprintln!("Previous output could not restart: {error}");
+                    *retry_at = Some(now + Duration::from_secs(1));
+                }
+            }
         }
     }
     true
@@ -2075,6 +2084,7 @@ mod tests {
         source: Option<Box<dyn RenderSource>>,
         failed: bool,
         reject_start: bool,
+        reject_sample_rate: Option<u32>,
         starts: usize,
         selection: Option<(Option<OutputDeviceId>, OutputConfig)>,
     }
@@ -2091,7 +2101,7 @@ mod tests {
             source: Box<dyn RenderSource>,
         ) -> Result<(), OutputError> {
             self.starts += 1;
-            if self.reject_start {
+            if self.reject_start || self.reject_sample_rate == Some(config.sample_rate_hz) {
                 return Err(OutputError::DeviceUnavailable);
             }
             self.failed = false;
@@ -2427,8 +2437,12 @@ mod tests {
         assert_eq!(output.output().starts, starts);
         let final_selection = sonimesh_app::OutputSelection {
             device: Some(OutputDeviceId::new("final-default")),
-            ..next_selection.clone()
+            config: OutputConfig {
+                sample_rate_hz: 44_100,
+                ..next_selection.config
+            },
         };
+        output.output_mut().reject_sample_rate = Some(44_100);
         assert!(follow_default_output(
             &mut output,
             &mut receiver,
@@ -2439,6 +2453,32 @@ mod tests {
             |_| Ok(final_selection.clone())
         ));
         assert!(retry.is_none());
+        assert_eq!(selected, next_selection);
+        assert_eq!(
+            output.output().selection.as_ref().unwrap().1.sample_rate_hz,
+            48_000
+        );
+        assert!(output.output().source.is_some());
+        assert_eq!(output.gain_handle().snapshot(), controls.snapshot());
+        assert!(!follow_default_output(
+            &mut output,
+            &mut receiver,
+            &mut selected,
+            &mut next_check,
+            &mut retry,
+            now + Duration::from_secs(12),
+            |_| panic!("failed default should not be retried immediately")
+        ));
+        output.output_mut().reject_sample_rate = None;
+        assert!(follow_default_output(
+            &mut output,
+            &mut receiver,
+            &mut selected,
+            &mut next_check,
+            &mut retry,
+            now + Duration::from_secs(13),
+            |_| Ok(final_selection.clone())
+        ));
         assert_eq!(selected, final_selection);
         assert!(stop_output(retry, || Ok(())).is_ok());
         assert_eq!(output.gain_handle().snapshot(), controls.snapshot());
