@@ -4,6 +4,7 @@ use serde::Serialize;
 #[serde(rename_all = "camelCase")]
 pub struct Snapshot {
     running: bool,
+    endpoint_id: Option<String>,
     endpoint_name: String,
     sample_rate: u32,
     channels: u16,
@@ -91,6 +92,7 @@ mod platform {
     pub struct Monitor {
         stream: Option<Stream>,
         meter: Arc<Meter>,
+        endpoint_id: Option<String>,
         endpoint_name: String,
         sample_rate: u32,
         channels: u16,
@@ -101,6 +103,7 @@ mod platform {
             Self {
                 stream: None,
                 meter: Arc::new(Meter::default()),
+                endpoint_id: None,
                 endpoint_name: String::new(),
                 sample_rate: 0,
                 channels: 0,
@@ -216,6 +219,7 @@ mod platform {
             stream.play().map_err(|error| error.to_string())?;
             self.stream = Some(stream);
             self.meter = meter;
+            self.endpoint_id = Some(endpoint_id.to_owned());
             self.endpoint_name = endpoint_name;
             self.sample_rate = sample_rate;
             self.channels = channels;
@@ -235,6 +239,7 @@ mod platform {
                 .then(|| "The Windows loopback stream reported an error.".to_owned());
             Snapshot {
                 running: self.stream.is_some(),
+                endpoint_id: self.endpoint_id.clone(),
                 endpoint_name: self.endpoint_name.clone(),
                 sample_rate: self.sample_rate,
                 channels: self.channels,
@@ -302,6 +307,11 @@ mod platform {
                 .expect("could not start selected endpoint loopback");
             assert!(started.running);
             assert_eq!(started.endpoint_name, endpoint.name);
+            assert_eq!(started.endpoint_id.as_deref(), Some(endpoint.id.as_str()));
+            assert_eq!(
+                monitor.snapshot().endpoint_id.as_deref(),
+                Some(endpoint.id.as_str())
+            );
             assert!(!monitor.stop().running);
         }
 
@@ -406,6 +416,7 @@ mod platform {
         pub fn stop(&mut self) -> Snapshot {
             Snapshot {
                 running: false,
+                endpoint_id: None,
                 endpoint_name: String::new(),
                 sample_rate: 0,
                 channels: 0,
@@ -419,6 +430,7 @@ mod platform {
         pub fn snapshot(&self) -> Snapshot {
             Snapshot {
                 running: false,
+                endpoint_id: None,
                 endpoint_name: String::new(),
                 sample_rate: 0,
                 channels: 0,

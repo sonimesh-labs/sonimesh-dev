@@ -24,6 +24,9 @@
   endpoint metadata and loopback setup only, not Bluetooth audio capture.
 - The selected default and one non-default endpoint each started and stopped a
   WASAPI loopback stream; each reported name matched the selected endpoint.
+  A subsequent default-endpoint check also confirmed the start and status
+  snapshots identify the selected endpoint. This checks monitor identity, not
+  Bluetooth playback or audible output.
 - The Windows Bluetooth discovery check passed. The inbound-wait check accepted
   the sole candidate, reported either waiting or already open, and returned to
   idle after close.

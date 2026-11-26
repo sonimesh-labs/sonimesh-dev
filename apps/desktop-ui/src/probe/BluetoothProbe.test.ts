@@ -148,6 +148,52 @@ it('restores the selected PCM endpoint when reopening the Bluetooth probe', asyn
   reopened.unmount()
 })
 
+it('uses the active monitored endpoint for a test tone after reopening', async () => {
+  localStorage.setItem('sonimesh.bluetoothProbe.loopbackEndpoint', 'saved-output')
+  const invoke = vi.fn((command: string) => {
+    if (command === 'bluetooth_status') return Promise.resolve('idle')
+    if (command === 'bluetooth_candidates') return Promise.resolve({ generation: 1, names: [] })
+    if (command === 'loopback_status') return Promise.resolve({ running: true, endpointId: 'active-output', endpointName: 'Speakers', sampleRate: 48000, channels: 2, samples: 0, peak: 0, error: null })
+    if (command === 'loopback_endpoints') return Promise.resolve([
+      { id: 'saved-output', name: 'Speakers', isDefault: true },
+      { id: 'active-output', name: 'Speakers', isDefault: false },
+    ])
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  expect((wrapper.get('#loopback-endpoint').element as HTMLSelectElement).value).toBe('active-output')
+  await wrapper.findAll('button').find(button => button.text() === 'Play test tone')!.trigger('click')
+  await flushPromises()
+  expect(invoke).toHaveBeenCalledWith('loopback_test_tone', { endpointId: 'active-output' })
+  expect(localStorage.getItem('sonimesh.bluetoothProbe.loopbackEndpoint')).toBe('saved-output')
+  wrapper.unmount()
+})
+
+it('recovers the active monitored endpoint before the saved preference', async () => {
+  localStorage.setItem('sonimesh.bluetoothProbe.loopbackEndpoint', 'saved-output')
+  const invoke = vi.fn((command: string) => {
+    if (command === 'bluetooth_status') return Promise.resolve('idle')
+    if (command === 'bluetooth_candidates') return Promise.resolve({ generation: 1, names: [] })
+    if (command === 'loopback_status') return Promise.resolve({ running: true, endpointId: 'active-output', endpointName: 'Active', sampleRate: 48000, channels: 2, samples: 0, peak: 0, error: 'Stream failed.' })
+    if (command === 'loopback_endpoints') return Promise.resolve([
+      { id: 'saved-output', name: 'Saved', isDefault: true },
+      { id: 'active-output', name: 'Active', isDefault: false },
+    ])
+    if (command === 'loopback_stop') return Promise.resolve({ running: false, endpointId: 'active-output', endpointName: 'Active', sampleRate: 48000, channels: 2, samples: 0, peak: 0, error: null })
+    if (command === 'loopback_start') return Promise.resolve({ running: true, endpointId: 'active-output', endpointName: 'Active', sampleRate: 48000, channels: 2, samples: 0, peak: 0, error: null })
+    return Promise.resolve()
+  })
+  window.__TAURI__ = { core: { invoke: invoke as DesktopBridgeInvoke } }
+  const wrapper = mount(BluetoothProbe)
+  await flushPromises()
+  await wrapper.findAll('button').find(button => button.text() === 'Recover PCM check')!.trigger('click')
+  await flushPromises()
+  expect(invoke).toHaveBeenCalledWith('loopback_start', { endpointId: 'active-output' })
+  wrapper.unmount()
+})
+
 it('reports the fallback when the remembered PCM endpoint is unavailable', async () => {
   localStorage.setItem('sonimesh.bluetoothProbe.loopbackEndpoint', 'removed-output')
   const invoke = vi.fn((command: string) => {

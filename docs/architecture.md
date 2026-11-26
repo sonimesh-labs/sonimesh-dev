@@ -315,7 +315,9 @@ places the default first then sorts by name, selects it initially, and shows eac
 endpoint's default sample rate and channel count when available. It supports the
 standard integer and floating-point
 PCM sample formats exposed by CPAL. It reports format, sample count, endpoint name,
-and peak since the last poll without storing PCM. Missing format details do not
+and peak since the last poll without storing PCM. The local probe snapshot also
+identifies the active endpoint so a reopened panel sends its test tone to the
+monitored device, even when the saved endpoint preference differs. Missing format details do not
 hide an endpoint. This checks endpoint activity only; Bluetooth source capture
 remains unverified and the capability result stays unchanged.
 The operator may instead leave the selected connection started while waiting for

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 
-type LoopbackSnapshot = { running: boolean; endpointName: string; sampleRate: number; channels: number; samples: number; peak: number; runPeak: number; error: string | null }
+type LoopbackSnapshot = { running: boolean; endpointId?: string | null; endpointName: string; sampleRate: number; channels: number; samples: number; peak: number; runPeak: number; error: string | null }
 type LoopbackEndpoint = { id: string; name: string; isDefault: boolean; sampleRate?: number | null; channels?: number | null }
 type PlaybackCapability = 'ApplicationPcmSource' | 'SystemRouted' | 'Unsupported'
 
@@ -150,6 +150,14 @@ function loopbackEndpointLabel(endpoint: LoopbackEndpoint) {
 
 function selectAvailableLoopbackEndpoint(endpoints: LoopbackEndpoint[]) {
   const previousId = loopbackEndpointId.value
+  const activeId = loopback.value?.running ? loopback.value.endpointId : null
+  if (activeId) {
+    loopbackEndpoints.value = endpoints
+    loopbackEndpointId.value = activeId
+    loopbackEndpointMessage.value = endpoints.some(endpoint => endpoint.id === activeId)
+      ? null : 'The monitored output endpoint is unavailable in the current device list.'
+    return
+  }
   const preferred = endpoints.find(endpoint => endpoint.id === readLoopbackEndpointId())
   if (preferred) {
     loopbackEndpoints.value = endpoints
@@ -332,6 +340,7 @@ async function refreshLoopbackEndpoints() {
 
 async function recoverLoopback() {
   if (!window.__TAURI__) return
+  const activeEndpointId = loopback.value?.running ? loopback.value.endpointId : null
   loopbackRequest++
   clearTimeout(loopbackTimer)
   loopbackBusy.value = true
@@ -342,7 +351,12 @@ async function recoverLoopback() {
     loopbackStatusError.value = null
     loopbackStartedAt = undefined
     loopbackNoSamplesLong.value = false
-    selectAvailableLoopbackEndpoint(await window.__TAURI__.core.invoke<LoopbackEndpoint[]>('loopback_endpoints') ?? [])
+    const endpoints = await window.__TAURI__.core.invoke<LoopbackEndpoint[]>('loopback_endpoints') ?? []
+    selectAvailableLoopbackEndpoint(endpoints)
+    if (activeEndpointId && endpoints.some(endpoint => endpoint.id === activeEndpointId)) {
+      loopbackEndpointId.value = activeEndpointId
+      loopbackEndpointMessage.value = null
+    }
     if (!loopbackEndpointId.value) throw new Error('No Windows output endpoints are available.')
     const result = await window.__TAURI__.core.invoke<LoopbackSnapshot>('loopback_start', { endpointId: loopbackEndpointId.value })
     if (!result.running) throw new Error('Windows output monitoring did not restart.')
@@ -392,12 +406,13 @@ async function toggleLoopback() {
 }
 
 async function playLoopbackTestTone() {
-  if (!window.__TAURI__ || !loopback.value?.running || !loopbackEndpointId.value) return
+  const endpointId = loopback.value?.endpointId || loopbackEndpointId.value
+  if (!window.__TAURI__ || !loopback.value?.running || !endpointId) return
   loopbackToneBusy.value = true
   loopbackToneMessage.value = null
   loopbackError.value = null
   try {
-    await window.__TAURI__.core.invoke('loopback_test_tone', { endpointId: loopbackEndpointId.value })
+    await window.__TAURI__.core.invoke('loopback_test_tone', { endpointId })
     loopbackToneMessage.value = 'Test tone finished.'
     void pollLoopback()
   } catch (cause) {
