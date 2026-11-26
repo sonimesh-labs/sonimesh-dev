@@ -1,6 +1,7 @@
 use serde::Serialize;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::Ipv4Addr;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::time::{Duration, Instant};
@@ -12,6 +13,15 @@ const OUTPUT_DRAIN_TIMEOUT: Duration = Duration::from_millis(200);
 const OUTPUT_DRAIN_LIMIT: usize = 2048;
 const CONTROL_PORT_IN_USE: &str = "Listener exited: control TCP port is already in use. Choose another control port and start again.";
 const MEDIA_PORT_IN_USE: &str = "Listener exited: receiver UDP port is already in use. Choose another receiver UDP port and start again.";
+
+fn listener_path(probe_executable: &Path, debug_fallback: Option<&Path>) -> PathBuf {
+    let adjacent = probe_executable.with_file_name("paired-audio-lab.exe");
+    if adjacent.is_file() {
+        adjacent
+    } else {
+        debug_fallback.unwrap_or(&adjacent).to_path_buf()
+    }
+}
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -181,8 +191,14 @@ impl Lab {
         if host.is_unspecified() || host.is_multicast() || host.is_broadcast() {
             return Err("Enter a unicast IPv4 address.".into());
         }
-        let executable = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../target/debug/paired-audio-lab.exe");
+        let fallback =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/debug/paired-audio-lab.exe");
+        let probe_executable =
+            std::env::current_exe().map_err(|_| "Could not locate the output probe executable.")?;
+        let executable = listener_path(
+            &probe_executable,
+            cfg!(debug_assertions).then_some(&fallback),
+        );
         let mut command = Command::new(executable);
         command
             .args([
@@ -796,6 +812,55 @@ fn parse_metrics(line: &str) -> Option<LabMetrics> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn listener_prefers_adjacent_binary_and_only_uses_an_explicit_fallback() {
+        let directory = std::env::temp_dir().join(format!(
+            "sonimesh-listener-path-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let probe = directory.join("output-probe.exe");
+        let adjacent = directory.join("paired-audio-lab.exe");
+        let fallback = directory.join("debug-listener.exe");
+        assert_eq!(listener_path(&probe, Some(&fallback)), fallback);
+        assert_eq!(listener_path(&probe, None), adjacent);
+        std::fs::write(&adjacent, b"fixture").unwrap();
+        assert_eq!(listener_path(&probe, Some(&fallback)), adjacent);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires a built Windows lab listener"]
+    fn launches_listener_from_an_adjacent_directory() {
+        let directory = std::env::temp_dir().join(format!(
+            "sonimesh-listener-launch-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let listener = directory.join("paired-audio-lab.exe");
+        std::fs::copy(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/debug/paired-audio-lab.exe"),
+            &listener,
+        )
+        .unwrap();
+        let executable = listener_path(&directory.join("output-probe.exe"), None);
+        let output = Command::new(executable)
+            .arg("--invalid-for-test")
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("usage: paired-audio-lab"));
+        std::fs::remove_dir_all(directory).unwrap();
+    }
 
     #[test]
     fn signal_freshness_uses_read_time_and_resets_with_session() {

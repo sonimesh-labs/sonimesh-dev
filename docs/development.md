@@ -1330,8 +1330,11 @@ its **Paired audio lab**, first build the child listener from the repository roo
 cargo build -p opus-codec-prototype --bin paired-audio-lab --features playback
 ~~~
 
-The probe expects `target/debug/paired-audio-lab.exe` in this checkout. Start the
-listener in the window and scan its lab invitation with the Android audio lab's
+The probe first looks for `paired-audio-lab.exe` alongside its own executable.
+In debug builds it falls back to `target/debug/paired-audio-lab.exe` in this
+checkout. For a manually assembled release, place a playback-enabled listener
+alongside the probe executable; this is not an installer or a production pairing
+flow. Start the listener in the window and scan its lab invitation with the Android audio lab's
 **Scan lab invitation** button. The built-in scanner requests camera permission;
 copy and paste remains available if scanning cannot be used. The
 experimental QR contains the same hexadecimal test payload as the text field;

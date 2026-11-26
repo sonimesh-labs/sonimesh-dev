@@ -35,6 +35,11 @@ default output. The main
 desktop preview remains synthetic until a real session owner exists. Tauri and
 webview dependencies remain outside the six shared crates.
 
+The output probe can launch a separately built lab listener alongside its own
+executable; debug builds may fall back to the checkout's debug listener. This
+does not bundle the listener, connect the main desktop shell, or promote the
+fixed lab invitation to production pairing.
+
 The repository enforces the current direct Rust dependency graph with
 `tools/check_workspace_boundaries.py`, which reads `cargo metadata --no-deps`.
 It allows only the documented internal edges among the six `sonimesh-*` crates
