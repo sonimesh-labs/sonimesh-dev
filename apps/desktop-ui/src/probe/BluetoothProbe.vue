@@ -469,7 +469,7 @@ onBeforeUnmount(() => {
     <button type="button" class="preview-action" :disabled="busy" @click="openBluetoothSettings">Open Bluetooth settings</button>
     <button type="button" class="preview-action" :disabled="busy || phase !== 'idle'" @click="refresh">Refresh Bluetooth sources</button>
     <p v-if="discovering" role="status">{{ loaded ? 'Refreshing Bluetooth sources...' : 'Searching for Bluetooth sources...' }}</p>
-    <p v-else-if="loaded && names.length === 0" role="status">No playback sources found. Pair a compatible device in Windows, then refresh.</p>
+    <p v-else-if="loaded && names.length === 0" role="status">{{ playbackCapability === 'Unsupported' ? 'Bluetooth playback is unavailable on this platform.' : 'No playback sources found. Pair a compatible device in Windows, then refresh.' }}</p>
     <template v-if="names.length">
       <label for="bluetooth-source">Playback source</label>
       <select id="bluetooth-source" v-model="selected" :disabled="busy || phase !== 'idle'">

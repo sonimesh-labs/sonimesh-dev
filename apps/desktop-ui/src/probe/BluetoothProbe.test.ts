@@ -55,6 +55,10 @@ it.each([
   const wrapper = mount(BluetoothProbe)
   await flushPromises()
   expect(wrapper.text()).toContain(`Capability: ${capability}. ${description}`)
+  if (capability === 'Unsupported') {
+    expect(wrapper.text()).toContain('Bluetooth playback is unavailable on this platform.')
+    expect(wrapper.text()).not.toContain('Pair a compatible device in Windows')
+  }
   wrapper.unmount()
 })
 
@@ -228,7 +232,7 @@ it('reports empty discovery and system closure', async () => {
   let empty = true
   const invoke = vi.fn((command: string) => {
     if (command === 'loopback_status') return Promise.resolve({ running: false, endpointName: '', sampleRate: 0, channels: 0, samples: 0, peak: 0, error: null })
-    if (command === 'bluetooth_candidates') return Promise.resolve({ generation: 1, names: empty ? [] : ['Phone'] })
+    if (command === 'bluetooth_candidates') return Promise.resolve({ generation: 1, names: empty ? [] : ['Phone'], capability: 'SystemRouted' })
     if (command === 'bluetooth_status') return Promise.resolve('idle')
     return Promise.resolve()
   })
