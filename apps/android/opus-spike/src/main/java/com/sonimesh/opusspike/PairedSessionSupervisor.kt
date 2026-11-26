@@ -50,6 +50,10 @@ internal class PairedSessionSupervisor(
     var stopResult: Result<StreamControlResult>? = null
         private set
 
+    @Volatile
+    var senderDrainFailed = false
+        private set
+
     fun awaitStarted() {
         startupComplete.await()
         startupError?.let { throw it }
@@ -186,11 +190,15 @@ internal class PairedSessionSupervisor(
 
             if (running.get()) throw IOException("paired media sender ended")
 
-            if (!running.get() && sessionActive.get()) {
-                sender?.join(SENDER_DRAIN_TIMEOUT_MS)
-                if (sender?.isAlive == true) sender?.interrupt()
-                stopResult = attemptPairedStop(identity, false) { stream ->
-                    connection.stopStream(stream, 2_000)
+            if (!running.get()) {
+                val drain = drainPairedSender(sender, sessionActive, SENDER_DRAIN_TIMEOUT_MS, SENDER_EXIT_TIMEOUT_MS)
+                senderDrainFailed = drain != SenderDrainResult.Complete
+                stopResult = if (drain == SenderDrainResult.StillRunning) {
+                    Result.failure(IOException("media sender did not stop before the desktop stop request"))
+                } else {
+                    attemptPairedStop(identity, false) { stream ->
+                        connection.stopStream(stream, 2_000)
+                    }
                 }
             }
         } finally {
@@ -272,7 +280,7 @@ internal class PairedSessionSupervisor(
         const val CONTROL_POLL_TIMEOUT_MS = 250
         const val SENDER_DRAIN_TIMEOUT_MS = 2_500L
         const val SENDER_EXIT_TIMEOUT_MS = 500L
-        const val STOP_SOCKET_CLOSE_GRACE_MS = 3_500L
+        const val STOP_SOCKET_CLOSE_GRACE_MS = 6_000L
     }
 
     private fun rejectionReason(detail: String): String = when (detail) {
@@ -280,6 +288,25 @@ internal class PairedSessionSupervisor(
         "output unavailable" -> "output-unavailable"
         else -> "other"
     }
+}
+
+internal enum class SenderDrainResult { Complete, Incomplete, StillRunning }
+
+internal fun drainPairedSender(
+    sender: Thread?,
+    sessionActive: AtomicBoolean,
+    timeoutMillis: Long,
+    exitTimeoutMillis: Long,
+): SenderDrainResult {
+    if (sender == null) return SenderDrainResult.Incomplete
+    sender.join(timeoutMillis)
+    if (sender.isAlive || !sessionActive.get()) {
+        sessionActive.set(false)
+        sender.interrupt()
+        sender.join(exitTimeoutMillis)
+        return if (sender.isAlive) SenderDrainResult.StillRunning else SenderDrainResult.Incomplete
+    }
+    return SenderDrainResult.Complete
 }
 
 internal fun pairedReconnectDelayMillis(failures: Int): Long =

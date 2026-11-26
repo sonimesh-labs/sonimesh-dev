@@ -262,8 +262,12 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   On normal paired shutdown it also attempts a bounded MediaCodec end-of-stream
   drain before finishing the UDP sender. A partial PCM frame is padded with
   silence. If the drain fails or times out, the lab warns that the end of the
-  audio may be missing; it also reports an unconfirmed desktop stop if both
-  occur. An API 37 x86_64 emulator test observes MediaCodec end-of-stream and
+  audio may be missing. It gives the same warning when the UDP sender fails or
+  cannot finish its bounded stop drain. It ends that sender's session before
+  asking the desktop to stop; if the sender cannot exit in time, it closes the
+  control connection and reports the stop as unconfirmed. The socket-close and
+  supervisor timeouts allow the bounded sender drain and stop reply to finish.
+  It also reports an unconfirmed desktop stop if both occur. An API 37 x86_64 emulator test observes MediaCodec end-of-stream and
   at least one audio packet using the tail-drain helper; it does not verify the
   content of the final packet, the full service path, or a physical codec.
   Once the control connection is ready, the lab reports that audio capture and

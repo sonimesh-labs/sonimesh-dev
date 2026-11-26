@@ -463,7 +463,7 @@ class LabCaptureService : Service() {
             }
             handler.post {
                 workerFinished = true
-                captureStopWarning(terminalStatus, stopResult, tailFailed)?.let {
+                captureStopWarning(terminalStatus, stopResult, tailFailed || pairedSupervisor?.senderDrainFailed == true)?.let {
                     terminalStatus = true
                     LabStatus.publish(it)
                 }
@@ -633,7 +633,7 @@ class LabCaptureService : Service() {
     }
 
     companion object {
-        private const val PAIRED_STOP_TIMEOUT_MS = 4_000L
+        private const val PAIRED_STOP_TIMEOUT_MS = 6_500L
         const val ACTION_SET_MUTED = "com.sonimesh.opusspike.SET_MUTED"
         const val EXTRA_MUTED = "muted"
     }

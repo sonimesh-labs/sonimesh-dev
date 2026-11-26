@@ -90,6 +90,13 @@ then sends StopStream when capture ends. During capture, the same worker polls
 the otherwise idle control connection and stops with a connection-ended status
 when it closes; this poll and StopStream never read the TLS stream concurrently.
 This detects an observed close or read failure, not a silent network partition.
+On normal lab shutdown the UDP sender gets up to 2.5 seconds to drain and a
+further 0.5 seconds to exit after cancellation. StopStream is attempted only
+after it exits, with a 2-second reply timeout; the control socket close grace is
+6 seconds and the service waits up to 6.5 seconds for its supervisor. A sender
+that does not exit is reported as incomplete, and the connection is closed
+without claiming desktop stop confirmation. These are bounded lab policies, not
+delivery guarantees.
 The user supplies the lab's public
 desktop pin manually; this is not QR scanning or persistent device pairing.
 
