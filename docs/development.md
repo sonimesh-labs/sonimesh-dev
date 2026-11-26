@@ -1297,8 +1297,13 @@ listener in the window and scan its lab invitation with the Android audio lab's
 copy and paste remains available if scanning cannot be used. The
 experimental QR contains the same hexadecimal test payload as the text field;
 it is not the production binary QR representation from ADR 0018. A scan from a
-non-loopback address also fills the UDP destination; a loopback invitation keeps
-the separately configured UDP destination for ADB reverse.
+non-loopback address also fills the UDP destination by default; a loopback
+invitation keeps the separately configured UDP destination for ADB reverse.
+For a relay on a different host, enter its UDP address and turn off **Use
+invitation address for UDP when scanning** before scanning, including when
+using scan and start. This choice survives activity recreation and defaults to
+on when opening a new lab activity. It controls only the address: an invitation
+containing a UDP port still applies that port.
 For a direct connection, the probe wraps the lab invitation by default with the
 running listener's UDP port as `SONIMESH-LAB1:<port>:<hex>`. Android
 accepts this experimental text in scan, paste, and share flows and applies the

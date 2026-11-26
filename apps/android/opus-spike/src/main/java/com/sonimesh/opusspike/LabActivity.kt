@@ -77,6 +77,7 @@ class LabActivity : Activity() {
     private lateinit var usage: Spinner
     private lateinit var bitrate: Spinner
     private lateinit var muteSwitch: Switch
+    private lateinit var scanUsesInvitationAddress: Switch
     private lateinit var toneButton: Button
     private lateinit var probeButton: Button
     private lateinit var retryButton: Button
@@ -333,6 +334,12 @@ class LabActivity : Activity() {
             setText(savedInstanceState?.getString("invitation") ?: "")
         }
         layout.addView(invitation)
+        scanUsesInvitationAddress = Switch(this).apply {
+            text = "Use invitation address for UDP when scanning"
+            isSaveEnabled = false
+            isChecked = savedInstanceState?.getBoolean("scanUsesInvitationAddress", true) ?: true
+        }
+        layout.addView(scanUsesInvitationAddress)
         layout.addView(Button(this).apply {
             text = "Scan lab invitation"
             setOnClickListener { scanInvitation(startAfterScan = false) }
@@ -484,6 +491,7 @@ class LabActivity : Activity() {
         outState.putString("address", address.text.toString())
         outState.putString("mediaPort", mediaPort.text.toString())
         outState.putString("invitation", invitation.text.toString())
+        outState.putBoolean("scanUsesInvitationAddress", scanUsesInvitationAddress.isChecked)
         outState.putString("setupFeedback", setupFeedback.text.toString())
         outState.putString("pin", pin.text.toString())
         outState.putString("host", host.text.toString())
@@ -773,7 +781,7 @@ class LabActivity : Activity() {
             return
         }
         invitation.setText(contents)
-        if (applyInvitation(useAddressForUdp = true) && startAfterScan) {
+        if (applyInvitation(useAddressForUdp = scanUsesInvitationAddress.isChecked) && startAfterScan) {
             startCapture(true, paired = true)
         }
     }

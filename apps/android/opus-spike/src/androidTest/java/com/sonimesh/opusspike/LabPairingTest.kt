@@ -9,6 +9,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
+import android.widget.Switch
 import android.widget.TextView
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
@@ -244,6 +245,45 @@ class LabPairingTest {
                 assertEquals("cd".repeat(32), pin.text.toString())
             }
         }
+    }
+
+    @Test
+    fun scan_can_preserve_relay_address_across_recreation_and_start() {
+        val payload = labHex(labInvitation("AB".repeat(32), "192.168.1.7"))
+        ActivityScenario.launch(LabActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                val root = activity.window.decorView
+                val toggle = requireNotNull(findSwitch(root, "Use invitation address for UDP when scanning"))
+                assertTrue(toggle.isChecked)
+                toggle.isChecked = false
+                requireNotNull(findField(root, "Desktop IPv4 address for UDP")).setText("192.168.1.9")
+                requireNotNull(findField(root, "Desktop UDP port")).setText("39093")
+            }
+            scenario.recreate()
+            scenario.onActivity { activity ->
+                val root = activity.window.decorView
+                assertFalse(requireNotNull(findSwitch(root, "Use invitation address for UDP when scanning")).isChecked)
+                activity.applyScannedInvitation(payload)
+                assertEquals("192.168.1.9", requireNotNull(findField(root, "Desktop IPv4 address for UDP")).text.toString())
+                assertEquals("192.168.1.7", requireNotNull(findField(root, "Paired control IPv4 address")).text.toString())
+                assertEquals("39093", requireNotNull(findField(root, "Desktop UDP port")).text.toString())
+                // An invalid relay address makes scan-and-start stop before permissions,
+                // demonstrating that it uses the retained address.
+                requireNotNull(findField(root, "Desktop IPv4 address for UDP")).setText("invalid")
+                deliverScannerResult(activity, 4, Activity.RESULT_OK, "SONIMESH-LAB1:39094:$payload")
+                assertTrue(hasText(root, "Status: Enter a valid desktop IPv4 address for UDP."))
+                assertEquals("39094", requireNotNull(findField(root, "Desktop UDP port")).text.toString())
+                assertTrue(LabStatus.captureAdmission.canBegin())
+            }
+        }
+    }
+
+    private fun findSwitch(view: View, text: String): Switch? {
+        if (view is Switch && view.text == text) return view
+        if (view is ViewGroup) for (index in 0 until view.childCount) {
+            findSwitch(view.getChildAt(index), text)?.let { return it }
+        }
+        return null
     }
 
     private fun hasText(view: View, text: String): Boolean {
