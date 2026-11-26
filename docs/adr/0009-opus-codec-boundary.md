@@ -86,6 +86,10 @@ Gain changes ramp across one 20 ms frame, and the ramp advances only when that
 frame is accepted by the encoder. Mute sends silence immediately; after muted
 audio is accepted, unmuting ramps up from silence over one frame.
 The capture-signal indicator still observes the unscaled input.
+The lab warns when the encoder continuously accepts non-silent, unmuted input
+for two seconds without emitting an audio packet. Silence, mute, zero gain, or
+an emitted packet clears the observation. This is a recoverable diagnostic, not
+proof of codec failure; capture continues and device behavior remains unverified.
 The lab may report a cumulative average of encoded Opus payload bytes divided by
 monotonic elapsed time since capture started, including the bounded encoder tail
 drain. It updates at most once per second during capture and retains a final

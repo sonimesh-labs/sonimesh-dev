@@ -72,6 +72,8 @@ class LabCaptureService : Service() {
     private var foregroundTransportLabel: String? = null
     private var foregroundConnectionStatus: ForegroundConnectionStatus? = null
     private var foregroundSignalLabel = "Waiting for capture signal"
+    private var captureStatus = "Preparing audio capture and encoder…"
+    private var encoderOutputWarning = false
     private val handler = Handler(Looper.getMainLooper())
     private var terminalStatus = false
     private var started = false
@@ -241,6 +243,9 @@ class LabCaptureService : Service() {
                             if (running.get() && !terminalStatus) {
                                 LabStatus.publish(message)
                                 updateForegroundConnectionStatus(message)
+                                if (foregroundConnectionStatus != ForegroundConnectionStatus.Reconnecting && encoderOutputWarning) {
+                                    publishCaptureStatus(captureStatus)
+                                }
                             }
                         }
                     },
@@ -323,6 +328,15 @@ class LabCaptureService : Service() {
             fun currentEncoderInput(): ShortArray = gainProcessor.prepare(pcm, senderMuted.get(), senderGain.get())
             val signalMonitor = LabSignalMonitor()
             val encoderInputWait = EncoderInputWait()
+            val encoderOutputMonitor = EncoderOutputMonitor()
+            fun publishEncoderOutputTransition(warning: Boolean?) {
+                if (warning != null) handler.post {
+                    if (running.get() && !terminalStatus) {
+                        encoderOutputWarning = warning
+                        publishCaptureStatus(captureStatus)
+                    }
+                }
+            }
             val captureReadWait = CaptureReadWait()
             val sendInterval = SenderIntervalMeter(captureStartMillis)
             var filled = 0
@@ -331,6 +345,7 @@ class LabCaptureService : Service() {
             fun pollEncodedOutput(): EncoderTailOutput {
                 return when (activeCodec.poll { packet ->
                     requireLabOpusDuration(packet)
+                    publishEncoderOutputTransition(encoderOutputMonitor.packet())
                     check(outputSequence <= 0xffff_ffffL) { "media sequence exhausted" }
                     activeRateMeter.record(packet.size)
                     val now = SystemClock.elapsedRealtime()
@@ -412,7 +427,13 @@ class LabCaptureService : Service() {
                 }
                 var waitingForInput = false
                 if (filled == pcm.size) {
-                    if (activeCodec.tryQueue(currentEncoderInput(), frame * 20_000)) {
+                    val muted = senderMuted.get()
+                    val gain = senderGain.get()
+                    val input = gainProcessor.prepare(pcm, muted, gain)
+                    if (activeCodec.tryQueue(input, frame * 20_000)) {
+                        publishEncoderOutputTransition(encoderOutputMonitor.accepted(
+                            SystemClock.elapsedRealtime(), !muted && gain > 0 && input.any { it != 0.toShort() },
+                        ))
                         gainProcessor.accepted()
                         frame++
                         filled = 0
@@ -586,7 +607,10 @@ class LabCaptureService : Service() {
     }
 
     private fun publishCaptureStatus(message: String) {
-        if (foregroundConnectionStatus != ForegroundConnectionStatus.Reconnecting) LabStatus.publish(message)
+        captureStatus = message
+        if (foregroundConnectionStatus != ForegroundConnectionStatus.Reconnecting) {
+            LabStatus.publish(if (encoderOutputWarning) "Encoder has not produced audio packets despite input. Capture continues; try restarting if this persists." else message)
+        }
     }
 
     private fun updateForegroundConnectionStatus(message: String?) {
