@@ -433,6 +433,17 @@ sub-10-ms interval out of 425; the receiver decoded 399 of 426 packets and
 reported 24 PLC decisions, 19 late packets and eight resynchronization drops.
 This uncontrolled run did not reproduce the previous run's clean late/drop
 counters, and does not identify the cause or establish a quality comparison.
+After the paired lab's empty-stream recovery was moved before packet polling,
+an API 37 x86_64 emulator run of `plays_latency_probe_during_paired_capture`
+used Windows playback and a loopback relay configured with
+`--burst-interval 50 --burst-length 6 --delay-ms 0 --jitter-ms 0`. The Android
+test passed, and the relay reported 415 submitted packets, 48 burst drops, and
+367 forwarded packets. The receiver reported 367 decoded frames, 51 PLC
+decisions, no late or resynchronization-dropped frames, 944 output callbacks,
+and no output errors. This run did not instrument whether the new reset branch
+executed; it does not establish audible continuity, physical WLAN behavior, or
+a quality comparison. The test checked the probe in Android capture; the
+receiver was not configured to detect it.
 While reconnecting, the connection status remains visible even if the capture
 signal changes; the separate capture-signal indicator continues to update.
 The indicator reports signal on the first non-silent capture read, including
