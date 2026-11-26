@@ -950,11 +950,28 @@ struct Playback(
     Option<(
         sonimesh_app::ReceiverOutputController<sonimesh_platform::CpalOutput, SAMPLES>,
         sonimesh_app::OutputSelection,
+        bool,
     )>,
 );
 
 #[cfg(not(all(windows, feature = "playback")))]
 struct Playback;
+
+#[cfg(all(windows, feature = "playback"))]
+fn current_default_selection(
+    output: &sonimesh_platform::CpalOutput,
+) -> Result<sonimesh_app::OutputSelection, String> {
+    let probe = output
+        .default_device_probe()
+        .map_err(|error| error.to_string())?;
+    let config = probe
+        .output_config(None, 8_192)
+        .map_err(|error| error.to_string())?;
+    Ok(sonimesh_app::OutputSelection {
+        device: Some(probe.device.id),
+        config,
+    })
+}
 
 #[cfg_attr(
     not(all(windows, feature = "playback")),
@@ -963,7 +980,7 @@ struct Playback;
 impl Playback {
     fn start_controls(&self) -> LabResult<()> {
         #[cfg(all(windows, feature = "playback"))]
-        if let Some((controller, _)) = &self.0 {
+        if let Some((controller, _, _)) = &self.0 {
             lab_control::start_console_control(controller.gain_handle());
             return Ok(());
         }
@@ -972,7 +989,7 @@ impl Playback {
 
     fn abort(&mut self) {
         #[cfg(all(windows, feature = "playback"))]
-        if let Some((controller, _)) = &mut self.0 {
+        if let Some((controller, _, _)) = &mut self.0 {
             controller.stop();
         }
     }
@@ -981,40 +998,43 @@ impl Playback {
         #[cfg(all(windows, feature = "playback"))]
         {
             if options.play {
-                let (output, selection) = if options.output_id_stdin || options.output_id_framed {
-                    use sonimesh_platform::{CpalOutput, OutputDeviceId};
-                    use std::io::Read;
-                    let mut id = String::new();
-                    if options.output_id_framed {
-                        let mut stdin = std::io::stdin().lock();
-                        let mut length = [0_u8; 4];
-                        stdin.read_exact(&mut length)?;
-                        let length = u32::from_be_bytes(length) as usize;
-                        if length == 0 || length > 4096 {
+                let (output, selection, follow_default) =
+                    if options.output_id_stdin || options.output_id_framed {
+                        use sonimesh_platform::{CpalOutput, OutputDeviceId};
+                        use std::io::Read;
+                        let mut id = String::new();
+                        if options.output_id_framed {
+                            let mut stdin = std::io::stdin().lock();
+                            let mut length = [0_u8; 4];
+                            stdin.read_exact(&mut length)?;
+                            let length = u32::from_be_bytes(length) as usize;
+                            if length == 0 || length > 4096 {
+                                return Err("invalid output ID".into());
+                            }
+                            let mut bytes = vec![0; length];
+                            stdin.read_exact(&mut bytes)?;
+                            id = String::from_utf8(bytes)?;
+                        } else {
+                            std::io::stdin().take(4097).read_to_string(&mut id)?;
+                        }
+                        if id.is_empty() || id.len() > 4096 {
                             return Err("invalid output ID".into());
                         }
-                        let mut bytes = vec![0; length];
-                        stdin.read_exact(&mut bytes)?;
-                        id = String::from_utf8(bytes)?;
+                        let output = CpalOutput::new();
+                        let probe = output.device_probe(&OutputDeviceId::new(id))?;
+                        let config = probe.output_config(None, 8_192)?;
+                        (
+                            output,
+                            sonimesh_app::OutputSelection {
+                                device: Some(probe.device.id),
+                                config,
+                            },
+                            false,
+                        )
                     } else {
-                        std::io::stdin().take(4097).read_to_string(&mut id)?;
-                    }
-                    if id.is_empty() || id.len() > 4096 {
-                        return Err("invalid output ID".into());
-                    }
-                    let output = CpalOutput::new();
-                    let probe = output.device_probe(&OutputDeviceId::new(id))?;
-                    let config = probe.output_config(None, 8_192)?;
-                    (
-                        output,
-                        sonimesh_app::OutputSelection {
-                            device: Some(probe.device.id),
-                            config,
-                        },
-                    )
-                } else {
-                    common::prepare_output(options.select_output).map_err(|e| e.to_string())?
-                };
+                        common::prepare_output_with_default_choice(options.select_output)
+                            .map_err(|e| e.to_string())?
+                    };
                 let factory = sonimesh_app::ReceiverPcmEndpointFactory::new(
                     8,
                     sonimesh_app::SourcePcmFormat::new(48_000, 2)?,
@@ -1026,7 +1046,7 @@ impl Playback {
                         .gain_handle()
                         .set_gain(f32::from(volume) / 100.0)?;
                 }
-                return Ok(Self(Some((controller, selection))));
+                return Ok(Self(Some((controller, selection, follow_default))));
             }
             Ok(Self(None))
         }
@@ -1041,7 +1061,10 @@ impl Playback {
 
     fn start(&mut self, receiver: &mut Receiver) -> LabResult<bool> {
         #[cfg(all(windows, feature = "playback"))]
-        if let Some((controller, selection)) = &mut self.0 {
+        if let Some((controller, selection, follow_default)) = &mut self.0 {
+            if *follow_default {
+                *selection = current_default_selection(controller.output())?;
+            }
             controller.start(selection.clone(), receiver)?;
             return Ok(true);
         }
@@ -1051,8 +1074,13 @@ impl Playback {
 
     fn monitor(&mut self, receiver: &mut Receiver, retry_at: &mut Option<Instant>) -> bool {
         #[cfg(all(windows, feature = "playback"))]
-        if let Some((controller, _)) = &mut self.0 {
-            return maintain_output(controller, receiver, retry_at, Instant::now());
+        if let Some((controller, _, follow_default)) = &mut self.0 {
+            return maintain_output(controller, receiver, retry_at, Instant::now(), |output| {
+                if !*follow_default {
+                    return Ok(None);
+                }
+                current_default_selection(output).map(Some)
+            });
         }
         let _ = (receiver, retry_at);
         false
@@ -1060,7 +1088,7 @@ impl Playback {
 
     fn stop(&mut self) -> LabResult<()> {
         #[cfg(all(windows, feature = "playback"))]
-        if let Some((controller, _)) = &mut self.0 {
+        if let Some((controller, _, _)) = &mut self.0 {
             let status = controller.output().status();
             controller.stop();
             lab_println!(
@@ -1086,13 +1114,21 @@ fn maintain_output<O: sonimesh_platform::AudioOutput>(
     receiver: &mut Receiver,
     retry_at: &mut Option<Instant>,
     now: Instant,
+    resolve: impl FnOnce(&O) -> Result<Option<sonimesh_app::OutputSelection>, String>,
 ) -> bool {
     if let Some(health) = output.monitor() {
         eprintln!("Output failed ({health:?}); retrying the selected device.");
         *retry_at = Some(now + Duration::from_secs(1));
     }
     if retry_at.is_some_and(|deadline| now >= deadline) {
-        match output.recover(receiver) {
+        let result = resolve(output.output()).and_then(|selection| {
+            match selection {
+                Some(selection) => output.start(selection, receiver),
+                None => output.recover(receiver),
+            }
+            .map_err(|error| error.to_string())
+        });
+        match result {
             Ok(()) => {
                 *retry_at = None;
                 lab_println!("Output recovered; waiting for fresh audio.");
@@ -1677,6 +1713,7 @@ mod tests {
         failed: bool,
         reject_start: bool,
         starts: usize,
+        selection: Option<(Option<OutputDeviceId>, OutputConfig)>,
     }
 
     impl AudioOutput for FaultOutput {
@@ -1686,8 +1723,8 @@ mod tests {
 
         fn start(
             &mut self,
-            _: Option<&OutputDeviceId>,
-            _: OutputConfig,
+            device: Option<&OutputDeviceId>,
+            config: OutputConfig,
             source: Box<dyn RenderSource>,
         ) -> Result<(), OutputError> {
             self.starts += 1;
@@ -1695,6 +1732,7 @@ mod tests {
                 return Err(OutputError::DeviceUnavailable);
             }
             self.failed = false;
+            self.selection = Some((device.cloned(), config));
             self.source = Some(source);
             Ok(())
         }
@@ -1872,19 +1910,35 @@ mod tests {
         output.output_mut().reject_start = true;
         let now = Instant::now();
         let mut retry = None;
-        assert!(maintain_output(&mut output, &mut receiver, &mut retry, now));
         assert!(maintain_output(
             &mut output,
             &mut receiver,
             &mut retry,
-            now + Duration::from_millis(999)
+            now,
+            |_| Ok(None)
+        ));
+        assert!(maintain_output(
+            &mut output,
+            &mut receiver,
+            &mut retry,
+            now + Duration::from_millis(999),
+            |_| panic!("recovery must wait for its retry deadline")
         ));
         assert_eq!(output.output().starts, 1);
         assert!(maintain_output(
             &mut output,
             &mut receiver,
             &mut retry,
-            now + Duration::from_secs(1)
+            now + Duration::from_secs(1),
+            |_| Err("default output unavailable".into())
+        ));
+        assert_eq!(output.output().starts, 1);
+        assert!(maintain_output(
+            &mut output,
+            &mut receiver,
+            &mut retry,
+            now + Duration::from_secs(2),
+            |_| Ok(None)
         ));
         assert_eq!(output.output().starts, 2);
 
@@ -1921,9 +1975,22 @@ mod tests {
             &mut output,
             &mut receiver,
             &mut retry,
-            now + Duration::from_secs(2)
+            now + Duration::from_secs(3),
+            |_| Ok(Some(sonimesh_app::OutputSelection {
+                device: Some(OutputDeviceId::new("new-default")),
+                config: OutputConfig {
+                    sample_rate_hz: 44_100,
+                    channels: 2,
+                    sample_format: SampleFormat::Float32,
+                    requested_callback_frames: None,
+                    maximum_callback_frames: 960
+                },
+            }))
         ));
         assert!(retry.is_none());
+        let (device, config) = output.output().selection.as_ref().unwrap();
+        assert_eq!(device.as_ref(), Some(&OutputDeviceId::new("new-default")));
+        assert_eq!(config.sample_rate_hz, 44_100);
         assert!(stop_output(retry, || Ok(())).is_ok());
         assert_eq!(output.gain_handle().snapshot(), controls.snapshot());
         assert_eq!(metrics.snapshot().jitter_frames, 0);
@@ -1967,6 +2034,26 @@ mod tests {
             .unwrap()
             .render(&mut samples);
         assert!(samples.iter().any(|sample| sample.abs() > 0.001));
+        output.output_mut().failed = true;
+        assert!(maintain_output(
+            &mut output,
+            &mut receiver,
+            &mut retry,
+            now + Duration::from_secs(4),
+            |_| Ok(None)
+        ));
+        assert!(maintain_output(
+            &mut output,
+            &mut receiver,
+            &mut retry,
+            now + Duration::from_secs(5),
+            |_| Ok(None)
+        ));
+        assert!(retry.is_none());
+        assert_eq!(
+            output.output().selection.as_ref().unwrap().0.as_ref(),
+            Some(&OutputDeviceId::new("new-default"))
+        );
         lab_control::apply_control("mute", &controls).unwrap();
         output.stop();
         output

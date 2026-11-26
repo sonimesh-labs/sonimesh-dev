@@ -295,6 +295,12 @@ claiming that roadmap phases 0A–0D or the Windows WLAN MVP are complete.
   identify the cause of an interruption or establish that audio was decoded.
   Output recovery transitions are also emitted promptly for the desktop probe;
   the cumulative status line remains the compatibility fallback.
+  After an output fault, the paired lab's system-default choice re-probes the
+  current default endpoint and its format on each retry; an explicitly selected
+  endpoint remains pinned. A software test covers a failed probe, a failed start,
+  and recovery to a different sample rate while retaining gain and mute. Default
+  changes that do not fault the active stream and physical device removal remain
+  unverified.
   The probe retains the latest 32 bounded lifecycle events for the current
   listener snapshot. Session evidence copy/share includes those events, and
   remains available with status plus events when a session ends before metrics

@@ -36,11 +36,26 @@ pub fn prepare_output(
     (sonimesh_platform::CpalOutput, sonimesh_app::OutputSelection),
     Box<dyn std::error::Error>,
 > {
+    let (output, selection, _) = prepare_output_with_default_choice(select_output)?;
+    Ok((output, selection))
+}
+
+#[cfg(all(windows, feature = "playback"))]
+pub fn prepare_output_with_default_choice(
+    select_output: bool,
+) -> Result<
+    (
+        sonimesh_platform::CpalOutput,
+        sonimesh_app::OutputSelection,
+        bool,
+    ),
+    Box<dyn std::error::Error>,
+> {
     use sonimesh_platform::{AudioOutput, CpalOutput};
     use std::io::{self, Write};
 
     let output = CpalOutput::new();
-    let probe = if select_output {
+    let (probe, follow_default) = if select_output {
         let devices = output.devices()?;
         println!("0: System default output");
         for (index, device) in devices.iter().enumerate() {
@@ -65,19 +80,19 @@ pub fn prepare_output(
         }
         let index = parse_choice(&input, devices.len())?;
         if index == 0 {
-            output.default_device_probe()?
+            (output.default_device_probe()?, true)
         } else {
-            output.device_probe(&devices[index - 1].id)?
+            (output.device_probe(&devices[index - 1].id)?, false)
         }
     } else {
-        output.default_device_probe()?
+        (output.default_device_probe()?, true)
     };
     let config = probe.output_config(None, 8_192)?;
     let selection = sonimesh_app::OutputSelection {
         device: Some(probe.device.id),
         config,
     };
-    Ok((output, selection))
+    Ok((output, selection, follow_default))
 }
 
 #[cfg(any(test, all(windows, feature = "playback")))]

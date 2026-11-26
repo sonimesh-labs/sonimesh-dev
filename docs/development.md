@@ -844,6 +844,11 @@ disabled until the state is known.
 Add `--control` alongside `--play` to adjust playback from the listener console:
 enter `volume 0` through `volume 100`, `mute`, or `unmute`. These local settings
 survive output recovery and successive sessions while the listener is running.
+When system-default output is selected, a reported output fault causes the paired
+listener to retry with the current default endpoint and its current format. A
+specific selected endpoint is retried by its original ID. An active stream that
+does not report a fault is not switched when the system default changes. This is
+software-tested recovery behavior; physical device removal remains unverified.
 Silence can
 reflect the source or platform capture policy. Other audio-lab modes below use
 their separate ADB bootstrap. Remove the reverse mapping when no longer needed.
