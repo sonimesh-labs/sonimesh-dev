@@ -727,7 +727,10 @@ jitter, and output-backend ADRs using measured 10/20 ms and device results.
   pending nonblocking control reply before polling another command, so temporary
   socket backpressure pauses intake without discarding the session. Trusted
   scheduler attachment configures its TLS socket as non-blocking; framing also
-  retries a pending transport flush after the reply bytes enter TLS. A 2026-11-22
+  retries a pending transport flush after the reply bytes enter TLS. A software
+  loopback test also composes the actual pairing exchange, trusted scheduler,
+  derived media root, protected UDP and native Opus into an in-memory output;
+  it does not exercise the desktop shell or a physical audio device. A 2026-11-22
   emulator/ADB
   reverse-loopback run now records Conscrypt against this desktop stack, but
   physical WLAN/OEM interoperability remains open and ADR 0021 stays

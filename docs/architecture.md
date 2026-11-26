@@ -91,8 +91,9 @@ non-blocking I/O, and a reply remains pending until the underlying stream flushe
 The adapter exposes explicit flush/closed states and
 does not enter the realtime output callback. A software integration test drives
 the scheduler over loopback TCP control alongside protected UDP and native
-Opus; its trusted session is supplied by the test, without TLS pairing or a
-platform host. A future Tauri shell can delegate to this owner without moving
+Opus. A second software test composes the live TLS pairing exchange and its
+derived media root with that scheduler and an in-memory output; no platform host
+is involved. A future Tauri shell can delegate to this owner without moving
 UI code into the realtime path. The projection excludes pairing IDs,
 proofs, addresses, session material, PCM,
 encoded media, realtime callbacks, platform output handles, and device-selection
